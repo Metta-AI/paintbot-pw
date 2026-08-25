@@ -1,7 +1,7 @@
 ## Light vs Dark Silky HUD.
 
 import
-  std/[os, strformat],
+  std/strformat,
   chroma, pixie, silky, vmath, windy,
   polyworld/[actioncam, chrome, gameuis, pathing, player, rtscameras],
   content, sim, game
@@ -63,28 +63,6 @@ proc unitPortraitKey*(player: int32, kind: UnitKind): string =
 proc buildingPortraitKey*(player: int32, kind: BuildingKind): string =
   ## Returns the atlas name packed from one building's profile PNG.
   buildingPortraitKeys[max(player, 0)][kind]
-
-proc unitPortraitPath*(player: int32, kind: UnitKind): string =
-  ## Returns the on-disk profile next to one unit model.
-  UnitModels[player][kind].changeFileExt("profile.png")
-
-proc buildingPack(player: int32, kind: BuildingKind): string =
-  ## Returns the GLB pack that holds this building's prop.
-  if kind == GoldMineBuilding:
-    DarkPropPack
-  elif player == LightPlayer or kind == FarmBuilding:
-    LightPropPack
-  else:
-    DarkPropPack
-
-proc buildingPortraitPath*(player: int32, kind: BuildingKind): string =
-  ## Returns the on-disk profile for one building prop.
-  if kind == GoldMineBuilding:
-    DarkPropPack.changeFileExt("mineral1.profile.png")
-  else:
-    buildingPack(player, kind).changeFileExt(
-      BuildingProps[player][kind] & ".profile.png"
-    )
 
 proc coverSquare(well: GameUiPanel, pad = 4.0'f32): GameUiPanel =
   ## Returns a centered square inset inside a portrait well.

@@ -5,7 +5,7 @@
 ## of diverging silently at some later tick.
 
 import
-  polyworld/[cli, common, hashes]
+  polyworld/[cli, hashes]
 
 ## Match shape
 
@@ -385,132 +385,12 @@ proc diagonalStepTicks*(stepTicks: int32): int32 =
   int32((int64(stepTicks) * DiagonalCost + OrthogonalCost div 2) div
     OrthogonalCost)
 
-## Presentation identifiers
-##
-## Names only. The simulation never reads an asset, so a missing model changes
-## how the game looks and never how it plays.
+## Pose the simulation publishes. Graphics maps it to clip names.
 
 type
   AnimationSlot* = enum
     RunAnimation, IdleAnimation, DeathAnimation,
     AttackAnimation, AttackAlternateAnimation, VictoryAnimation
-
-const
-  UnitModels*: array[PlayerCount, array[UnitKind, string]] = [
-    [
-      PeonUnit: DataRoot & "/characters/mini_legion/human/worker.glb",
-      SoldierUnit: DataRoot & "/characters/mini_legion/human/footman.glb",
-      ArcherUnit: DataRoot & "/characters/mini_legion/human/archer.glb",
-      MageUnit: DataRoot & "/characters/mini_legion/human/mage.glb",
-      KnightUnit: DataRoot & "/characters/mini_legion/human/horseman.glb",
-      CatapultUnit: DataRoot & "/characters/mini_legion/human/siege_engine.glb",
-      ClericUnit: DataRoot & "/characters/mini_legion/sentinel/druid.glb",
-      SummonUnit: DataRoot & "/characters/mini_legion/sentinel/rock_golem.glb"
-    ],
-    [
-      PeonUnit: DataRoot & "/characters/mini_legion/warband/minion.glb",
-      SoldierUnit: DataRoot & "/characters/mini_legion/warband/grunt.glb",
-      ArcherUnit: DataRoot & "/characters/mini_legion/warband/head_hunter.glb",
-      MageUnit: DataRoot & "/characters/mini_legion/warband/warlock.glb",
-      KnightUnit: DataRoot & "/characters/mini_legion/warband/hog_rider.glb",
-      CatapultUnit: DataRoot & "/characters/mini_legion/undead/siege_engine.glb",
-      ClericUnit: DataRoot & "/characters/mini_legion/undead/lich.glb",
-      SummonUnit: DataRoot & "/characters/rpg_monsters/demon_king.glb"
-    ]
-  ]
-
-  UnitHeights*: array[UnitKind, float32] = [
-    PeonUnit: 1.05'f32,
-    SoldierUnit: 1.15'f32,
-    ArcherUnit: 1.20'f32,
-    MageUnit: 1.25'f32,
-    KnightUnit: 1.55'f32,
-    CatapultUnit: 1.40'f32,
-    ClericUnit: 1.22'f32,
-    SummonUnit: 1.90'f32
-  ]
-
-## Clip name candidates per slot, most preferred first.
-##
-## Mini Legion uses Idle/Run/Attack01/Death. Workers have WorkRoutine and
-## no attack. Archers and head hunters use Attack01Start. Siege engines
-## move with Move. The rock golem walks. Demon king uses IdleBattle and
-## RunForward. The last name in each list is one every current model has.
-
-const MiniLegionClips: array[AnimationSlot, seq[string]] = [
-  RunAnimation: @["Run", "Move", "Walk", "RunForward", "WalkForward"],
-  IdleAnimation: @["Idle", "IdleBattle", "IdleNormal"],
-  DeathAnimation: @["Death", "Die", "Die01"],
-  AttackAnimation: @[
-    "Attack01", "Attack01Start", "WorkRoutine", "WorkStart", "Idle"
-  ],
-  AttackAlternateAnimation: @[
-    "Attack02", "Attack02Start", "Attack01", "Attack01Start",
-    "WorkRoutine", "Idle"
-  ],
-  VictoryAnimation: @["Victory", "Idle", "IdleBattle", "Taunting"]
-]
-
-const AnimationNames*: array[UnitKind, array[AnimationSlot, seq[string]]] = [
-  PeonUnit: MiniLegionClips,
-  SoldierUnit: MiniLegionClips,
-  ArcherUnit: MiniLegionClips,
-  MageUnit: MiniLegionClips,
-  KnightUnit: MiniLegionClips,
-  CatapultUnit: MiniLegionClips,
-  ClericUnit: MiniLegionClips,
-  SummonUnit: MiniLegionClips
-]
-
-const
-  LightPropPack* = DataRoot & "/terrain/low_poly_village.glb"
-  DarkPropPack* = DataRoot & "/terrain/tower_defense_kit.glb"
-
-  BuildingProps*: array[PlayerCount, array[BuildingKind, string]] = [
-    [
-      TownHallBuilding: "house_lvl7",
-      FarmBuilding: "farm_lvl4",
-      BarracksBuilding: "farm_house_lvl5",
-      LumberMillBuilding: "farm_house_lvl3",
-      TowerBuilding: "tower_lvl5",
-      StablesBuilding: "farm_house_lvl6",
-      ChurchBuilding: "house_lvl4",
-      BlacksmithBuilding: "farm_house_lvl2",
-      GoldMineBuilding: ""
-    ],
-    [
-      TownHallBuilding: "building1",
-      FarmBuilding: "farm_lvl2",
-      BarracksBuilding: "building3",
-      LumberMillBuilding: "building2",
-      TowerBuilding: "tower_square_tall1",
-      StablesBuilding: "tower_tall1",
-      ChurchBuilding: "tower_square_tall2",
-      BlacksmithBuilding: "tower_square_small1",
-      GoldMineBuilding: ""
-    ]
-  ]
-
-  BuildingPropHeights*: array[BuildingKind, float32] = [
-    TownHallBuilding: 3.0'f32,
-    FarmBuilding: 1.6'f32,
-    BarracksBuilding: 2.6'f32,
-    LumberMillBuilding: 2.4'f32,
-    TowerBuilding: 3.2'f32,
-    StablesBuilding: 2.5'f32,
-    ChurchBuilding: 2.8'f32,
-    BlacksmithBuilding: 2.2'f32,
-    GoldMineBuilding: 1.8'f32
-  ]
-
-  ## Farm props live in the village pack for both sides, since the tower kit
-  ## has no farm. Every other Dark building comes from the tower kit.
-  DarkFarmFromVillage* = true
-
-  MineProps* = ["mineral1", "mineral3", "rock2"]
-    ## Neutral gold mine decoration, from the tower kit.
-  ConstructionProps* = ["box1", "barel1", "wall1"]
-  RubbleProps* = ["rock1", "stump1"]
 
 ## Content fingerprint
 

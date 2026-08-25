@@ -1,8 +1,7 @@
-## Light vs Dark content table checks: balance sanity, tech shape, and the
-## promise that every presentation name the game asks for exists on disk.
+## Light vs Dark content table checks: balance sanity and tech shape.
 
 import
-  std/[json, os, sets, streams, strformat, strutils, tables],
+  std/[sets, strformat, strutils],
   polyworld/hashes,
   ../examples/light_vs_dark/content
 
@@ -197,76 +196,6 @@ block addHashyDistinguishesValues:
   swapped.addHashy(2'i32)
   swapped.addHashy(1'i32)
   doAssert ordered != swapped, "addHashy ignores ordering"
-
-## Presentation names must resolve. Reading the glTF JSON chunk directly keeps
-## this test headless: no GL context, no model loading, just the name lists.
-
-proc readGltfNames(path: string): tuple[nodes, clips: HashSet[string]] =
-  ## Reads node and animation names out of one binary glTF container.
-  doAssert fileExists(path), &"missing asset: {path}"
-  let stream = newFileStream(path, fmRead)
-  doAssert stream != nil, &"cannot open asset: {path}"
-  defer: stream.close()
-  doAssert stream.readStr(4) == "glTF", &"not a binary glTF: {path}"
-  discard stream.readUint32()          # container version
-  discard stream.readUint32()          # total length
-  let
-    chunkLength = stream.readUint32()
-    chunkKind = stream.readUint32()
-  doAssert chunkKind == 0x4E4F534A'u32, &"first chunk is not JSON: {path}"
-  let document = parseJson(stream.readStr(int(chunkLength)))
-  if document.hasKey("nodes"):
-    for node in document["nodes"]:
-      if node.hasKey("name"):
-        result.nodes.incl node["name"].getStr()
-  if document.hasKey("animations"):
-    for animation in document["animations"]:
-      if animation.hasKey("name"):
-        result.clips.incl animation["name"].getStr()
-
-block characterModelsAndClipsResolve:
-  var cache: Table[string, HashSet[string]]
-  for player in 0 ..< PlayerCount:
-    for kind in UnitKind:
-      let path = UnitModels[player][kind]
-      if path notin cache:
-        cache[path] = readGltfNames(path).clips
-      let clips = cache[path]
-      doAssert clips.len > 0, &"{path} has no animation clips"
-      for slot in AnimationSlot:
-        var resolved = ""
-        for candidate in AnimationNames[kind][slot]:
-          if candidate in clips:
-            resolved = candidate
-            break
-        doAssert resolved.len > 0,
-          &"player {player} {kind} {slot} resolves to no clip in {path}; " &
-          &"candidates were {AnimationNames[kind][slot]}"
-
-block buildingPropsResolve:
-  let
-    village = readGltfNames(LightPropPack).nodes
-    towerKit = readGltfNames(DarkPropPack).nodes
-  for kind in BuildingKind:
-    if kind == GoldMineBuilding:
-      continue
-    doAssert BuildingProps[LightPlayer][kind] in village,
-      &"village pack has no prop {BuildingProps[LightPlayer][kind]} for {kind}"
-    let darkProp = BuildingProps[DarkPlayer][kind]
-    doAssert darkProp in towerKit or darkProp in village,
-      &"neither prop pack has {darkProp} for {kind}"
-    doAssert BuildingPropHeights[kind] > 0, &"{kind} renders at zero height"
-  for name in MineProps:
-    doAssert name in towerKit, &"tower kit has no mine prop {name}"
-  for name in ConstructionProps:
-    doAssert name in towerKit, &"tower kit has no construction prop {name}"
-  for name in RubbleProps:
-    doAssert name in towerKit, &"tower kit has no rubble prop {name}"
-
-block modelHeightsAreSane:
-  for kind in UnitKind:
-    doAssert UnitHeights[kind] > 0.5'f32 and UnitHeights[kind] < 3.0'f32,
-      &"{kind} renders at an implausible height"
 
 echo "test_lvd_content: all checks passed"
 echo "  contentHash = ", toHex(contentHash())
