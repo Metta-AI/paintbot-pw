@@ -35,6 +35,63 @@ polyworld_data/
 
 Games load files from `../polyworld_data/` when run from this repo root.
 
+## Commands
+
+Run these from the polyworld repo root after `polyworld_data` is cloned next
+to it.
+
+### Games
+
+Each game takes the same flags. `--bot` starts a live match with BASIC
+scripts. `-d:headless --record` runs without a window and writes a replay.
+`--replay` plays that file back. `-d:emscripten` builds the wasm client.
+
+```
+# Gods of the Arena
+nim r examples/gods_of_the_arena/gota.nim --bot examples/gods_of_the_arena/players/base.bas:10
+nim r -d:headless examples/gods_of_the_arena/gota.nim --seed 1988 --bot examples/gods_of_the_arena/players/base.bas:10 --record examples/gods_of_the_arena/replays/demo.replay
+nim r examples/gods_of_the_arena/gota.nim --replay examples/gods_of_the_arena/replays/demo.replay
+nim c -d:emscripten examples/gods_of_the_arena/gota.nim
+
+# Light vs. Dark
+nim r examples/light_vs_dark/lvd.nim --bot examples/light_vs_dark/players/base.bas:2
+nim r -d:headless examples/light_vs_dark/lvd.nim --seed 1988 --bot examples/light_vs_dark/players/base.bas:2 --record examples/light_vs_dark/replays/demo.replay
+nim r examples/light_vs_dark/lvd.nim --replay examples/light_vs_dark/replays/demo.replay
+nim c -d:emscripten examples/light_vs_dark/lvd.nim
+
+# Call to Adventure
+nim r examples/call_to_adventure/cta.nim --bot examples/call_to_adventure/players/base.bas:4
+nim r -d:headless examples/call_to_adventure/cta.nim --seed 1988 --bot examples/call_to_adventure/players/base.bas:4 --record examples/call_to_adventure/replays/demo.replay
+nim r examples/call_to_adventure/cta.nim --replay examples/call_to_adventure/replays/demo.replay
+nim c -d:emscripten examples/call_to_adventure/cta.nim
+```
+
+The `:N` after a bot path is how many copies to load. Gods of the Arena
+needs 10, Light vs Dark needs 2, Call to Adventure needs 4.
+
+### Experiments
+
+Experiments are stand-alone windows for trying one engine piece without
+starting a full game. Terrain labs the heightfield, blending, shadows, and
+path smoothing. Character labs load a skinned glb or the modular outfit
+viewer. Particles and fxmesh are GPU effect editors with json presets.
+
+```
+# Terrain
+nim r experiments/terrain/quadterrain.nim
+nim r experiments/terrain/quadterrain_blended.nim
+nim r experiments/terrain/quadterrain_shadows.nim
+nim r experiments/terrain/quadterrain_pathing.nim
+
+# Characters
+nim r experiments/characters/characters.nim
+nim r experiments/modular_chars/modular_chars.nim
+
+# Effects
+nim r experiments/particles/particles.nim
+nim r experiments/fxmesh/fxmesh.nim
+```
+
 ## Goals
 
 - Make simulations deterministic, reproducible, and easy to inspect.
