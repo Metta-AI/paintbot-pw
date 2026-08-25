@@ -1,0 +1,29 @@
+name: Github Actions
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: treeform/setup-nim-action@v6
+      - name: Install dependencies
+        shell: bash
+        run: |
+          cd ..
+          nimby create
+          nimby install "${{ github.event.repository.name }}/${{ github.event.repository.name }}.nimble"
+          nimby sync "${{ github.event.repository.name }}/nimby.lock"
+      - run: nim r tests/tests.nim
+      - run: nim r tests/test_gota_sim.nim -- --bot:examples/gods_of_the_arena/players/base.bas:10
+      - run: nim c -d:headless examples/gods_of_the_arena/gota.nim
+      - run: nim c -d:headless examples/call_to_adventure/cta.nim
+      - run: nim c -d:headless examples/light_vs_dark/lvd.nim
