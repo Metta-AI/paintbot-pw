@@ -17,6 +17,24 @@ describe how something looks or sounds, but never what it means to the
 simulation. This boundary allows assets to improve without silently changing
 gameplay.
 
+## Assets
+
+Examples, experiments, and tools load models, textures, fonts, and UI from
+the private assets repo. Clone it next to this folder as `polyworld_data`:
+
+```
+git clone git@github.com:Metta-AI/polyworld-data.git ../polyworld_data
+```
+
+The two folders should sit like this:
+
+```
+polyworld/
+polyworld_data/
+```
+
+Games load files from `../polyworld_data/` when run from this repo root.
+
 ## Goals
 
 - Make simulations deterministic, reproducible, and easy to inspect.
