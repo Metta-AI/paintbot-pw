@@ -1,0 +1,154 @@
+## Shared graphical viewer bootstrap for Polyworld games.
+
+import
+  std/[math, os, strutils, times],
+  opengl, pixie, silky, vmath, windy,
+  common, player
+
+const
+  DefaultWindowSize* = ivec2(1280, 800)
+  DefaultFontPath* = DataRoot & "/fonts/Rubik-Regular.ttf"
+  BoldFontPath* = DataRoot & "/fonts/Rubik-Bold.ttf"
+  EditorThemeDir* = DataRoot & "/themes/editor/"
+  UiDir* = DataRoot & "/ui/"
+  IconDir* = DataRoot & "/icons/"
+  WindowPatchPath = EditorThemeDir & "window.9patch.png"
+  FramePatchPath = EditorThemeDir & "frame.9patch.png"
+  HudIconSize = 64
+
+proc damping*(rate, dt: float32): float32 =
+  ## Returns a frame-rate-independent exponential easing fraction.
+  1.0'f32 - exp(-rate * dt)
+
+proc shortestTurn*(current, target: float32): float32 =
+  ## Returns the shortest signed turn between two yaw angles.
+  var delta = target - current
+  while delta > PI.float32:
+    delta -= (2 * PI).float32
+  while delta < -PI.float32:
+    delta += (2 * PI).float32
+  delta
+
+proc addDefaultFonts*(builder: AtlasBuilder) =
+  ## Adds the shared HUD type ramp used by every graphical client.
+  builder.addFont(BoldFontPath, "H1", 32.0)
+  builder.addFont(DefaultFontPath, "Default", 18.0)
+  builder.addFont(DefaultFontPath, "Hud", 15.0)
+  builder.addFont(DefaultFontPath, "Small", 12.0)
+
+proc addScaledPatch(builder: AtlasBuilder, path, name: string) =
+  ## Packs a 2x 9-patch so a 32px slice still has a stretchable center.
+  let
+    source = readImage(path)
+    scaled = source.resize(source.width * 2, source.height * 2)
+  if not builder.addImage(name, scaled):
+    raise newException(
+      ValueError,
+      "Failed to allocate space for " & path
+    )
+
+proc addHudGlyphs(builder: AtlasBuilder) =
+  ## Packs the shared transport and HUD glyphs every game can draw.
+  for file in walkDir(IconDir):
+    if not file.path.endsWith(".png"):
+      continue
+    let
+      name = splitFile(file.path).name
+      icon = readImage(file.path).resize(HudIconSize, HudIconSize)
+    if not builder.addImage(name, icon):
+      raise newException(
+        ValueError,
+        "the UI atlas is too small for HUD icons"
+      )
+
+proc newHudAtlas*(size = 1024): AtlasBuilder =
+  ## Starts an atlas with the shared editor theme and UI images.
+  result = newAtlasBuilder(size, 4)
+  result.addDir(EditorThemeDir, EditorThemeDir)
+  result.addDir(UiDir, UiDir)
+  result.addScaledPatch(WindowPatchPath, "window.9patch")
+  result.addScaledPatch(FramePatchPath, "frame.9patch")
+  result.addHudGlyphs()
+
+proc gameWindowSize*(width, height: int32): IVec2 =
+  ## Returns a requested window size, or the shared default.
+  if width > 0 and height > 0:
+    ivec2(width, height)
+  else:
+    DefaultWindowSize
+
+proc initGameWindow*(
+    title,
+    atlasPath: string,
+    size = DefaultWindowSize,
+    vsync = false
+): (Window, Silky) =
+  ## Creates the spectator window, GL context, and Silky atlas client.
+  let window = newWindow(title, size, vsync = vsync)
+  window.makeContextCurrent()
+  loadExtensions()
+  let sk = newSilky(window, atlasPath)
+  window.runeInputEnabled = true
+  window.onRune = proc(rune: Rune) =
+    sk.inputRunes.add(rune)
+  (window, sk)
+
+proc frameDelta*(
+    lastFrameTime: var float64,
+    captureStep = 1.0'f32 / 60.0'f32
+): float32 =
+  ## Returns clamped wall-clock dt, or a fixed step when capturing.
+  let now = epochTime()
+  result = clamp(now - lastFrameTime, 0.0, 0.1).float32
+  lastFrameTime = now
+  when defined(takeScreenshot):
+    result = captureStep
+
+proc simulationActive*(transport: Player): bool =
+  ## Returns whether presentation should advance on this frame.
+  transport.playing or transport.targetTick >= 0
+
+proc atLiveTickCap*(tick, maximumTicks: int32, live: bool): bool =
+  ## Returns whether a live match has used its configured tick budget.
+  live and tick >= maximumTicks
+
+proc applyScreenshotCamera*(cameraDistance: var float32) =
+  ## Overrides camera distance from CAM_DIST when capturing.
+  when defined(takeScreenshot):
+    if existsEnv("CAM_DIST"):
+      cameraDistance = getEnv("CAM_DIST").parseFloat.float32
+  else:
+    discard cameraDistance
+
+proc captureScreenshot*(
+    window: Window,
+    frame: var int,
+    waitFrames: int,
+    defaultPath: string
+) =
+  ## Writes one back-buffer capture after waitFrames when capturing.
+  when defined(takeScreenshot):
+    inc frame
+    if frame < waitFrames:
+      return
+    let
+      path =
+        if existsEnv("SCREENSHOT_PATH"):
+          getEnv("SCREENSHOT_PATH")
+        else:
+          defaultPath
+      image = newImage(window.size.x, window.size.y)
+    glReadPixels(
+      0,
+      0,
+      window.size.x.GLsizei,
+      window.size.y.GLsizei,
+      GL_RGBA,
+      GL_UNSIGNED_BYTE,
+      image.data[0].addr
+    )
+    image.flipVertical()
+    image.writeFile(path)
+    quit(0)
+  else:
+    discard (window, frame, waitFrames, defaultPath)

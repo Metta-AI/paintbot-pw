@@ -1,0 +1,36 @@
+# Ignore files with no extention.
+*
+!*/
+!*.*
+!LICENSE
+
+# Ignore hidden files, but not the license or github files.
+.*
+!.github/
+!.github/**
+!.gitignore
+
+# Normal ignores.
+*.exe
+nimcache
+*.pdb
+*.ilk
+*.out
+
+# Assets live in the sibling polyworld_data repo.
+/data
+
+# Project specific ignores.
+*.atlas.png
+experiments/terrain/quadterrain_shot.png
+experiments/characters/characters_shot.png
+examples/gods_of_the_arena/gota_shot.png
+examples/gods_of_the_arena/emscripten/
+examples/gods_of_the_arena/profiles/
+examples/call_to_adventure/shot.png
+examples/call_to_adventure/emscripten/
+examples/light_vs_dark/*.png
+examples/light_vs_dark/emscripten/
+examples/light_vs_dark/profiles/
+tmp/
+experiments/modular_chars/modular_chars_shot.png
