@@ -15,6 +15,13 @@ block:
   doAssert rtsEdgePanDir(vec2(0, 300), size, inside = false) == vec2(0, 0)
   doAssert rtsEdgePanDir(vec2(400, 300), size, 4) == vec2(0, 0)
 
+echo "Testing edge pan stays off unless fullscreen"
+block:
+  doAssert not rtsEdgePanAllowed(false, true, false)
+  doAssert not rtsEdgePanAllowed(true, false, false)
+  doAssert not rtsEdgePanAllowed(true, true, true)
+  doAssert rtsEdgePanAllowed(true, true, false)
+
 echo "Testing combined pan does not double a held direction"
 block:
   let doubled = rtsPanDir(vec2(0, -1), vec2(0, -1))

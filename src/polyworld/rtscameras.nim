@@ -10,6 +10,7 @@ const
   RtsFieldOfView* = 45.0'f32
   RtsEdgePanMargin* = 16.0'f32
     ## Pixel band at the window edge that pans the camera.
+    ## Edge pan is only used while the window is fullscreen.
   RtsPanSpeed* = 0.96'f32
     ## World units per second per unit of camera distance.
 
@@ -143,12 +144,22 @@ proc rtsPointerInside(window: Window): bool =
   else:
     true
 
+proc rtsEdgePanAllowed*(
+    fullscreen, inside, captured: bool
+): bool =
+  ## Edge pan is only live in fullscreen with a free cursor over the window.
+  fullscreen and inside and not captured
+
 proc rtsPanDir*(window: Window): Vec2 =
   ## Returns the combined keyboard and screen-edge pan for this frame.
+  ## Edge pan only runs in fullscreen so a windowed game does not drift
+  ## when the pointer sits on a chrome border.
   if not window.focused:
     return
   let edge =
-    if rtsPointerInside(window) and not window.mouseCaptured:
+    if rtsEdgePanAllowed(
+      window.fullscreen, rtsPointerInside(window), window.mouseCaptured
+    ):
       rtsEdgePanDir(window.mousePos.vec2, window.size.vec2)
     else:
       vec2(0)
