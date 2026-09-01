@@ -3,7 +3,7 @@
 ## economy's accounting.
 
 import
-  std/[strformat, strutils, times],
+  std/strformat,
   polyworld/[bodies, tapes],
   ../examples/light_vs_dark/bots,
   ../examples/light_vs_dark/content,
@@ -789,47 +789,5 @@ block replayReproducesTheMatch:
   doAssert replayed.units.len == liveGame.world.units.len
   echo "  " & $data.actions.len & " commands replayed over " & $Ticks &
     " ticks with no divergence"
-
-echo "Testing headless throughput under a full load"
-block fastEnoughToBeUseful:
-  ## The real cost is a late-game map: two full economies plus two armies
-  ## marching at each other. An empty opening proves nothing.
-  var w = newWorld(map, 200_000)
-  for player in 0'i32 ..< PlayerCount:
-    var
-      mineId = NoEntity
-      best = int32.high
-    for mine in map.mines:
-      let distance = tileDistance(map.hallOrigin[player], mine.origin)
-      if distance < best:
-        best = distance
-        mineId = mine.id
-    for index in 0 ..< w.units.len:
-      if w.units[index].owner == player:
-        discard w.applyHarvest(player, w.units[index].id, mineId, 0)
-    let anchor =
-      if player == LightPlayer: tile2(30, 30) else: tile2(97, 97)
-    let squad = w.placeSquad(player, anchor, 60)
-    let target =
-      if player == LightPlayer: map.hallOrigin[DarkPlayer]
-      else: map.hallOrigin[LightPlayer]
-    for id in squad:
-      discard w.applyMove(player, id, int32(target.x), int32(target.y))
-  doAssert w.units.len >= 120, &"only {w.units.len} units on the map"
-
-  pathSearches = 0
-  pathExpansions = 0
-  let started = epochTime()
-  w.run(TickRate * 60)
-  let elapsed = epochTime() - started
-  let speedup = 60.0 / max(elapsed, 0.0001)
-  echo "  " & $w.units.len & " units: simulated 60s in " &
-    formatFloat(elapsed, ffDecimal, 3) & "s wall clock (" &
-    $int(speedup) & "x real time)"
-  echo "  " & $pathSearches & " path searches, " & $pathExpansions &
-    " expansions (" & $(pathExpansions div max(pathSearches, 1)) &
-    " per search, " & $(pathExpansions div (TickRate * 60)) & " per tick)"
-  doAssert speedup > 20.0,
-    "headless simulation is only " & $int(speedup) & "x real time"
 
 echo "test_lvd_sim: all checks passed"

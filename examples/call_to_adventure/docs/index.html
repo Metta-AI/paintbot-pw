@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Call to Adventure</title>
+  <!-- Icons, portraits, and fonts load from the sibling polyworld_data repo. -->
+  <style>
+    @font-face {
+      font-family: Rubik;
+      src: url("../../../../polyworld_data/fonts/Rubik-Regular.ttf") format("truetype");
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: Rubik;
+      src: url("../../../../polyworld_data/fonts/Rubik-Bold.ttf") format("truetype");
+      font-weight: 700;
+    }
+    :root {
+      --bg: #120e0c;
+      --well: #16110e;
+      --gold: #e8c47a;
+      --gold-dim: #b48943;
+      --fighter: #c27d3e;
+      --wizard: #7e59d2;
+      --rogue: #5aa86a;
+      --cleric: #d4c36a;
+      --green: #6ad36a;
+      --mana: #7a9cff;
+      --text: #f0ebe4;
+      --muted: #b6aa9a;
+      --line: rgba(232, 196, 122, 0.2);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Rubik, sans-serif;
+    }
+    body {
+      background:
+        radial-gradient(1000px 520px at 20% -40px, rgba(196, 125, 62, 0.16), transparent 55%),
+        radial-gradient(800px 480px at 100% 10%, rgba(126, 89, 210, 0.14), transparent 50%),
+        var(--bg);
+    }
+    a { color: var(--gold); text-decoration: none; }
+    img { display: block; }
+    .wrap { width: min(1240px, calc(100% - 32px)); margin: 0 auto; }
+    header.top {
+      position: sticky; top: 0; z-index: 20;
+      backdrop-filter: blur(12px);
+      background: rgba(18, 14, 12, 0.88);
+      border-bottom: 1px solid var(--line);
+    }
+    .top-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; min-height: 64px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.08em; }
+    .brand img { width: 36px; height: 36px; }
+    .brand small { display: block; color: var(--gold); font-size: 11px; letter-spacing: 0.22em; }
+    nav { display: flex; gap: 18px; font-size: 13px; letter-spacing: 0.08em; }
+    nav a { color: var(--muted); }
+    nav a:hover { color: var(--gold); }
+    .hero {
+      position: relative; margin: 24px 0 32px;
+      border: 1px solid var(--line); border-radius: 22px; overflow: hidden;
+      background: #111; box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+    }
+    .hero .banner-strip { display: flex; height: 380px; }
+    .hero .banner-strip img {
+      flex: 1; min-width: 0; height: 100%; object-fit: cover; object-position: top center;
+    }
+    .hero .veil {
+      position: absolute; inset: 0;
+      background: linear-gradient(180deg, rgba(18,14,12,0.1) 20%, rgba(18,14,12,0.92) 100%);
+    }
+    .hero-copy { position: absolute; left: 32px; right: 32px; bottom: 28px; }
+    .kicker { color: var(--gold); letter-spacing: 0.28em; font-size: 12px; font-weight: 700; margin: 0 0 8px; }
+    h1 { margin: 0 0 10px; font-size: clamp(32px, 5vw, 52px); letter-spacing: 0.04em; }
+    .lede { max-width: 780px; margin: 0; color: #e4d8c8; line-height: 1.5; }
+    .facts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 0 0 36px; }
+    .fact, .panel, .hero-card, .item-card, .monster-card {
+      background: linear-gradient(180deg, #241c16, #16110e);
+      border: 1px solid var(--line); border-radius: 16px;
+    }
+    .fact { padding: 16px 18px; display: flex; gap: 12px; align-items: center; }
+    .fact img, .stat img, .cost img { width: 22px; height: 22px; }
+    .fact b { display: block; font-size: 20px; }
+    .fact span, .muted { color: var(--muted); font-size: 12px; letter-spacing: 0.06em; }
+    h2 { margin: 0 0 14px; font-size: 28px; letter-spacing: 0.04em; }
+    h3 { margin: 0; letter-spacing: 0.03em; }
+    .panel { padding: 22px; margin-bottom: 28px; }
+    .split { display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 18px; }
+    p { line-height: 1.6; color: #e4d8c8; }
+    .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .chip {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--well); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px; padding: 10px 12px;
+    }
+    .chip img { width: 28px; height: 28px; }
+    .role { margin: 4px 0 12px; font-size: 13px; letter-spacing: 0.12em; font-weight: 700; }
+    .roster { display: grid; gap: 18px; margin-bottom: 40px; }
+    .hero-card { padding: 18px; }
+    .hero-head { display: grid; grid-template-columns: 148px 1fr; gap: 18px; margin-bottom: 16px; }
+    .portrait {
+      width: 148px; height: 210px; border-radius: 14px; overflow: hidden; background: #222;
+    }
+    .portrait img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .stat {
+      background: var(--well); border-radius: 10px; padding: 8px 10px;
+      display: flex; gap: 8px; align-items: center;
+    }
+    .stat b { display: block; font-size: 15px; }
+    .abilities { display: grid; gap: 8px; }
+    .ability {
+      display: grid; grid-template-columns: 64px 48px 1fr; gap: 12px; align-items: center;
+      background: var(--well); border-radius: 12px; padding: 8px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    .ability img { width: 64px; height: 64px; border-radius: 10px; }
+    .key {
+      width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center;
+      font-weight: 700; background: #2a2418; color: var(--gold); border: 1px solid var(--gold-dim);
+    }
+    .ability h4 { margin: 0 0 4px; font-size: 16px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 0; }
+    .tag {
+      font-size: 11px; letter-spacing: 0.04em; padding: 3px 7px; border-radius: 999px;
+      background: #2a241c; color: #e8dcc8;
+    }
+    .tag.heal { background: #1d3322; color: #9be39b; }
+    .tag.loot { background: #3a2a12; color: var(--gold); }
+    .shop, .monsters { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .item-card, .monster-card { padding: 14px; }
+    .item-card img.icon, .monster-card img.icon {
+      width: 84px; height: 84px; border-radius: 12px; background: #0e1014; object-fit: cover;
+    }
+    .item-top { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
+    .cost { display: flex; align-items: center; gap: 6px; color: var(--gold); font-weight: 700; }
+    .bonus { font-size: 13px; color: #e4d8c8; margin: 0; }
+    footer { padding: 28px 0 48px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 980px) {
+      .facts, .split, .shop, .monsters, .hero-head, .stats { grid-template-columns: 1fr 1fr; }
+      .hero .banner-strip { height: 240px; }
+    }
+    @media (max-width: 640px) {
+      nav { display: none; }
+      .facts, .split, .shop, .monsters, .lanes, .hero-head, .stats, .ability { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="brand">
+        <img src="../../../../polyworld_data/icons/champion.png" alt="">
+        <div>
+          <small>POLYWORLD</small>
+          CALL TO ADVENTURE
+        </div>
+      </div>
+      <nav>
+        <a href="#dungeon">Dungeon</a>
+        <a href="#party">Party</a>
+        <a href="#monsters">Monsters</a>
+        <a href="#treasure">Treasure</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <div class="banner-strip">
+        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_5.profile.png" alt="Brom">
+        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_18.profile.png" alt="Nyra">
+        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_11.profile.png" alt="Fenn">
+        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_9.profile.png" alt="Zyra">
+      </div>
+      <div class="veil"></div>
+      <div class="hero-copy">
+        <p class="kicker">FOUR HEROES · SIX FLOORS</p>
+        <h1>CALL TO ADVENTURE</h1>
+        <p class="lede">
+          A fighter, a wizard, a rogue, and a cleric descend a seeded dungeon.
+          Clear each floor, haul treasure, then climb back to the surface before
+          the vault's reinforcements close the way out.
+        </p>
+      </div>
+    </section>
+
+    <section class="facts">
+      <div class="fact"><img src="../../../../polyworld_data/icons/champion.png" alt=""><div><b>4</b><span>HEROES</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/map_marker.png" alt=""><div><b>6</b><span>LEVELS</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>6</b><span>ITEM SLOTS</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/gold.png" alt=""><div><b>5</b><span>TREASURES</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>20</b><span>MINUTES</span></div></div>
+    </section>
+
+    <section id="dungeon" class="panel">
+      <p class="kicker">THE RUN</p>
+      <h2>How the dungeon works</h2>
+      <div class="split">
+        <div>
+          <p>
+            Call to Adventure is a deterministic four-hero expedition. The map
+            is six stacked 128×128 slabs: Surface, Old Halls, Caves, Flooded
+            Deep, Lava Hall, and the Vault. Ramps link the floors. One BASIC
+            script drives each hero.
+          </p>
+          <p>
+            The party starts on the surface and fights down. When the vault is
+            empty they turn around. On the climb, monsters respawn on floors
+            above them every 15 seconds. Treasure is worth more the deeper it
+            dropped. A hero banks gold only after reaching the surface. If
+            everyone dies, the run is lost. If time runs out, the match ends
+            wherever they stand.
+          </p>
+          <p>
+            Each class has a ten-ability HUD bar (keys 1–6, Q, E, R, F). The
+            native AI spends combat on one primary strike, uses Chain Axe to
+            pick up loot, and lets the cleric cast Healing Bloom. Damage rolls
+            <b>base + 0..spread</b>, then a class power percent. Healing is
+            negative damage and skips that percent.
+          </p>
+        </div>
+        <div class="lanes">
+          <div class="chip"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>Regen</b><div class="muted">4% max HP every 0.5s after 3s idle</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>Encumbrance</b><div class="muted">Speed 100 / 85 / 70 / 50%</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/armor.png" alt=""><div><b>Guard</b><div class="muted">Guarded targets take 40% damage</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/waypoint.png" alt=""><div><b>Aggro</b><div class="muted">11 tiles, then hunt the floor</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/units.png" alt=""><div><b>Cap</b><div class="muted">90 monsters in the whole dungeon</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">24 ticks a second, 20 minute run</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="party">
+      <p class="kicker">THE PARTY</p>
+      <h2>Heroes and ability bars</h2>
+      <p>
+        Speed is in tiles per second. Power is the percent applied to strike
+        damage. Carry is inventory weight. Light is vision radius in tiles.
+      </p>
+      <div class="roster">
+        <article class="hero-card">
+          <div class="hero-head">
+            <div class="portrait" style="box-shadow: inset 0 0 0 3px var(--fighter)">
+              <img src="../../../../polyworld_data/characters/modular_chars/character.preset_5.profile.png" alt="Brom">
+            </div>
+            <div>
+              <div class="role" style="color:var(--fighter)">BROM · FIGHTER</div>
+              <h3>FRONTLINE</h3>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>340</b><span class="muted">HP</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>0</b><span class="muted">MANA</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>150%</b><span class="muted">POWER</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.50</b><span class="muted">SPEED</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>120</b><span class="muted">CARRY</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>6</b><span class="muted">LIGHT</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability"><img src="../../../../polyworld_data/abilities/firebrand_sword.png" alt=""><div class="key">1</div><div><h4>Firebrand Sword</h4><div class="meta"><span class="tag">PRIMARY</span><span class="tag">14–20 DMG</span><span class="tag">21–30 HIT</span><span class="tag">1 TILE</span><span class="tag">NO CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/molten_fist.png" alt=""><div class="key">2</div><div><h4>Molten Fist</h4><div class="meta"><span class="tag">34–44 DMG</span><span class="tag">51–66 HIT</span><span class="tag">1 TILE</span><span class="tag">5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/lion_guard.png" alt=""><div class="key">3</div><div><h4>Lion Guard</h4><div class="meta"><span class="tag">SELF</span><span class="tag">2s CD</span><span class="tag">NO MANA</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/chain_axe.png" alt=""><div class="key">4</div><div><h4>Chain Axe</h4><div class="meta"><span class="tag loot">LOOT PICKUP</span><span class="tag">NO CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/arcane_gateway.png" alt=""><div class="key">5</div><div><h4>Arcane Gateway</h4><div class="meta"><span class="tag">1 TILE</span><span class="tag">NO CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/battle_horn.png" alt=""><div class="key">6</div><div><h4>Battle Horn</h4><div class="meta"><span class="tag">0.5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/iron_flail.png" alt=""><div class="key">Q</div><div><h4>Iron Flail</h4><div class="meta"><span class="tag">18–26 DMG</span><span class="tag">27–39 HIT</span><span class="tag">2 TILES</span><span class="tag">3s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/inferno_aegis.png" alt=""><div class="key">E</div><div><h4>Inferno Aegis</h4><div class="meta"><span class="tag">SELF</span><span class="tag">2.7s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/winged_boot.png" alt=""><div class="key">R</div><div><h4>Winged Boot</h4><div class="meta"><span class="tag">3 TILES</span><span class="tag">7.5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/blazing_blade.png" alt=""><div class="key">F</div><div><h4>Blazing Blade</h4><div class="meta"><span class="tag">28–36 DMG</span><span class="tag">42–54 HIT</span><span class="tag">1 TILE</span><span class="tag">4s CD</span></div></div></div>
+          </div>
+        </article>
+
+        <article class="hero-card">
+          <div class="hero-head">
+            <div class="portrait" style="box-shadow: inset 0 0 0 3px var(--wizard)">
+              <img src="../../../../polyworld_data/characters/modular_chars/character.preset_18.profile.png" alt="Nyra">
+            </div>
+            <div>
+              <div class="role" style="color:var(--wizard)">NYRA · WIZARD</div>
+              <h3>BURST MAGE</h3>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>200</b><span class="muted">HP</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>160</b><span class="muted">MANA</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>125%</b><span class="muted">POWER</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.60</b><span class="muted">SPEED</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>45</b><span class="muted">CARRY</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>8</b><span class="muted">LIGHT</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability"><img src="../../../../polyworld_data/abilities/meteor_strike.png" alt=""><div class="key">1</div><div><h4>Meteor Strike</h4><div class="meta"><span class="tag">PRIMARY</span><span class="tag">22–30 DMG</span><span class="tag">27–37 HIT</span><span class="tag">12 MANA</span><span class="tag">7 TILES</span><span class="tag">1.5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/frost_lance.png" alt=""><div class="key">2</div><div><h4>Frost Lance</h4><div class="meta"><span class="tag">10–14 DMG</span><span class="tag">12–17 HIT</span><span class="tag">16 MANA</span><span class="tag">5 TILES</span><span class="tag">4s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/void_portal.png" alt=""><div class="key">3</div><div><h4>Void Portal</h4><div class="meta"><span class="tag">20 MANA</span><span class="tag">4 TILES</span><span class="tag">10s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/chain_axe.png" alt=""><div class="key">4</div><div><h4>Chain Axe</h4><div class="meta"><span class="tag loot">LOOT PICKUP</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/arcane_gateway.png" alt=""><div class="key">5</div><div><h4>Arcane Gateway</h4><div class="meta"><span class="tag">1 TILE</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/battle_horn.png" alt=""><div class="key">6</div><div><h4>Battle Horn</h4><div class="meta"><span class="tag">0.5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/ice_wall.png" alt=""><div class="key">Q</div><div><h4>Ice Wall</h4><div class="meta"><span class="tag">SELF</span><span class="tag">3.3s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/lightning_storm.png" alt=""><div class="key">E</div><div><h4>Lightning Storm</h4><div class="meta"><span class="tag">30–40 DMG</span><span class="tag">37–50 HIT</span><span class="tag">18 MANA</span><span class="tag">6 TILES</span><span class="tag">2s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/mana_crystal.png" alt=""><div class="key">R</div><div><h4>Mana Crystal</h4><div class="meta"><span class="tag">14 MANA</span><span class="tag">3 TILES</span><span class="tag">5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/arcane_meteor.png" alt=""><div class="key">F</div><div><h4>Arcane Meteor</h4><div class="meta"><span class="tag">36–48 DMG</span><span class="tag">45–60 HIT</span><span class="tag">22 MANA</span><span class="tag">8 TILES</span><span class="tag">3s CD</span></div></div></div>
+          </div>
+        </article>
+
+        <article class="hero-card">
+          <div class="hero-head">
+            <div class="portrait" style="box-shadow: inset 0 0 0 3px var(--rogue)">
+              <img src="../../../../polyworld_data/characters/modular_chars/character.preset_11.profile.png" alt="Fenn">
+            </div>
+            <div>
+              <div class="role" style="color:var(--rogue)">FENN · ROGUE</div>
+              <h3>MOBILE STRIKER</h3>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>250</b><span class="muted">HP</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>40</b><span class="muted">MANA</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>135%</b><span class="muted">POWER</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>3.40</b><span class="muted">SPEED</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>70</b><span class="muted">CARRY</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>5</b><span class="muted">LIGHT</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability"><img src="../../../../polyworld_data/abilities/venom_dagger.png" alt=""><div class="key">1</div><div><h4>Venom Dagger</h4><div class="meta"><span class="tag">PRIMARY</span><span class="tag">12–16 DMG</span><span class="tag">16–21 HIT</span><span class="tag">1 TILE</span><span class="tag">4s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/verdant_arrow.png" alt=""><div class="key">2</div><div><h4>Verdant Arrow</h4><div class="meta"><span class="tag">9–14 DMG</span><span class="tag">12–18 HIT</span><span class="tag">6 TILES</span><span class="tag">1s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/shadow_cloak.png" alt=""><div class="key">3</div><div><h4>Shadow Cloak</h4><div class="meta"><span class="tag">SELF</span><span class="tag">15s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/chain_axe.png" alt=""><div class="key">4</div><div><h4>Chain Axe</h4><div class="meta"><span class="tag loot">LOOT PICKUP</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/arcane_gateway.png" alt=""><div class="key">5</div><div><h4>Arcane Gateway</h4><div class="meta"><span class="tag">1 TILE</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/battle_horn.png" alt=""><div class="key">6</div><div><h4>Battle Horn</h4><div class="meta"><span class="tag">0.5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/void_blade.png" alt=""><div class="key">Q</div><div><h4>Void Blade</h4><div class="meta"><span class="tag">16–21 DMG</span><span class="tag">21–28 HIT</span><span class="tag">1 TILE</span><span class="tag">3.3s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/shadow_comet.png" alt=""><div class="key">E</div><div><h4>Shadow Comet</h4><div class="meta"><span class="tag">14–20 DMG</span><span class="tag">18–27 HIT</span><span class="tag">7 TILES</span><span class="tag">1.5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/gale_slash.png" alt=""><div class="key">R</div><div><h4>Gale Slash</h4><div class="meta"><span class="tag">20–26 DMG</span><span class="tag">27–35 HIT</span><span class="tag">1 TILE</span><span class="tag">2s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/thorn_ring.png" alt=""><div class="key">F</div><div><h4>Thorn Ring</h4><div class="meta"><span class="tag">SELF</span><span class="tag">3.8s CD</span></div></div></div>
+          </div>
+        </article>
+
+        <article class="hero-card">
+          <div class="hero-head">
+            <div class="portrait" style="box-shadow: inset 0 0 0 3px var(--cleric)">
+              <img src="../../../../polyworld_data/characters/modular_chars/character.preset_9.profile.png" alt="Zyra">
+            </div>
+            <div>
+              <div class="role" style="color:var(--cleric)">ZYRA · CLERIC</div>
+              <h3>SUPPORT</h3>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>270</b><span class="muted">HP</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>180</b><span class="muted">MANA</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>100%</b><span class="muted">POWER</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.70</b><span class="muted">SPEED</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>80</b><span class="muted">CARRY</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>6</b><span class="muted">LIGHT</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability"><img src="../../../../polyworld_data/abilities/solar_hammer.png" alt=""><div class="key">1</div><div><h4>Solar Hammer</h4><div class="meta"><span class="tag">PRIMARY</span><span class="tag">14–20 DMG</span><span class="tag">1 TILE</span><span class="tag">NO CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/healing_bloom.png" alt=""><div class="key">2</div><div><h4>Healing Bloom</h4><div class="meta"><span class="tag heal">HEAL 62–70</span><span class="tag">18 MANA</span><span class="tag">4 TILES</span><span class="tag">3s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/angelic_emblem.png" alt=""><div class="key">3</div><div><h4>Angelic Emblem</h4><div class="meta"><span class="tag">24 MANA</span><span class="tag">4 TILES</span><span class="tag">15s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/sun_orb.png" alt=""><div class="key">4</div><div><h4>Sun Orb</h4><div class="meta"><span class="tag">26–36 DMG</span><span class="tag">20 MANA</span><span class="tag">5 TILES</span><span class="tag">10s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/chain_axe.png" alt=""><div class="key">5</div><div><h4>Chain Axe</h4><div class="meta"><span class="tag loot">LOOT PICKUP</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/battle_horn.png" alt=""><div class="key">6</div><div><h4>Battle Horn</h4><div class="meta"><span class="tag">0.5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/healing_potion.png" alt=""><div class="key">Q</div><div><h4>Healing Potion</h4><div class="meta"><span class="tag heal">HEAL</span><span class="tag">0.5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/fire_phoenix.png" alt=""><div class="key">E</div><div><h4>Fire Phoenix</h4><div class="meta"><span class="tag heal">HEAL 90</span><span class="tag">22 MANA</span><span class="tag">4 TILES</span><span class="tag">12.5s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/nature_talisman.png" alt=""><div class="key">R</div><div><h4>Nature Talisman</h4><div class="meta"><span class="tag">16 MANA</span><span class="tag">4 TILES</span><span class="tag">10s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/cosmic_flare.png" alt=""><div class="key">F</div><div><h4>Cosmic Flare</h4><div class="meta"><span class="tag">24–32 DMG</span><span class="tag">20 MANA</span><span class="tag">6 TILES</span><span class="tag">7.5s CD</span></div></div></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="monsters" class="panel">
+      <p class="kicker">THE DUNGEON</p>
+      <h2>Monsters</h2>
+      <p>
+        Surface has no spawns. Deeper floors mix nastier species and add 10%
+        hit points per level. Monsters swing Firebrand Sword at their own
+        power percent, so they lose a straight damage race against the party.
+      </p>
+      <div class="monsters">
+        <article class="monster-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/characters/rpg_monsters/skeleton.profile.png" alt="Skeleton">
+            <div><h3>Skeleton</h3><div class="muted">OLD HALLS</div></div>
+          </div>
+          <p class="bonus">60 HP base. Speed 2.20. Sight 6. Power 55%.</p>
+        </article>
+        <article class="monster-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/characters/rpg_monsters/orc.profile.png" alt="Orc">
+            <div><h3>Orc</h3><div class="muted">CAVES</div></div>
+          </div>
+          <p class="bonus">90 HP base. Speed 3.00. Sight 9. Power 70%.</p>
+        </article>
+        <article class="monster-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/characters/mini_legion/undead/lich.profile.png" alt="Lich">
+            <div><h3>Lich</h3><div class="muted">FLOODED DEEP</div></div>
+          </div>
+          <p class="bonus">130 HP base. Speed 2.00. Sight 10. Power 80%.</p>
+        </article>
+        <article class="monster-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/characters/mini_legion/sentinel/rock_golem.profile.png" alt="Golem">
+            <div><h3>Golem</h3><div class="muted">LAVA / VAULT</div></div>
+          </div>
+          <p class="bonus">260 HP base. Speed 1.40. Sight 5. Power 110%. Often drops an idol.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="treasure" class="panel">
+      <p class="kicker">THE HAUL</p>
+      <h2>Treasure, weight, and value</h2>
+      <p>
+        Six inventory slots. Value on the ground is the table below plus 15
+        gold per dungeon level. Weight slows the bearer through encumbrance.
+        Gold only counts as banked after a living hero walks it onto the surface.
+      </p>
+      <div class="shop">
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/merchant_coin_purse.png" alt="Gold pile">
+            <div><h3>Gold Pile</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">10</div></div>
+          </div>
+          <p class="bonus">Weight 5. Common on the upper floors.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/amethyst_crystal.png" alt="Gemstone">
+            <div><h3>Gemstone</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">60</div></div>
+          </div>
+          <p class="bonus">Weight 2. Light and valuable.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/sanguine_chalice.png" alt="Chalice">
+            <div><h3>Chalice</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">140</div></div>
+          </div>
+          <p class="bonus">Weight 8. Starts appearing in the flooded deep.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/whisperwood_idol.png" alt="Idol">
+            <div><h3>Idol</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">300</div></div>
+          </div>
+          <p class="bonus">Weight 40. Heavy. Golems drop these often.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/crystal_crown.png" alt="Crown">
+            <div><h3>Crown</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">900</div></div>
+          </div>
+          <p class="bonus">Weight 15. Vault-only prize.</p>
+        </article>
+      </div>
+    </section>
+
+    <footer>
+      Numbers come from <code>examples/call_to_adventure/content.nim</code>,
+      <code>ui.nim</code>, and <code>sim.nim</code>. Icons load from the sibling
+      <code>polyworld_data</code> folder.
+    </footer>
+  </main>
+</body>
+</html>

@@ -1,0 +1,1334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Gods of the Arena</title>
+  <!-- Icons, portraits, and fonts load from the sibling polyworld_data repo. -->
+  <style>
+    @font-face {
+      font-family: Rubik;
+      src: url("../../../../polyworld_data/fonts/Rubik-Regular.ttf") format("truetype");
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: Rubik;
+      src: url("../../../../polyworld_data/fonts/Rubik-Bold.ttf") format("truetype");
+      font-weight: 700;
+    }
+    :root {
+      --bg: #0c1014;
+      --panel: #16181e;
+      --panel-2: #1c1f27;
+      --well: #101216;
+      --gold: #f7dd8f;
+      --gold-dim: #c4a45a;
+      --red: #e05053;
+      --blue: #4c80e8;
+      --green: #6ad36a;
+      --mana: #5aa8f0;
+      --xp: #9b6adf;
+      --text: #eef0f4;
+      --muted: #a6aebf;
+      --line: rgba(247, 221, 143, 0.18);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Rubik, sans-serif;
+    }
+    body {
+      background:
+        radial-gradient(1200px 600px at 50% -80px, rgba(76, 128, 232, 0.16), transparent 60%),
+        radial-gradient(900px 500px at 100% 20%, rgba(224, 80, 83, 0.12), transparent 55%),
+        var(--bg);
+    }
+    a { color: var(--gold); text-decoration: none; }
+    img { display: block; }
+    .wrap { width: min(1240px, calc(100% - 32px)); margin: 0 auto; }
+    header.top {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      backdrop-filter: blur(12px);
+      background: rgba(12, 16, 20, 0.86);
+      border-bottom: 1px solid var(--line);
+    }
+    .top-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 64px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+    .brand img { width: 36px; height: 36px; }
+    .brand small {
+      display: block;
+      color: var(--gold);
+      font-size: 11px;
+      letter-spacing: 0.22em;
+    }
+    nav { display: flex; gap: 18px; font-size: 13px; letter-spacing: 0.08em; }
+    nav a { color: var(--muted); }
+    nav a:hover { color: var(--gold); }
+    .hero {
+      position: relative;
+      margin: 24px 0 32px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      overflow: hidden;
+      background: #111;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+    }
+    .hero .banner-strip {
+      display: flex;
+      height: 420px;
+    }
+    .hero .banner-strip img {
+      flex: 1;
+      min-width: 0;
+      height: 100%;
+      object-fit: cover;
+      object-position: top center;
+    }
+    .hero .veil {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(12,16,20,0.08) 20%, rgba(12,16,20,0.92) 100%);
+    }
+    .hero-copy {
+      position: absolute;
+      left: 32px;
+      right: 32px;
+      bottom: 28px;
+    }
+    .kicker {
+      color: var(--gold);
+      letter-spacing: 0.28em;
+      font-size: 12px;
+      font-weight: 700;
+      margin: 0 0 8px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(32px, 5vw, 56px);
+      letter-spacing: 0.04em;
+      text-shadow: 0 8px 24px rgba(0,0,0,0.55);
+    }
+    .lede {
+      max-width: 760px;
+      margin: 0;
+      color: #d7dbe4;
+      line-height: 1.5;
+    }
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin: 0 0 36px;
+    }
+    .fact, .panel, .hero-card, .item-card {
+      background: linear-gradient(180deg, #1b1e26, #14171d);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+    .fact {
+      padding: 16px 18px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .fact img, .stat img, .cost img { width: 22px; height: 22px; }
+    .fact b { display: block; font-size: 20px; }
+    .fact span, .muted { color: var(--muted); font-size: 12px; letter-spacing: 0.06em; }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 28px;
+      letter-spacing: 0.04em;
+    }
+    h3 { margin: 0; letter-spacing: 0.03em; }
+    .panel { padding: 22px; margin-bottom: 28px; }
+    .split {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 18px;
+    }
+    p { line-height: 1.6; color: #d5dae3; }
+    .lanes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .chip {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--well);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 10px 12px;
+    }
+    .chip img { width: 28px; height: 28px; }
+    .team { font-weight: 700; font-size: 12px; letter-spacing: 0.12em; }
+    .team.red { color: var(--red); }
+    .team.blue { color: var(--blue); }
+    .roster {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+      margin-bottom: 40px;
+    }
+    .hero-card { padding: 18px; }
+    .hero-head {
+      display: grid;
+      grid-template-columns: 148px 1fr;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+    .portrait {
+      position: relative;
+      width: 148px;
+      height: 210px;
+      border-radius: 14px;
+      overflow: hidden;
+      background: #222;
+    }
+    .portrait img { width: 100%; height: 100%; object-fit: cover; }
+    .portrait.blue { box-shadow: inset 0 0 0 3px var(--blue); }
+    .portrait.red { box-shadow: inset 0 0 0 3px var(--red); }
+    .lvl {
+      position: absolute;
+      left: 8px;
+      bottom: 8px;
+      min-width: 42px;
+      height: 28px;
+      padding: 0 8px;
+      border-radius: 8px;
+      background: #111318;
+      color: var(--gold);
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 12px;
+      border: 1px solid var(--gold-dim);
+    }
+    .role {
+      margin: 4px 0 12px;
+      font-size: 13px;
+      letter-spacing: 0.12em;
+      font-weight: 700;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .stat {
+      background: var(--well);
+      border-radius: 10px;
+      padding: 8px 10px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .stat b { display: block; font-size: 15px; }
+    .bars { margin-top: 10px; display: grid; gap: 8px; }
+    .bar {
+      height: 26px;
+      border-radius: 8px;
+      background: #0d0f13;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .bar > i {
+      display: block;
+      height: 100%;
+    }
+    .hp > i { background: linear-gradient(90deg, #2d7a38, #6ad36a); }
+    .mp > i { background: linear-gradient(90deg, #1f5ea8, #5aa8f0); }
+    .bar-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 26px;
+      letter-spacing: 0.06em;
+      color: #fff;
+      text-shadow: 0 1px 2px #000, 0 0 8px rgba(0,0,0,0.9);
+    }
+    .abilities { display: grid; gap: 8px; }
+    .ability {
+      display: grid;
+      grid-template-columns: 72px 54px 1fr;
+      gap: 12px;
+      align-items: center;
+      background: var(--well);
+      border-radius: 12px;
+      padding: 8px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    .ability img {
+      width: 72px;
+      height: 72px;
+      border-radius: 10px;
+    }
+    .key {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      background: #2a2418;
+      color: var(--gold);
+      border: 1px solid var(--gold-dim);
+    }
+    .ability h4 { margin: 0 0 4px; font-size: 16px; }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 6px 0 4px;
+    }
+    .tag {
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: #252830;
+      color: #d7dbe6;
+    }
+    .tag.strike { background: #3a1f24; color: #ffb3b4; }
+    .tag.heal { background: #1d3322; color: #9be39b; }
+    .tag.restore { background: #1b2d44; color: #9ec8ff; }
+    .tag.ult { background: #3a2a12; color: var(--gold); }
+    .shop {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .item-card { padding: 14px; }
+    .item-card img.icon {
+      width: 84px;
+      height: 84px;
+      border-radius: 12px;
+      background: #0e1014;
+    }
+    .item-top {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .cost {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--gold);
+      font-weight: 700;
+    }
+    .bonus { font-size: 13px; color: #d7dbe4; margin: 0; }
+    footer {
+      padding: 28px 0 48px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 980px) {
+      .facts, .split, .shop, .hero-head, .stats { grid-template-columns: 1fr 1fr; }
+      .hero .banner-strip { height: 280px; }
+    }
+    @media (max-width: 640px) {
+      nav { display: none; }
+      .facts, .split, .shop, .lanes, .hero-head, .stats, .ability {
+        grid-template-columns: 1fr;
+      }
+      .hero-copy { left: 16px; right: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="brand">
+        <img src="../../../../polyworld_data/icons/champion.png" alt="">
+        <div>
+          <small>POLYWORLD</small>
+          GODS OF THE ARENA
+        </div>
+      </div>
+      <nav>
+        <a href="#arena">Arena</a>
+        <a href="#heroes">Heroes</a>
+        <a href="#shop">Shop</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <div class="banner-strip">
+        <img src="../../../../polyworld_data/characters/mini_legion/human/knight.profile.png" alt="">
+        <img src="../../../../polyworld_data/characters/mini_legion/human/archer.profile.png" alt="">
+        <img src="../../../../polyworld_data/characters/mini_legion/human/mage.profile.png" alt="">
+        <img src="../../../../polyworld_data/characters/mini_legion/sentinel/druid.profile.png" alt="">
+        <img src="../../../../polyworld_data/characters/mini_legion/sentinel/demon_hunter.profile.png" alt="">
+        <img src="../../../../polyworld_data/characters/mini_legion/undead/death_knight.profile.png" alt="">
+        <img src="../../../../polyworld_data/characters/mini_legion/undead/crossbowman.profile.png" alt="">
+        <img src="../../../../polyworld_data/characters/mini_legion/undead/lich.profile.png" alt="">
+        <img src="../../../../polyworld_data/characters/mini_legion/warband/warlock.profile.png" alt="">
+        <img src="../../../../polyworld_data/characters/mini_legion/warband/berserker.profile.png" alt="">
+      </div>
+      <div class="veil"></div>
+      <div class="hero-copy">
+        <p class="kicker">FIVE VERSUS FIVE</p>
+        <h1>GODS OF THE ARENA</h1>
+        <p class="lede">
+          Two gods sit in opposite-corner forts. Three lanes, a river, a bridge,
+          and a jungle of pine stand between them. Ten heroes, footmen, and
+          towers fight until one god falls.
+        </p>
+      </div>
+    </section>
+
+    <section class="facts">
+      <div class="fact"><img src="../../../../polyworld_data/icons/champion.png" alt=""><div><b>10</b><span>HEROES</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>18</b><span>TOWERS</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/minion.png" alt=""><div><b>3</b><span>LANES</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/experience.png" alt=""><div><b>20</b><span>MAX LEVEL</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/gold.png" alt=""><div><b>20</b><span>SHOP ITEMS</span></div></div>
+    </section>
+
+    <section id="arena" class="panel">
+      <p class="kicker">THE MATCH</p>
+      <h2>How the arena works</h2>
+      <div class="split">
+        <div>
+          <p>
+            Gods of the Arena is a deterministic 5v5 lane battler. Blue brings
+            the living roster. Red brings the undead and warband. Each side
+            starts with five heroes, three barracks, six lane towers, and a
+            fort that holds the god.
+          </p>
+          <p>
+            Footmen spawn two per lane every ten seconds and march until they
+            meet the enemy. Heroes start at level 1 with 150 gold and their
+            full four-ability kit already unlocked. Kills grant gold and XP.
+            Heroes grow to level 20, then spend gold in a six-slot inventory.
+          </p>
+          <p>
+            Outer towers fall first, then inner, then the gate. A god becomes
+            attackable after one of its lanes is cleared. The first fort to
+            reach zero health loses.
+          </p>
+        </div>
+        <div class="lanes">
+          <div class="chip"><img src="../../../../polyworld_data/icons/minion.png" alt=""><div><b>Footmen</b><div class="muted">60 HP, 12 damage, 15 gold</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>Towers</b><div class="muted">Outer 600, inner 800, gate 1000</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/fort.png" alt=""><div><b>Gods</b><div class="muted">400 HP, exposed after a lane falls</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/kills.png" alt=""><div><b>Hero bounty</b><div class="muted">150 XP and 100 gold</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/experience.png" alt=""><div><b>Level curve</b><div class="muted">100 XP, then +75 each level</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">24 ticks a second, 20 minute match</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="heroes">
+      <p class="kicker">THE ROSTER</p>
+      <h2>Heroes and ability kits</h2>
+      <p>
+        Every hero enters with Q, W, E, and R ready at <b>level 1</b>. There is
+        no skill-point tree. Stats climb through level 20. Cooldowns and ranges
+        below use the live HUD units: seconds and tiles.
+      </p>
+
+      <div class="roster">
+        <!-- Vanguard Knight -->
+        <article class="hero-card" id="vanguard-knight">
+          <div class="hero-head">
+            <div class="portrait blue">
+              <img src="../../../../polyworld_data/characters/mini_legion/human/knight.profile.png" alt="Vanguard Knight">
+              <div class="lvl">1-20</div>
+            </div>
+            <div>
+              <div class="team blue">BLUE TEAM</div>
+              <h3>VANGUARD KNIGHT</h3>
+              <div class="role" style="color:var(--blue)">MELEE · FRONTLINE PROTECTOR</div>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>330 → 1470</b><span class="muted">HP +60/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>110 → 262</b><span class="muted">MANA +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>25 → 120</b><span class="muted">DAMAGE +5/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.17</b><span class="muted">RANGE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.32 → 2.78</b><span class="muted">MOVE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.92</b><span class="muted">ATTACKS / S</span></div></div>
+              </div>
+              <div class="bars">
+                <div class="bar hp"><i style="width:22%"></i><div class="bar-label"><span>HEALTH</span><span>330 → 1470</span></div></div>
+                <div class="bar mp"><i style="width:42%"></i><div class="bar-label"><span>MANA</span><span>110 → 262</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/lion_guard.png" alt="Lion Guard">
+              <div class="key">Q</div>
+              <div>
+                <h4>Lion Guard</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+28 HP</span><span class="tag">8s CD</span><span class="tag">PASSIVE</span></div>
+                <p class="bonus">A blue and gold lion shield. Restores health on a short cycle with no mana cost.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/firebrand_sword.png" alt="Firebrand Sword">
+              <div class="key">W</div>
+              <div>
+                <h4>Firebrand Sword</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">40 DMG</span><span class="tag">20 MANA</span><span class="tag">4s CD</span><span class="tag">1.5 RANGE</span></div>
+                <p class="bonus">A flaming white sword. Close-range fire strike for the front line.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/inferno_aegis.png" alt="Inferno Aegis">
+              <div class="key">E</div>
+              <div>
+                <h4>Inferno Aegis</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+50 HP</span><span class="tag">35 MANA</span><span class="tag">10s CD</span></div>
+                <p class="bonus">A lava-cracked shield. A larger self-heal when the knight needs to hold.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/blazing_blade.png" alt="Blazing Blade">
+              <div class="key">R</div>
+              <div>
+                <h4>Blazing Blade</h4>
+                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">90 DMG</span><span class="tag">70 MANA</span><span class="tag">20s CD</span><span class="tag">1.8 RANGE</span></div>
+                <p class="bonus">A silver blade wrapped in orange fire. The knight's heaviest melee burst.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Ranger -->
+        <article class="hero-card" id="ranger">
+          <div class="hero-head">
+            <div class="portrait blue">
+              <img src="../../../../polyworld_data/characters/mini_legion/human/archer.profile.png" alt="Ranger">
+              <div class="lvl">1-20</div>
+            </div>
+            <div>
+              <div class="team blue">BLUE TEAM</div>
+              <h3>RANGER</h3>
+              <div class="role" style="color:var(--blue)">RANGER · MOBILE RANGED CARRY</div>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>210 → 932</b><span class="muted">HP +38/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>110 → 262</b><span class="muted">MANA +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>25 → 139</b><span class="muted">DAMAGE +6/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>5.50</b><span class="muted">RANGE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.76 → 3.44</b><span class="muted">MOVE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.33</b><span class="muted">ATTACKS / S</span></div></div>
+              </div>
+              <div class="bars">
+                <div class="bar hp"><i style="width:23%"></i><div class="bar-label"><span>HEALTH</span><span>210 → 932</span></div></div>
+                <div class="bar mp"><i style="width:42%"></i><div class="bar-label"><span>MANA</span><span>110 → 262</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/dragon_sight.png" alt="Dragon Sight">
+              <div class="key">Q</div>
+              <div>
+                <h4>Dragon Sight</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">16 DMG</span><span class="tag">9s CD</span><span class="tag">7.0 RANGE</span><span class="tag">PASSIVE</span></div>
+                <p class="bonus">A glowing dragon eye. Long-range poke with no mana cost.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/verdant_arrow.png" alt="Verdant Arrow">
+              <div class="key">W</div>
+              <div>
+                <h4>Verdant Arrow</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">32 DMG</span><span class="tag">18 MANA</span><span class="tag">3s CD</span><span class="tag">6.0 RANGE</span></div>
+                <p class="bonus">A vine-wrapped golden arrow. Fast nature shot for lane pressure.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/ricochet_disc.png" alt="Ricochet Disc">
+              <div class="key">E</div>
+              <div>
+                <h4>Ricochet Disc</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">48 DMG</span><span class="tag">32 MANA</span><span class="tag">8s CD</span><span class="tag">6.5 RANGE</span></div>
+                <p class="bonus">A crescent disc that hunts back lines. Heavier ranged hit.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/storm_eagle.png" alt="Storm Eagle">
+              <div class="key">R</div>
+              <div>
+                <h4>Storm Eagle</h4>
+                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">95 DMG</span><span class="tag">80 MANA</span><span class="tag">24s CD</span><span class="tag">8.0 RANGE</span></div>
+                <p class="bonus">A lightning eagle dive. The longest-range burst on the roster.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Arcanist -->
+        <article class="hero-card" id="arcanist">
+          <div class="hero-head">
+            <div class="portrait blue">
+              <img src="../../../../polyworld_data/characters/mini_legion/human/mage.profile.png" alt="Arcanist">
+              <div class="lvl">1-20</div>
+            </div>
+            <div>
+              <div class="team blue">BLUE TEAM</div>
+              <h3>ARCANIST</h3>
+              <div class="role" style="color:var(--blue)">MAGE · BURST MAGE</div>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>190 → 760</b><span class="muted">HP +30/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>180 → 465</b><span class="muted">MANA +15/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>38 → 190</b><span class="muted">DAMAGE +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>5.00</b><span class="muted">RANGE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.48 → 3.01</b><span class="muted">MOVE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.80</b><span class="muted">ATTACKS / S</span></div></div>
+              </div>
+              <div class="bars">
+                <div class="bar hp"><i style="width:25%"></i><div class="bar-label"><span>HEALTH</span><span>190 → 760</span></div></div>
+                <div class="bar mp"><i style="width:39%"></i><div class="bar-label"><span>MANA</span><span>180 → 465</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/mana_crystal.png" alt="Mana Crystal">
+              <div class="key">Q</div>
+              <div>
+                <h4>Mana Crystal</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag restore">RESTORE</span><span class="tag">+28 MANA</span><span class="tag">6s CD</span><span class="tag">PASSIVE</span></div>
+                <p class="bonus">A cluster of blue shards. Refunds mana so the burst kit can keep firing.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/frost_lance.png" alt="Frost Lance">
+              <div class="key">W</div>
+              <div>
+                <h4>Frost Lance</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">42 DMG</span><span class="tag">28 MANA</span><span class="tag">4s CD</span><span class="tag">5.5 RANGE</span></div>
+                <p class="bonus">An ice-crystal lance. Reliable piercing frost shot.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/meteor_strike.png" alt="Meteor Strike">
+              <div class="key">E</div>
+              <div>
+                <h4>Meteor Strike</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">70 DMG</span><span class="tag">50 MANA</span><span class="tag">9s CD</span><span class="tag">6.0 RANGE</span></div>
+                <p class="bonus">A flaming rocky meteor. Mid-kit bombardment.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/arcane_meteor.png" alt="Arcane Meteor">
+              <div class="key">R</div>
+              <div>
+                <h4>Arcane Meteor</h4>
+                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">120 DMG</span><span class="tag">100 MANA</span><span class="tag">25s CD</span><span class="tag">7.0 RANGE</span></div>
+                <p class="bonus">A violet meteor ringed in crystals. The largest single-target mage hit.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Druid Warden -->
+        <article class="hero-card" id="druid-warden">
+          <div class="hero-head">
+            <div class="portrait blue">
+              <img src="../../../../polyworld_data/characters/mini_legion/sentinel/druid.profile.png" alt="Druid Warden">
+              <div class="lvl">1-20</div>
+            </div>
+            <div>
+              <div class="team blue">BLUE TEAM</div>
+              <h3>DRUID WARDEN</h3>
+              <div class="role" style="color:var(--blue)">MAGE · DURABLE SUPPORT</div>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>250 → 1162</b><span class="muted">HP +48/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>170 → 436</b><span class="muted">MANA +14/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>22 → 98</b><span class="muted">DAMAGE +4/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>4.00</b><span class="muted">RANGE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.56 → 3.09</b><span class="muted">MOVE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.92</b><span class="muted">ATTACKS / S</span></div></div>
+              </div>
+              <div class="bars">
+                <div class="bar hp"><i style="width:22%"></i><div class="bar-label"><span>HEALTH</span><span>250 → 1162</span></div></div>
+                <div class="bar mp"><i style="width:39%"></i><div class="bar-label"><span>MANA</span><span>170 → 436</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/nature_talisman.png" alt="Nature Talisman">
+              <div class="key">Q</div>
+              <div>
+                <h4>Nature Talisman</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+22 HP</span><span class="tag">8s CD</span><span class="tag">PASSIVE</span></div>
+                <p class="bonus">A wooden spiral charm. Quiet regeneration with no mana cost.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/healing_bloom.png" alt="Healing Bloom">
+              <div class="key">W</div>
+              <div>
+                <h4>Healing Bloom</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+55 HP</span><span class="tag">30 MANA</span><span class="tag">7s CD</span></div>
+                <p class="bonus">A white and gold flower. The main support heal.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/kindred_wisps.png" alt="Kindred Wisps">
+              <div class="key">E</div>
+              <div>
+                <h4>Kindred Wisps</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+80 HP</span><span class="tag">45 MANA</span><span class="tag">12s CD</span></div>
+                <p class="bonus">Twin pale spirits on a cyan cord. A larger recovery when the lane turns.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/golem_seed.png" alt="Golem Seed">
+              <div class="key">R</div>
+              <div>
+                <h4>Golem Seed</h4>
+                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">85 DMG</span><span class="tag">75 MANA</span><span class="tag">22s CD</span><span class="tag">3.3 RANGE</span></div>
+                <p class="bonus">A stone seed that cracks into a guardian. The warden's objective hit.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Demon Hunter -->
+        <article class="hero-card" id="demon-hunter">
+          <div class="hero-head">
+            <div class="portrait blue">
+              <img src="../../../../polyworld_data/characters/mini_legion/sentinel/demon_hunter.profile.png" alt="Demon Hunter">
+              <div class="lvl">1-20</div>
+            </div>
+            <div>
+              <div class="team blue">BLUE TEAM</div>
+              <h3>DEMON HUNTER</h3>
+              <div class="role" style="color:var(--blue)">MELEE · MELEE ASSASSIN</div>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>220 → 904</b><span class="muted">HP +36/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>90 → 223</b><span class="muted">MANA +7/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>32 → 165</b><span class="muted">DAMAGE +7/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.25</b><span class="muted">RANGE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>3.04 → 3.95</b><span class="muted">MOVE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.50</b><span class="muted">ATTACKS / S</span></div></div>
+              </div>
+              <div class="bars">
+                <div class="bar hp"><i style="width:24%"></i><div class="bar-label"><span>HEALTH</span><span>220 → 904</span></div></div>
+                <div class="bar mp"><i style="width:40%"></i><div class="bar-label"><span>MANA</span><span>90 → 223</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/shadow_cloak.png" alt="Shadow Cloak">
+              <div class="key">Q</div>
+              <div>
+                <h4>Shadow Cloak</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+18 HP</span><span class="tag">10s CD</span><span class="tag">PASSIVE</span></div>
+                <p class="bonus">An empty hooded cloak. Small sustain while hunting.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/void_blade.png" alt="Void Blade">
+              <div class="key">W</div>
+              <div>
+                <h4>Void Blade</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">38 DMG</span><span class="tag">16 MANA</span><span class="tag">3.3s CD</span><span class="tag">1.5 RANGE</span></div>
+                <p class="bonus">A jagged purple dagger. Cheap melee strike for trades.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/gale_slash.png" alt="Gale Slash">
+              <div class="key">E</div>
+              <div>
+                <h4>Gale Slash</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">52 DMG</span><span class="tag">28 MANA</span><span class="tag">7s CD</span><span class="tag">2.0 RANGE</span></div>
+                <p class="bonus">A curved blade of wind. A longer-reach slash after the gap close.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/shadow_comet.png" alt="Shadow Comet">
+              <div class="key">R</div>
+              <div>
+                <h4>Shadow Comet</h4>
+                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">100 DMG</span><span class="tag">65 MANA</span><span class="tag">21s CD</span><span class="tag">5.0 RANGE</span></div>
+                <p class="bonus">A dark comet on a purple crescent. Assassin execute from mid range.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Death Knight -->
+        <article class="hero-card" id="death-knight">
+          <div class="hero-head">
+            <div class="portrait red">
+              <img src="../../../../polyworld_data/characters/mini_legion/undead/death_knight.profile.png" alt="Death Knight">
+              <div class="lvl">1-20</div>
+            </div>
+            <div>
+              <div class="team red">RED TEAM</div>
+              <h3>DEATH KNIGHT</h3>
+              <div class="role" style="color:var(--red)">MELEE · SUSTAINING BRUISER</div>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>350 → 1528</b><span class="muted">HP +62/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>90 → 242</b><span class="muted">MANA +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>30 → 144</b><span class="muted">DAMAGE +6/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.27</b><span class="muted">RANGE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.28 → 2.74</b><span class="muted">MOVE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.86</b><span class="muted">ATTACKS / S</span></div></div>
+              </div>
+              <div class="bars">
+                <div class="bar hp"><i style="width:23%"></i><div class="bar-label"><span>HEALTH</span><span>350 → 1528</span></div></div>
+                <div class="bar mp"><i style="width:37%"></i><div class="bar-label"><span>MANA</span><span>90 → 242</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/sanguine_chalice.png" alt="Sanguine Chalice">
+              <div class="key">Q</div>
+              <div>
+                <h4>Sanguine Chalice</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+26 HP</span><span class="tag">8s CD</span><span class="tag">PASSIVE</span></div>
+                <p class="bonus">A crimson chalice of living blood. Passive sustain in the grind.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/afterlight_sickle.png" alt="Afterlight Sickle">
+              <div class="key">W</div>
+              <div>
+                <h4>Afterlight Sickle</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">42 DMG</span><span class="tag">18 MANA</span><span class="tag">4.5s CD</span><span class="tag">1.5 RANGE</span></div>
+                <p class="bonus">A dark crescent sickle. Melee harvest for the bruiser kit.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/withering_idol.png" alt="Withering Idol">
+              <div class="key">E</div>
+              <div>
+                <h4>Withering Idol</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">60 DMG</span><span class="tag">36 MANA</span><span class="tag">9s CD</span><span class="tag">2.7 RANGE</span></div>
+                <p class="bonus">A cracked idol that drains green light. Mid-range blight strike.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/dark_eclipse.png" alt="Dark Eclipse">
+              <div class="key">R</div>
+              <div>
+                <h4>Dark Eclipse</h4>
+                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">110 DMG</span><span class="tag">80 MANA</span><span class="tag">26s CD</span><span class="tag">2.3 RANGE</span></div>
+                <p class="bonus">A black sun with a gold-violet corona. Close-range celestial smash.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Crossbowman -->
+        <article class="hero-card" id="crossbowman">
+          <div class="hero-head">
+            <div class="portrait red">
+              <img src="../../../../polyworld_data/characters/mini_legion/undead/crossbowman.profile.png" alt="Crossbowman">
+              <div class="lvl">1-20</div>
+            </div>
+            <div>
+              <div class="team red">RED TEAM</div>
+              <h3>CROSSBOWMAN</h3>
+              <div class="role" style="color:var(--red)">RANGER · HEAVY RANGED CARRY</div>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>230 → 1028</b><span class="muted">HP +42/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>80 → 194</b><span class="muted">MANA +6/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>43 → 195</b><span class="muted">DAMAGE +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>6.50</b><span class="muted">RANGE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.40 → 2.86</b><span class="muted">MOVE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.67</b><span class="muted">ATTACKS / S</span></div></div>
+              </div>
+              <div class="bars">
+                <div class="bar hp"><i style="width:22%"></i><div class="bar-label"><span>HEALTH</span><span>230 → 1028</span></div></div>
+                <div class="bar mp"><i style="width:41%"></i><div class="bar-label"><span>MANA</span><span>80 → 194</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/final_measure.png" alt="Final Measure">
+              <div class="key">Q</div>
+              <div>
+                <h4>Final Measure</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">20 DMG</span><span class="tag">9s CD</span><span class="tag">7.0 RANGE</span><span class="tag">PASSIVE</span></div>
+                <p class="bonus">A bronze balance of blade and skull. Free long-range poke.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/siege_scarab.png" alt="Siege Scarab">
+              <div class="key">W</div>
+              <div>
+                <h4>Siege Scarab</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">50 DMG</span><span class="tag">22 MANA</span><span class="tag">5s CD</span><span class="tag">6.7 RANGE</span></div>
+                <p class="bonus">A brass scarab crushing a tower. Structure-minded bolt.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/lodestone_surge.png" alt="Lodestone Surge">
+              <div class="key">E</div>
+              <div>
+                <h4>Lodestone Surge</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">68 DMG</span><span class="tag">40 MANA</span><span class="tag">10s CD</span><span class="tag">6.0 RANGE</span></div>
+                <p class="bonus">An enchanted lodestone pulling steel. Heavier ranged shot.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/clockwork_charge.png" alt="Clockwork Charge">
+              <div class="key">R</div>
+              <div>
+                <h4>Clockwork Charge</h4>
+                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">115 DMG</span><span class="tag">70 MANA</span><span class="tag">23s CD</span><span class="tag">7.5 RANGE</span></div>
+                <p class="bonus">A ticking clockwork bomb. Slow, long, and meant to end a siege.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Lich -->
+        <article class="hero-card" id="lich">
+          <div class="hero-head">
+            <div class="portrait red">
+              <img src="../../../../polyworld_data/characters/mini_legion/undead/lich.profile.png" alt="Lich">
+              <div class="lvl">1-20</div>
+            </div>
+            <div>
+              <div class="team red">RED TEAM</div>
+              <h3>LICH</h3>
+              <div class="role" style="color:var(--red)">MAGE · CONTROL MAGE</div>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>185 → 717</b><span class="muted">HP +28/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>210 → 533</b><span class="muted">MANA +17/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>36 → 188</b><span class="muted">DAMAGE +8/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>5.50</b><span class="muted">RANGE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.40 → 2.86</b><span class="muted">MOVE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.75</b><span class="muted">ATTACKS / S</span></div></div>
+              </div>
+              <div class="bars">
+                <div class="bar hp"><i style="width:26%"></i><div class="bar-label"><span>HEALTH</span><span>185 → 717</span></div></div>
+                <div class="bar mp"><i style="width:39%"></i><div class="bar-label"><span>MANA</span><span>210 → 533</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/frost_sigil.png" alt="Frost Sigil">
+              <div class="key">Q</div>
+              <div>
+                <h4>Frost Sigil</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">14 DMG</span><span class="tag">8s CD</span><span class="tag">6.0 RANGE</span><span class="tag">PASSIVE</span></div>
+                <p class="bonus">A geometric snowflake ward. Free frost poke.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/ice_spear.png" alt="Ice Spear">
+              <div class="key">W</div>
+              <div>
+                <h4>Ice Spear</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">44 DMG</span><span class="tag">30 MANA</span><span class="tag">4s CD</span><span class="tag">6.0 RANGE</span></div>
+                <p class="bonus">A bursting blue ice projectile. Primary control shot.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/bone_marionette.png" alt="Bone Marionette">
+              <div class="key">E</div>
+              <div>
+                <h4>Bone Marionette</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">66 DMG</span><span class="tag">48 MANA</span><span class="tag">9s CD</span><span class="tag">5.0 RANGE</span></div>
+                <p class="bonus">A skeletal hand on spectral strings. Mid-kit corpse strike.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/bound_void.png" alt="Bound Void">
+              <div class="key">R</div>
+              <div>
+                <h4>Bound Void</h4>
+                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">125 DMG</span><span class="tag">110 MANA</span><span class="tag">27s CD</span><span class="tag">6.5 RANGE</span></div>
+                <p class="bonus">A chained purple void sphere. Highest damage and longest cooldown in the game.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Warlock -->
+        <article class="hero-card" id="warlock">
+          <div class="hero-head">
+            <div class="portrait red">
+              <img src="../../../../polyworld_data/characters/mini_legion/warband/warlock.profile.png" alt="Warlock">
+              <div class="lvl">1-20</div>
+            </div>
+            <div>
+              <div class="team red">RED TEAM</div>
+              <h3>WARLOCK</h3>
+              <div class="role" style="color:var(--red)">MAGE · UTILITY SUMMONER</div>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>240 → 1114</b><span class="muted">HP +46/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>190 → 494</b><span class="muted">MANA +16/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>26 → 121</b><span class="muted">DAMAGE +5/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>4.50</b><span class="muted">RANGE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.48 → 3.01</b><span class="muted">MOVE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>0.86</b><span class="muted">ATTACKS / S</span></div></div>
+              </div>
+              <div class="bars">
+                <div class="bar hp"><i style="width:22%"></i><div class="bar-label"><span>HEALTH</span><span>240 → 1114</span></div></div>
+                <div class="bar mp"><i style="width:38%"></i><div class="bar-label"><span>MANA</span><span>190 → 494</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/aether_siphon.png" alt="Aether Siphon">
+              <div class="key">Q</div>
+              <div>
+                <h4>Aether Siphon</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag restore">RESTORE</span><span class="tag">+22 MANA</span><span class="tag">7s CD</span><span class="tag">PASSIVE</span></div>
+                <p class="bonus">A spectral serpent draining light. Passive mana refund.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/moth_hex.png" alt="Moth Hex">
+              <div class="key">W</div>
+              <div>
+                <h4>Moth Hex</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">36 DMG</span><span class="tag">24 MANA</span><span class="tag">4s CD</span><span class="tag">4.7 RANGE</span></div>
+                <p class="bonus">A moonlit moth inside a blue hex. Cheap utility strike.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/dread_totem.png" alt="Dread Totem">
+              <div class="key">E</div>
+              <div>
+                <h4>Dread Totem</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">58 DMG</span><span class="tag">42 MANA</span><span class="tag">9s CD</span><span class="tag">4.0 RANGE</span></div>
+                <p class="bonus">A screaming shadow totem. Mid-range fear strike.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/void_portal.png" alt="Void Portal">
+              <div class="key">R</div>
+              <div>
+                <h4>Void Portal</h4>
+                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">105 DMG</span><span class="tag">90 MANA</span><span class="tag">24s CD</span><span class="tag">5.0 RANGE</span></div>
+                <p class="bonus">A dark ring of purple stones. Summoner finisher through the void.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <!-- Berserker -->
+        <article class="hero-card" id="berserker">
+          <div class="hero-head">
+            <div class="portrait red">
+              <img src="../../../../polyworld_data/characters/mini_legion/warband/berserker.profile.png" alt="Berserker">
+              <div class="lvl">1-20</div>
+            </div>
+            <div>
+              <div class="team red">RED TEAM</div>
+              <h3>BERSERKER</h3>
+              <div class="role" style="color:var(--red)">MELEE · AGGRESSIVE MELEE CARRY</div>
+              <div class="stats">
+                <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>300 → 1345</b><span class="muted">HP +55/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>40 → 116</b><span class="muted">MANA +4/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>35 → 168</b><span class="muted">DAMAGE +7/LVL</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1.33</b><span class="muted">RANGE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.72 → 3.40</b><span class="muted">MOVE</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/damage.png" alt=""><div><b>1.20</b><span class="muted">ATTACKS / S</span></div></div>
+              </div>
+              <div class="bars">
+                <div class="bar hp"><i style="width:22%"></i><div class="bar-label"><span>HEALTH</span><span>300 → 1345</span></div></div>
+                <div class="bar mp"><i style="width:34%"></i><div class="bar-label"><span>MANA</span><span>40 → 116</span></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="abilities">
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/rage_crucible.png" alt="Rage Crucible">
+              <div class="key">Q</div>
+              <div>
+                <h4>Rage Crucible</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag heal">HEAL</span><span class="tag">+20 HP</span><span class="tag">8s CD</span><span class="tag">PASSIVE</span></div>
+                <p class="bonus">An iron heart overflowing with fire. Cheap sustain for a low-mana carry.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/molten_fist.png" alt="Molten Fist">
+              <div class="key">W</div>
+              <div>
+                <h4>Molten Fist</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">45 DMG</span><span class="tag">8 MANA</span><span class="tag">3.5s CD</span><span class="tag">1.5 RANGE</span></div>
+                <p class="bonus">A flaming stone fist. Almost free melee punch.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/winged_boot.png" alt="Winged Boot">
+              <div class="key">E</div>
+              <div>
+                <h4>Winged Boot</h4>
+                <div class="meta"><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">40 DMG</span><span class="tag">12 MANA</span><span class="tag">8s CD</span><span class="tag">2.5 RANGE</span></div>
+                <p class="bonus">A winged armored boot. Gap-close strike with a longer reach.</p>
+              </div>
+            </div>
+            <div class="ability">
+              <img src="../../../../polyworld_data/abilities/volcanic_eruption.png" alt="Volcanic Eruption">
+              <div class="key">R</div>
+              <div>
+                <h4>Volcanic Eruption</h4>
+                <div class="meta"><span class="tag ult">ULTIMATE</span><span class="tag">LVL 1</span><span class="tag strike">STRIKE</span><span class="tag">100 DMG</span><span class="tag">24 MANA</span><span class="tag">20s CD</span><span class="tag">2.2 RANGE</span></div>
+                <p class="bonus">A volcano throwing lava and rock. Cheap ultimate for a mana-starved fighter.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section id="shop" class="panel">
+      <p class="kicker">THE SHOP</p>
+      <h2>Items, costs, and bonuses</h2>
+      <p>
+        Six inventory slots. Consumables stack to 8. Heroes start with 150 gold.
+        Footmen drop 15, towers 75, heroes 100.
+      </p>
+      <h3 style="margin: 8px 0 12px; color: var(--gold);">Consumables</h3>
+      <div class="shop">
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/ironroot_ration.png" alt="Ironroot Ration">
+            <div>
+              <h3>Ironroot Ration</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">30</div>
+            </div>
+          </div>
+          <p class="bonus">Use: restore 40 health.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/vitality_elixir.png" alt="Vitality Elixir">
+            <div>
+              <h3>Vitality Elixir</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">50</div>
+            </div>
+          </div>
+          <p class="bonus">Use: restore 90 health.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/mana_potion.png" alt="Mana Potion">
+            <div>
+              <h3>Mana Potion</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">45</div>
+            </div>
+          </div>
+          <p class="bonus">Use: restore 60 mana.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/poison_potion.png" alt="Poison Potion">
+            <div>
+              <h3>Poison Potion</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">40</div>
+            </div>
+          </div>
+          <p class="bonus">Use: deal 35 strike damage.</p>
+        </article>
+      </div>
+
+      <h3 style="margin: 22px 0 12px; color: var(--gold);">Equipment</h3>
+      <div class="shop">
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/steel_helmet.png" alt="Steel Helmet">
+            <div>
+              <h3>Steel Helmet</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">80</div>
+            </div>
+          </div>
+          <p class="bonus">+50 maximum health.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/steel_buckler.png" alt="Steel Buckler">
+            <div>
+              <h3>Steel Buckler</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">90</div>
+            </div>
+          </div>
+          <p class="bonus">+60 maximum health.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/leather_gauntlets.png" alt="Leather Gauntlets">
+            <div>
+              <h3>Leather Gauntlets</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">70</div>
+            </div>
+          </div>
+          <p class="bonus">+4 damage.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/ranger_boots.png" alt="Ranger Boots">
+            <div>
+              <h3>Ranger Boots</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">100</div>
+            </div>
+          </div>
+          <p class="bonus">+0.32 move speed.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/ruby_amulet.png" alt="Ruby Amulet">
+            <div>
+              <h3>Ruby Amulet</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">120</div>
+            </div>
+          </div>
+          <p class="bonus">+70 maximum health.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/sapphire_ring.png" alt="Sapphire Ring">
+            <div>
+              <h3>Sapphire Ring</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">120</div>
+            </div>
+          </div>
+          <p class="bonus">+40 maximum mana.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/crimson_dagger.png" alt="Crimson Dagger">
+            <div>
+              <h3>Crimson Dagger</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">110</div>
+            </div>
+          </div>
+          <p class="bonus">+8 damage.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/amethyst_wand.png" alt="Amethyst Wand">
+            <div>
+              <h3>Amethyst Wand</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">140</div>
+            </div>
+          </div>
+          <p class="bonus">+9 damage.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/sunsteel_longsword.png" alt="Sunsteel Longsword">
+            <div>
+              <h3>Sunsteel Longsword</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">150</div>
+            </div>
+          </div>
+          <p class="bonus">+10 damage.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/ranger_bow.png" alt="Ranger Bow">
+            <div>
+              <h3>Ranger Bow</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">150</div>
+            </div>
+          </div>
+          <p class="bonus">+10 damage.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/ironbark_pauldrons.png" alt="Ironbark Pauldrons">
+            <div>
+              <h3>Ironbark Pauldrons</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">140</div>
+            </div>
+          </div>
+          <p class="bonus">+80 maximum health.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/knight_armor.png" alt="Knight Armor">
+            <div>
+              <h3>Knight Armor</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">160</div>
+            </div>
+          </div>
+          <p class="bonus">+120 maximum health.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/thornwood_staff.png" alt="Thornwood Staff">
+            <div>
+              <h3>Thornwood Staff</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">170</div>
+            </div>
+          </div>
+          <p class="bonus">+40 maximum health, +6 damage.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/battle_axe.png" alt="Battle Axe">
+            <div>
+              <h3>Battle Axe</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">180</div>
+            </div>
+          </div>
+          <p class="bonus">+14 damage.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/rune_crossbow.png" alt="Rune Crossbow">
+            <div>
+              <h3>Rune Crossbow</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">180</div>
+            </div>
+          </div>
+          <p class="bonus">+14 damage.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/items/arcane_spellbook.png" alt="Arcane Spellbook">
+            <div>
+              <h3>Arcane Spellbook</h3>
+              <div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">190</div>
+            </div>
+          </div>
+          <p class="bonus">+30 maximum mana, +12 damage.</p>
+        </article>
+      </div>
+    </section>
+
+    <footer>
+      Numbers come from <code>examples/gods_of_the_arena/content.nim</code> and
+      <code>sim.nim</code>. Icons load from the sibling <code>polyworld_data</code>
+      folder. Clone it next to this repo and open this file from docs.
+    </footer>
+  </main>
+</body>
+</html>

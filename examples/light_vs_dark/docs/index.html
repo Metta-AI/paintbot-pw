@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Light vs Dark</title>
+  <!-- Icons, portraits, and fonts load from the sibling polyworld_data repo. -->
+  <style>
+    @font-face {
+      font-family: Rubik;
+      src: url("../../../../polyworld_data/fonts/Rubik-Regular.ttf") format("truetype");
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: Rubik;
+      src: url("../../../../polyworld_data/fonts/Rubik-Bold.ttf") format("truetype");
+      font-weight: 700;
+    }
+    :root {
+      --bg: #0b1016;
+      --well: #10151c;
+      --gold: #f0d27a;
+      --gold-dim: #b49248;
+      --light: #508ce6;
+      --dark: #d25055;
+      --wood: #c4a06a;
+      --text: #eef2f7;
+      --muted: #a8b3c4;
+      --line: rgba(240, 210, 122, 0.18);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Rubik, sans-serif;
+    }
+    body {
+      background:
+        radial-gradient(1100px 560px at 0% -60px, rgba(80, 140, 230, 0.18), transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, rgba(210, 80, 85, 0.16), transparent 50%),
+        var(--bg);
+    }
+    a { color: var(--gold); text-decoration: none; }
+    img { display: block; }
+    .wrap { width: min(1240px, calc(100% - 32px)); margin: 0 auto; }
+    header.top {
+      position: sticky; top: 0; z-index: 20;
+      backdrop-filter: blur(12px);
+      background: rgba(11, 16, 22, 0.88);
+      border-bottom: 1px solid var(--line);
+    }
+    .top-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 16px; min-height: 64px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.08em; }
+    .brand img { width: 36px; height: 36px; }
+    .brand small { display: block; color: var(--gold); font-size: 11px; letter-spacing: 0.22em; }
+    nav { display: flex; gap: 18px; font-size: 13px; letter-spacing: 0.08em; }
+    nav a { color: var(--muted); }
+    nav a:hover { color: var(--gold); }
+    .hero {
+      position: relative; margin: 24px 0 32px;
+      border: 1px solid var(--line); border-radius: 22px; overflow: hidden;
+      background: #111; box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+    }
+    .hero .banner-strip { display: flex; height: 320px; }
+    .hero .banner-strip img {
+      flex: 1; min-width: 0; height: 100%; object-fit: cover; object-position: top center;
+    }
+    .hero .veil {
+      position: absolute; inset: 0;
+      background: linear-gradient(180deg, rgba(11,16,22,0.08) 15%, rgba(11,16,22,0.92) 100%);
+    }
+    .hero-copy { position: absolute; left: 32px; right: 32px; bottom: 28px; }
+    .kicker { color: var(--gold); letter-spacing: 0.28em; font-size: 12px; font-weight: 700; margin: 0 0 8px; }
+    h1 { margin: 0 0 10px; font-size: clamp(32px, 5vw, 52px); letter-spacing: 0.04em; }
+    .lede { max-width: 820px; margin: 0; color: #dbe4f0; line-height: 1.5; }
+    .facts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 0 0 36px; }
+    .fact, .panel, .unit-card, .build-card {
+      background: linear-gradient(180deg, #18202b, #10151c);
+      border: 1px solid var(--line); border-radius: 16px;
+    }
+    .fact { padding: 16px 18px; display: flex; gap: 12px; align-items: center; }
+    .fact img, .stat img, .cost img { width: 22px; height: 22px; }
+    .fact b { display: block; font-size: 20px; }
+    .fact span, .muted { color: var(--muted); font-size: 12px; letter-spacing: 0.06em; }
+    h2 { margin: 0 0 14px; font-size: 28px; letter-spacing: 0.04em; }
+    h3 { margin: 0 0 4px; letter-spacing: 0.03em; }
+    .panel { padding: 22px; margin-bottom: 28px; }
+    .split { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 18px; }
+    p { line-height: 1.6; color: #dbe4f0; }
+    .lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .chip {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--well); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px; padding: 10px 12px;
+    }
+    .chip img { width: 28px; height: 28px; }
+    .side { font-weight: 700; font-size: 12px; letter-spacing: 0.14em; }
+    .side.light { color: var(--light); }
+    .side.dark { color: var(--dark); }
+    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 28px; }
+    .unit-card, .build-card { padding: 14px; }
+    .unit-top { display: grid; grid-template-columns: 96px 96px 1fr; gap: 12px; align-items: start; margin-bottom: 10px; }
+    .portrait {
+      width: 96px; height: 120px; border-radius: 12px; overflow: hidden; background: #0c1016;
+    }
+    .portrait img { width: 100%; height: 100%; object-fit: cover; object-position: top; }
+    .portrait.light { box-shadow: inset 0 0 0 2px var(--light); }
+    .portrait.dark { box-shadow: inset 0 0 0 2px var(--dark); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .stat {
+      background: var(--well); border-radius: 8px; padding: 7px 8px;
+      display: flex; gap: 6px; align-items: center;
+    }
+    .stat b { display: block; font-size: 13px; }
+    .diff { font-size: 13px; color: #dbe4f0; margin: 8px 0 0; }
+    .build-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .build-top { display: flex; gap: 12px; align-items: center; }
+    .build-top img {
+      width: 72px; height: 72px; border-radius: 10px; object-fit: cover; background: #0c1016;
+    }
+    .cost { display: flex; flex-wrap: wrap; gap: 10px; color: var(--gold); font-weight: 700; font-size: 13px; }
+    .cost span { display: flex; align-items: center; gap: 4px; }
+    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    footer { padding: 28px 0 48px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 980px) {
+      .facts, .split, .grid, .build-grid, .unit-top { grid-template-columns: 1fr 1fr; }
+      .hero .banner-strip { height: 220px; }
+    }
+    @media (max-width: 640px) {
+      nav { display: none; }
+      .facts, .split, .grid, .build-grid, .lanes, .unit-top, .pair, .stats { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap top-inner">
+      <div class="brand">
+        <img src="../../../../polyworld_data/icons/alliance.png" alt="">
+        <div>
+          <small>POLYWORLD</small>
+          LIGHT VS DARK
+        </div>
+      </div>
+      <nav>
+        <a href="#match">Match</a>
+        <a href="#units">Units</a>
+        <a href="#buildings">Buildings</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <div class="banner-strip">
+        <img src="../../../../polyworld_data/characters/mini_legion/human/worker.profile.png" alt="Peasant">
+        <img src="../../../../polyworld_data/characters/mini_legion/human/footman.profile.png" alt="Footman">
+        <img src="../../../../polyworld_data/characters/mini_legion/human/knight.profile.png" alt="Knight">
+        <img src="../../../../polyworld_data/characters/mini_legion/warband/grunt.profile.png" alt="Grunt">
+        <img src="../../../../polyworld_data/characters/mini_legion/warband/warlock.profile.png" alt="Warlock">
+        <img src="../../../../polyworld_data/characters/rpg_monsters/demon_king.profile.png" alt="Daemon">
+      </div>
+      <div class="veil"></div>
+      <div class="hero-copy">
+        <p class="kicker">ONE OVERLORD EACH</p>
+        <h1>LIGHT VS DARK</h1>
+        <p class="lede">
+          A 1v1 real-time strategy match on a 128-tile map that is fair by
+          construction: Dark's half is Light's half rotated 180 degrees. Two
+          BASIC overlords gather gold and wood, raise an army, and try to wipe
+          the other side out.
+        </p>
+      </div>
+    </section>
+
+    <section class="facts">
+      <div class="fact"><img src="../../../../polyworld_data/icons/units.png" alt=""><div><b>8</b><span>UNIT KINDS</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/build.png" alt=""><div><b>8</b><span>BUILDINGS</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/gold.png" alt=""><div><b>800</b><span>STARTING GOLD</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/wood.png" alt=""><div><b>400</b><span>STARTING WOOD</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/food.png" alt=""><div><b>100</b><span>FOOD CAP</span></div></div>
+    </section>
+
+    <section id="match" class="panel">
+      <p class="kicker">THE MATCH</p>
+      <h2>How a game is won</h2>
+      <div class="split">
+        <div>
+          <p>
+            Each side starts with a town hall, five peasants or peons, 800 gold,
+            and 400 wood. Neutral gold mines sit on the map. Trees give four
+            wood trips then vanish. Food comes from the hall and farms, capped
+            at 100. Army size is also capped at 100 living units.
+          </p>
+          <p>
+            Combat is piercing plus basic, then armor. Piercing always lands.
+            Basic is reduced by armor and never goes below zero. Most swings
+            miss 20% of the time. Catapults never miss, deal 255 piercing, and
+            splash 63 piercing onto king-move neighbours.
+          </p>
+          <p>
+            A player is defeated when they have no standing buildings and no
+            peon left to raise one. If the 20-minute clock hits first, score
+            is buildings × 1000, plus army × 100, plus gold and wood ever
+            gathered ÷ 100.
+          </p>
+        </div>
+        <div class="lanes">
+          <div class="chip"><img src="../../../../polyworld_data/icons/gold.png" alt=""><div><b>Gold trip</b><div class="muted">100 gold, 2.5s in the mine, 4 miners</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/wood.png" alt=""><div><b>Wood trip</b><div class="muted">100 wood, 3.3s chop, 400 per tree</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/food.png" alt=""><div><b>Hall / farm</b><div class="muted">+5 and +4 food</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>Walk</b><div class="muted">Infantry 10 ticks/tile, siege 16</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/tower.png" alt=""><div><b>Tower</b><div class="muted">12 damage, 6 range, 1s cooldown</div></div></div>
+          <div class="chip"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>Clock</b><div class="muted">24 ticks a second, fog of war</div></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="units">
+      <p class="kicker">THE ARMIES</p>
+      <h2>Units</h2>
+      <p>
+        Light and Dark share gold, wood, train time, and most combat numbers.
+        Where they differ, both portraits and both rows are shown. Damage is
+        piercing / basic. Speed is ticks to cross one tile.
+      </p>
+      <div class="grid">
+        <article class="unit-card">
+          <div class="unit-top">
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/worker.profile.png" alt="Peasant"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/minion.profile.png" alt="Peon"></div>
+            <div>
+              <div class="side light">LIGHT PEASANT</div>
+              <div class="side dark">DARK PEON</div>
+              <h3>Worker</h3>
+              <div class="muted">Town hall · 400 gold · 18.8s</div>
+            </div>
+          </div>
+          <div class="stats">
+            <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>40</b><span class="muted">HP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/armor.png" alt=""><div><b>0</b><span class="muted">ARMOR</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>0 / 1</b><span class="muted">DMG</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1</b><span class="muted">RANGE</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>10</b><span class="muted">STEP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>5</b><span class="muted">SIGHT</span></div></div>
+          </div>
+        </article>
+
+        <article class="unit-card">
+          <div class="unit-top">
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/footman.profile.png" alt="Footman"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/grunt.profile.png" alt="Grunt"></div>
+            <div>
+              <div class="side light">LIGHT FOOTMAN</div>
+              <div class="side dark">DARK GRUNT</div>
+              <h3>Soldier</h3>
+              <div class="muted">Barracks · 400 gold · 15s</div>
+            </div>
+          </div>
+          <div class="stats">
+            <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>60</b><span class="muted">HP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/armor.png" alt=""><div><b>2</b><span class="muted">ARMOR</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>1 / 9</b><span class="muted">DMG</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1</b><span class="muted">RANGE</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>10</b><span class="muted">STEP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>5</b><span class="muted">SIGHT</span></div></div>
+          </div>
+        </article>
+
+        <article class="unit-card">
+          <div class="unit-top">
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/archer.profile.png" alt="Archer"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/head_hunter.profile.png" alt="Spearman"></div>
+            <div>
+              <div class="side light">LIGHT ARCHER</div>
+              <div class="side dark">DARK SPEARMAN</div>
+              <h3>Ranged</h3>
+              <div class="muted">Barracks · mill · 450g 50w · 17.5s</div>
+            </div>
+          </div>
+          <div class="stats">
+            <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>60</b><span class="muted">HP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/armor.png" alt=""><div><b>1</b><span class="muted">ARMOR</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>4–5 / 0</b><span class="muted">DMG</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>5 / 4</b><span class="muted">RANGE</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>10</b><span class="muted">STEP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>7</b><span class="muted">SIGHT</span></div></div>
+          </div>
+          <p class="diff">Light: 4 piercing, 5 range. Dark: 5 piercing, 4 range. Cooldown 1.5s.</p>
+        </article>
+
+        <article class="unit-card">
+          <div class="unit-top">
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/mage.profile.png" alt="Conjurer"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/warlock.profile.png" alt="Warlock"></div>
+            <div>
+              <div class="side light">LIGHT CONJURER</div>
+              <div class="side dark">DARK WARLOCK</div>
+              <h3>Mage</h3>
+              <div class="muted">Tower · 900 gold · 22.5s</div>
+            </div>
+          </div>
+          <div class="stats">
+            <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>40</b><span class="muted">HP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/armor.png" alt=""><div><b>0</b><span class="muted">ARMOR</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>6 / 0</b><span class="muted">DMG</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>3 / 2</b><span class="muted">RANGE</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>10</b><span class="muted">STEP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>7</b><span class="muted">SIGHT</span></div></div>
+          </div>
+          <p class="diff">Light range 3. Dark range 2. Cooldown 1.5s.</p>
+        </article>
+
+        <article class="unit-card">
+          <div class="unit-top">
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/horseman.profile.png" alt="Knight"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/hog_rider.profile.png" alt="Raider"></div>
+            <div>
+              <div class="side light">LIGHT KNIGHT</div>
+              <div class="side dark">DARK RAIDER</div>
+              <h3>Cavalry</h3>
+              <div class="muted">Barracks · stables + smith · 850g · 20s</div>
+            </div>
+          </div>
+          <div class="stats">
+            <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>90</b><span class="muted">HP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/armor.png" alt=""><div><b>5</b><span class="muted">ARMOR</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>1 / 13</b><span class="muted">DMG</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1</b><span class="muted">RANGE</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>10</b><span class="muted">STEP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>6</b><span class="muted">SIGHT</span></div></div>
+          </div>
+        </article>
+
+        <article class="unit-card">
+          <div class="unit-top">
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/siege_engine.profile.png" alt="Catapult"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/undead/siege_engine.profile.png" alt="Catapult"></div>
+            <div>
+              <div class="side light">LIGHT CATAPULT</div>
+              <div class="side dark">DARK CATAPULT</div>
+              <h3>Siege</h3>
+              <div class="muted">Barracks · smith + mill · 900g 200w · 25s</div>
+            </div>
+          </div>
+          <div class="stats">
+            <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>120</b><span class="muted">HP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/armor.png" alt=""><div><b>0</b><span class="muted">ARMOR</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>255 / 0</b><span class="muted">DMG</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>8</b><span class="muted">RANGE</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>16</b><span class="muted">STEP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>8</b><span class="muted">SIGHT</span></div></div>
+          </div>
+          <p class="diff">Never misses. 63 splash piercing. 8s cooldown.</p>
+        </article>
+
+        <article class="unit-card">
+          <div class="unit-top">
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/sentinel/druid.profile.png" alt="Cleric"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/undead/lich.profile.png" alt="Necrolyte"></div>
+            <div>
+              <div class="side light">LIGHT CLERIC</div>
+              <div class="side dark">DARK NECROLYTE</div>
+              <h3>Support</h3>
+              <div class="muted">Church / temple · 700 gold · 20s</div>
+            </div>
+          </div>
+          <div class="stats">
+            <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>40</b><span class="muted">HP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/armor.png" alt=""><div><b>0</b><span class="muted">ARMOR</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>6 / 0</b><span class="muted">DMG</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>1 / 2</b><span class="muted">RANGE</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>10</b><span class="muted">STEP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>7</b><span class="muted">SIGHT</span></div></div>
+          </div>
+          <p class="diff">Light range 1. Dark range 2. Cooldown 2s.</p>
+        </article>
+
+        <article class="unit-card">
+          <div class="unit-top">
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/sentinel/rock_golem.profile.png" alt="Elemental"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/rpg_monsters/demon_king.profile.png" alt="Daemon"></div>
+            <div>
+              <div class="side light">LIGHT ELEMENTAL</div>
+              <div class="side dark">DARK DAEMON</div>
+              <h3>Summon</h3>
+              <div class="muted">Tower · 1200 gold · 30s</div>
+            </div>
+          </div>
+          <div class="stats">
+            <div class="stat"><img src="../../../../polyworld_data/icons/health.png" alt=""><div><b>250 / 300</b><span class="muted">HP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/armor.png" alt=""><div><b>0</b><span class="muted">ARMOR</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>40 / 65</b><span class="muted">DMG</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/range.png" alt=""><div><b>3 / 1</b><span class="muted">RANGE</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>10</b><span class="muted">STEP</span></div></div>
+            <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>6</b><span class="muted">SIGHT</span></div></div>
+          </div>
+          <p class="diff">Light: 250 HP, 40 piercing, range 3. Dark: 300 HP, 65 basic, range 1.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="buildings" class="panel">
+      <p class="kicker">THE TOWN</p>
+      <h2>Buildings</h2>
+      <p>
+        Same costs and hit points on both sides. Dark names stables as kennels
+        and church as temple. Gold mines are neutral, 25,000 on the main and
+        15,000 on expansions.
+      </p>
+      <div class="build-grid">
+        <article class="build-card">
+          <div class="build-top">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.house_lvl7.profile.png" alt="Town hall">
+            <div>
+              <h3>Town Hall</h3>
+              <div class="cost">
+                <span><img src="../../../../polyworld_data/icons/gold.png" alt="">1200</span>
+                <span><img src="../../../../polyworld_data/icons/wood.png" alt="">800</span>
+              </div>
+            </div>
+          </div>
+          <p class="diff">1200 HP. 30s. 3×3. +5 food. Gold and wood drop-off. Trains workers.</p>
+          <div class="pair">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.house_lvl7.profile.png" alt="Light hall">
+            <img src="../../../../polyworld_data/terrain/tower_defense_kit.building1.profile.png" alt="Dark hall">
+          </div>
+        </article>
+        <article class="build-card">
+          <div class="build-top">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_lvl4.profile.png" alt="Farm">
+            <div>
+              <h3>Farm</h3>
+              <div class="cost">
+                <span><img src="../../../../polyworld_data/icons/gold.png" alt="">400</span>
+                <span><img src="../../../../polyworld_data/icons/wood.png" alt="">200</span>
+              </div>
+            </div>
+          </div>
+          <p class="diff">400 HP. 10s. 2×2. +4 food.</p>
+        </article>
+        <article class="build-card">
+          <div class="build-top">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl5.profile.png" alt="Barracks">
+            <div>
+              <h3>Barracks</h3>
+              <div class="cost">
+                <span><img src="../../../../polyworld_data/icons/gold.png" alt="">600</span>
+                <span><img src="../../../../polyworld_data/icons/wood.png" alt="">400</span>
+              </div>
+            </div>
+          </div>
+          <p class="diff">800 HP. 20s. 3×3. Trains soldiers, ranged, knights, siege.</p>
+          <div class="pair">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl5.profile.png" alt="Light barracks">
+            <img src="../../../../polyworld_data/terrain/tower_defense_kit.building3.profile.png" alt="Dark barracks">
+          </div>
+        </article>
+        <article class="build-card">
+          <div class="build-top">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl3.profile.png" alt="Lumber mill">
+            <div>
+              <h3>Lumber Mill</h3>
+              <div class="cost">
+                <span><img src="../../../../polyworld_data/icons/gold.png" alt="">500</span>
+                <span><img src="../../../../polyworld_data/icons/wood.png" alt="">300</span>
+              </div>
+            </div>
+          </div>
+          <p class="diff">600 HP. 15s. 3×3. Wood drop-off. Unlocks ranged and towers.</p>
+        </article>
+        <article class="build-card">
+          <div class="build-top">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.tower_lvl5.profile.png" alt="Tower">
+            <div>
+              <h3>Tower</h3>
+              <div class="cost">
+                <span><img src="../../../../polyworld_data/icons/gold.png" alt="">500</span>
+                <span><img src="../../../../polyworld_data/icons/wood.png" alt="">300</span>
+              </div>
+            </div>
+          </div>
+          <p class="diff">700 HP. 15s. 2×2. Needs mill. 12 damage, 6 range, sight 9. Trains mages and summons.</p>
+        </article>
+        <article class="build-card">
+          <div class="build-top">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl6.profile.png" alt="Stables">
+            <div>
+              <h3>Stables / Kennels</h3>
+              <div class="cost">
+                <span><img src="../../../../polyworld_data/icons/gold.png" alt="">600</span>
+                <span><img src="../../../../polyworld_data/icons/wood.png" alt="">400</span>
+              </div>
+            </div>
+          </div>
+          <p class="diff">700 HP. 20s. 3×3. Needs barracks. Unlocks cavalry with the smith.</p>
+        </article>
+        <article class="build-card">
+          <div class="build-top">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.house_lvl4.profile.png" alt="Church">
+            <div>
+              <h3>Church / Temple</h3>
+              <div class="cost">
+                <span><img src="../../../../polyworld_data/icons/gold.png" alt="">700</span>
+                <span><img src="../../../../polyworld_data/icons/wood.png" alt="">400</span>
+              </div>
+            </div>
+          </div>
+          <p class="diff">700 HP. 20s. 3×3. Needs barracks. Trains cleric / necrolyte.</p>
+        </article>
+        <article class="build-card">
+          <div class="build-top">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl2.profile.png" alt="Blacksmith">
+            <div>
+              <h3>Blacksmith</h3>
+              <div class="cost">
+                <span><img src="../../../../polyworld_data/icons/gold.png" alt="">600</span>
+                <span><img src="../../../../polyworld_data/icons/wood.png" alt="">400</span>
+              </div>
+            </div>
+          </div>
+          <p class="diff">700 HP. 15s. 3×3. Needs barracks. Unlocks knights and catapults.</p>
+        </article>
+        <article class="build-card">
+          <div class="build-top">
+            <img src="../../../../polyworld_data/terrain/tower_defense_kit.mineral1.profile.png" alt="Gold mine">
+            <div>
+              <h3>Gold Mine</h3>
+              <div class="cost"><span>Neutral</span></div>
+            </div>
+          </div>
+          <p class="diff">2000 HP. 2×2. Main 25,000 gold. Expansion 15,000. Four miners at a time.</p>
+        </article>
+      </div>
+    </section>
+
+    <footer>
+      Numbers come from <code>examples/light_vs_dark/content.nim</code> and
+      <code>ui.nim</code>. Portraits load from the sibling
+      <code>polyworld_data</code> folder.
+    </footer>
+  </main>
+</body>
+</html>
