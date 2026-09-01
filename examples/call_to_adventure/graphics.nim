@@ -1017,13 +1017,14 @@ proc runGraphics*() =
       if followSelection and selectedLivingCount() > 1:
         groupCameraScale = clamp(
           groupCameraScale *
-            (1.0'f32 - window.scrollDelta.y * 0.1'f32),
+            (1.0'f32 - window.scrollDelta.y * 0.1'f32 / 3.0'f32),
           0.75,
           3.0
         )
       else:
         cameraDistance = clamp(
-          cameraDistance * (1.0'f32 - window.scrollDelta.y * 0.1'f32),
+          cameraDistance *
+            (1.0'f32 - window.scrollDelta.y * 0.1'f32 / 3.0'f32),
           8,
           160
         )
@@ -1123,6 +1124,16 @@ proc runGraphics*() =
           cameraTarget.z -= delta.y.float32 * 0.05'f32
           cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
           cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
+        if not minimapPanning and
+            applyRtsPan(
+              cameraTarget,
+              rtsPanDir(window),
+              dt,
+              cameraDistance,
+              HalfGrid
+            ):
+          followSelection = false
+          actionCam.takeManual()
         if actionCam.enabled:
           feedCtaActions()
           actionCam.chooseShot(dt, transport.speed)

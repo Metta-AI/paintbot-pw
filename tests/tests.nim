@@ -24,6 +24,7 @@ import
   test_pathing,
   test_player,
   test_rngs,
+  test_rtscameras,
   test_tapes,
   test_tile_paths,
   test_viewers,

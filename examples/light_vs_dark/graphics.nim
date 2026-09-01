@@ -810,17 +810,33 @@ proc runGraphics*() =
       cameraTarget.z -= delta.y * speed
       cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
       cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
+    if not minimapPanning and
+        applyRtsPan(
+          cameraTarget,
+          rtsPanDir(window),
+          dt,
+          cameraDistance,
+          HalfGrid
+        ):
+      followSelection = false
+      actionCam.takeManual()
     if not overUi and window.scrollDelta.y != 0:
       actionCam.takeManual()
       if followSelection and selectedCount() > 1:
         groupCameraScale = clamp(
-          groupCameraScale * pow(0.92'f32, window.scrollDelta.y),
+          groupCameraScale * pow(
+            0.92'f32,
+            window.scrollDelta.y / 3.0'f32
+          ),
           0.75'f32,
           3.0'f32
         )
       else:
         cameraDistance = clamp(
-          cameraDistance * pow(0.92'f32, window.scrollDelta.y),
+          cameraDistance * pow(
+            0.92'f32,
+            window.scrollDelta.y / 3.0'f32
+          ),
           8.0'f32,
           400.0'f32
         )
