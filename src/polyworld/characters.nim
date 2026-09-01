@@ -6,9 +6,9 @@
 ## copies.
 ##
 ## Modular characters (../polyworld_data/characters/modular_chars) are one glb carrying
-## every swappable part; `loadModularCharacterModel` picks one manifest
-## preset and the model shows just those part nodes when it draws. Presets
-## share the loaded file.
+## every swappable part; `loadModularCharacterModel` picks a part list or a
+## manifest preset and the model shows just those part nodes when it draws.
+## Outfits share the loaded file.
 
 import
   std/[tables, json, strutils, sets, os],
@@ -55,40 +55,61 @@ proc loadCharacterModel*(
   result.baseTransform =
     baseTransformFor(result.file.root.getAABounds(), targetHeight)
 
-proc loadModularCharacterModel*(
-    path, manifestPath, presetName: string, targetHeight: float32
-): CharacterModel =
-  ## One outfit of a modular character: the glb is loaded once per path
-  ## and shared, the manifest names the preset's parts. Height comes from
-  ## the shown parts alone, so a tall hat does not shrink the character.
+proc loadModularFile(path: string): CharacterModel =
+  ## Returns a model wrapping the shared glb for this path.
   if path notin sharedFiles:
     sharedFiles[path] = readGltfFile(path)
   result = CharacterModel(file: sharedFiles[path])
   for i, clip in result.file.root.animations:
     result.clips[clip.name] = i
+
+proc applyModularParts(
+    model: CharacterModel,
+    parts: openArray[string],
+    targetHeight: float32
+) =
+  ## Shows one outfit and sizes height from those parts alone.
   var byName: Table[string, Node]
-  for node in result.file.root.walkNodes:
+  for node in model.file.root.walkNodes:
     if node.mesh != nil:
-      result.partNodes.add node
+      model.partNodes.add node
       byName[node.name] = node
+  for name in parts:
+    doAssert name in byName, "no part node " & name
+    model.shownParts.add byName[name]
+    if name.startsWith("Eye_") or name.startsWith("Mouth_") or
+        name.startsWith("Brow_"):
+      model.unlitParts.add name
+  doAssert model.shownParts.len > 0, "modular outfit has no parts"
+  var bounds = model.shownParts[0].getAABounds()
+  for node in model.shownParts:
+    bounds = bounds.merge(node.getAABounds())
+  model.baseTransform = baseTransformFor(bounds, targetHeight)
+
+proc loadModularCharacterModel*(
+    path: string, parts: openArray[string], targetHeight: float32
+): CharacterModel =
+  ## One outfit of a modular character: the glb is loaded once per path
+  ## and shared, `parts` names the nodes to show. Height comes from the
+  ## shown parts alone, so a tall hat does not shrink the character.
+  result = loadModularFile(path)
+  applyModularParts(result, parts, targetHeight)
+
+proc loadModularCharacterModel*(
+    path, manifestPath, presetName: string, targetHeight: float32
+): CharacterModel =
+  ## Same as the parts overload, looking the outfit up in the manifest.
   let manifest = parseFile(manifestPath)
   var found = false
+  var parts: seq[string]
   for preset in manifest["presets"]:
     if preset["name"].getStr != presetName:
       continue
     found = true
     for part in preset["parts"]:
-      let name = part.getStr
-      doAssert name in byName, presetName & ": no part node " & name
-      result.shownParts.add byName[name]
-      if name.startsWith("Eye_") or name.startsWith("Mouth_") or
-          name.startsWith("Brow_"):
-        result.unlitParts.add name
+      parts.add part.getStr
   doAssert found, manifestPath & ": no preset " & presetName
-  var bounds = result.shownParts[0].getAABounds()
-  for node in result.shownParts:
-    bounds = bounds.merge(node.getAABounds())
-  result.baseTransform = baseTransformFor(bounds, targetHeight)
+  loadModularCharacterModel(path, parts, targetHeight)
 
 proc clipIndex*(model: CharacterModel, name: string): int =
   ## Returns the animation index registered under a clip name.

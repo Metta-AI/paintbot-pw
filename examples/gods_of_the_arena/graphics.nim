@@ -22,17 +22,6 @@ const
 type
   GraphicsError = object of CatchableError
 
-  HeroGraphicsSpec = object
-    modelPath: string
-    portraitPath: string
-    portraitKey: string
-    runClip: string
-    idleClip: string
-    deathClip: string
-    firstAttackClip: string
-    secondAttackClip: string
-    targetHeight: float32
-
 proc renderPoint(position: WorldPoint): Vec3 =
   ## Converts authoritative integer coordinates at the rendering boundary.
   vec3(
@@ -121,138 +110,94 @@ proc laneRenderPath(lane: int): seq[Vec3] =
     )
 
 # Lane footmen and the gods per team: humans for red, undead for blue, so
-# the teams read from their models with no tinting.
-const FootmanModels: array[Team, string] = [
-  DataRoot & "/characters/mini_legion/human/footman.glb",
-  DataRoot & "/characters/mini_legion/undead/skeleton_warrior.glb"
-]
-
-const HeroGraphicsSpecs: array[HeroClass, HeroGraphicsSpec] = [
-  HeroGraphicsSpec(
-    modelPath: DataRoot & "/characters/mini_legion/human/knight.glb",
-    portraitPath:
-      DataRoot & "/characters/mini_legion/human/knight.profile.png",
-    portraitKey: "gota_vanguard_knight",
-    runClip: "Run",
-    idleClip: "Idle",
-    deathClip: "Death",
-    firstAttackClip: "Attack01",
-    secondAttackClip: "Attack02",
-    targetHeight: 1.95
-  ),
-  HeroGraphicsSpec(
-    modelPath: DataRoot & "/characters/mini_legion/human/archer.glb",
-    portraitPath:
-      DataRoot & "/characters/mini_legion/human/archer.profile.png",
-    portraitKey: "gota_ranger",
-    runClip: "Run",
-    idleClip: "Idle",
-    deathClip: "Death",
-    firstAttackClip: "Attack01Start",
-    secondAttackClip: "Attack02Start",
-    targetHeight: 1.85
-  ),
-  HeroGraphicsSpec(
-    modelPath: DataRoot & "/characters/mini_legion/human/mage.glb",
-    portraitPath:
-      DataRoot & "/characters/mini_legion/human/mage.profile.png",
-    portraitKey: "gota_arcanist",
-    runClip: "Run",
-    idleClip: "Idle",
-    deathClip: "Death",
-    firstAttackClip: "Attack01",
-    secondAttackClip: "Attack02",
-    targetHeight: 1.85
-  ),
-  HeroGraphicsSpec(
-    modelPath: DataRoot & "/characters/mini_legion/sentinel/druid.glb",
-    portraitPath:
-      DataRoot & "/characters/mini_legion/sentinel/druid.profile.png",
-    portraitKey: "gota_druid_warden",
-    runClip: "Run",
-    idleClip: "Idle",
-    deathClip: "Death",
-    firstAttackClip: "Attack01",
-    secondAttackClip: "Attack02",
-    targetHeight: 1.95
-  ),
-  HeroGraphicsSpec(
-    modelPath:
-      DataRoot & "/characters/mini_legion/sentinel/demon_hunter.glb",
-    portraitPath:
-      DataRoot & "/characters/mini_legion/sentinel/demon_hunter.profile.png",
-    portraitKey: "gota_demon_hunter",
-    runClip: "Run",
-    idleClip: "Idle",
-    deathClip: "Death",
-    firstAttackClip: "Attack01",
-    secondAttackClip: "Attack02",
-    targetHeight: 1.9
-  ),
-  HeroGraphicsSpec(
-    modelPath:
-      DataRoot & "/characters/mini_legion/undead/death_knight.glb",
-    portraitPath:
-      DataRoot & "/characters/mini_legion/undead/death_knight.profile.png",
-    portraitKey: "gota_death_knight",
-    runClip: "Run",
-    idleClip: "Idle",
-    deathClip: "Death",
-    firstAttackClip: "Attack01",
-    secondAttackClip: "Attack02",
-    targetHeight: 1.95
-  ),
-  HeroGraphicsSpec(
-    modelPath:
-      DataRoot & "/characters/mini_legion/undead/crossbowman.glb",
-    portraitPath:
-      DataRoot & "/characters/mini_legion/undead/crossbowman.profile.png",
-    portraitKey: "gota_crossbowman",
-    runClip: "Run",
-    idleClip: "Idle",
-    deathClip: "Death",
-    firstAttackClip: "Attack01",
-    secondAttackClip: "Attack02",
-    targetHeight: 1.85
-  ),
-  HeroGraphicsSpec(
-    modelPath: DataRoot & "/characters/mini_legion/undead/lich.glb",
-    portraitPath:
-      DataRoot & "/characters/mini_legion/undead/lich.profile.png",
-    portraitKey: "gota_lich",
-    runClip: "Run",
-    idleClip: "Idle",
-    deathClip: "Death",
-    firstAttackClip: "Attack01",
-    secondAttackClip: "Attack02",
-    targetHeight: 1.9
-  ),
-  HeroGraphicsSpec(
-    modelPath: DataRoot & "/characters/mini_legion/warband/warlock.glb",
-    portraitPath:
-      DataRoot & "/characters/mini_legion/warband/warlock.profile.png",
-    portraitKey: "gota_warlock",
-    runClip: "Run",
-    idleClip: "Idle",
-    deathClip: "Death",
-    firstAttackClip: "Attack01",
-    secondAttackClip: "Attack02",
-    targetHeight: 2.05
-  ),
-  HeroGraphicsSpec(
-    modelPath:
-      DataRoot & "/characters/mini_legion/warband/berserker.glb",
-    portraitPath:
-      DataRoot & "/characters/mini_legion/warband/berserker.profile.png",
-    portraitKey: "gota_berserker",
-    runClip: "Run",
-    idleClip: "Idle",
-    deathClip: "Death",
-    firstAttackClip: "Attack01",
-    secondAttackClip: "Attack02",
-    targetHeight: 1.9
-  )
-]
+# the teams read from their models with no tinting. Heroes are outfits of
+# the same modular pack Call to Adventure uses. Blue wears the upper tank,
+# ranged, mage, support, and fighter looks. Red wears the lower ones.
+# Ranger, Crossbowman, and Arcanist drop or swap gear from their numbered
+# preset. Everyone else wears the preset as published.
+const
+  FootmanModels: array[Team, string] = [
+    DataRoot & "/characters/mini_legion/human/footman.glb",
+    DataRoot & "/characters/mini_legion/undead/skeleton_warrior.glb"
+  ]
+  HeroModelPath = DataRoot & "/characters/modular_chars/character.glb"
+  HeroTargetHeight = 1.7'f32
+  HeroPortraitKeys: array[HeroClass, string] = [
+    "gota_vanguard_knight",
+    "gota_ranger",
+    "gota_arcanist",
+    "gota_druid_warden",
+    "gota_demon_hunter",
+    "gota_death_knight",
+    "gota_crossbowman",
+    "gota_lich",
+    "gota_warlock",
+    "gota_berserker"
+  ]
+  HeroPortraitPaths: array[HeroClass, string] = [
+    DataRoot & "/characters/modular_chars/character.preset_1.profile.png",
+    DataRoot & "/characters/modular_chars/character.preset_13.profile.png",
+    DataRoot & "/characters/modular_chars/character.preset_16.profile.png",
+    DataRoot & "/characters/modular_chars/character.preset_17.profile.png",
+    DataRoot & "/characters/modular_chars/character.preset_2.profile.png",
+    DataRoot & "/characters/modular_chars/character.preset_3.profile.png",
+    DataRoot & "/characters/modular_chars/character.preset_11.profile.png",
+    DataRoot & "/characters/modular_chars/character.preset_12.profile.png",
+    DataRoot & "/characters/modular_chars/character.preset_6.profile.png",
+    DataRoot & "/characters/modular_chars/character.preset_14.profile.png"
+  ]
+  HeroLooks: array[HeroClass, seq[string]] = [
+    @[
+      "Back_1", "Body_White_1", "Body_White_Head_1", "Chest_1",
+      "Eye_Black_1", "Foot_1", "Hand_1", "Head_1", "Leg_1",
+      "Wield_Gear_Left_1", "Wield_Gear_Right_1"
+    ],
+    @[
+      "Body_Yellow_1", "Body_Yellow_Head_1", "Brow_Brown_3", "Chest_13",
+      "Eye_Brown_7", "Foot_13", "Hand_13", "Head_13", "Leg_13",
+      "Mouth_Yellow_3", "Wield_Gear_Right_13"
+    ],
+    @[
+      "Back_16", "Body_White_1", "Body_White_Head_2", "Chest_16",
+      "Earring_4", "Eye_BlueB_1", "Foot_16", "Hand_16", "Head_16",
+      "Leg_16", "Mouth_White_3", "Wield_Gear_Right_12"
+    ],
+    @[
+      "Back_17", "Body_Yellow_1", "Body_Yellow_Head_3", "Chest_17",
+      "Eye_Brown_4", "Foot_17", "Hand_17", "Head_17", "Leg_17",
+      "Wield_Gear_Left_17"
+    ],
+    @[
+      "Back_2", "Body_White_1", "Body_White_Head_1", "Brow_Blue_8",
+      "Chest_2", "Eye_BlueB_4", "Foot_2", "Hand_2", "Head_2", "Leg_2",
+      "Mouth_White_2", "Wield_Gear_Right_2"
+    ],
+    @[
+      "Back_3", "Body_White_1", "Body_White_Head_3", "Brow_Blue_8",
+      "Chest_3", "Eye_BlueB_1", "Foot_3", "Hand_3", "Head_3", "Leg_3",
+      "Mouth_Brown_2", "Wield_Gear_Right_3"
+    ],
+    @[
+      "Body_White_1", "Body_White_Head_2", "Chest_11", "Eye_Brown_11",
+      "Foot_11", "Hand_11", "Head_11", "Leg_11", "Mouth_Brown_4",
+      "Wield_Gear_Right_11"
+    ],
+    @[
+      "Back_12", "Body_Yellow_1", "Body_Yellow_Head_2", "Brow_Brown_3",
+      "Chest_12", "Eye_Brown_4", "Foot_12", "Hand_12", "Head_12",
+      "Leg_12", "Mouth_Brown_10", "Wield_Gear_Right_12"
+    ],
+    @[
+      "Back_6", "Body_Yellow_1", "Body_Yellow_Head_3", "Chest_6",
+      "Eye_Purple_1", "Foot_6", "Hand_6", "Head_6", "Leg_6",
+      "Mouth_Purple_9", "Wield_Gear_Left_6"
+    ],
+    @[
+      "Back_14", "Body_Yellow_1", "Body_Yellow_Head_3", "Chest_14",
+      "Eye_BlueB_1", "Foot_14", "Hand_14", "Head_14", "Leg_14",
+      "Mouth_Yellow_2", "Wield_Gear_Left_14", "Wield_Gear_Right_7"
+    ]
+  ]
 
 var
   window: Window
@@ -264,8 +209,8 @@ proc runGraphics*() =
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
     for class in HeroClass:
-      let spec = HeroGraphicsSpecs[class]
-      if not builder.addImage(spec.portraitKey, readImage(spec.portraitPath)):
+      if not builder.addImage(
+          HeroPortraitKeys[class], readImage(HeroPortraitPaths[class])):
         raise newException(
           GraphicsError,
           "the UI atlas is too small for hero portraits"
@@ -296,7 +241,7 @@ proc runGraphics*() =
     footmanModels: array[Team, CharacterModel]
     footmanRenderClips: array[Team, array[6, int]]
     heroModels: array[HeroClass, CharacterModel]
-    heroRenderClips: array[HeroClass, array[5, int]]
+    heroRenderClips: array[5, int]
   profileBlock "models":
     for team in Team:
       let model = loadCharacterModel(FootmanModels[team], 1.15)
@@ -310,19 +255,19 @@ proc runGraphics*() =
         model.clipIndex("Attack02")
       ]
     for class in HeroClass:
-      let spec = HeroGraphicsSpecs[class]
-      heroModels[class] = loadCharacterModel(
-        spec.modelPath,
-        spec.targetHeight
+      heroModels[class] = loadModularCharacterModel(
+        HeroModelPath,
+        HeroLooks[class],
+        HeroTargetHeight
       )
-      let model = heroModels[class]
-      heroRenderClips[class] = [
-        model.clipIndex(spec.runClip),
-        model.clipIndex(spec.idleClip),
-        model.clipIndex(spec.deathClip),
-        model.clipIndex(spec.firstAttackClip),
-        model.clipIndex(spec.secondAttackClip)
-      ]
+    let heroModel = heroModels[VanguardKnight]
+    heroRenderClips = [
+      heroModel.clipIndex("Run"),
+      heroModel.clipIndex("Idle"),
+      heroModel.clipIndex("Death"),
+      heroModel.clipIndex("Attack01"),
+      heroModel.clipIndex("Attack02")
+    ]
   var
     particles = initParticleSystem()
     selectionOutline = initSelectionOutline()
@@ -946,10 +891,10 @@ proc runGraphics*() =
         heroModels[hero.class],
         unitRenderPoint(hero.id, hero.position),
         unitRenderFacing(hero.id, hero.facing),
-        heroRenderClips[hero.class][hero.animClip],
+        heroRenderClips[hero.animClip],
         holdClipTime(
           heroModels[hero.class],
-          heroRenderClips[hero.class][hero.animClip],
+          heroRenderClips[hero.animClip],
           hero.animTicks,
           hero.state == Dying
         ),
@@ -1672,7 +1617,7 @@ proc runGraphics*() =
           for hero in run.world.heroes:
             if not visibleInView(hero.team, hero.position):
               continue
-            let clip = heroRenderClips[hero.class][hero.animClip]
+            let clip = heroRenderClips[hero.animClip]
             drawCharacter(
               scene,
               heroModels[hero.class],
