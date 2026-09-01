@@ -1,6 +1,6 @@
 ## Renders a portrait of each given character or named prop, as
-## <model>.profile.png — a 256x256 shot on a transparent background, for
-## roster panels, unit cards, and building tiles.
+## <model>.profile.png — a 256x256 toon-shaded shot on a transparent
+## background, for roster panels, unit cards, and building tiles.
 ##
 ## Characters: framing is driven by skin weights rather than a guess at a
 ## box. The head joint and everything beneath it select the vertices they
@@ -26,9 +26,9 @@
 ##   nim r tools/profile_glb.nim "../polyworld_data/characters/modular_chars/character.glb:Preset 5"
 
 import
-  std/[json, math, os, strformat, strutils, tables],
+  std/[json, math, os, sets, strformat, strutils, tables],
   chroma, gltf, opengl, pixie, vmath, windy,
-  posedbounds
+  posedbounds, polyworld/[characters, toon]
 
 const
   ProfileSize = 256     ## what lands on disk
@@ -42,6 +42,7 @@ const
   WholePadding = 1.20'f32
   CropMargin = 0.08'f32  ## breathing room around the subject, as a fraction
   IdlePrefix = "Idle"
+  ProfileHour = 12.0'f32  ## noon Day palette, same as in-game daylight
 
 let args = commandLineParams()
 if args.len == 0:
@@ -77,8 +78,21 @@ loadExtensions()
 
 var
   renderer = newRenderer(window)
-  pbrContext = newPbrContext(renderer)
-pbrContext.attachEnvironmentMap(loadDefaultEnvironmentMap())
+  toonContext = newToonContext()
+let hour =
+  if existsEnv("TOON_HOUR"):
+    getEnv("TOON_HOUR").parseFloat.float32
+  else:
+    ProfileHour
+# Same rim, light, and noon palette the games start from.
+toonContext.rimColor = color(1, 1, 1, ToonRimStrength)
+toonContext.lightDirection = ToonLightDirection
+toonContext.setPalette(paletteAtHour(hour))
+if existsEnv("TOON_LIGHT"):
+  let parts = getEnv("TOON_LIGHT").split(",")
+  toonContext.lightDirection = normalize(vec3(
+    parts[0].parseFloat.float32, parts[1].parseFloat.float32,
+    parts[2].parseFloat.float32))
 
 ## Face
 
@@ -347,31 +361,23 @@ proc profile(file: GltfFile, shot: Shot) =
     eye = target + vec3(
       sin(yaw) * cos(pitch), sin(pitch), cos(yaw) * cos(pitch)) * distance
 
-  pbrContext.size = window.size
-  pbrContext.transform = mat4()
-  pbrContext.view = lookAt(eye, target, vec3(0, 1, 0))
-  pbrContext.proj = perspective(
+  toonContext.transform = mat4()
+  toonContext.view = lookAt(eye, target, vec3(0, 1, 0))
+  toonContext.proj = perspective(
     VerticalFov, 1.0'f32, max(distance * 0.01'f32, 0.001'f32), 500.0'f32)
-  pbrContext.tint = color(1, 1, 1, 1)
-  pbrContext.useTrs = true
-  # The PBR shader negates the light vectors: these light the face from the
-  # camera side, with a warmer key than the contact sheets use.
-  pbrContext.ambientLightColor = color(0.38, 0.42, 0.52, 0.45)
-  pbrContext.sunLightDirection = normalize(vec3(1, -2.2, -1.6))
-  pbrContext.sunLightColor = color(1.0, 0.98, 0.94, 1.0)
-  pbrContext.rimLightDirection = normalize(vec3(-1, 0.6, -1))
-  pbrContext.rimLightColor = color(0.95, 0.72, 0.46, 0.35)
-  pbrContext.debugView = dvLit
-  pbrContext.cameraPosition = eye
-  pbrContext.useShadows = false
-  pbrContext.drawSkybox = false
-  pbrContext.vsync = false
+  toonContext.tint = color(1, 1, 1, 1)
+  toonContext.cameraPosition = eye
+  toonContext.unlitNodes.clear()
+  for part in preset:
+    if part.startsWith("Eye_") or part.startsWith("Mouth_") or
+        part.startsWith("Brow_"):
+      toonContext.unlitNodes.incl part
 
   for _ in 0 ..< WarmupFrames:
     renderer.beginFrame(window, window.size)
     # Clear to fully transparent so the portrait composites onto any panel.
     renderer.clearScreen(color(0, 0, 0, 0))
-    pbrContext.draw(file.root)
+    toonContext.draw(file.root)
     renderer.endFrame()
     window.swapBuffers()
     pollEvents()
