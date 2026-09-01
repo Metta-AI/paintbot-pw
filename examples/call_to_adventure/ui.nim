@@ -30,7 +30,6 @@ const
   AbilitySlotHs = [
     82.0'f32, 82, 82, 82, 82, 82, 64, 64, 64, 64
   ]
-  AbilityIconGrow = 8.0'f32
   MenuSlotXs = [
     16.0'f32, 72, 127, 183, 238, 293, 349
   ]
@@ -438,9 +437,9 @@ proc drawUi*(
   let
     chrome = currentChrome(window)
     chatPanel = sk.beginImagePanel(chrome.chat, "cta_bottomLeft")
-    questPanel = chrome.minimap
-    detailsPanel = chrome.abilities
-    menuPanel = chrome.menu
+    questPanel = sk.beginImagePanel(chrome.minimap, "cta_leftRight")
+    detailsPanel = sk.beginImagePanel(chrome.abilities, "cta_bottomCenter")
+    menuPanel = sk.beginImagePanel(chrome.menu, "cta_bottomRight")
     selectedActor = run.world.actors[primaryId]
     selectedClass = selectedActor.heroClass
     shownLevel = run.viewLevel(selectedIds)
@@ -455,25 +454,22 @@ proc drawUi*(
       portrait = card.imageSlot(6, 7, 86, 91)
       hpBar = card.imageSlot(111, 44, 193, 20)
       manaBar = card.imageSlot(111, 67, 193, 25)
-    sk.drawRect(
-      portrait.origin,
-      portrait.size,
-      if selectedIds[slot]:
-        rgbx(235, 216, 154, 255)
-      else:
-        rgbx(16, 14, 18, 255)
-    )
-    let inset =
-      if selectedIds[slot]: 3.0'f32
-      else: 0.0'f32
-    sk.drawSprite(
+    discard sk.beginImagePanel(card, "cta_leftTop")
+    if selectedIds[slot]:
+      sk.drawRoundedRect(
+        portrait.origin - vec2(2),
+        portrait.size + vec2(4),
+        rgbx(235, 216, 154, 255),
+        wellRadius(portrait.size + vec2(4))
+      )
+    sk.drawWellImage(
+      portrait,
       HeroPortraitKeys[class],
-      portrait.origin + vec2(inset),
-      portrait.size - vec2(inset * 2)
+      if actor.alive:
+        rgbx(255, 255, 255, 255)
+      else:
+        rgbx(140, 140, 148, 255)
     )
-    if not actor.alive:
-      sk.drawRect(portrait.origin, portrait.size, rgbx(25, 18, 22, 160))
-    sk.finishImagePanel(card, "cta_leftTop")
     sk.drawBar(
       hpBar.origin,
       hpBar.size,
@@ -665,7 +661,6 @@ proc drawUi*(
     cameraTarget,
     cameraDistance
   )
-  sk.finishImagePanel(questPanel, "cta_leftRight")
   let themeName = questPanel.imageSlot(102, 4, 186, 24)
   sk.drawLabel(
     Themes[shownLevel].name,
@@ -729,18 +724,16 @@ proc drawUi*(
     "Small"
   )
   for index in 0 .. 9:
-    let grown = detailsPanel.imageSlot(
-      AbilitySlotXs[index] - AbilityIconGrow,
-      AbilitySlotYs[index] - AbilityIconGrow,
-      AbilitySlotWs[index] + AbilityIconGrow * 2,
-      AbilitySlotHs[index] + AbilityIconGrow * 2
+    let slotPanel = detailsPanel.imageSlot(
+      AbilitySlotXs[index],
+      AbilitySlotYs[index],
+      AbilitySlotWs[index],
+      AbilitySlotHs[index]
     )
-    sk.drawSprite(
-      abilityIconKey(HeroAbilities[selectedClass][index]),
-      grown.origin,
-      grown.size
+    sk.drawWellImage(
+      slotPanel,
+      abilityIconKey(HeroAbilities[selectedClass][index])
     )
-  sk.finishImagePanel(detailsPanel, "cta_bottomCenter")
   for index in 0 .. 9:
     let slotPanel = detailsPanel.imageSlot(
       AbilitySlotXs[index],
@@ -799,13 +792,7 @@ proc drawUi*(
   )
   for i, icon in MenuIcons:
     let slot = menuPanel.imageSlot(MenuSlotXs[i], 13, 39, 40)
-    sk.drawSprite(
-      icon,
-      slot.origin - vec2(4),
-      slot.size + vec2(8),
-      MenuIconTint
-    )
-  sk.finishImagePanel(menuPanel, "cta_bottomRight")
+    sk.drawWellImage(slot, icon, MenuIconTint)
   transport.drawTransport(
     sk,
     window,

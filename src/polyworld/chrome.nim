@@ -270,16 +270,24 @@ proc drawBar*(
   else:
     sk.drawRect(innerPos, fillSize, color)
 
+proc wellRadius*(size: Vec2): float32 =
+  ## Corner radius that matches the bronze wells on the HUD plates.
+  max(min(size.x, size.y) * 0.12'f32, 4.0'f32)
+
 proc drawSprite*(
     sk: Silky,
     name: string,
     pos,
     size: Vec2,
-    color = rgbx(255, 255, 255, 255)
+    color = rgbx(255, 255, 255, 255),
+    radius = 0.0'f32
 ) =
   ## Draws one atlas image stretched to an explicit rectangle.
   if name notin sk.atlas.entries:
     sk.drawRect(pos, size, rgbx(28, 33, 44, 255))
+    return
+  if radius > 0.5:
+    sk.drawRoundedImage(name, pos, size, radius, color)
     return
   let uv = sk.atlas.entries[name]
   sk.drawQuad(
@@ -290,6 +298,30 @@ proc drawSprite*(
     color
   )
 
+proc drawRoundedRect*(
+    sk: Silky,
+    pos,
+    size: Vec2,
+    color: ColorRGBX,
+    radius: float32
+) =
+  ## Draws one solid rounded rectangle.
+  sk.drawRoundedImage(WhiteTileKey, pos, size, radius, color)
+
+proc drawWellImage*(
+    sk: Silky,
+    well: GameUiPanel,
+    name: string,
+    color = rgbx(255, 255, 255, 255),
+    pad = 4.0'f32
+) =
+  ## Draws one atlas image inside a well, after the plate, with matching
+  ## rounded corners.
+  let
+    inner = well.inset(min(pad, min(well.size.x, well.size.y) * 0.08'f32))
+    radius = wellRadius(inner.size)
+  sk.drawSprite(name, inner.origin, inner.size, color, radius)
+
 proc beginImagePanel*(
     sk: Silky,
     panel: GameUiPanel,
@@ -298,14 +330,6 @@ proc beginImagePanel*(
   ## Draws one textured panel sprite and returns the same outer rect.
   sk.drawSprite(image, panel.origin, panel.size)
   panel
-
-proc finishImagePanel*(
-    sk: Silky,
-    panel: GameUiPanel,
-    image: string
-) =
-  ## Draws a textured plate over well contents so cutouts clip them.
-  sk.drawSprite(image, panel.origin, panel.size)
 
 proc drawValueBar*(
     sk: Silky,

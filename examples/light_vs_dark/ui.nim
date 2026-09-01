@@ -73,15 +73,12 @@ proc coverSquare(well: GameUiPanel, pad = 4.0'f32): GameUiPanel =
 proc drawPortrait(
     sk: Silky,
     well: GameUiPanel,
-    key: string,
-    fill = rgbx(22, 26, 34, 255)
+    key: string
 ) =
-  ## Fills a well and draws a profile sprite inside it.
-  sk.drawRect(well.origin, well.size, fill)
+  ## Draws a profile sprite inside a well after the plate.
   if key.len == 0:
     return
-  let cover = coverSquare(well)
-  sk.drawSprite(key, cover.origin, cover.size)
+  sk.drawWellImage(well, key)
 
 proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
@@ -542,8 +539,18 @@ proc drawUi*(
     area = minimapPanel.minimapMap()
   const MapSampleStride = 2'i32
   let cell = area.size.x / float32(GridSide)
-  sk.drawRect(well.origin, well.size, rgbx(16, 18, 22, 255))
-  sk.drawRect(area.origin, area.size, rgbx(24, 30, 24, 255))
+  sk.drawRoundedRect(
+    well.origin,
+    well.size,
+    rgbx(16, 18, 22, 255),
+    wellRadius(well.size)
+  )
+  sk.drawRoundedRect(
+    area.origin,
+    area.size,
+    rgbx(24, 30, 24, 255),
+    wellRadius(area.size)
+  )
   for y in countup(0'i32, GridSide - 1, MapSampleStride):
     for x in countup(0'i32, GridSide - 1, MapSampleStride):
       let index = tileIndex(x, y)
@@ -617,7 +624,6 @@ proc drawUi*(
     primaryId = NoEntity
   var
     portraitKey = ""
-    portraitColor = rgbx(40, 46, 58, 255)
     portraitHp = 0'i32
     portraitMax = 1'i32
     portraitId = primaryId
@@ -630,7 +636,6 @@ proc drawUi*(
   if portraitId.isUnitId and run.world.hasUnit(portraitId):
     let unit = run.world.units[run.world.unitIndex(portraitId)]
     portraitKey = unitPortraitKey(unit.owner, unit.kind)
-    portraitColor = playerColor(unit.owner)
     portraitHp = unit.hp
     portraitMax = UnitTable[unit.owner][unit.kind].hp
     portraitName = unit.kind.unitName(unit.owner)
@@ -650,7 +655,6 @@ proc drawUi*(
       max(structure.owner, 0),
       structure.kind
     )
-    portraitColor = playerColor(max(structure.owner, 0))
     portraitHp = structure.hp
     portraitMax = max(structure.maxHp, 1)
     portraitName = structure.kind.buildingName(structure.owner)
@@ -670,18 +674,7 @@ proc drawUi*(
     selectBar = selectionPanel.imageSlot(18, 160, 169, 23)
     selectName = selectionPanel.imageSlot(18, 186, 169, 22)
     selectStatus = selectionPanel.imageSlot(18, 208, 169, 32)
-  sk.drawRect(
-    selectPortrait.origin,
-    selectPortrait.size,
-    portraitColor
-  )
-  sk.drawPortrait(
-    GameUiPanel(
-      origin: selectPortrait.origin + vec2(4),
-      size: selectPortrait.size - vec2(8)
-    ),
-    portraitKey
-  )
+  sk.drawPortrait(selectPortrait, portraitKey)
   writeRatio(hudScratch, portraitHp.int, portraitMax.int)
   sk.drawValueBar(
     selectBar.origin,
@@ -706,20 +699,6 @@ proc drawUi*(
       rgbx(166, 174, 190, 255),
       "Small"
     )
-  for index in 0 .. 9:
-    let
-      slot = selectionPanel.imageSlot(
-        SelectionGrid[index].x,
-        SelectionGrid[index].y,
-        SelectionSlotSize.x,
-        SelectionSlotSize.y
-      )
-      pad = min(slot.size.x, slot.size.y) * 0.06'f32
-    sk.drawRect(
-      slot.origin + vec2(pad),
-      slot.size - vec2(pad * 2),
-      rgbx(48, 54, 68, 180)
-    )
   var
     shown = 0
     clickedId = NoEntity
@@ -738,8 +717,7 @@ proc drawUi*(
       )
     sk.drawPortrait(
       slot,
-      unitPortraitKey(unit.owner, unit.kind),
-      playerColor(unit.owner)
+      unitPortraitKey(unit.owner, unit.kind)
     )
     if id == primaryId:
       sk.drawRect(
@@ -772,19 +750,12 @@ proc drawUi*(
           SelectionSlotSize.x,
           SelectionSlotSize.y
         )
-        pad = min(well.size.x, well.size.y) * 0.08'f32
         filled = slot < structure.queueLength
       if filled:
         let kind = UnitKind(structure.queue[slot] - 1)
         sk.drawPortrait(
           well,
           unitPortraitKey(max(structure.owner, 0), kind)
-        )
-      else:
-        sk.drawRect(
-          well.origin + vec2(pad),
-          well.size - vec2(pad * 2),
-          rgbx(31, 36, 47, 180)
         )
       if filled and slot == 0:
         sk.drawRect(

@@ -15,13 +15,10 @@ const
   PanelInventory = vec2(379, 322)
   HudClearance = 48.0'f32
   BadgeSmall = 18.0'f32
-  PortraitGrow = 6.0'f32
-  AbilityIconGrow = 6.0'f32
   AbilityKeys = ["Q", "W", "E", "R", "D", "F"]
   ScoreIcons = ["tower", "kills", "deaths"]
   CooldownFill = rgbx(8, 10, 16, 180)
   IconTint = rgbx(245, 230, 190, 255)
-  WellFill = rgbx(16, 14, 18, 255)
   HeroPortraitKeys: array[HeroClass, string] = [
     "gota_vanguard_knight",
     "gota_ranger",
@@ -381,19 +378,9 @@ proc selectHeroCard(
   primaryId = id
   followSelection = true
 
-proc coverSquare(well: GameUiPanel, grow = 0.0'f32): GameUiPanel =
-  ## Returns a centered square that covers one well.
-  let side = max(well.size.x, well.size.y) + grow * 2
-  result.size = vec2(side)
-  result.origin = well.origin + (well.size - result.size) * 0.5'f32
-
-proc fillWell(sk: Silky, well: GameUiPanel) =
-  ## Fills one plate well so the world does not show through.
-  sk.drawRect(well.origin, well.size, WellFill)
-
 proc minimapMap(panel: GameUiPanel): GameUiPanel =
-  ## Returns the map rectangle that fills the minimap plate.
-  GameUiPanel(origin: panel.origin, size: panel.size)
+  ## Returns the map rectangle inside the minimap plate's frame.
+  panel.inset(8)
 
 proc updateMinimapCamera*(
     window: Window,
@@ -512,37 +499,26 @@ proc drawHeroPortrait(
     followSelection: var bool,
     actionCam: var ActionCam
 ) =
-  ## Draws one top-bar portrait behind the hero plate.
+  ## Draws one top-bar portrait on the hero plate.
   let
     x = heroCardX(hero)
     portrait = panel.imageSlot(x, 10, 78, 80)
     picked = isPicked(hero.id, selectedIds)
   if picked:
-    sk.drawRect(
+    sk.drawRoundedRect(
       portrait.origin - vec2(2),
       portrait.size + vec2(4),
-      rgbx(244, 224, 154, 255)
+      rgbx(244, 224, 154, 255),
+      wellRadius(portrait.size + vec2(4))
     )
-  sk.drawRect(
-    portrait.origin,
-    portrait.size,
-    if picked:
-      rgbx(244, 224, 154, 255)
-    else:
-      teamHudColor(hero.team)
-  )
-  let cover = coverSquare(portrait, PortraitGrow)
-  sk.drawSprite(
+  sk.drawWellImage(
+    portrait,
     HeroPortraitKeys[hero.class],
-    cover.origin,
-    cover.size
+    if hero.state == Dying or hero.hp <= 0:
+      rgbx(140, 140, 148, 255)
+    else:
+      rgbx(255, 255, 255, 255)
   )
-  if hero.state == Dying or hero.hp <= 0:
-    sk.drawRect(
-      portrait.origin,
-      portrait.size,
-      rgbx(12, 14, 20, 150)
-    )
   if window.clicked(sk, portrait):
     actionCam.takeManual()
     selectHeroCard(
@@ -559,7 +535,7 @@ proc drawHeroMeters(
     panel: GameUiPanel,
     hero: Hero
 ) =
-  ## Draws one hero's bars and level after the plate clips the portrait.
+  ## Draws one hero's bars and level on the hero plate.
   let
     x = heroCardX(hero)
     portrait = panel.imageSlot(x, 10, 78, 80)
@@ -613,13 +589,8 @@ proc drawAbilityIcon(
     icon: string,
     tint = rgbx(255, 255, 255, 255)
 ) =
-  ## Draws one ability glyph behind a framed art slot.
-  sk.drawSprite(
-    icon,
-    slot.origin - vec2(AbilityIconGrow),
-    slot.size + vec2(AbilityIconGrow * 2),
-    tint
-  )
+  ## Draws one ability glyph inside a framed art slot.
+  sk.drawWellImage(slot, icon, tint)
 
 proc drawCooldownSweep(
     sk: Silky,
@@ -667,13 +638,17 @@ proc drawUi*(
   let
     chrome = currentChrome(window)
     scorePanel = sk.beginImagePanel(chrome.score, "gota_leftTop")
-    heroesPanel = chrome.heroes
+    heroesPanel = sk.beginImagePanel(chrome.heroes, "gota_topCenter")
     clockPanel = sk.beginImagePanel(chrome.clock, "gota_leftRight")
-    minimapPanel = chrome.minimap
-    detailsPanel = chrome.details
-    inventoryPanel = chrome.inventory
+    minimapPanel = sk.beginImagePanel(chrome.minimap, "gota_bottomLeft")
+    inventoryPanel = sk.beginImagePanel(chrome.inventory, "gota_bottomRight")
     hudTime = currentHudTime()
   var selection = selectedUnit(primaryId, viewMode)
+  let detailsPanel =
+    if selection != nil:
+      sk.beginImagePanel(chrome.details, "gota_bottomCenter")
+    else:
+      chrome.details
 
   sk.drawLabel(
     "WHO IS WINNING NOW?",
@@ -707,7 +682,6 @@ proc drawUi*(
       followSelection,
       actionCam
     )
-  sk.finishImagePanel(heroesPanel, "gota_topCenter")
   for hero in run.world.heroes:
     sk.drawHeroMeters(heroesPanel, hero)
 
@@ -734,7 +708,12 @@ proc drawUi*(
   )
 
   let mapArea = minimapPanel.minimapMap()
-  sk.drawRect(mapArea.origin, mapArea.size, rgbx(35, 54, 49, 255))
+  sk.drawRoundedRect(
+    mapArea.origin,
+    mapArea.size,
+    rgbx(35, 54, 49, 255),
+    wellRadius(mapArea.size)
+  )
   sk.drawRect(
     mapArea.origin + mapArea.size * 0.5'f32 - vec2(2),
     vec2(4),
@@ -799,33 +778,13 @@ proc drawUi*(
     cameraTarget,
     cameraDistance
   )
-  sk.finishImagePanel(minimapPanel, "gota_bottomLeft")
 
   if selection != nil:
     let
       teamColor = teamHudColor(selection.team)
       portrait = detailsPanel.imageSlot(32, 32, 150, 211)
-    sk.drawRect(portrait.origin, portrait.size, teamColor)
-    sk.fillWell(detailsPanel.imageSlot(30, 243, 51, 50))
-    sk.fillWell(detailsPanel.imageSlot(440, 38, 532, 28))
-    sk.fillWell(detailsPanel.imageSlot(440, 83, 532, 28))
-    sk.fillWell(detailsPanel.imageSlot(440, 129, 532, 28))
-    for i in 0 .. 5:
-      sk.fillWell(
-        detailsPanel.imageSlot(
-          AbilitySlotXs[i],
-          186,
-          AbilitySlotWs[i],
-          if i < 4: 87.0'f32 else: 86.0'f32
-        )
-      )
-    let cover = coverSquare(portrait, PortraitGrow)
     if selection.kind == SelectedHero:
-      sk.drawSprite(
-        selection.portraitKey,
-        cover.origin,
-        cover.size
-      )
+      sk.drawWellImage(portrait, selection.portraitKey)
     else:
       let glyph =
         case selection.kind
@@ -837,7 +796,7 @@ proc drawUi*(
           "fort"
         of SelectedHero:
           "champion"
-      sk.drawSprite(glyph, cover.origin, cover.size, teamColor)
+      sk.drawWellImage(portrait, glyph, teamColor)
     if selection.kind == SelectedHero:
       for slot in HeroAbilitySlot:
         let
@@ -871,7 +830,6 @@ proc drawUi*(
             ),
             itemIconKey(item)
           )
-  sk.drawRect(inventoryPanel.origin, inventoryPanel.size, WellFill)
   for slot in 0 ..< InventorySlots:
     let
       slotPanel = inventoryPanel.imageSlot(
@@ -882,17 +840,8 @@ proc drawUi*(
       )
       item =
         if selection == nil: NoItem else: selection.inventory[slot]
-    sk.fillWell(slotPanel)
     if item != NoItem:
-      sk.drawSprite(
-        itemIconKey(item),
-        slotPanel.origin - vec2(4),
-        slotPanel.size + vec2(8)
-      )
-  sk.fillWell(inventoryPanel.imageSlot(39, 261, 139, 31))
-  if selection != nil:
-    sk.finishImagePanel(detailsPanel, "gota_bottomCenter")
-  sk.finishImagePanel(inventoryPanel, "gota_bottomRight")
+      sk.drawWellImage(slotPanel, itemIconKey(item))
 
   if selection != nil:
     let
