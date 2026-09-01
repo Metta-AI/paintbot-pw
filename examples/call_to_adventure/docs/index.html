@@ -47,39 +47,18 @@
     a { color: var(--gold); text-decoration: none; }
     img { display: block; }
     .wrap { width: min(1240px, calc(100% - 32px)); margin: 0 auto; }
-    header.top {
-      position: sticky; top: 0; z-index: 20;
-      backdrop-filter: blur(12px);
-      background: rgba(18, 14, 12, 0.88);
-      border-bottom: 1px solid var(--line);
-    }
+    header.top { margin: 0 0 24px; }
     .top-inner {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 16px; min-height: 64px;
+      display: flex; align-items: center; justify-content: center; gap: 16px;
     }
-    .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; letter-spacing: 0.08em; }
-    .brand img { width: 36px; height: 36px; }
-    .brand small { display: block; color: var(--gold); font-size: 11px; letter-spacing: 0.22em; }
+    .page-logo {
+      display: block; width: min(720px, 100%); height: auto; margin: 0 auto 8px;
+    }
     nav { display: flex; gap: 18px; font-size: 13px; letter-spacing: 0.08em; }
     nav a { color: var(--muted); }
     nav a:hover { color: var(--gold); }
-    .hero {
-      position: relative; margin: 24px 0 32px;
-      border: 1px solid var(--line); border-radius: 22px; overflow: hidden;
-      background: #111; box-shadow: 0 24px 60px rgba(0,0,0,0.35);
-    }
-    .hero .banner-strip { display: flex; height: 380px; }
-    .hero .banner-strip img {
-      flex: 1; min-width: 0; height: 100%; object-fit: cover; object-position: top center;
-    }
-    .hero .veil {
-      position: absolute; inset: 0;
-      background: linear-gradient(180deg, rgba(18,14,12,0.1) 20%, rgba(18,14,12,0.92) 100%);
-    }
-    .hero-copy { position: absolute; left: 32px; right: 32px; bottom: 28px; }
     .kicker { color: var(--gold); letter-spacing: 0.28em; font-size: 12px; font-weight: 700; margin: 0 0 8px; }
-    h1 { margin: 0 0 10px; font-size: clamp(32px, 5vw, 52px); letter-spacing: 0.04em; }
-    .lede { max-width: 780px; margin: 0; color: #e4d8c8; line-height: 1.5; }
+    .lede { max-width: 780px; margin: 0 0 28px; color: #e4d8c8; line-height: 1.5; }
     .facts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 0 0 36px; }
     .fact, .panel, .hero-card, .item-card, .monster-card {
       background: linear-gradient(180deg, #241c16, #16110e);
@@ -145,24 +124,19 @@
     footer { padding: 28px 0 48px; color: var(--muted); font-size: 13px; }
     @media (max-width: 980px) {
       .facts, .split, .shop, .monsters, .hero-head, .stats { grid-template-columns: 1fr 1fr; }
-      .hero .banner-strip { height: 240px; }
     }
     @media (max-width: 640px) {
-      nav { display: none; }
+      header.top { display: none; }
       .facts, .split, .shop, .monsters, .lanes, .hero-head, .stats, .ability { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
+  <div class="wrap">
+    <img class="page-logo" src="../../../../polyworld_data/themes/cta/cta_logo.png" alt="Call to Adventure">
+  </div>
   <header class="top">
     <div class="wrap top-inner">
-      <div class="brand">
-        <img src="../../../../polyworld_data/icons/champion.png" alt="">
-        <div>
-          <small>POLYWORLD</small>
-          CALL TO ADVENTURE
-        </div>
-      </div>
       <nav>
         <a href="#dungeon">Dungeon</a>
         <a href="#party">Party</a>
@@ -173,24 +147,11 @@
   </header>
 
   <main class="wrap">
-    <section class="hero">
-      <div class="banner-strip">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_5.profile.png" alt="Brom">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_18.profile.png" alt="Nyra">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_11.profile.png" alt="Fenn">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_9.profile.png" alt="Zyra">
-      </div>
-      <div class="veil"></div>
-      <div class="hero-copy">
-        <p class="kicker">FOUR HEROES · SIX FLOORS</p>
-        <h1>CALL TO ADVENTURE</h1>
-        <p class="lede">
-          A fighter, a wizard, a rogue, and a cleric descend a seeded dungeon.
-          Clear each floor, haul treasure, then climb back to the surface before
-          the vault's reinforcements close the way out.
-        </p>
-      </div>
-    </section>
+    <p class="lede">
+      A fighter, a wizard, a rogue, and a cleric descend a seeded dungeon.
+      Clear each floor, haul treasure, then climb back to the surface before
+      the vault's reinforcements close the way out.
+    </p>
 
     <section class="facts">
       <div class="fact"><img src="../../../../polyworld_data/icons/champion.png" alt=""><div><b>4</b><span>HEROES</span></div></div>

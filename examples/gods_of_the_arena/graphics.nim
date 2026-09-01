@@ -18,6 +18,7 @@ when defined(takeScreenshot):
 
 const
   AtlasPath = DataRoot & "/themes/gota.atlas.png"
+  LogoPath = DataRoot & "/themes/gota/gota_logo.png"
 
 type
   GraphicsError = object of CatchableError
@@ -71,6 +72,7 @@ proc addItemIcons(builder: AtlasBuilder) =
 proc addHudIcons(builder: AtlasBuilder) =
   ## Packs the textured HUD panels into the atlas.
   const PanelDir = DataRoot & "/themes/gota/"
+  builder.addThemeLogo(LogoPath)
   if not builder.addImage(
         "gota_leftTop",
         readImage(PanelDir & "leftTop.png")
@@ -226,6 +228,7 @@ proc runGraphics*() =
       AtlasPath,
       gameWindowSize(options.windowWidth, options.windowHeight)
     )
+  let splash = startSplash(sk, window)
   profileBlock "terrain":
     amplitude = 1.4'f32
     seed = run.map.seed
@@ -376,6 +379,7 @@ proc runGraphics*() =
     )
   profileBlock "bake":
     bakeTerrain(rebuildWalkability = false)
+  drawSplash(sk, window, splash.name)
 
   type God = object
     team: Team
@@ -1525,6 +1529,7 @@ proc runGraphics*() =
           followSelection = true
           break
 
+  holdSplash(sk, window, splash)
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime)

@@ -48,69 +48,22 @@
     a { color: var(--gold); text-decoration: none; }
     img { display: block; }
     .wrap { width: min(1240px, calc(100% - 32px)); margin: 0 auto; }
-    header.top {
-      position: sticky;
-      top: 0;
-      z-index: 20;
-      backdrop-filter: blur(12px);
-      background: rgba(12, 16, 20, 0.86);
-      border-bottom: 1px solid var(--line);
-    }
+    header.top { margin: 0 0 24px; }
     .top-inner {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: center;
       gap: 16px;
-      min-height: 64px;
     }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-    }
-    .brand img { width: 36px; height: 36px; }
-    .brand small {
+    .page-logo {
       display: block;
-      color: var(--gold);
-      font-size: 11px;
-      letter-spacing: 0.22em;
+      width: min(720px, 100%);
+      height: auto;
+      margin: 0 auto 8px;
     }
     nav { display: flex; gap: 18px; font-size: 13px; letter-spacing: 0.08em; }
     nav a { color: var(--muted); }
     nav a:hover { color: var(--gold); }
-    .hero {
-      position: relative;
-      margin: 24px 0 32px;
-      border: 1px solid var(--line);
-      border-radius: 22px;
-      overflow: hidden;
-      background: #111;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
-    }
-    .hero .banner-strip {
-      display: flex;
-      height: 420px;
-    }
-    .hero .banner-strip img {
-      flex: 1;
-      min-width: 0;
-      height: 100%;
-      object-fit: cover;
-      object-position: top center;
-    }
-    .hero .veil {
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(180deg, rgba(12,16,20,0.08) 20%, rgba(12,16,20,0.92) 100%);
-    }
-    .hero-copy {
-      position: absolute;
-      left: 32px;
-      right: 32px;
-      bottom: 28px;
-    }
     .kicker {
       color: var(--gold);
       letter-spacing: 0.28em;
@@ -118,15 +71,9 @@
       font-weight: 700;
       margin: 0 0 8px;
     }
-    h1 {
-      margin: 0 0 10px;
-      font-size: clamp(32px, 5vw, 56px);
-      letter-spacing: 0.04em;
-      text-shadow: 0 8px 24px rgba(0,0,0,0.55);
-    }
     .lede {
       max-width: 760px;
-      margin: 0;
+      margin: 0 0 28px;
       color: #d7dbe4;
       line-height: 1.5;
     }
@@ -349,27 +296,21 @@
     }
     @media (max-width: 980px) {
       .facts, .split, .shop, .hero-head, .stats { grid-template-columns: 1fr 1fr; }
-      .hero .banner-strip { height: 280px; }
     }
     @media (max-width: 640px) {
-      nav { display: none; }
+      header.top { display: none; }
       .facts, .split, .shop, .lanes, .hero-head, .stats, .ability {
         grid-template-columns: 1fr;
       }
-      .hero-copy { left: 16px; right: 16px; }
     }
   </style>
 </head>
 <body>
+  <div class="wrap">
+    <img class="page-logo" src="../../../../polyworld_data/themes/gota/gota_logo.png" alt="Gods of the Arena">
+  </div>
   <header class="top">
     <div class="wrap top-inner">
-      <div class="brand">
-        <img src="../../../../polyworld_data/icons/champion.png" alt="">
-        <div>
-          <small>POLYWORLD</small>
-          GODS OF THE ARENA
-        </div>
-      </div>
       <nav>
         <a href="#arena">Arena</a>
         <a href="#heroes">Heroes</a>
@@ -379,30 +320,11 @@
   </header>
 
   <main class="wrap">
-    <section class="hero">
-      <div class="banner-strip">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_1.profile.png" alt="">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_13.profile.png" alt="">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_16.profile.png" alt="">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_17.profile.png" alt="">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_2.profile.png" alt="">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_3.profile.png" alt="">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_11.profile.png" alt="">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_12.profile.png" alt="">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_6.profile.png" alt="">
-        <img src="../../../../polyworld_data/characters/modular_chars/character.preset_14.profile.png" alt="">
-      </div>
-      <div class="veil"></div>
-      <div class="hero-copy">
-        <p class="kicker">FIVE VERSUS FIVE</p>
-        <h1>GODS OF THE ARENA</h1>
-        <p class="lede">
-          Two gods sit in opposite-corner forts. Three lanes, a river, a bridge,
-          and a jungle of pine stand between them. Ten heroes, footmen, and
-          towers fight until one god falls.
-        </p>
-      </div>
-    </section>
+    <p class="lede">
+      Two gods sit in opposite-corner forts. Three lanes, a river, a bridge,
+      and a jungle of pine stand between them. Ten heroes, footmen, and
+      towers fight until one god falls.
+    </p>
 
     <section class="facts">
       <div class="fact"><img src="../../../../polyworld_data/icons/champion.png" alt=""><div><b>10</b><span>HEROES</span></div></div>

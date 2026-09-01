@@ -20,6 +20,7 @@ when defined(takeScreenshot):
 
 const
   AtlasPath = DataRoot & "/themes/cta.atlas.png"
+  LogoPath = DataRoot & "/themes/cta/cta_logo.png"
   SimulationStep = 1.0'f32 / TickRate.float32
   SeekCheckpointTicks = TickRate * 10
   PathLift = 0.2'f32
@@ -192,6 +193,7 @@ proc makeCircleIcon(size: int, fill: ColorRGBA): Image =
 proc addHudIcons(builder: AtlasBuilder) =
   ## Packs textured HUD plates into the atlas.
   const PanelDir = DataRoot & "/themes/cta/"
+  builder.addThemeLogo(LogoPath)
   if not builder.addImage(
       "cta_badge",
       makeCircleIcon(22, rgba(18, 20, 28, 255))
@@ -258,6 +260,7 @@ proc runGraphics*() =
       AtlasPath,
       gameWindowSize(options.windowWidth, options.windowHeight)
     )
+  let splash = startSplash(sk, window)
   # The stack spans about 45 tiles top to bottom; the shading uses amplitude
   # as its height scale, so a value near the whole span keeps every level
   # readable instead of clipping the deep ones to black.
@@ -282,6 +285,7 @@ proc runGraphics*() =
         HeroModelPath, HeroManifestPath, ClassPresets[class], 1.7)
     for species in Species:
       monsterModels[species] = loadCharacterModel(SpeciesModels[species], 1.6)
+  drawSplash(sk, window, splash.name)
 
   proc clipFor(model: CharacterModel, names: varargs[string]): int =
     ## Clip names differ across the model packs, so ask for the first one
@@ -1049,6 +1053,7 @@ proc runGraphics*() =
     if existsEnv("SELECT_ALL"):
       selectAllHeroes()
 
+  holdSplash(sk, window, splash)
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, SimulationStep)

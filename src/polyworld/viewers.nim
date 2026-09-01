@@ -2,7 +2,7 @@
 
 import
   std/[math, os, strutils, times],
-  opengl, pixie, silky, vmath, windy,
+  chroma, opengl, pixie, silky, vmath, windy,
   common, player
 
 const
@@ -15,6 +15,14 @@ const
   WindowPatchPath = EditorThemeDir & "window.9patch.png"
   FramePatchPath = EditorThemeDir & "frame.9patch.png"
   HudIconSize = 64
+  SplashName* = "logo"
+  SplashSeconds* = 3.0
+    ## How long the theme logo stays up while the client finishes loading.
+
+type Splash* = object
+  ## Wall-clock start of one loading splash.
+  startedAt*: float64
+  name*: string
 
 proc damping*(rate, dt: float32): float32 =
   ## Returns a frame-rate-independent exponential easing fraction.
@@ -28,6 +36,14 @@ proc shortestTurn*(current, target: float32): float32 =
   while delta < -PI.float32:
     delta += (2 * PI).float32
   delta
+
+proc addThemeLogo*(builder: AtlasBuilder, path: string) =
+  ## Packs one game's theme logo for the loading splash.
+  if not builder.addImage(SplashName, readImage(path)):
+    raise newException(
+      ValueError,
+      "the UI atlas is too small for the theme logo"
+    )
 
 proc addDefaultFonts*(builder: AtlasBuilder) =
   ## Adds the shared HUD type ramp used by every graphical client.
@@ -92,6 +108,59 @@ proc initGameWindow*(
   window.onRune = proc(rune: Rune) =
     sk.inputRunes.add(rune)
   (window, sk)
+
+proc drawSplash*(
+    sk: Silky,
+    window: Window,
+    name = SplashName
+) =
+  ## Draws the theme logo centered on a black frame.
+  sk.beginUi(window, window.size)
+  sk.clearScreen(rgbx(0, 0, 0, 255))
+  if name in sk.atlas.entries:
+    let
+      uv = sk.atlas.entries[name]
+      src = vec2(uv.width.float32, uv.height.float32)
+      area = window.size.vec2 * 0.78
+      scale = min(area.x / max(src.x, 1), area.y / max(src.y, 1))
+      dest = src * scale
+      pos = (window.size.vec2 - dest) * 0.5
+    sk.drawQuad(
+      pos,
+      dest,
+      vec2(uv.x.float32, uv.y.float32),
+      src,
+      rgbx(255, 255, 255, 255)
+    )
+  sk.endUi()
+  window.swapBuffers()
+  pollEvents()
+
+proc startSplash*(
+    sk: Silky,
+    window: Window,
+    name = SplashName
+): Splash =
+  ## Shows the splash and starts the hold clock.
+  result.startedAt = epochTime()
+  result.name = name
+  drawSplash(sk, window, name)
+
+proc holdSplash*(
+    sk: Silky,
+    window: Window,
+    splash: Splash,
+    seconds = SplashSeconds
+) =
+  ## Keeps the splash up until the hold time elapses.
+  when defined(takeScreenshot) or defined(emscripten):
+    drawSplash(sk, window, splash.name)
+    return
+  while epochTime() - splash.startedAt < seconds:
+    if window.closeRequested:
+      quit(0)
+    drawSplash(sk, window, splash.name)
+    sleep(10)
 
 proc frameDelta*(
     lastFrameTime: var float64,

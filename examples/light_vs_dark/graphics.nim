@@ -24,6 +24,7 @@ import
 const
   WindowTitle = "Light vs Dark"
   AtlasPath = DataRoot & "/themes/lvd.atlas.png"
+  LogoPath = DataRoot & "/themes/lvd/lvd_logo.png"
   SeekCheckpointTicks = TickRate * 10
     ## One saved world every ten seconds, so a seek re-simulates at most
     ## that much.
@@ -201,6 +202,7 @@ proc clipIndex(model: CharacterModel, slot: AnimationSlot): int =
 proc addHudIcons(builder: AtlasBuilder) =
   ## Packs portraits, resource glyphs, and textured HUD panels.
   const PanelDir = DataRoot & "/themes/lvd/"
+  builder.addThemeLogo(LogoPath)
   for player in 0'i32 ..< PlayerCount:
     for kind in UnitKind:
       if not builder.addImage(
@@ -331,6 +333,7 @@ proc runGraphics*() =
       AtlasPath,
       gameWindowSize(options.windowWidth, options.windowHeight)
     )
+  let splash = startSplash(sk, window)
   profileBlock "terrain":
     seed = run.mapSeed
     initTerrain()
@@ -354,6 +357,7 @@ proc runGraphics*() =
         unitModels[player][kind] = model
         for slot in AnimationSlot:
           unitClips[player][kind][slot] = model.clipIndex(slot)
+  drawSplash(sk, window, splash.name)
 
   let scene = newCharacterScene(window)
   scene.useToonShading()
@@ -1152,6 +1156,7 @@ proc runGraphics*() =
           selectedIds.add unit.id
     var screenshotFrame = 0
 
+  holdSplash(sk, window, splash)
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, Step)
