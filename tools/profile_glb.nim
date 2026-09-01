@@ -1,5 +1,5 @@
 ## Renders a portrait of each given character or named prop, as
-## <model>.profile.png — a 64x64 shot on a transparent background, for
+## <model>.profile.png — a 256x256 shot on a transparent background, for
 ## roster panels, unit cards, and building tiles.
 ##
 ## Characters: framing is driven by skin weights rather than a guess at a
@@ -31,8 +31,8 @@ import
   posedbounds
 
 const
-  ProfileSize = 64      ## what lands on disk
-  RenderSize = 512      ## supersampled, then boxed down for clean edges
+  ProfileSize = 256     ## what lands on disk
+  RenderSize = 1024     ## supersampled, then boxed down for clean edges
   WarmupFrames = 8      ## give the renderer time to upload textures
   PoseSeconds = 0.4'f32
   VerticalFov = 35.0'f32  ## a longer lens flatters a face
@@ -381,8 +381,7 @@ proc profile(file: GltfFile, shot: Shot) =
     0, 0, RenderSize.GLsizei, RenderSize.GLsizei,
     GL_RGBA, GL_UNSIGNED_BYTE, rendered.data[0].addr)
   rendered.flipVertical()
-  # Render large and box down: at 64 pixels a face needs every bit of
-  # antialiasing it can get, and msaa alone does not carry fine horns.
+  # Render large and box down so antialiasing survives the crop.
   let image = cropToSubject(rendered).resize(ProfileSize, ProfileSize)
   let profilePath =
     if preset.len > 0:

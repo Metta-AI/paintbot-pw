@@ -122,9 +122,12 @@
     .build-top img {
       width: 72px; height: 72px; border-radius: 10px; object-fit: cover; background: #0c1016;
     }
+    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    .pair img {
+      width: 100%; height: 72px; border-radius: 10px; object-fit: cover; background: #0c1016;
+    }
     .cost { display: flex; flex-wrap: wrap; gap: 10px; color: var(--gold); font-weight: 700; font-size: 13px; }
     .cost span { display: flex; align-items: center; gap: 4px; }
-    .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
     footer { padding: 28px 0 48px; color: var(--muted); font-size: 13px; }
     @media (max-width: 980px) {
       .facts, .split, .grid, .build-grid, .unit-top { grid-template-columns: 1fr 1fr; }
@@ -157,12 +160,12 @@
   <main class="wrap">
     <section class="hero">
       <div class="banner-strip">
-        <img src="../../../../polyworld_data/characters/mini_legion/human/worker.profile.png" alt="Peasant">
-        <img src="../../../../polyworld_data/characters/mini_legion/human/footman.profile.png" alt="Footman">
-        <img src="../../../../polyworld_data/characters/mini_legion/human/knight.profile.png" alt="Knight">
-        <img src="../../../../polyworld_data/characters/mini_legion/warband/grunt.profile.png" alt="Grunt">
-        <img src="../../../../polyworld_data/characters/mini_legion/warband/warlock.profile.png" alt="Warlock">
-        <img src="../../../../polyworld_data/characters/rpg_monsters/demon_king.profile.png" alt="Daemon">
+        <img src="../../../../polyworld_data/characters/mini_legion/human/worker.profile.png" alt="Peasant" width="256" height="256">
+        <img src="../../../../polyworld_data/characters/mini_legion/human/footman.profile.png" alt="Footman" width="256" height="256">
+        <img src="../../../../polyworld_data/characters/mini_legion/human/knight.profile.png" alt="Knight" width="256" height="256">
+        <img src="../../../../polyworld_data/characters/mini_legion/warband/grunt.profile.png" alt="Grunt" width="256" height="256">
+        <img src="../../../../polyworld_data/characters/mini_legion/warband/warlock.profile.png" alt="Warlock" width="256" height="256">
+        <img src="../../../../polyworld_data/characters/rpg_monsters/demon_king.profile.png" alt="Daemon" width="256" height="256">
       </div>
       <div class="veil"></div>
       <div class="hero-copy">
@@ -231,8 +234,8 @@
       <div class="grid">
         <article class="unit-card">
           <div class="unit-top">
-            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/worker.profile.png" alt="Peasant"></div>
-            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/minion.profile.png" alt="Peon"></div>
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/worker.profile.png" alt="Peasant" width="256" height="256"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/minion.profile.png" alt="Peon" width="256" height="256"></div>
             <div>
               <div class="side light">LIGHT PEASANT</div>
               <div class="side dark">DARK PEON</div>
@@ -252,8 +255,8 @@
 
         <article class="unit-card">
           <div class="unit-top">
-            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/footman.profile.png" alt="Footman"></div>
-            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/grunt.profile.png" alt="Grunt"></div>
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/footman.profile.png" alt="Footman" width="256" height="256"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/grunt.profile.png" alt="Grunt" width="256" height="256"></div>
             <div>
               <div class="side light">LIGHT FOOTMAN</div>
               <div class="side dark">DARK GRUNT</div>
@@ -273,8 +276,8 @@
 
         <article class="unit-card">
           <div class="unit-top">
-            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/archer.profile.png" alt="Archer"></div>
-            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/head_hunter.profile.png" alt="Spearman"></div>
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/archer.profile.png" alt="Archer" width="256" height="256"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/head_hunter.profile.png" alt="Spearman" width="256" height="256"></div>
             <div>
               <div class="side light">LIGHT ARCHER</div>
               <div class="side dark">DARK SPEARMAN</div>
@@ -295,8 +298,8 @@
 
         <article class="unit-card">
           <div class="unit-top">
-            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/mage.profile.png" alt="Conjurer"></div>
-            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/warlock.profile.png" alt="Warlock"></div>
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/mage.profile.png" alt="Conjurer" width="256" height="256"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/warlock.profile.png" alt="Warlock" width="256" height="256"></div>
             <div>
               <div class="side light">LIGHT CONJURER</div>
               <div class="side dark">DARK WARLOCK</div>
@@ -317,8 +320,8 @@
 
         <article class="unit-card">
           <div class="unit-top">
-            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/horseman.profile.png" alt="Knight"></div>
-            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/hog_rider.profile.png" alt="Raider"></div>
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/horseman.profile.png" alt="Knight" width="256" height="256"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/warband/hog_rider.profile.png" alt="Raider" width="256" height="256"></div>
             <div>
               <div class="side light">LIGHT KNIGHT</div>
               <div class="side dark">DARK RAIDER</div>
@@ -338,8 +341,8 @@
 
         <article class="unit-card">
           <div class="unit-top">
-            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/siege_engine.profile.png" alt="Catapult"></div>
-            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/undead/siege_engine.profile.png" alt="Catapult"></div>
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/human/siege_engine.profile.png" alt="Catapult" width="256" height="256"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/undead/siege_engine.profile.png" alt="Catapult" width="256" height="256"></div>
             <div>
               <div class="side light">LIGHT CATAPULT</div>
               <div class="side dark">DARK CATAPULT</div>
@@ -360,8 +363,8 @@
 
         <article class="unit-card">
           <div class="unit-top">
-            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/sentinel/druid.profile.png" alt="Cleric"></div>
-            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/undead/lich.profile.png" alt="Necrolyte"></div>
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/sentinel/druid.profile.png" alt="Cleric" width="256" height="256"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/mini_legion/undead/lich.profile.png" alt="Necrolyte" width="256" height="256"></div>
             <div>
               <div class="side light">LIGHT CLERIC</div>
               <div class="side dark">DARK NECROLYTE</div>
@@ -382,8 +385,8 @@
 
         <article class="unit-card">
           <div class="unit-top">
-            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/sentinel/rock_golem.profile.png" alt="Elemental"></div>
-            <div class="portrait dark"><img src="../../../../polyworld_data/characters/rpg_monsters/demon_king.profile.png" alt="Daemon"></div>
+            <div class="portrait light"><img src="../../../../polyworld_data/characters/mini_legion/sentinel/rock_golem.profile.png" alt="Elemental" width="256" height="256"></div>
+            <div class="portrait dark"><img src="../../../../polyworld_data/characters/rpg_monsters/demon_king.profile.png" alt="Daemon" width="256" height="256"></div>
             <div>
               <div class="side light">LIGHT ELEMENTAL</div>
               <div class="side dark">DARK DAEMON</div>
@@ -415,7 +418,7 @@
       <div class="build-grid">
         <article class="build-card">
           <div class="build-top">
-            <img src="../../../../polyworld_data/terrain/low_poly_village.house_lvl7.profile.png" alt="Town hall">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.house_lvl7.profile.png" alt="Town hall" width="256" height="256">
             <div>
               <h3>Town Hall</h3>
               <div class="cost">
@@ -426,13 +429,13 @@
           </div>
           <p class="diff">1200 HP. 30s. 3×3. +5 food. Gold and wood drop-off. Trains workers.</p>
           <div class="pair">
-            <img src="../../../../polyworld_data/terrain/low_poly_village.house_lvl7.profile.png" alt="Light hall">
-            <img src="../../../../polyworld_data/terrain/tower_defense_kit.building1.profile.png" alt="Dark hall">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.house_lvl7.profile.png" alt="Light hall" width="256" height="256">
+            <img src="../../../../polyworld_data/terrain/tower_defense_kit.building1.profile.png" alt="Dark hall" width="256" height="256">
           </div>
         </article>
         <article class="build-card">
           <div class="build-top">
-            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_lvl4.profile.png" alt="Farm">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_lvl4.profile.png" alt="Farm" width="256" height="256">
             <div>
               <h3>Farm</h3>
               <div class="cost">
@@ -445,7 +448,7 @@
         </article>
         <article class="build-card">
           <div class="build-top">
-            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl5.profile.png" alt="Barracks">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl5.profile.png" alt="Barracks" width="256" height="256">
             <div>
               <h3>Barracks</h3>
               <div class="cost">
@@ -456,13 +459,13 @@
           </div>
           <p class="diff">800 HP. 20s. 3×3. Trains soldiers, ranged, knights, siege.</p>
           <div class="pair">
-            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl5.profile.png" alt="Light barracks">
-            <img src="../../../../polyworld_data/terrain/tower_defense_kit.building3.profile.png" alt="Dark barracks">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl5.profile.png" alt="Light barracks" width="256" height="256">
+            <img src="../../../../polyworld_data/terrain/tower_defense_kit.building3.profile.png" alt="Dark barracks" width="256" height="256">
           </div>
         </article>
         <article class="build-card">
           <div class="build-top">
-            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl3.profile.png" alt="Lumber mill">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl3.profile.png" alt="Lumber mill" width="256" height="256">
             <div>
               <h3>Lumber Mill</h3>
               <div class="cost">
@@ -475,7 +478,7 @@
         </article>
         <article class="build-card">
           <div class="build-top">
-            <img src="../../../../polyworld_data/terrain/low_poly_village.tower_lvl5.profile.png" alt="Tower">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.tower_lvl5.profile.png" alt="Tower" width="256" height="256">
             <div>
               <h3>Tower</h3>
               <div class="cost">
@@ -488,7 +491,7 @@
         </article>
         <article class="build-card">
           <div class="build-top">
-            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl6.profile.png" alt="Stables">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl6.profile.png" alt="Stables" width="256" height="256">
             <div>
               <h3>Stables / Kennels</h3>
               <div class="cost">
@@ -501,7 +504,7 @@
         </article>
         <article class="build-card">
           <div class="build-top">
-            <img src="../../../../polyworld_data/terrain/low_poly_village.house_lvl4.profile.png" alt="Church">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.house_lvl4.profile.png" alt="Church" width="256" height="256">
             <div>
               <h3>Church / Temple</h3>
               <div class="cost">
@@ -514,7 +517,7 @@
         </article>
         <article class="build-card">
           <div class="build-top">
-            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl2.profile.png" alt="Blacksmith">
+            <img src="../../../../polyworld_data/terrain/low_poly_village.farm_house_lvl2.profile.png" alt="Blacksmith" width="256" height="256">
             <div>
               <h3>Blacksmith</h3>
               <div class="cost">
@@ -527,7 +530,7 @@
         </article>
         <article class="build-card">
           <div class="build-top">
-            <img src="../../../../polyworld_data/terrain/tower_defense_kit.mineral1.profile.png" alt="Gold mine">
+            <img src="../../../../polyworld_data/terrain/tower_defense_kit.mineral1.profile.png" alt="Gold mine" width="256" height="256">
             <div>
               <h3>Gold Mine</h3>
               <div class="cost"><span>Neutral</span></div>
