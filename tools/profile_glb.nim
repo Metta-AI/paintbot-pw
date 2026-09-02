@@ -178,7 +178,9 @@ proc presetParts(path, name: string): seq[string] =
   let manifestPath = path.parentDir / "manifest.json"
   if not fileExists(manifestPath):
     return
-  for preset in parseFile(manifestPath){"presets"}:
+  # getElems, not a bare iteration: a pack manifest that has no presets at
+  # all yields nil here, and iterating that crashes.
+  for preset in parseFile(manifestPath){"presets"}.getElems:
     if preset["name"].getStr == name:
       for part in preset["parts"]:
         result.add part.getStr

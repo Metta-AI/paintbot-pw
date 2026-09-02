@@ -162,6 +162,83 @@ proc resampleLanczos(image: Image, width, height: int): Image =
         b += pixel.b.float * w
       result.unsafe[x, y] = rgbx(clampByte(r), clampByte(g), clampByte(b), 255)
 
+
+
+proc readTga*(path: string): Image =
+  ## Reads an uncompressed true-colour TGA.
+  ##
+  ## Pixie has no TGA decoder, and the Toon packs ship their foliage atlases
+  ## that way — 4096² 32-bit BGRA, bottom-up, which is the only flavour this
+  ## handles. Anything else is refused rather than silently mis-decoded.
+  let data = readFile(path)
+  if data.len < 18:
+    raise newException(ConversionError, path & ": truncated TGA header")
+  let
+    idLength = data[0].ord
+    colorMapType = data[1].ord
+    imageType = data[2].ord
+    width = data[12].ord or (data[13].ord shl 8)
+    height = data[14].ord or (data[15].ord shl 8)
+    bits = data[16].ord
+    descriptor = data[17].ord
+  if colorMapType != 0 or imageType != 2 or bits notin {24, 32}:
+    raise newException(ConversionError,
+      path & ": unsupported TGA (type " & $imageType & ", " & $bits & " bpp)")
+  let
+    channels = bits div 8
+    start = 18 + idLength
+    topDown = (descriptor and 0x20) != 0
+  if start + width * height * channels > data.len:
+    raise newException(ConversionError, path & ": truncated TGA pixels")
+  result = newImage(width, height)
+  for row in 0 ..< height:
+    let y = if topDown: row else: height - 1 - row
+    for x in 0 ..< width:
+      let i = start + (row * width + x) * channels
+      let alpha = if channels == 4: uint8(data[i + 3].ord) else: 255'u8
+      result.unsafe[x, y] = rgba(
+        uint8(data[i + 2].ord), uint8(data[i + 1].ord),
+        uint8(data[i].ord), alpha).rgbx
+
+proc readSourceImage*(path: string): Image =
+  ## Reads a pack texture, including the formats pixie does not handle.
+  if path.toLowerAscii.endsWith(".tga"): readTga(path)
+  else: readImage(path)
+
+proc resampleLanczosRgba(image: Image, width, height: int): Image =
+  ## Separable Lanczos-3 resample that carries alpha.
+  ##
+  ## Cutout foliage lives or dies on its alpha edge, so unlike the opaque
+  ## path this keeps the channel. Pixie stores premultiplied colour, which is
+  ## exactly what a resample wants: filtering premultiplied values never
+  ## drags a transparent texel's colour into its neighbours.
+  template clampByte(v: float): uint8 =
+    uint8(clamp(round(v), 0.0, 255.0))
+  let horizontal = newImage(width, image.height)
+  for x, (start, weights) in lanczosWeights(image.width, width):
+    for y in 0 ..< image.height:
+      var r, g, b, a = 0.0
+      for k, w in weights:
+        let pixel = image.unsafe[start + k, y]
+        r += pixel.r.float * w
+        g += pixel.g.float * w
+        b += pixel.b.float * w
+        a += pixel.a.float * w
+      horizontal.unsafe[x, y] =
+        rgbx(clampByte(r), clampByte(g), clampByte(b), clampByte(a))
+  result = newImage(width, height)
+  for y, (start, weights) in lanczosWeights(image.height, height):
+    for x in 0 ..< width:
+      var r, g, b, a = 0.0
+      for k, w in weights:
+        let pixel = horizontal.unsafe[x, start + k]
+        r += pixel.r.float * w
+        g += pixel.g.float * w
+        b += pixel.b.float * w
+        a += pixel.a.float * w
+      result.unsafe[x, y] =
+        rgbx(clampByte(r), clampByte(g), clampByte(b), clampByte(a))
+
 proc writeTexture*(
     sourcePath, targetPath: string, size: int, mode = "rgb", force = false
 ): bool =
@@ -169,14 +246,14 @@ proc writeTexture*(
   ##
   ## These packs ship textures at essentially no compression, so this is the
   ## step that turns tens of megabytes into hundreds of kilobytes. Colour
-  ## textures drop to RGB and resample with Lanczos; masks keep only the red
-  ## channel as 8-bit grey, sampled nearest so team regions never bleed into
-  ## each other.
+  ## textures drop to RGB and resample with Lanczos; "rgba" keeps the alpha
+  ## channel for cutout foliage; masks keep only the red channel as 8-bit
+  ## grey, sampled nearest so team regions never bleed into each other.
   if not force and fileExists(targetPath) and
       getLastModificationTime(targetPath) >= getLastModificationTime(sourcePath):
     return false
   createDir(targetPath.parentDir)
-  var image = readImage(sourcePath)
+  var image = readSourceImage(sourcePath)
   var pixels: string
   var channels: int
   if mode == "mask":
@@ -187,6 +264,20 @@ proc writeTexture*(
       for x in 0 ..< size:
         let sx = int((x.float + 0.5) * image.width.float / size.float)
         pixels[y * size + x] = char(image.unsafe[sx, sy].r)
+  elif mode == "rgba":
+    channels = 4
+    if image.width != size or image.height != size:
+      image = resampleLanczosRgba(image, size, size)
+    pixels = newString(size * size * 4)
+    for i, pixel in image.data:
+      # Pixie holds premultiplied colour; PNG wants straight alpha.
+      let a = pixel.a.int
+      template straight(c: uint8): char =
+        if a == 0: char(0) else: char(min(255, c.int * 255 div a))
+      pixels[i * 4 + 0] = straight(pixel.r)
+      pixels[i * 4 + 1] = straight(pixel.g)
+      pixels[i * 4 + 2] = straight(pixel.b)
+      pixels[i * 4 + 3] = char(pixel.a)
   else:
     channels = 3
     # Alpha is dropped, so make every pixel opaque first: premultiplied and
