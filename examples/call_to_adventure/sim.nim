@@ -690,13 +690,13 @@ proc advancePath*(world: World, slot: int32): bool =
   world.followPath(slot)
 
 proc stepToward*(world: World, slot: int32, goal: TileRef): bool =
-  ## Keeps an actor walking toward a goal, re-pathing when the goal moves.
+  ## Sets or updates a walk path. Movement happens in `advancePath`.
   if world.actors[slot].path.len == 0 or
       world.actors[slot].pathIndex >= int32(world.actors[slot].path.len) or
       not (world.pathGoal(slot) == goal):
     if not world.setPath(slot, goal):
       return false
-  world.followPath(slot)
+  true
 
 proc wantedTile*(world: World, slot: int32): (bool, TileRef) =
   ## The tile this actor is trying to step into right now, if any.

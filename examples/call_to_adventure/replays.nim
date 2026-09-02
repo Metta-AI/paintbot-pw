@@ -9,7 +9,7 @@ import
 const
   ReplayGame* = "call_to_adventure"
   ReplayFormatVersion* = 1'u16
-  ReplayGameVersion* = 10'u16
+  ReplayGameVersion* = 11'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionPickupTarget* = 3'u8

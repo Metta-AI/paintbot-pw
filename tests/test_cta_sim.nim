@@ -332,6 +332,28 @@ block:
       "movement drifted at tile boundary on tick " & $tick
     doAssert abs(world.actors[slot].body.pos.y - 0.5'fx) <= Fixed(8)
 
+echo "Testing stepToward only sets the path"
+block:
+  layers = @[flatLayer(6)]
+  computeWalkable()
+  let
+    world = newWorld(Setup(seed: 1988))
+    slot = world.addActor(Actor(
+      home: TileRef(level: 0, x: 0, z: 0),
+      speed: ClassSpeeds[RogueClass],
+      hp: 1,
+      maxHp: 1
+    ))
+    goal = TileRef(level: 0, x: 5, z: 0)
+    before = world.actors[slot].body.pos
+  doAssert world.stepToward(slot, goal)
+  doAssert world.actors[slot].body.pos == before,
+    "a walk command must not also steer that tick"
+  doAssert world.pathGoal(slot) == goal
+  discard world.advancePath(slot)
+  doAssert world.actors[slot].body.pos != before,
+    "movement must happen in the path phase"
+
 echo "Testing paths route around occupied tiles"
 block:
   var floor = QuadLayer(
