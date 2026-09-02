@@ -499,7 +499,8 @@ proc drawHeroPortrait(
     primaryId: var int32,
     selectedIds: var seq[int32],
     followSelection: var bool,
-    actionCam: var ActionCam
+    actionCam: var ActionCam,
+    focusPlayerHero: var bool
 ) =
   ## Draws one top-bar portrait on the hero plate.
   let
@@ -531,6 +532,10 @@ proc drawHeroPortrait(
       window.buttonDown[KeyLeftShift] or
         window.buttonDown[KeyRightShift]
     )
+    if options.playerSlot > 0 and
+        not run.replayMode and
+        hero.id == run.world.heroes[options.playerSlot - 1].id:
+      focusPlayerHero = true
 
 proc drawHeroMeters(
     sk: Silky,
@@ -634,7 +639,8 @@ proc drawUi*(
     primaryId: var int32,
     selectedIds: var seq[int32],
     followSelection: var bool,
-    actionCam: var ActionCam
+    actionCam: var ActionCam,
+    focusPlayerHero: var bool
 ) =
   ## Draws every Silky HUD panel for the current frame.
   let
@@ -682,7 +688,8 @@ proc drawUi*(
       primaryId,
       selectedIds,
       followSelection,
-      actionCam
+      actionCam,
+      focusPlayerHero
     )
   for hero in run.world.heroes:
     sk.drawHeroMeters(heroesPanel, hero)
@@ -799,6 +806,13 @@ proc drawUi*(
         of SelectedHero:
           "champion"
       sk.drawWellImage(portrait, glyph, teamColor)
+    if window.clicked(sk, portrait) and
+        selection.kind == SelectedHero and
+        options.playerSlot > 0 and
+        not run.replayMode and
+        selection.id == run.world.heroes[options.playerSlot - 1].id:
+      actionCam.takeManual()
+      focusPlayerHero = true
     if selection.kind == SelectedHero:
       for slot in HeroAbilitySlot:
         let

@@ -431,7 +431,8 @@ proc drawUi*(
     primaryId: var int,
     selectedIds: var array[PartySize, bool],
     followSelection: var bool,
-    actionCam: var ActionCam
+    actionCam: var ActionCam,
+    focusPlayerHero: var bool
 ) =
   ## Draws every Silky HUD panel for the current frame.
   let
@@ -547,6 +548,10 @@ proc drawUi*(
         window.buttonDown[KeyLeftShift] or
           window.buttonDown[KeyRightShift]
       )
+      if options.playerSlot > 0 and
+          not run.replayMode and
+          slot == options.playerSlot - 1:
+        focusPlayerHero = true
   let
     generalTab = chatPanel.imageSlot(8, 4, 72, 28)
     combatTab = chatPanel.imageSlot(88, 4, 128, 28)

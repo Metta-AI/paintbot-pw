@@ -18,11 +18,20 @@ const
     ## subject above the HUD.
   RtsGotaFollowLift* = 0.15'f32
     ## GOTA's HUD is shorter, so the hero sits closer to center.
+  RtsPortraitEase* = 0.55'f32
+    ## Ease-in-out duration when a HUD portrait pans to a hero.
 
-type MinimapViewRect* = object
-  ## Describes the visible ground footprint inside a minimap rectangle.
-  origin*: Vec2
-  size*: Vec2
+type
+  MinimapViewRect* = object
+    ## Describes the visible ground footprint inside a minimap rectangle.
+    origin*: Vec2
+    size*: Vec2
+  CameraEase* = object
+    ## One-shot ease-in-out pan from a start point toward a live dest.
+    active*: bool
+    start*: Vec3
+    elapsed*: float32
+    duration*: float32
 
 proc rtsCameraEye*(target: Vec3, distance: float32): Vec3 =
   ## Returns the locked north-facing RTS camera position.
@@ -255,4 +264,42 @@ proc applyRtsPan*(
     -halfSpan,
     halfSpan
   )
+  true
+
+proc rtsEaseT*(t: float32): float32 =
+  ## Smoothstep ease-in-out in 0 .. 1.
+  let u = clamp(t, 0.0'f32, 1.0'f32)
+  u * u * (3.0'f32 - 2.0'f32 * u)
+
+proc startCameraEase*(
+    ease: var CameraEase,
+    fromPos: Vec3,
+    duration = RtsPortraitEase
+) =
+  ## Begins an ease-in-out pan from the current look-at.
+  ease.active = true
+  ease.start = fromPos
+  ease.elapsed = 0
+  ease.duration = max(duration, 0.001'f32)
+
+proc cancelCameraEase*(ease: var CameraEase) =
+  ## Stops a running portrait pan without changing the look-at.
+  ease.active = false
+
+proc advanceCameraEase*(
+    ease: var CameraEase,
+    target: var Vec3,
+    dest: Vec3,
+    dt: float32
+): bool =
+  ## Moves `target` toward `dest` with ease-in-out. Still running if true.
+  if not ease.active:
+    return false
+  ease.elapsed += dt
+  let t = rtsEaseT(ease.elapsed / ease.duration)
+  target = mix(ease.start, dest, t)
+  if ease.elapsed >= ease.duration:
+    target = dest
+    ease.active = false
+    return false
   true

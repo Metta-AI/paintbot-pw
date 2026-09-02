@@ -497,6 +497,8 @@ proc runGraphics*() =
     lastMouse = ivec2(0, 0)
     lastFrameTime = epochTime()
     followSelection = false
+    cameraEase: CameraEase
+    focusPlayerHero = false
     actionCam = initActionCam(
       minDistance = 12,
       maxDistance = 36,
@@ -676,18 +678,10 @@ proc runGraphics*() =
     followSelection = false
     actionCam.takeManual()
 
-  proc playerHeroSelected(): bool =
-    ## Returns whether the human hero is currently selected and alive.
-    playerMode() and
-      playerSlot >= 0 and
-      playerSlot < run.world.actors.len and
-      selectedIds[playerSlot] and
-      run.world.actors[playerSlot].alive
-
   if playerMode():
     selectedIds[playerSlot] = true
     primaryId = playerSlot
-    followSelection = true
+    followSelection = false
     actionCam.enabled = false
     if playerSlot >= 0 and playerSlot < run.world.actors.len:
       cameraTarget =
@@ -1017,18 +1011,16 @@ proc runGraphics*() =
         tileCenter(picked.layer, picked.x, picked.z)
       )
 
-  proc followPlayerHero(dt: float32) =
-    ## Keeps the camera on the selected human hero.
+  proc playerHeroFrame(): Vec3 =
+    ## Returns the look-at that frames the human hero over the HUD.
     if playerSlot < 0 or playerSlot >= run.world.actors.len:
-      return
+      return cameraTarget
     let actor = run.world.actors[playerSlot]
     if not actor.alive:
-      return
-    followSelection = true
-    cameraTarget = mix(
-      cameraTarget,
+      return cameraTarget
+    rtsFollowFrame(
       actorRenderPosition(actor) + vec3(0, 0.85'f32, 0),
-      damping(5.0'f32, dt)
+      cameraDistance
     )
 
   proc drawWorldBars(
@@ -1165,6 +1157,7 @@ proc runGraphics*() =
     sk.uiScale = hudUiScale(window)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     if not mouseOverUi(window, sk.mousePos):
+      cancelCameraEase(cameraEase)
       if not playerMode():
         actionCam.takeManual()
       if not playerMode() and
@@ -1262,6 +1255,9 @@ proc runGraphics*() =
       # Camera
       profileBlock "camera":
         let overUi = mouseOverUi(window, sk.mousePos)
+        if focusPlayerHero:
+          focusPlayerHero = false
+          startCameraEase(cameraEase, cameraTarget)
         if (window.buttonPressed[MouseMiddle] and not overUi) or
             window.buttonPressed[KeyB]:
           if playerMode():
@@ -1269,6 +1265,7 @@ proc runGraphics*() =
           else:
             followSelection = false
             actionCam.takeManual()
+          cancelCameraEase(cameraEase)
           lastMouse = window.mousePos
         let wantPan =
           window.buttonDown[KeyB] or
@@ -1277,19 +1274,43 @@ proc runGraphics*() =
         if wantPan and not panning:
           lastMouse = window.mousePos
         panning = wantPan
-        if playerHeroSelected():
-          followPlayerHero(dt)
+        updateMinimapCamera(
+          window,
+          sk.mousePos,
+          cameraTarget,
+          minimapPanning,
+          followSelection,
+          selectedViewLevel()
+        )
+        if minimapPanning:
+          actionCam.takeManual()
+          cancelCameraEase(cameraEase)
+        if playerMode():
+          if panning:
+            let delta = window.mousePos - lastMouse
+            lastMouse = window.mousePos
+            cancelCameraEase(cameraEase)
+            cameraTarget.x -= delta.x.float32 * 0.05'f32
+            cameraTarget.z -= delta.y.float32 * 0.05'f32
+            cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
+            cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
+          elif not minimapPanning and
+              applyRtsPan(
+                cameraTarget,
+                rtsPanDir(window),
+                dt,
+                cameraDistance,
+                HalfGrid
+              ):
+            cancelCameraEase(cameraEase)
+          else:
+            discard advanceCameraEase(
+              cameraEase,
+              cameraTarget,
+              playerHeroFrame(),
+              dt
+            )
         else:
-          updateMinimapCamera(
-            window,
-            sk.mousePos,
-            cameraTarget,
-            minimapPanning,
-            followSelection,
-            selectedViewLevel()
-          )
-          if minimapPanning:
-            actionCam.takeManual()
           if panning:
             let delta = window.mousePos - lastMouse
             lastMouse = window.mousePos
@@ -1309,7 +1330,7 @@ proc runGraphics*() =
               ):
             followSelection = false
             actionCam.takeManual()
-          if not playerMode() and actionCam.enabled:
+          if actionCam.enabled:
             feedCtaActions()
             actionCam.chooseShot(dt, transport.speed)
             actionCam.follow(
@@ -1520,7 +1541,8 @@ proc runGraphics*() =
           primaryId,
           selectedIds,
           followSelection,
-          actionCam
+          actionCam,
+          focusPlayerHero
         )
         sk.endUi()
       when defined(takeScreenshot):

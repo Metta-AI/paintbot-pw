@@ -61,6 +61,29 @@ block:
   doAssert lower.z > 0
   doAssert lower.z < framed.z
 
+echo "Testing camera ease-in-out"
+block:
+  doAssert abs(rtsEaseT(0) - 0) < 0.001
+  doAssert abs(rtsEaseT(1) - 1) < 0.001
+  doAssert abs(rtsEaseT(0.5) - 0.5) < 0.001
+  doAssert rtsEaseT(0.25) < 0.25
+  doAssert rtsEaseT(0.75) > 0.75
+  var
+    ease: CameraEase
+    target = vec3(0, 0, 0)
+  startCameraEase(ease, vec3(0, 0, 0), 1.0)
+  doAssert ease.active
+  discard advanceCameraEase(ease, target, vec3(10, 0, 0), 0.25)
+  doAssert target.x < 2.5
+  discard advanceCameraEase(ease, target, vec3(10, 0, 0), 0.25)
+  doAssert abs(target.x - 5) < 0.001
+  discard advanceCameraEase(ease, target, vec3(10, 0, 0), 0.5)
+  doAssert abs(target.x - 10) < 0.001
+  doAssert not ease.active
+  startCameraEase(ease, vec3(0, 0, 0), 1.0)
+  cancelCameraEase(ease)
+  doAssert not advanceCameraEase(ease, target, vec3(10, 0, 0), 0.5)
+
 echo "Testing ground tile picking"
 block:
   let tile = groundTile(vec3(-63.2, 0, 4.1), 64, 128)

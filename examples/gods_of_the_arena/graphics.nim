@@ -689,6 +689,8 @@ proc runGraphics*() =
     selectionStarted = false
     selectionAdditive = false
     followSelection = false
+    cameraEase: CameraEase
+    focusPlayerHero = false
     groupCameraScale = 1.0'f32
     actionCam = initActionCam(
       minDistance = 22,
@@ -748,7 +750,7 @@ proc runGraphics*() =
   if playerMode():
     primaryId = playerHeroId()
     selectedIds.add primaryId
-    followSelection = true
+    followSelection = false
 
   proc syncViewMode() =
     ## Shows one team's fog when the selection is one-sided.
@@ -868,10 +870,6 @@ proc runGraphics*() =
     primaryId = 0
     followSelection = false
     actionCam.takeManual()
-
-  proc playerHeroSelected(): bool =
-    ## Returns whether the human hero is in the current selection.
-    playerMode() and isSelected(playerHeroId())
 
   proc selectedCenter(): Vec3 =
     ## Returns the midpoint of all currently selected world objects.
@@ -1198,36 +1196,37 @@ proc runGraphics*() =
         36
       )
 
-  proc followPlayerHero(dt: float32) =
-    ## Keeps the camera on the selected human hero.
+  proc playerHeroFrame(): Vec3 =
+    ## Returns the look-at that frames the human hero over the HUD.
     let hero = heroById(run.world, playerHeroId())
     if hero.id == 0:
-      return
-    followSelection = true
-    cameraTarget = mix(
-      cameraTarget,
-      rtsFollowFrame(
-        unitRenderPoint(hero.id, hero.position) + vec3(0, 0.9'f32, 0),
-        cameraDistance,
-        RtsGotaFollowLift
-      ),
-      damping(5.0'f32, dt)
+      return cameraTarget
+    rtsFollowFrame(
+      unitRenderPoint(hero.id, hero.position) + vec3(0, 0.9'f32, 0),
+      cameraDistance,
+      RtsGotaFollowLift
     )
+
+  if playerMode():
+    cameraTarget = playerHeroFrame()
 
   proc updateCamera(dt: float32) =
     ## Applies fixed-north RTS pan, zoom, and selection following.
     pruneSelection()
     syncViewMode()
-    if not playerHeroSelected():
-      updateMinimapCamera(
-        window,
-        sk.mousePos,
-        cameraTarget,
-        minimapPanning,
-        followSelection
-      )
-      if minimapPanning:
-        actionCam.takeManual()
+    if focusPlayerHero:
+      focusPlayerHero = false
+      startCameraEase(cameraEase, cameraTarget)
+    updateMinimapCamera(
+      window,
+      sk.mousePos,
+      cameraTarget,
+      minimapPanning,
+      followSelection
+    )
+    if minimapPanning:
+      actionCam.takeManual()
+      cancelCameraEase(cameraEase)
     let overUi = mouseOverUi(window, sk.mousePos, primaryId)
     if window.buttonPressed[KeyA] and
         (window.buttonDown[KeyLeftControl] or
@@ -1248,6 +1247,7 @@ proc runGraphics*() =
       else:
         followSelection = false
         actionCam.takeManual()
+      cancelCameraEase(cameraEase)
     panning =
       window.buttonDown[KeyB] or
       (not overUi and window.buttonDown[MouseMiddle]) or
@@ -1256,6 +1256,7 @@ proc runGraphics*() =
     let delta = window.mouseDelta.vec2
     if playerMode():
       if not overUi and window.scrollDelta.y != 0:
+        cancelCameraEase(cameraEase)
         cameraDistance = clamp(
           cameraDistance * pow(
             0.92'f32,
@@ -1264,22 +1265,28 @@ proc runGraphics*() =
           5.0'f32,
           400.0'f32
         )
-      if playerHeroSelected():
-        followPlayerHero(dt)
-        return
       if panning:
+        cancelCameraEase(cameraEase)
         let panSpeed = cameraDistance * 0.0015
         cameraTarget.x -= delta.x * panSpeed
         cameraTarget.z -= delta.y * panSpeed
         cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
         cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
-      discard applyRtsPan(
-        cameraTarget,
-        rtsPanDir(window),
-        dt,
-        cameraDistance,
-        HalfGrid
-      )
+      elif applyRtsPan(
+          cameraTarget,
+          rtsPanDir(window),
+          dt,
+          cameraDistance,
+          HalfGrid
+        ):
+        cancelCameraEase(cameraEase)
+      else:
+        discard advanceCameraEase(
+          cameraEase,
+          cameraTarget,
+          playerHeroFrame(),
+          dt
+        )
       return
     if panning:
       followSelection = false
@@ -1653,14 +1660,8 @@ proc runGraphics*() =
     else:
       primaryId = playerHeroId()
       selectedIds = @[primaryId]
-      followSelection = true
-      let hero = heroById(run.world, primaryId)
-      if hero.id != 0:
-        cameraTarget = rtsFollowFrame(
-          unitRenderPoint(hero.id, hero.position) + vec3(0, 0.9'f32, 0),
-          cameraDistance,
-          RtsGotaFollowLift
-        )
+      followSelection = false
+      cameraTarget = playerHeroFrame()
 
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
@@ -1855,7 +1856,8 @@ proc runGraphics*() =
           primaryId,
           selectedIds,
           followSelection,
-          actionCam
+          actionCam,
+          focusPlayerHero
         )
         sk.endUi()
       when defined(takeScreenshot):
