@@ -32,5 +32,7 @@ examples/call_to_adventure/emscripten/
 examples/light_vs_dark/*.png
 examples/light_vs_dark/emscripten/
 examples/light_vs_dark/profiles/
+examples/heartleaf/*.png
+examples/heartleaf/emscripten/
 tmp/
 experiments/modular_chars/modular_chars_shot.png

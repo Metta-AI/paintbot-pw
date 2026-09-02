@@ -64,10 +64,17 @@ nim r examples/call_to_adventure/cta.nim --bot examples/call_to_adventure/player
 nim r -d:headless examples/call_to_adventure/cta.nim --seed 1988 --bot examples/call_to_adventure/players/base.bas:4 --record examples/call_to_adventure/replays/demo.replay
 nim r examples/call_to_adventure/cta.nim --replay examples/call_to_adventure/replays/demo.replay
 nim c -d:emscripten examples/call_to_adventure/cta.nim
+
+# Heartleaf
+nim r examples/heartleaf/heartleaf.nim --bot examples/heartleaf/players/base.bas:9
+nim r -d:headless examples/heartleaf/heartleaf.nim --seed 1988 --bot examples/heartleaf/players/base.bas:9 --record examples/heartleaf/replays/demo.replay
+nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay
+nim c -d:emscripten examples/heartleaf/heartleaf.nim
 ```
 
 The `:N` after a bot path is how many copies to load. Gods of the Arena
-needs 10, Light vs Dark needs 2, Call to Adventure needs 4.
+needs 10, Light vs Dark needs 2, Call to Adventure needs 4, Heartleaf
+needs 9.
 
 ### Experiments
 

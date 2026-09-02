@@ -27,3 +27,4 @@ jobs:
       - run: nim c -d:headless examples/gods_of_the_arena/gota.nim
       - run: nim c -d:headless examples/call_to_adventure/cta.nim
       - run: nim c -d:headless examples/light_vs_dark/lvd.nim
+      - run: nim c -d:headless examples/heartleaf/heartleaf.nim

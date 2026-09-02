@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Heartleaf</title>
+  <!-- Portraits, icons, and fonts load from the sibling polyworld_data repo. -->
+  <style>
+    @font-face {
+      font-family: Rubik;
+      src: url("../../../../polyworld_data/fonts/Rubik-Regular.ttf") format("truetype");
+      font-weight: 400;
+    }
+    @font-face {
+      font-family: Rubik;
+      src: url("../../../../polyworld_data/fonts/Rubik-Bold.ttf") format("truetype");
+      font-weight: 700;
+    }
+    :root {
+      --bg: #0c120c;
+      --well: #101710;
+      --leaf: #5fa357;
+      --leaf-deep: #2f5e33;
+      --cream: #efe6c8;
+      --tomato: #e26c5c;
+      --text: #eef7ee;
+      --muted: #a9b8a9;
+      --line: rgba(95, 163, 87, 0.24);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Rubik, sans-serif;
+    }
+    body {
+      background:
+        radial-gradient(1100px 560px at 0% -60px, rgba(95, 163, 87, 0.20), transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, rgba(226, 108, 92, 0.14), transparent 50%),
+        var(--bg);
+    }
+    a { color: var(--leaf); text-decoration: none; }
+    img { display: block; }
+    .wrap { width: min(1100px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 60px; }
+    .page-logo { width: min(560px, 100%); height: auto; margin: 0 auto 6px; }
+    .kicker {
+      color: var(--leaf); letter-spacing: 0.28em; font-size: 12px;
+      font-weight: 700; margin: 0 0 8px; text-align: center;
+    }
+    .lede {
+      max-width: 780px; margin: 0 auto 30px; color: #dcead9;
+      line-height: 1.6; text-align: center;
+    }
+    .facts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 0 0 36px; }
+    .fact, .panel {
+      background: linear-gradient(180deg, #162015, #101710);
+      border: 1px solid var(--line); border-radius: 16px;
+    }
+    .fact { padding: 16px 18px; text-align: center; }
+    .fact b { display: block; font-size: 24px; color: var(--cream); }
+    .fact span { color: var(--muted); font-size: 12px; letter-spacing: 0.06em; }
+    h2 { margin: 0 0 14px; font-size: 26px; letter-spacing: 0.04em; }
+    .panel { padding: 22px; margin-bottom: 24px; }
+    p, li { line-height: 1.6; color: #dcead9; }
+    .rule { color: var(--cream); font-weight: 700; }
+    .villagers { display: grid; grid-template-columns: repeat(9, 1fr); gap: 10px; }
+    .villager { text-align: center; }
+    .villager img {
+      width: 100%; border-radius: 12px; border: 1px solid var(--line);
+      background: var(--well);
+    }
+    .villager span { display: block; margin-top: 6px; font-size: 13px; color: var(--muted); }
+    pre {
+      background: var(--well); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px; padding: 14px 16px; overflow-x: auto;
+      color: var(--cream); font-size: 13px; line-height: 1.6;
+    }
+    footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 30px; }
+    @media (max-width: 900px) {
+      .facts { grid-template-columns: repeat(2, 1fr); }
+      .villagers { grid-template-columns: repeat(3, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <img class="page-logo" src="../../../../polyworld_data/themes/heartleaf/heartleaf_logo.png" alt="Heartleaf">
+    <p class="kicker">A POLYWORLD EXAMPLE GAME</p>
+    <p class="lede">
+      Nine villagers, one week, one bell. Gather the morning vegetables,
+      talk your neighbours into coming over, and be inside the right house
+      when the clock strikes six &mdash; because dinner is the only thing
+      that scores.
+    </p>
+
+    <div class="facts">
+      <div class="fact"><b>9</b><span>VILLAGERS</span></div>
+      <div class="fact"><b>24</b><span>VEGETABLES</span></div>
+      <div class="fact"><b>27</b><span>GARDEN PLOTS</span></div>
+      <div class="fact"><b>6 PM</b><span>THE TALLY</span></div>
+      <div class="fact"><b>7</b><span>DAYS</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>The week</h2>
+      <p>
+        Days run 9:00 to 21:00 on an accelerated clock. Every morning each
+        garden grows one random vegetable; a gatherer takes everything the
+        plot holds and it stays bare until tomorrow. At exactly 18:00 every
+        house holds its dinner tally at once: a party is valid when the
+        owner is home with at least one visitor.
+      </p>
+      <ul>
+        <li><span class="rule">Hosting:</span> the host banks items carried
+          &times; visitor count, then the pantry feeds everyone for three
+          bite rounds &mdash; and empties.</li>
+        <li><span class="rule">Eating:</span> a vegetable you have never
+          tasted this week is worth 3, a repeat is worth 1. Guests eat for
+          free.</li>
+        <li><span class="rule">Loneliness:</span> anyone alone, or outside,
+          scores nothing that night.</li>
+      </ul>
+      <p>
+        Invitations are real commands &mdash; a wave within three tiles
+        declares you a host &mdash; but nothing binds anyone. Attendance is
+        purely who is physically inside which house when the bell rings.
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>The village</h2>
+      <p>
+        The map is generated from a seed: a ring of nine houses around a
+        stone plaza, dirt roads from every door, three garden plots beside
+        each house, and a forest closing in from the map edge. Houses have
+        no interiors &mdash; a villager who steps inside becomes a little
+        portrait floating over the roof.
+      </p>
+      <div class="villagers">
+        <div class="villager"><img src="../../../../polyworld_data/characters/modular_chars/character.preset_1.profile.png" alt=""><span>Ivan</span></div>
+        <div class="villager"><img src="../../../../polyworld_data/characters/modular_chars/character.preset_2.profile.png" alt=""><span>Anton</span></div>
+        <div class="villager"><img src="../../../../polyworld_data/characters/modular_chars/character.preset_3.profile.png" alt=""><span>Yura</span></div>
+        <div class="villager"><img src="../../../../polyworld_data/characters/modular_chars/character.preset_5.profile.png" alt=""><span>Sasha</span></div>
+        <div class="villager"><img src="../../../../polyworld_data/characters/modular_chars/character.preset_6.profile.png" alt=""><span>Maxim</span></div>
+        <div class="villager"><img src="../../../../polyworld_data/characters/modular_chars/character.preset_9.profile.png" alt=""><span>Nikita</span></div>
+        <div class="villager"><img src="../../../../polyworld_data/characters/modular_chars/character.preset_11.profile.png" alt=""><span>Vova</span></div>
+        <div class="villager"><img src="../../../../polyworld_data/characters/modular_chars/character.preset_12.profile.png" alt=""><span>Dima</span></div>
+        <div class="villager"><img src="../../../../polyworld_data/characters/modular_chars/character.preset_13.profile.png" alt=""><span>Egor</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>The bots</h2>
+      <p>
+        Each villager is one BASIC program deciding once per game minute:
+        gather, walk, invite, accept, enter, exit. The reference villager
+        plays the strong plan from the game this borrows its ideas from
+        &mdash; gather all day, host by rotation, guest everywhere else,
+        and never be alone at six.
+      </p>
+      <pre>nim r examples/heartleaf/heartleaf.nim --bot examples/heartleaf/players/base.bas:9
+
+nim r -d:headless examples/heartleaf/heartleaf.nim --seed 1988 \
+  --bot examples/heartleaf/players/base.bas:9 \
+  --record examples/heartleaf/replays/demo.replay
+
+nim r examples/heartleaf/heartleaf.nim --replay examples/heartleaf/replays/demo.replay</pre>
+    </div>
+
+    <footer>
+      Every game is deterministic: same seed, same bots, same week &mdash;
+      recorded to a replay that verifies bit-exactly on playback.
+    </footer>
+  </div>
+</body>
+</html>
