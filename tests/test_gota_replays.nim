@@ -35,6 +35,7 @@ echo "Testing Flatty action replay round trip"
 let recorder = initReplayRecorder(setup)
 recorder.recordWalkTo(12, 100, 64, 42)
 recorder.recordAttackTarget(12, 105, 100)
+recorder.recordAttackMove(15, 100, 70, 80)
 recorder.recordAttackTarget(19, 100, 105)
 for tick in 1'u64 .. 20'u64:
   recorder.recordHash(tick xor 0x9E3779B97F4A7C15'u64)
@@ -52,10 +53,12 @@ doAssert decoded.header.setup.mapSeed == 2026
 doAssert decoded.header.setup.heroes.len == 2
 doAssert decoded.header.setup.heroes[0].class == uint8(DeathKnight.ord)
 doAssert decoded.header.setup.heroes[1].class == uint8(VanguardKnight.ord)
-doAssert decoded.actions.len == 3
+doAssert decoded.actions.len == 4
 doAssert decoded.actions[0].kind == ActionWalkTo
 doAssert decoded.actions[0].first == 64
 doAssert decoded.actions[1].kind == ActionAttackTarget
+doAssert decoded.actions[2].kind == ActionAttackMove
+doAssert decoded.actions[2].first == 70
 doAssert decoded.hashes == recorder.data.hashes
 doAssert decoded.hashes.len == int(decoded.header.setup.maximumTicks)
 
@@ -66,6 +69,9 @@ let first = player.actionsAt(12)
 doAssert first.len == 2
 doAssert first[0].heroId == 100
 doAssert first[1].heroId == 105
+let moved = player.actionsAt(15)
+doAssert moved.len == 1
+doAssert moved[0].kind == ActionAttackMove
 doAssert player.actionsAt(18).len == 0
 doAssert player.actionsAt(19).len == 1
 doAssert player.finished
@@ -79,6 +85,9 @@ doAssert action.heroId == 100
 doAssert directPlayer.takeActionAt(12, action)
 doAssert action.heroId == 105
 doAssert not directPlayer.takeActionAt(12, action)
+doAssert directPlayer.takeActionAt(15, action)
+doAssert action.kind == ActionAttackMove
+doAssert not directPlayer.takeActionAt(15, action)
 doAssert directPlayer.takeActionAt(19, action)
 doAssert directPlayer.finished
 

@@ -972,6 +972,47 @@ proc hasProp*(pack: PropPack, name: string): bool =
   ## Returns whether a pack contains a model with the requested node name.
   pack != nil and name in pack.names
 
+proc pickProp*(
+    pack: PropPack,
+    name: string,
+    origin,
+    dir,
+    position: Vec3,
+    rotation,
+    propScale: float32
+): float32 =
+  ## Ray distance to a placed prop's triangles, or -1 when they miss.
+  result = -1
+  if not pack.hasProp(name):
+    return
+  let
+    model = pack.models[pack.names[name]]
+    world =
+      translate(position) * rotateY(rotation) *
+      scale(vec3(propScale, propScale, propScale))
+  var i = 0
+  while i + 26 < model.vertices.len:
+    let
+      a = world * vec3(
+        model.vertices[i],
+        model.vertices[i + 1],
+        model.vertices[i + 2]
+      )
+      b = world * vec3(
+        model.vertices[i + 9],
+        model.vertices[i + 10],
+        model.vertices[i + 11]
+      )
+      c = world * vec3(
+        model.vertices[i + 18],
+        model.vertices[i + 19],
+        model.vertices[i + 20]
+      )
+      distance = rayTriangle(origin, dir, a, b, c)
+    if distance > 0 and (result < 0 or distance < result):
+      result = distance
+    i += 27
+
 proc placeProp*(
     pack: PropPack,
     name: string,

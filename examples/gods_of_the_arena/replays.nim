@@ -7,12 +7,13 @@ import
 const
   ReplayGame* = "gods_of_the_arena"
   ReplayFormatVersion* = 3'u16
-  ReplayGameVersion* = 12'u16
+  ReplayGameVersion* = 13'u16
   ReplayGridTiles* = 128'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionBuyItem* = 3'u8
   ActionUseItem* = 4'u8
+  ActionAttackMove* = 5'u8
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 10_000_000
   MaxReplayHashes* = 100_000_000
@@ -74,7 +75,8 @@ proc record*(recorder: ReplayRecorder, action: ReplayAction) =
   if action.kind != ActionWalkTo and
       action.kind != ActionAttackTarget and
       action.kind != ActionBuyItem and
-      action.kind != ActionUseItem:
+      action.kind != ActionUseItem and
+      action.kind != ActionAttackMove:
     fail("replay action kind is invalid")
   recorder.data.actions.appendAction(action, MaxReplayActions)
 
@@ -90,6 +92,22 @@ proc recordWalkTo*(
     tick: tick,
     heroId: heroId,
     kind: ActionWalkTo,
+    first: x,
+    second: y
+  )
+
+proc recordAttackMove*(
+    recorder: ReplayRecorder,
+    tick: uint32,
+    heroId,
+    x,
+    y: int32
+) =
+  ## Records one attack-move action without bot implementation details.
+  recorder.record ReplayAction(
+    tick: tick,
+    heroId: heroId,
+    kind: ActionAttackMove,
     first: x,
     second: y
   )
@@ -183,7 +201,8 @@ proc validate*(data: ReplayData) =
     if action.kind != ActionWalkTo and
         action.kind != ActionAttackTarget and
         action.kind != ActionBuyItem and
-        action.kind != ActionUseItem:
+        action.kind != ActionUseItem and
+        action.kind != ActionAttackMove:
       fail("replay action kind is invalid")
     var knownHero = false
     for hero in setup.heroes:

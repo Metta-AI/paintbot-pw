@@ -19,6 +19,7 @@ import
   test_gota_replays,
   test_gota_world,
   test_hashes,
+  test_inputs,
   test_lvd_content,
   test_lvd_maps,
   test_lvd_replays,

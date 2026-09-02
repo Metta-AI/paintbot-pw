@@ -47,6 +47,17 @@ block:
   run.world.heroes[0].class = savedClass
   doAssert hashNow() == base
 
+echo "Testing attack-move flag reaches the state hash"
+block:
+  let
+    base = hashNow()
+    saved = run.world.heroes[0].attackMoving
+  run.world.heroes[0].attackMoving = not saved
+  doAssert hashNow() != base,
+    "attackMoving is authoritative but does not reach stateHash"
+  run.world.heroes[0].attackMoving = saved
+  doAssert hashNow() == base
+
 echo "Testing ability cooldown reaches the state hash"
 block:
   let

@@ -135,6 +135,7 @@ type
     surfaceHint*: int32
     navLayer*: int32
     attackObjectId*: int32
+    attackMoving*: bool
     movePath*: seq[WorldPoint]
     movePathLayers*: seq[int32]
     movePathIndex*: int
@@ -377,6 +378,10 @@ const
   FootmanTowerSightRadius = 7 * WorldScale
   FootmanMeleeRange* = 54_000'i32
   FortRange = 255_000'i32
+  HeroMeleeIdleRange* = 150_000'i32
+    ## Standing melee heroes auto-attack enemies this close.
+  HeroMeleeAttackMoveRange* = 480_000'i32
+    ## Attack-move melee chase radius, much larger than idle aggro.
   HeroLanes = [0, 0, 1, 2, 2]
   HeroRespawnTicks = 8 * TickRate
   HeroMaxLevel* = 20
@@ -1439,6 +1444,7 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
   if index < 0 or world.heroes[index].state == Dying:
     return false
   world.heroes[index].attackObjectId = 0
+  world.heroes[index].attackMoving = false
   world.heroes[index].targetFootmanId = 0
   world.heroes[index].targetHeroId = 0
   world.heroes[index].targetTowerId = 0
@@ -1450,6 +1456,49 @@ proc applyWalkTo*(world: World, heroId, mapX, mapY: int32): bool =
     world.heroes[index].position.y
   )
 
+proc applyAttackMove*(world: World, heroId, mapX, mapY: int32): bool =
+  ## Walks toward a map tile and attacks enemies found along the way.
+  let index = heroIndex(world, heroId)
+  if index < 0 or world.heroes[index].state == Dying:
+    return false
+  world.heroes[index].attackObjectId = 0
+  world.heroes[index].attackMoving = true
+  world.heroes[index].targetFootmanId = 0
+  world.heroes[index].targetHeroId = 0
+  world.heroes[index].targetTowerId = 0
+  world.heroes[index].attackingFort = false
+  setHeroDestination(
+    world.heroes[index],
+    int(mapX),
+    int(mapY),
+    world.heroes[index].position.y
+  )
+
+proc isEnemyTarget(world: World, hero: Hero, targetId: int32): bool =
+  ## Returns whether `targetId` is a living enemy the hero can chase.
+  if targetId == 0:
+    return false
+  let footman = footmanIndex(world, targetId)
+  if footman >= 0:
+    let other = world.footmen[footman]
+    return other.team != hero.team and
+      other.state != Dying and
+      other.hp > 0
+  let otherHero = heroIndex(world, targetId)
+  if otherHero >= 0:
+    let other = world.heroes[otherHero]
+    return other.team != hero.team and
+      other.state != Dying and
+      other.hp > 0
+  let tower = towerIndex(world, targetId)
+  if tower >= 0:
+    let other = world.towers[tower]
+    return other.team != hero.team and other.hp > 0
+  for fort in world.forts:
+    if fort.id == targetId:
+      return fort.team != hero.team and fort.hp > 0
+  false
+
 proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
   ## Applies one hero attack command after validating its target.
   let index = heroIndex(world, heroId)
@@ -1457,11 +1506,11 @@ proc applyAttackTarget*(world: World, heroId, targetId: int32): bool =
     return false
   if targetId == 0:
     world.heroes[index].attackObjectId = 0
+    world.heroes[index].attackMoving = false
     return true
-  var value: WorldObject
-  if not worldObjectById(world, heroId, targetId, value) or not value.alive or
-      value.team == world.heroes[index].team:
+  if not world.isEnemyTarget(world.heroes[index], targetId):
     return false
+  world.heroes[index].attackMoving = false
   if world.heroes[index].attackObjectId != targetId:
     world.heroes[index].hasMoveTarget = false
   world.heroes[index].attackObjectId = targetId
@@ -1766,6 +1815,7 @@ proc respawn(hero: Hero) =
   hero.targetTowerId = 0
   hero.attackingFort = false
   hero.attackObjectId = 0
+  hero.attackMoving = false
   hero.hasMoveTarget = false
   hero.movePath.setLen(0)
   hero.movePathIndex = 0
@@ -1889,6 +1939,10 @@ proc applyReplayAction(world: World, action: ReplayAction) =
   case action.kind
   of ActionWalkTo:
     discard applyWalkTo(world, action.heroId, action.first, action.second)
+  of ActionAttackMove:
+    discard applyAttackMove(
+      world, action.heroId, action.first, action.second
+    )
   of ActionAttackTarget:
     discard applyAttackTarget(world, action.heroId, action.first)
   of ActionBuyItem:
@@ -2003,6 +2057,62 @@ proc tryCombatAbilities(
     fortIndex
   )
 
+proc nearestEnemy(world: World, hero: Hero, radius: int32): int32 =
+  ## Returns the closest visible enemy within `radius`, or 0.
+  var bestSquared = int64(radius) * int64(radius)
+  for footman in world.footmen:
+    if footman.team == hero.team or
+        footman.state == Dying or
+        footman.hp <= 0 or
+        not visible(world, hero.team, footman.position):
+      continue
+    let squared = distanceSquared(hero.position, footman.position)
+    if squared <= bestSquared:
+      bestSquared = squared
+      result = footman.id
+  for other in world.heroes:
+    if other.id == hero.id or
+        other.team == hero.team or
+        other.state == Dying or
+        other.hp <= 0 or
+        not visible(world, hero.team, other.position):
+      continue
+    let squared = distanceSquared(hero.position, other.position)
+    if squared <= bestSquared:
+      bestSquared = squared
+      result = other.id
+  for tower in world.towers:
+    if tower.team == hero.team or
+        tower.hp <= 0 or
+        not towerExposed(world, tower) or
+        not visible(world, hero.team, tower.position):
+      continue
+    let squared = distanceSquared(hero.position, tower.position)
+    if squared <= bestSquared:
+      bestSquared = squared
+      result = tower.id
+  for fort in world.forts:
+    if fort.team == hero.team or
+        fort.hp <= 0 or
+        not fortExposed(world, fort.team) or
+        not visible(world, hero.team, fort.center):
+      continue
+    let squared = distanceSquared(hero.position, fort.center)
+    if squared <= bestSquared:
+      bestSquared = squared
+      result = fort.id
+
+proc acquireRadius(hero: Hero): int32 =
+  ## Returns the search radius for idle or attack-move acquisition.
+  if hero.attackMoving:
+    if hero.class.heroSpec.attackStyle == MeleeAttack:
+      return HeroMeleeAttackMoveRange
+    return heroAttackRange(hero.class)
+  if hero.class.heroSpec.attackStyle == MeleeAttack and
+      not hero.hasMoveTarget:
+    return HeroMeleeIdleRange
+  0
+
 proc updateHero(world: World, hero: Hero) =
   ## Applies scripted navigation, combat, rewards, death, and respawn.
   if hero.state == Dying:
@@ -2021,6 +2131,7 @@ proc updateHero(world: World, hero: Hero) =
     hero.targetTowerId = 0
     hero.attackingFort = false
     hero.attackObjectId = 0
+    hero.attackMoving = false
     hero.hasMoveTarget = false
     return
 
@@ -2066,6 +2177,36 @@ proc updateHero(world: World, hero: Hero) =
     if targetFootman < 0 and targetHero < 0 and targetTower < 0 and
         not hero.attackingFort:
       hero.attackObjectId = 0
+  if hero.attackObjectId == 0:
+    let radius = hero.acquireRadius()
+    if radius > 0:
+      hero.attackObjectId = world.nearestEnemy(hero, radius)
+      if hero.attackObjectId != 0:
+        targetFootman = footmanIndex(world, hero.attackObjectId)
+        if targetFootman >= 0:
+          let footman = world.footmen[targetFootman]
+          if footman.team == hero.team or footman.state == Dying or
+              footman.hp <= 0:
+            targetFootman = -1
+        if targetFootman < 0:
+          targetHero = heroIndex(world, hero.attackObjectId)
+          if targetHero >= 0:
+            let other = world.heroes[targetHero]
+            if other.team == hero.team or other.state == Dying or
+                other.hp <= 0:
+              targetHero = -1
+        if targetFootman < 0 and targetHero < 0:
+          targetTower = towerIndex(world, hero.attackObjectId)
+          if targetTower >= 0:
+            let tower = world.towers[targetTower]
+            if tower.team == hero.team or not towerExposed(world, tower):
+              targetTower = -1
+        if targetFootman < 0 and targetHero < 0 and targetTower < 0:
+          for i, fort in world.forts:
+            if fort.id == hero.attackObjectId:
+              fortIndex = i
+              hero.attackingFort = true
+              break
   hero.targetFootmanId =
     if targetFootman >= 0: world.footmen[targetFootman].id else: 0
   hero.targetHeroId =
@@ -2241,6 +2382,7 @@ proc stateHash*(game: Game): uint64 =
     hash.addHashy(hero.surfaceHint)
     hash.addHashy(hero.navLayer)
     hash.addHashy(hero.attackObjectId)
+    hash.addHashy(hero.attackMoving)
     hash.addHashy(hero.movePath.len)
     for waypoint in hero.movePath:
       hash.addHashy(waypoint)

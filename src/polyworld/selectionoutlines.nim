@@ -25,6 +25,11 @@ type
 var
   selectionTexture: Uniform[Sampler2d]
   selectionResolution: Uniform[Vec2]
+  selectionColor: Uniform[Vec3]
+
+const
+  SelectionOutlineColor* = vec3(1.0, 0.78, 0.12)
+  AttackOutlineColor* = vec3(0.92, 0.16, 0.14)
 
 proc selectionVertex(
     gl_Position: var Vec4,
@@ -98,7 +103,7 @@ proc selectionFragment(fragColor: var Vec4, texturePosition: Vec2) =
     ).a
   )
   let edge = clamp(nearby - center, 0, 1)
-  fragColor = vec4(1.0, 0.78, 0.12, edge)
+  fragColor = vec4(selectionColor, edge)
 
 proc compileShaderStage(
     kind: GLenum,
@@ -263,8 +268,11 @@ proc beginMask*(outline: var SelectionOutline, size: IVec2) =
   glClearColor(0, 0, 0, 0)
   glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
 
-proc drawOutline*(outline: SelectionOutline) =
-  ## Composites a two-pixel yellow edge around the current silhouette.
+proc drawOutline*(
+    outline: SelectionOutline,
+    color = SelectionOutlineColor
+) =
+  ## Composites a two-pixel edge around the current silhouette.
   glBindFramebuffer(GL_FRAMEBUFFER, 0)
   glViewport(0, 0, outline.size.x, outline.size.y)
   glDisable(GL_DEPTH_TEST)
@@ -282,6 +290,12 @@ proc drawOutline*(outline: SelectionOutline) =
     glGetUniformLocation(outline.program, "selectionResolution"),
     outline.size.x.float32,
     outline.size.y.float32
+  )
+  glUniform3f(
+    glGetUniformLocation(outline.program, "selectionColor"),
+    color.x,
+    color.y,
+    color.z
   )
   glBindVertexArray(outline.vertexArray)
   glDrawArrays(GL_TRIANGLES, 0, 3)

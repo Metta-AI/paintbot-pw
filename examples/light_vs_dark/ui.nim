@@ -3,7 +3,7 @@
 import
   std/strformat,
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, pathing, player, rtscameras],
+  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras],
   content, sim, game, controls
 
 const
@@ -367,10 +367,10 @@ proc updateMinimapCamera*(
   let
     chrome = currentChrome(window)
     area = chrome.minimap.minimapMap()
-  if window.buttonPressed[MouseLeft] and area.contains(mouse):
+  if window.mousePressed(MouseLeft) and area.contains(mouse):
     minimapPanning = true
     followSelection = false
-  if not window.buttonDown[MouseLeft]:
+  if not window.mouseDown(MouseLeft):
     minimapPanning = false
   if minimapPanning:
     let point = minimapWorldPoint(

@@ -11,7 +11,7 @@ import
   polyworld/profiles,
   polyworld/quadterrain,
   polyworld/shadows,
-  polyworld/[chrome, rtscameras, selectionoutlines, viewers, visions,
+  polyworld/[chrome, inputs, rtscameras, selectionoutlines, viewers, visions,
     worldbars]
 
 when defined(takeScreenshot):
@@ -634,36 +634,97 @@ proc runGraphics*() =
     renderer.draw(viewProjection, cameraRight, cameraUp)
 
   proc pickEntity(viewProjection: Mat4): int32 =
-    ## Finds the nearest visible selectable object under the pointer.
-    var bestDistance = 28.0'f32
-    let screenMouse = window.mousePos.vec2
-    template consider(candidateId: int32, position: Vec3, height: float32) =
-      block:
-        let point = screenPosition(
-          position + vec3(0, height, 0),
-          viewProjection
-        )
-        let distance = (point - screenMouse).length
-        if distance < bestDistance:
-          bestDistance = distance
-          result = candidateId
+    ## Finds the closest visible mesh under the pointer by triangle hit.
+    let
+      (origin, dir) = mouseRay(
+        window.mousePos.vec2,
+        window.size.vec2,
+        viewProjection
+      )
+    var bestDistance = -1.0'f32
+    template consider(candidateId: int32, distance: float32) =
+      if distance > 0 and (bestDistance < 0 or distance < bestDistance):
+        bestDistance = distance
+        result = candidateId
     for hero in run.world.heroes:
-      if hero.state != Dying and visibleInView(hero.team, hero.position):
-        consider(hero.id, unitRenderPoint(hero.id, hero.position), 1.0'f32)
-    for footman in run.world.footmen:
-      if footman.state != Dying and
-          visibleInView(footman.team, footman.position):
-        consider(
-          footman.id,
-          unitRenderPoint(footman.id, footman.position),
-          0.7'f32
+      if hero.state == Dying or not visibleInView(hero.team, hero.position):
+        continue
+      let
+        model = heroModels[hero.class]
+        clip = heroRenderClips[hero.animClip]
+      consider(
+        hero.id,
+        pickCharacter(
+          model,
+          origin,
+          dir,
+          unitRenderPoint(hero.id, hero.position),
+          unitRenderFacing(hero.id, hero.facing),
+          clip,
+          holdClipTime(
+            model, clip, hero.animTicks, hero.state == Dying
+          ),
+          hero.heroSizeFactor()
         )
+      )
+    for footman in run.world.footmen:
+      if footman.state == Dying or
+          not visibleInView(footman.team, footman.position):
+        continue
+      let
+        model = footmanModels[footman.team]
+        clip = footmanRenderClips[footman.team][footman.animClip]
+      consider(
+        footman.id,
+        pickCharacter(
+          model,
+          origin,
+          dir,
+          unitRenderPoint(footman.id, footman.position),
+          unitRenderFacing(footman.id, footman.facing),
+          clip,
+          holdClipTime(
+            model, clip, footman.animTicks, footman.state == Dying
+          )
+        )
+      )
     for tower in run.world.towers:
-      if tower.hp > 0 and visibleInView(tower.team, tower.position):
-        consider(tower.id, renderPoint(tower.position), 2.5'f32)
+      if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
+        continue
+      consider(
+        tower.id,
+        pickProp(
+          towerPack,
+          towerPropName(tower.tier),
+          origin,
+          dir,
+          renderPoint(tower.position),
+          renderFacing(tower.facing),
+          towerScale(tower.tier)
+        )
+      )
     for i, god in gods:
-      if visibleInView(god.team, run.world.forts[i].center):
-        consider(run.world.forts[i].id, god.position, 2.0'f32)
+      if not visibleInView(god.team, run.world.forts[i].center):
+        continue
+      let
+        model = footmanModels[god.team]
+        clip = footmanRenderClips[god.team][god.godClip]
+      var animTime = god.animTime
+      if run.world.gameOver and god.team != run.world.winner:
+        animTime = min(animTime, clipDuration(model, clip))
+      consider(
+        run.world.forts[i].id,
+        pickCharacter(
+          model,
+          origin,
+          dir,
+          god.position,
+          god.facing,
+          clip,
+          animTime,
+          2.6
+        )
+      )
 
   proc captureCheckpoint(): SeekCheckpoint =
     ## Captures simulation state for an exact seek restore.
@@ -688,6 +749,7 @@ proc runGraphics*() =
     rightPressPosition = vec2(0)
     selectionStarted = false
     selectionAdditive = false
+    attackMoveArmed = false
     followSelection = false
     cameraEase: CameraEase
     focusPlayerHero = false
@@ -899,30 +961,17 @@ proc runGraphics*() =
     if existsEnv("SELECT_ALL"):
       selectAllHeroes()
 
-  proc drawSelectedOutline(
+  proc drawOutlinedObject(
+      id: int32,
       view,
       projection,
       viewProjection: Mat4
   ) =
-    ## Draws selected animated objects into one exact silhouette mask.
-    if selectedTargetCount() == 0:
-      return
-    selectionOutline.beginMask(window.size)
-    var characterCount = 0
+    ## Draws one object's silhouette into the current outline mask.
     for hero in run.world.heroes:
-      if isSelected(hero.id):
-        inc characterCount
-    for footman in run.world.footmen:
-      if isSelected(footman.id):
-        inc characterCount
-    for i, god in gods:
-      if isSelected(run.world.forts[i].id):
-        inc characterCount
-    if characterCount > 0:
-      beginCharacters(scene, window, view, projection, cameraEye)
-    for hero in run.world.heroes:
-      if not isSelected(hero.id):
+      if hero.id != id:
         continue
+      beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
         heroModels[hero.class],
@@ -937,9 +986,12 @@ proc runGraphics*() =
         ),
         sizeFactor = hero.heroSizeFactor()
       )
+      finishCharacters(scene)
+      return
     for footman in run.world.footmen:
-      if not isSelected(footman.id):
+      if footman.id != id:
         continue
+      beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
         footmanModels[footman.team],
@@ -953,9 +1005,12 @@ proc runGraphics*() =
           footman.state == Dying
         )
       )
+      finishCharacters(scene)
+      return
     for i, god in gods:
-      if not isSelected(run.world.forts[i].id):
+      if run.world.forts[i].id != id:
         continue
+      beginCharacters(scene, window, view, projection, cameraEye)
       drawCharacter(
         scene,
         footmanModels[god.team],
@@ -965,10 +1020,10 @@ proc runGraphics*() =
         god.animTime,
         sizeFactor = 2.6
       )
-    if characterCount > 0:
       finishCharacters(scene)
+      return
     for tower in run.world.towers:
-      if tower.hp <= 0 or not isSelected(tower.id):
+      if tower.hp <= 0 or tower.id != id:
         continue
       towerPack.drawProp(
         towerPropName(tower.tier),
@@ -977,7 +1032,53 @@ proc runGraphics*() =
         towerScale(tower.tier),
         viewProjection
       )
-    selectionOutline.drawOutline()
+      return
+
+  proc drawIdOutlines(
+      ids: openArray[int32],
+      color: Vec3,
+      view,
+      projection,
+      viewProjection: Mat4
+  ) =
+    ## Composites one outline color around every id that still exists.
+    var any = false
+    for id in ids:
+      if selectionTarget(id).found:
+        any = true
+        break
+    if not any:
+      return
+    selectionOutline.beginMask(window.size)
+    for id in ids:
+      if selectionTarget(id).found:
+        drawOutlinedObject(id, view, projection, viewProjection)
+    selectionOutline.drawOutline(color)
+
+  proc drawSelectedOutline(
+      view,
+      projection,
+      viewProjection: Mat4
+  ) =
+    ## Draws the yellow selection outline and the red attack-target outline.
+    if selectedIds.len > 0:
+      drawIdOutlines(
+        selectedIds,
+        SelectionOutlineColor,
+        view,
+        projection,
+        viewProjection
+      )
+    if playerMode():
+      let targetId = heroById(run.world, playerHeroId()).attackObjectId
+      if targetId != 0:
+        drawIdOutlines(
+          [targetId],
+          AttackOutlineColor,
+          view,
+          projection,
+          viewProjection
+        )
 
   proc feedGotaActions() =
     ## Notes fights, tower shots, creeping, approaches, and upcoming tape.
@@ -1232,26 +1333,26 @@ proc runGraphics*() =
         (window.buttonDown[KeyLeftControl] or
           window.buttonDown[KeyRightControl]):
       selectAllHeroes()
-    if window.buttonPressed[MouseLeft] and not overUi:
+    elif window.buttonPressed[KeyA] and playerMode():
+      attackMoveArmed = true
+    if window.mousePressed(MouseLeft) and not overUi:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
         window.buttonDown[KeyLeftShift] or
         window.buttonDown[KeyRightShift]
-    if window.buttonPressed[MouseRight] and not overUi:
+    if window.mousePressed(MouseRight) and not overUi:
       rightPressPosition = window.mousePos.vec2
-    if (window.buttonPressed[MouseMiddle] and not overUi) or
-        window.buttonPressed[KeyB]:
-      if playerMode():
-        clearSelection()
-      else:
+    if window.mousePressed(MouseMiddle) and
+        (not overUi or window.buttonPressed[MouseMiddleKey]):
+      if not playerMode():
         followSelection = false
         actionCam.takeManual()
       cancelCameraEase(cameraEase)
     panning =
-      window.buttonDown[KeyB] or
-      (not overUi and window.buttonDown[MouseMiddle]) or
-      (not playerMode() and not overUi and window.buttonDown[MouseRight])
+      window.mouseDown(MouseMiddle) and
+        (not overUi or window.buttonDown[MouseMiddleKey]) or
+      (not playerMode() and not overUi and window.mouseDown(MouseRight))
 
     let delta = window.mouseDelta.vec2
     if playerMode():
@@ -1367,37 +1468,9 @@ proc runGraphics*() =
     elif followSelection:
       followSelection = false
 
-  proc updateWorldSelection(viewProjection: Mat4) =
-    ## Selects a clicked world unit without treating camera drags as clicks.
-    if not window.buttonReleased[MouseLeft]:
-      return
-    if selectionStarted and
-        (window.mousePos.vec2 - selectionPressPosition).length <=
-          6.0'f32 and
-        not mouseOverUi(window, sk.mousePos, primaryId):
-      let picked = pickEntity(viewProjection)
-      if picked != 0:
-        selectEntity(picked, selectionAdditive)
-      elif not selectionAdditive:
-        clearSelection()
-    selectionStarted = false
-
-  proc updatePlayerOrder(viewProjection: Mat4) =
-    ## Turns a right-click into a walk or attack for the human hero.
-    if not playerMode():
-      return
-    if not window.buttonReleased[MouseRight]:
-      return
-    if mouseOverUi(window, sk.mousePos, primaryId):
-      return
-    if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
-      return
-    let
-      heroId = playerHeroId()
-      picked = pickEntity(viewProjection)
-    if picked != 0 and objectTeam(picked) != objectTeam(heroId):
-      queueAttackTarget(heroId, picked)
-      return
+  proc issueGroundOrder(viewProjection: Mat4, attackMove: bool) =
+    ## Walks or attack-moves the human hero onto the tile under the pointer.
+    let heroId = playerHeroId()
     let hero = heroById(run.world, heroId)
     if hero.id == 0 or hero.state == Dying:
       return
@@ -1410,13 +1483,59 @@ proc runGraphics*() =
       walk = pickWalkableTile(origin, dir)
     if not walk.hit:
       return
-    queueWalkTo(
-      heroId,
-      int32(layers[walk.layer].originX + walk.x),
-      int32(layers[walk.layer].originZ + walk.z)
-    )
+    let
+      mapX = int32(layers[walk.layer].originX + walk.x)
+      mapY = int32(layers[walk.layer].originZ + walk.z)
+    if attackMove:
+      queueAttackMove(heroId, mapX, mapY)
+    else:
+      queueWalkTo(heroId, mapX, mapY)
     selectEntity(heroId)
     clickMarks.emitClickMark(tileCenter(walk.layer, walk.x, walk.z))
+
+  proc updateWorldSelection(viewProjection: Mat4) =
+    ## Selects a clicked world unit, or attacks it in player mode.
+    if not window.mouseReleased(MouseLeft):
+      return
+    if selectionStarted and
+        (window.mousePos.vec2 - selectionPressPosition).length <=
+          6.0'f32 and
+        not mouseOverUi(window, sk.mousePos, primaryId):
+      let picked = pickEntity(viewProjection)
+      if playerMode() and attackMoveArmed:
+        let heroId = playerHeroId()
+        if picked != 0 and objectTeam(picked) != objectTeam(heroId):
+          queueAttackTarget(heroId, picked)
+        else:
+          issueGroundOrder(viewProjection, true)
+        attackMoveArmed = false
+      elif picked != 0:
+        selectEntity(picked, selectionAdditive)
+        if playerMode() and objectTeam(picked) != objectTeam(playerHeroId()):
+          queueAttackTarget(playerHeroId(), picked)
+      elif not selectionAdditive:
+        clearSelection()
+    selectionStarted = false
+
+  proc updatePlayerOrder(viewProjection: Mat4) =
+    ## Turns a right-click into a walk, attack-move, or chase attack.
+    if not playerMode():
+      return
+    if not window.mouseReleased(MouseRight):
+      return
+    if mouseOverUi(window, sk.mousePos, primaryId):
+      return
+    if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
+      return
+    let
+      heroId = playerHeroId()
+      picked = pickEntity(viewProjection)
+    if picked != 0 and objectTeam(picked) != objectTeam(heroId):
+      queueAttackTarget(heroId, picked)
+      attackMoveArmed = false
+      return
+    issueGroundOrder(viewProjection, attackMoveArmed)
+    attackMoveArmed = false
 
   proc cameraView(): Mat4 =
     ## Updates the camera eye and returns its view matrix.

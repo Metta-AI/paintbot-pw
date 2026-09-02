@@ -10,7 +10,7 @@
 import
   std/[math, tables, times],
   chroma, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, characters, clickmarks, common, fixed, particles,
+  polyworld/[actioncam, characters, clickmarks, common, fixed, inputs, particles,
     particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shadows, shapes, tapes, viewers, visions, worldbars],
@@ -940,7 +940,7 @@ proc runGraphics*() =
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Left-click selects in spectator mode, or attacks, loots, and heals
     ## for the human hero.
-    if not window.buttonReleased[MouseLeft]:
+    if not window.mouseReleased(MouseLeft):
       return
     let
       delta = window.mousePos.vec2 - selectionPressPosition
@@ -978,7 +978,7 @@ proc runGraphics*() =
     ## Right-click walks the human hero onto the tile under the pointer.
     if not playerMode():
       return
-    if not window.buttonReleased[MouseRight]:
+    if not window.mouseReleased(MouseRight):
       return
     if mouseOverUi(window, sk.mousePos):
       return
@@ -1112,22 +1112,20 @@ proc runGraphics*() =
     sk.uiScale = hudUiScale(window)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     case button
-    of MouseLeft:
+    of MouseLeft, KeyV:
       if not mouseOverUi(window, sk.mousePos):
         selectionPressPosition = window.mousePos.vec2
         selectionStarted = true
         selectionAdditive =
           window.buttonDown[KeyLeftShift] or
           window.buttonDown[KeyRightShift]
-    of MouseRight:
+    of MouseRight, KeyN:
       if not mouseOverUi(window, sk.mousePos):
         rightPressPosition = window.mousePos.vec2
         lastMouse = window.mousePos
-    of MouseMiddle:
+    of MouseMiddle, KeyB:
       if not mouseOverUi(window, sk.mousePos):
         lastMouse = window.mousePos
-    of KeyB:
-      lastMouse = window.mousePos
     of KeySpace:
       transport.handleKey(button)
     of KeyC:
@@ -1258,19 +1256,17 @@ proc runGraphics*() =
         if focusPlayerHero:
           focusPlayerHero = false
           startCameraEase(cameraEase, cameraTarget)
-        if (window.buttonPressed[MouseMiddle] and not overUi) or
-            window.buttonPressed[KeyB]:
-          if playerMode():
-            clearSelection()
-          else:
+        if window.mousePressed(MouseMiddle) and
+            (not overUi or window.buttonPressed[MouseMiddleKey]):
+          if not playerMode():
             followSelection = false
             actionCam.takeManual()
           cancelCameraEase(cameraEase)
           lastMouse = window.mousePos
         let wantPan =
-          window.buttonDown[KeyB] or
-          (not overUi and window.buttonDown[MouseMiddle]) or
-          (not playerMode() and not overUi and window.buttonDown[MouseRight])
+          window.mouseDown(MouseMiddle) and
+            (not overUi or window.buttonDown[MouseMiddleKey]) or
+          (not playerMode() and not overUi and window.mouseDown(MouseRight))
         if wantPan and not panning:
           lastMouse = window.mousePos
         panning = wantPan

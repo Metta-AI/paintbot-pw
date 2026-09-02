@@ -11,6 +11,7 @@ type
   PlayerCommandKind = enum
     CommandWalk
     CommandAttack
+    CommandAttackMove
     CommandBuy
     CommandUse
 
@@ -26,6 +27,15 @@ proc queueWalkTo*(heroId, mapX, mapY: int32) =
   ## Queues one walk command for the human hero.
   pending.add PlayerCommand(
     kind: CommandWalk,
+    heroId: heroId,
+    first: mapX,
+    second: mapY
+  )
+
+proc queueAttackMove*(heroId, mapX, mapY: int32) =
+  ## Queues one attack-move command for the human hero.
+  pending.add PlayerCommand(
+    kind: CommandAttackMove,
     heroId: heroId,
     first: mapX,
     second: mapY
@@ -67,6 +77,10 @@ proc recordCommand(game: Game, command: PlayerCommand) =
     )
   of CommandAttack:
     game.recorder.recordAttackTarget(tick, command.heroId, command.first)
+  of CommandAttackMove:
+    game.recorder.recordAttackMove(
+      tick, command.heroId, command.first, command.second
+    )
   of CommandBuy:
     game.recorder.recordBuyItem(tick, command.heroId, command.first)
   of CommandUse:
@@ -81,6 +95,10 @@ proc applyCommand(game: Game, command: PlayerCommand): bool =
     )
   of CommandAttack:
     applyAttackTarget(game.world, command.heroId, command.first)
+  of CommandAttackMove:
+    applyAttackMove(
+      game.world, command.heroId, command.first, command.second
+    )
   of CommandBuy:
     applyBuyItem(game.world, command.heroId, command.first)
   of CommandUse:

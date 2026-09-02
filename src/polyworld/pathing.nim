@@ -265,7 +265,7 @@ proc isWalkable*(layerIndex, x, z: int): bool =
   inLayer(layerIndex, x, z) and
     layerWalkable[layerIndex][z * layers[layerIndex].width + x]
 
-proc rayTriangle(origin, dir, a, b, c: Vec3): float32 =
+proc rayTriangle*(origin, dir, a, b, c: Vec3): float32 =
   ## Ray-triangle intersection distance, or -1 when there is no hit.
   let
     edge1 = b - a

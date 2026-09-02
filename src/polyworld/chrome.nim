@@ -2,7 +2,7 @@
 
 import
   chroma, pixie, silky, vmath, windy,
-  gameuis, rtscameras
+  gameuis, inputs, rtscameras
 
 const
   PanelAccent* = rgbx(83, 91, 108, 255)
@@ -380,7 +380,7 @@ proc clicked*(
     panel: GameUiPanel
 ): bool =
   ## Returns whether this frame pressed inside a panel.
-  window.buttonPressed[MouseLeft] and panel.contains(sk.mousePos)
+  window.mousePressed(MouseLeft) and panel.contains(sk.mousePos)
 
 proc mapArea*(
     panel: GameUiPanel,

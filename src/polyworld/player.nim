@@ -7,7 +7,7 @@
 import
   std/times,
   chroma, pixie, silky, vmath, windy,
-  actioncam, chrome, gameuis
+  actioncam, chrome, gameuis, inputs
 
 const
   TransportHeight* = 80.0'f32
@@ -255,7 +255,7 @@ proc clicked(
     panel: GameUiPanel
 ): bool =
   ## Returns whether this frame pressed a transport button.
-  window.buttonPressed[MouseLeft] and panel.contains(sk.mousePos)
+  window.mousePressed(MouseLeft) and panel.contains(sk.mousePos)
 
 proc drawTransport*(
     player: var Player,
@@ -337,7 +337,7 @@ proc drawTransport*(
     origin: scrubOrigin - vec2(0, 8),
     size: scrubSize + vec2(0, 24)
   )
-  if window.buttonDown[MouseLeft] and scrubHit.contains(sk.mousePos):
+  if window.mouseDown(MouseLeft) and scrubHit.contains(sk.mousePos):
     let ratio = clamp(
       (sk.mousePos.x - scrubOrigin.x) / scrubSize.x,
       0.0'f32,

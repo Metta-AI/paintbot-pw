@@ -105,6 +105,23 @@ block:
   doAssert 1'u8 in layersSeen,
     "a river crossing must keep at least one deck tile"
 
+echo "Testing ray-triangle hits"
+block:
+  doAssert rayTriangle(
+    vec3(0, 0, -1),
+    vec3(0, 0, 1),
+    vec3(-1, -1, 0),
+    vec3(1, -1, 0),
+    vec3(0, 1, 0)
+  ) > 0
+  doAssert rayTriangle(
+    vec3(0, 0, -1),
+    vec3(0, 0, 1),
+    vec3(2, 2, 0),
+    vec3(3, 2, 0),
+    vec3(2, 3, 0)
+  ) < 0
+
 echo "Testing walk pick hits ramps and skips holes"
 block:
   proc flatTile(height: int16, flags = TileExists or

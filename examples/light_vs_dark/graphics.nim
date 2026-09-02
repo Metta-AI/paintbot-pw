@@ -11,7 +11,7 @@ import
   std/[math, os, strformat, strutils, tables, times, unicode],
   chroma, opengl, pixie, vmath, windy, silky,
   polyworld/[
-    actioncam, characters, chrome, clickmarks, common, fixed, particles,
+    actioncam, characters, chrome, clickmarks, common, fixed, inputs, particles,
     particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shadows, tapes, viewers, visions, worldbars
@@ -849,17 +849,17 @@ proc runGraphics*() =
       selectAllUnits()
     elif window.buttonPressed[KeyA] and playerMode():
       attackMoveArmed = true
-    if window.buttonPressed[MouseLeft] and not overUi:
+    if window.mousePressed(MouseLeft) and not overUi:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
         window.buttonDown[KeyLeftShift] or
         window.buttonDown[KeyRightShift]
-    if window.buttonPressed[MouseRight] and not overUi:
+    if window.mousePressed(MouseRight) and not overUi:
       rightPressPosition = window.mousePos.vec2
       if pendingBuild < 0:
         panning = true
-    if not window.buttonDown[MouseRight]:
+    if not window.mouseDown(MouseRight):
       panning = false
     let delta = window.mouseDelta.vec2
     if panning:
@@ -943,7 +943,7 @@ proc runGraphics*() =
 
   proc updateWorldSelection(viewProjection: Mat4) =
     ## Applies click, shift-click, or box selection on left release.
-    if not window.buttonReleased[MouseLeft]:
+    if not window.mouseReleased(MouseLeft):
       return
     if not selectionStarted:
       return
@@ -1020,7 +1020,7 @@ proc runGraphics*() =
     ## Turns a right-click into move, attack, harvest, or rally.
     if not playerMode():
       return
-    if not window.buttonReleased[MouseRight]:
+    if not window.mouseReleased(MouseRight):
       return
     if mouseOverUi(window, sk.mousePos):
       return

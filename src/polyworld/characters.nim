@@ -13,7 +13,7 @@
 import
   std/[tables, json, strutils, sets, os],
   chroma, gltf, vmath, windy,
-  shadows, toon
+  pathing, shadows, toon
 
 type
   CharacterShading* = enum
@@ -244,3 +244,87 @@ proc drawCharacter*(
 proc finishCharacters*(scene: CharacterScene) =
   ## Finishes the character renderer's current frame.
   scene.renderer.endFrame()
+
+proc pickPrimitive(
+    primitive: Primitive,
+    world: Mat4,
+    origin,
+    dir: Vec3
+): float32 =
+  ## Ray distance to one mesh primitive, or -1 when it misses.
+  result = -1
+  if primitive == nil or primitive.points.len == 0:
+    return
+  template consider(ia, ib, ic: int) =
+    if ia < primitive.points.len and
+        ib < primitive.points.len and
+        ic < primitive.points.len:
+      let distance = rayTriangle(
+        origin,
+        dir,
+        world * primitive.points[ia],
+        world * primitive.points[ib],
+        world * primitive.points[ic]
+      )
+      if distance > 0 and (result < 0 or distance < result):
+        result = distance
+  if primitive.indices32.len > 0:
+    var i = 0
+    while i + 2 < primitive.indices32.len:
+      consider(
+        primitive.indices32[i].int,
+        primitive.indices32[i + 1].int,
+        primitive.indices32[i + 2].int
+      )
+      i += 3
+  elif primitive.indices16.len > 0:
+    var i = 0
+    while i + 2 < primitive.indices16.len:
+      consider(
+        primitive.indices16[i].int,
+        primitive.indices16[i + 1].int,
+        primitive.indices16[i + 2].int
+      )
+      i += 3
+  else:
+    var i = 0
+    while i + 2 < primitive.points.len:
+      consider(i, i + 1, i + 2)
+      i += 3
+
+proc pickCharacter*(
+    model: CharacterModel,
+    origin,
+    dir,
+    position: Vec3,
+    facing: float32,
+    clip: int,
+    animTime: float32,
+    sizeFactor = 1.0'f32
+): float32 =
+  ## Ray distance to one posed character's triangles, or -1 when they miss.
+  result = -1
+  let root = model.file.root
+  if model.partNodes.len > 0:
+    for node in model.partNodes:
+      node.baseVisible = false
+      node.visible = false
+    for node in model.shownParts:
+      node.baseVisible = true
+      node.visible = true
+  if root.activeClips.len != 1:
+    root.activeClips.setLen(1)
+  root.activeClips[0] = clip
+  root.animTime = animTime
+  root.updateAnimation(0)
+  let transform =
+    translate(position) * rotateY(facing) *
+    scale(vec3(sizeFactor, sizeFactor, sizeFactor)) * model.baseTransform
+  root.updateTransforms(transform)
+  for node in root.walkNodes:
+    if node.mesh == nil or not node.visible:
+      continue
+    for primitive in node.mesh.primitives:
+      let distance = pickPrimitive(primitive, node.mat, origin, dir)
+      if distance > 0 and (result < 0 or distance < result):
+        result = distance
