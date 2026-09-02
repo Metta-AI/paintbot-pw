@@ -4,7 +4,7 @@ import
   std/strformat,
   chroma, pixie, silky, vmath, windy,
   polyworld/[actioncam, chrome, gameuis, pathing, player, rtscameras],
-  content, sim, game
+  content, sim, game, controls
 
 const
   PanelScore = vec2(353, 461)
@@ -73,12 +73,44 @@ proc coverSquare(well: GameUiPanel, pad = 4.0'f32): GameUiPanel =
 proc drawPortrait(
     sk: Silky,
     well: GameUiPanel,
-    key: string
+    key: string,
+    color = rgbx(255, 255, 255, 255)
 ) =
   ## Draws a profile sprite inside a well after the plate.
   if key.len == 0:
     return
-  sk.drawWellImage(well, key)
+  sk.drawWellImage(well, key, color)
+
+proc commandPlayer(viewMode: int32): int32 =
+  ## Returns the side whose build and train locks the HUD should show.
+  if options.playerSlot > 0 and not run.replayMode:
+    options.playerSlot - 1
+  elif viewMode > 0:
+    viewMode - 1
+  else:
+    LightPlayer
+
+proc canShowTrain(
+    player: int32,
+    buildingId: int32,
+    kind: UnitKind
+): bool =
+  ## Returns whether this side could start training the unit right now.
+  if buildingId.isBuildingId and
+      run.world.buildingOwner(buildingId) == player:
+    return run.world.canTrain(buildingId, kind)
+  for structure in run.world.buildings:
+    if structure.owner == player and
+        run.world.canTrain(structure.id, kind):
+      return true
+  false
+
+proc commandPortraitColor(ready: bool): ColorRGBX =
+  ## Fades portraits that cannot be built or trained yet.
+  if ready:
+    rgbx(255, 255, 255, 255)
+  else:
+    rgbx(255, 255, 255, 128)
 
 proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
@@ -405,6 +437,38 @@ proc drawScoreRow(
     )
     x += 72
 
+proc drawSlotCosts(
+    sk: Silky,
+    origin,
+    size: Vec2,
+    gold,
+    wood: int32
+) =
+  ## Draws gold and lumber costs on one command portrait.
+  sk.drawRect(
+    origin + vec2(0, size.y - 36),
+    vec2(size.x, 36),
+    rgbx(12, 14, 20, 200)
+  )
+  sk.drawSprite("gold", origin + vec2(6, size.y - 34), vec2(14))
+  writeInt(hudScratch, gold.int)
+  sk.drawLabel(
+    hudScratch,
+    origin + vec2(22, size.y - 36),
+    vec2(size.x - 28, 18),
+    rgbx(232, 196, 86, 255),
+    "Small"
+  )
+  sk.drawSprite("wood", origin + vec2(6, size.y - 18), vec2(14))
+  writeInt(hudScratch, wood.int)
+  sk.drawLabel(
+    hudScratch,
+    origin + vec2(22, size.y - 18),
+    vec2(size.x - 28, 18),
+    rgbx(196, 168, 120, 255),
+    "Small"
+  )
+
 proc drawUi*(
     sk: Silky,
     window: Window,
@@ -616,7 +680,8 @@ proc drawUi*(
       CenterAlign
     )
     if index < 3 and window.clicked(sk, button):
-      viewMode = int32(index)
+      if options.playerSlot == 0:
+        viewMode = int32(index)
 
   if primaryId == NoEntity or
       (not run.world.hasUnit(primaryId) and
@@ -803,28 +868,22 @@ proc drawUi*(
         let
           kind = BuildingKind(index)
           stats = BuildingTable[kind]
+          player = commandPlayer(viewMode)
         sk.drawPortrait(
           slot,
-          buildingPortraitKey(LightPlayer, kind)
+          buildingPortraitKey(LightPlayer, kind),
+          commandPortraitColor(run.world.canBuild(player, kind))
         )
-        sk.drawRect(
-          slot.origin + vec2(0, slot.size.y - 22),
-          vec2(slot.size.x, 22),
-          rgbx(12, 14, 20, 200)
+        sk.drawSlotCosts(
+          slot.origin,
+          slot.size,
+          stats.gold,
+          stats.wood
         )
-        sk.drawSprite(
-          "gold",
-          slot.origin + vec2(8, slot.size.y - 20),
-          vec2(16)
-        )
-        writeInt(hudScratch, stats.gold.int)
-        sk.drawLabel(
-          hudScratch,
-          slot.origin + vec2(26, slot.size.y - 22),
-          vec2(slot.size.x - 32, 22),
-          rgbx(232, 196, 86, 255),
-          "Small"
-        )
+        if options.playerSlot > 0 and
+            not run.replayMode and
+            window.clicked(sk, slot):
+          pendingBuild = int32(kind.ord)
   elif commandTab == 1:
     for kind in UnitKind:
       let
@@ -835,28 +894,27 @@ proc drawUi*(
           BuildSlotSize.y
         )
         stats = UnitTable[LightPlayer][kind]
+        player = commandPlayer(viewMode)
       sk.drawPortrait(
         slot,
-        unitPortraitKey(LightPlayer, kind)
+        unitPortraitKey(LightPlayer, kind),
+        commandPortraitColor(
+          canShowTrain(player, primaryId, kind)
+        )
       )
-      sk.drawRect(
-        slot.origin + vec2(0, slot.size.y - 22),
-        vec2(slot.size.x, 22),
-        rgbx(12, 14, 20, 200)
+      sk.drawSlotCosts(
+        slot.origin,
+        slot.size,
+        stats.gold,
+        stats.wood
       )
-      sk.drawSprite(
-        "gold",
-        slot.origin + vec2(8, slot.size.y - 20),
-        vec2(16)
-      )
-      writeInt(hudScratch, stats.gold.int)
-      sk.drawLabel(
-        hudScratch,
-        slot.origin + vec2(26, slot.size.y - 22),
-        vec2(slot.size.x - 32, 22),
-        rgbx(232, 196, 86, 255),
-        "Small"
-      )
+      if options.playerSlot > 0 and
+          not run.replayMode and
+          window.clicked(sk, slot):
+        let player = options.playerSlot - 1
+        if primaryId.isBuildingId and
+            run.world.buildingOwner(primaryId) == player:
+          queueTrain(player, primaryId, int32(kind.ord))
   else:
     sk.drawLabel(
       "No upgrades",

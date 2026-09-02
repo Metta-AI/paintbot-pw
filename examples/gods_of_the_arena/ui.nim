@@ -4,7 +4,7 @@ import
   std/[strformat, strutils],
   chroma, pixie, silky, vmath, windy,
   polyworld/[actioncam, chrome, gameuis, pathing, player, rtscameras],
-  content, sim, game
+  content, sim, game, controls
 
 const
   PanelScore = vec2(407, 159)
@@ -42,6 +42,8 @@ const
     vec2(38, 164), vec2(141, 164), vec2(245, 164)
   ]
   InventorySlotSize = vec2(84, 78)
+
+var shopOpen = false
 
 type
   HudChrome = object
@@ -830,18 +832,53 @@ proc drawUi*(
             ),
             itemIconKey(item)
           )
-  for slot in 0 ..< InventorySlots:
-    let
-      slotPanel = inventoryPanel.imageSlot(
-        InventorySlotsPos[slot].x,
-        InventorySlotsPos[slot].y,
-        InventorySlotSize.x,
-        InventorySlotSize.y
-      )
-      item =
-        if selection == nil: NoItem else: selection.inventory[slot]
-    if item != NoItem:
+  let playerHero =
+    options.playerSlot > 0 and not run.replayMode
+  let playerHeroId =
+    if playerHero:
+      run.world.heroes[options.playerSlot - 1].id
+    else:
+      0'i32
+  if playerHero:
+    let title = GameUiPanel(
+      origin: inventoryPanel.origin + vec2(24, 18),
+      size: vec2(inventoryPanel.size.x - 48, 28)
+    )
+    if window.clicked(sk, title):
+      shopOpen = not shopOpen
+  if playerHero and shopOpen:
+    var index = 0
+    for item in Item:
+      if item == NoItem:
+        continue
+      let
+        col = index mod 3
+        row = index div 3
+        slotPanel = inventoryPanel.imageSlot(
+          38 + col.float32 * 104,
+          56 + row.float32 * 42,
+          96,
+          38
+        )
       sk.drawWellImage(slotPanel, itemIconKey(item))
+      if window.clicked(sk, slotPanel):
+        queueBuyItem(playerHeroId, int32(item.ord))
+      inc index
+  else:
+    for slot in 0 ..< InventorySlots:
+      let
+        slotPanel = inventoryPanel.imageSlot(
+          InventorySlotsPos[slot].x,
+          InventorySlotsPos[slot].y,
+          InventorySlotSize.x,
+          InventorySlotSize.y
+        )
+        item =
+          if selection == nil: NoItem else: selection.inventory[slot]
+      if item != NoItem:
+        sk.drawWellImage(slotPanel, itemIconKey(item))
+      if playerHero and window.clicked(sk, slotPanel):
+        queueUseItem(playerHeroId, int32(slot))
 
   if selection != nil:
     let
@@ -968,7 +1005,7 @@ proc drawUi*(
           CenterAlign
         )
   sk.drawLabel(
-    "INVENTORY",
+    if playerHero and shopOpen: "SHOP" else: "INVENTORY",
     inventoryPanel.origin + vec2(24, 18),
     vec2(inventoryPanel.size.x - 48, 28),
     rgbx(200, 205, 216, 255),

@@ -12,14 +12,15 @@ import
   chroma, opengl, pixie, vmath, windy, silky,
   polyworld/[
     actioncam, characters, chrome, common, fixed, particles, particleshaders,
-    pathing, player, profiles, quadterrain, rtscameras, shadows, tapes, viewers,
-    visions, worldbars
+    pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
+    shadows, tapes, viewers, visions, worldbars
   ],
   content,
   sim,
   game,
   replays,
-  ui
+  ui,
+  controls
 
 const
   WindowTitle = "Light vs Dark"
@@ -130,9 +131,12 @@ var
   panning = false
   minimapPanning* = false
   showEdges = false
-  viewMode* = options.viewMode
+  viewMode* =
+    if options.playerSlot > 0: options.playerSlot
+    else: options.viewMode
   primaryId* = NoEntity
   selectedIds*: seq[int32]
+  rightPressPosition = vec2(0)
   followSelection* = false
   selectionPressPosition = vec2(0)
   selectionStarted = false
@@ -333,6 +337,14 @@ proc runGraphics*() =
       AtlasPath,
       gameWindowSize(options.windowWidth, options.windowHeight)
     )
+  if options.playerSlot > 0 and not run.replayMode:
+    let player = options.playerSlot - 1
+    for unit in run.world.units:
+      if unit.owner == player and unit.state != UnitDying:
+        selectedIds.add unit.id
+        primaryId = unit.id
+        followSelection = false
+        break
   let splash = startSplash(sk, window)
   profileBlock "terrain":
     seed = run.mapSeed
@@ -366,6 +378,7 @@ proc runGraphics*() =
     particles = initParticleSystem()
     worldBarRenderer = initWorldBarRenderer()
     damageTrails: DamageTrailTracker
+    selectionOutline = initSelectionOutline()
 
   ## Structures are terrain props rather than per-frame draws.
   var
@@ -515,8 +528,12 @@ proc runGraphics*() =
       if selectionTarget(id).found:
         inc result
 
+  proc playerMode(): bool =
+    ## Returns whether this client issues orders for one side.
+    options.playerSlot > 0 and not run.replayMode
+
   proc selectEntity(id: int32, additive = false) =
-    ## Selects or toggles one entity and begins fixed-view following.
+    ## Selects or toggles one entity. Spectator mode follows the selection.
     if not selectionTarget(id).found:
       return
     if not additive:
@@ -527,13 +544,15 @@ proc runGraphics*() =
           selectedIds.delete(i)
           break
       primaryId = selectedIds[0]
-      followSelection = true
+      if not playerMode():
+        followSelection = true
       actionCam.takeManual()
       return
     if not isSelected(id):
       selectedIds.add id
     primaryId = id
-    followSelection = true
+    if not playerMode():
+      followSelection = true
     actionCam.takeManual()
     if selectedIds.len > 1:
       groupCameraScale = 1.0'f32
@@ -553,12 +572,20 @@ proc runGraphics*() =
   proc selectAllUnits() =
     ## Selects all living mobile units for group following.
     selectedIds.setLen(0)
+    let owner =
+      if options.playerSlot > 0 and not run.replayMode:
+        options.playerSlot - 1
+      else:
+        -1'i32
     for unit in run.world.units:
       if unit.state notin {UnitDying, UnitInMine}:
+        if owner >= 0 and unit.owner != owner:
+          continue
         selectedIds.add unit.id
     if selectedIds.len > 0:
       primaryId = selectedIds[0]
-      followSelection = true
+      if not playerMode():
+        followSelection = true
       actionCam.takeManual()
       groupCameraScale = 1.0'f32
 
@@ -636,6 +663,29 @@ proc runGraphics*() =
             not run.world.buildingVisible(viewMode - 1, structure)):
         continue
       consider(structure.id, buildingCentre(structure), 1.4'f32)
+      for y in 0'i32 ..< structure.side:
+        for x in 0'i32 ..< structure.side:
+          let
+            tileX = int32(structure.origin.x) + x
+            tileY = int32(structure.origin.y) + y
+            world = tileCentreXZ(tile2(tileX, tileY))
+          consider(
+            structure.id,
+            vec3(world.x, surfaceHeight(world.x, world.y), world.y),
+            0.6'f32
+          )
+
+  proc structureAtTile(x, y: int32): int32 =
+    ## Standing structure whose footprint contains this tile.
+    result = NoEntity
+    if not inGrid(x, y):
+      return
+    for structure in run.world.buildings:
+      if structure.state == BuildingDying or
+          not shownBuilding(structure):
+        continue
+      if covers(structure.origin, structure.side, x, y):
+        return structure.id
 
   proc insideBox(point, origin, size: Vec2): bool =
     ## Returns whether a screen point lies inside a drag rectangle.
@@ -682,7 +732,8 @@ proc runGraphics*() =
       if not isSelected(id):
         selectedIds.add id
     primaryId = ids[0]
-    followSelection = true
+    if not playerMode():
+      followSelection = true
     actionCam.takeManual()
     if selectedIds.len > 1:
       groupCameraScale = 1.0'f32
@@ -794,6 +845,8 @@ proc runGraphics*() =
         (window.buttonDown[KeyLeftControl] or
           window.buttonDown[KeyRightControl]):
       selectAllUnits()
+    elif window.buttonPressed[KeyA] and playerMode():
+      attackMoveArmed = true
     if window.buttonPressed[MouseLeft] and not overUi:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
@@ -801,7 +854,9 @@ proc runGraphics*() =
         window.buttonDown[KeyLeftShift] or
         window.buttonDown[KeyRightShift]
     if window.buttonPressed[MouseRight] and not overUi:
-      panning = true
+      rightPressPosition = window.mousePos.vec2
+      if pendingBuild < 0:
+        panning = true
     if not window.buttonDown[MouseRight]:
       panning = false
     let delta = window.mouseDelta.vec2
@@ -854,12 +909,13 @@ proc runGraphics*() =
         transport.speed
       )
       return
-    if not selectionStarted:
+    if not playerMode() and not selectionStarted:
       let count = selectedCount()
       if followSelection and count == 1:
+        let focus = selectionTarget(selectedIds[0]).position
         cameraTarget = mix(
           cameraTarget,
-          selectionTarget(selectedIds[0]).position,
+          focus,
           damping(5.0'f32, dt)
         )
       elif followSelection and count > 1:
@@ -900,17 +956,253 @@ proc runGraphics*() =
         selectionAdditive
       )
     elif not overUi:
-      let picked = pickEntity(viewProjection)
-      if picked != NoEntity:
-        selectEntity(picked, selectionAdditive)
-      elif not selectionAdditive:
-        clearSelection()
+      if not (playerMode() and pendingBuild >= 0):
+        let picked = pickEntity(viewProjection)
+        if picked != NoEntity:
+          selectEntity(picked, selectionAdditive)
+        elif not selectionAdditive:
+          clearSelection()
     selectionStarted = false
+
+  proc buildGhostOrigin(viewProjection: Mat4): (int32, int32) =
+    ## Snaps the pending footprint so the cursor sits on its centre tile.
+    let
+      kind = BuildingKind(pendingBuild)
+      side = BuildingTable[kind].footprint
+      ground = pickGroundPoint(
+        window.mousePos.vec2,
+        window.size.vec2,
+        viewProjection,
+        cameraTarget.y
+      )
+      tile = groundTile(ground, HalfGrid, GridSide)
+    (tile[0] - side div 2, tile[1] - side div 2)
+
+  proc queuePendingBuild(x, y: int32) =
+    ## Sends the first selected peon to raise the pending structure.
+    let player = options.playerSlot - 1
+    for id in selectedIds:
+      if id.isUnitId and run.world.hasUnit(id):
+        let unit = run.world.units[run.world.unitIndex(id)]
+        if unit.owner == player and unit.kind == PeonUnit:
+          queueBuild(player, id, pendingBuild, x, y)
+          pendingBuild = -1
+          return
+
+  proc issueSelectedMove(player, x, y: int32) =
+    ## Moves every selected owned unit, or rallies a selected building.
+    var moved = false
+    for id in selectedIds:
+      if id.isUnitId and run.world.unitOwner(id) == player:
+        if attackMoveArmed:
+          queueAttackMove(player, id, x, y)
+        else:
+          queueMove(player, id, x, y)
+        moved = true
+    if not moved:
+      for id in selectedIds:
+        if id.isBuildingId and run.world.buildingOwner(id) == player:
+          queueSetRally(player, id, x, y)
+
+  proc updatePlayerOrder(viewProjection: Mat4) =
+    ## Turns a right-click into move, attack, harvest, or rally.
+    if not playerMode():
+      return
+    if not window.buttonReleased[MouseRight]:
+      return
+    if mouseOverUi(window, sk.mousePos):
+      return
+    if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
+      return
+    if pendingBuild >= 0:
+      let origin = buildGhostOrigin(viewProjection)
+      if run.world.canPlace(
+          BuildingKind(pendingBuild),
+          origin[0],
+          origin[1]
+      ):
+        queuePendingBuild(origin[0], origin[1])
+      return
+    let
+      player = options.playerSlot - 1
+      picked = pickEntity(viewProjection)
+      ground = pickGroundPoint(
+        window.mousePos.vec2,
+        window.size.vec2,
+        viewProjection,
+        cameraTarget.y
+      )
+      tile = groundTile(ground, HalfGrid, GridSide)
+      tree = tileIndex(tile[0], tile[1])
+      under = structureAtTile(tile[0], tile[1])
+      target =
+        if under != NoEntity:
+          under
+        else:
+          picked
+    if target != NoEntity:
+      if run.world.hasBuilding(target):
+        let structure = run.world.buildings[run.world.buildingIndex(target)]
+        if structure.kind == GoldMineBuilding:
+          for id in selectedIds:
+            if id.isUnitId and run.world.hasUnit(id):
+              let unit = run.world.units[run.world.unitIndex(id)]
+              if unit.owner == player and unit.kind == PeonUnit:
+                queueHarvest(player, id, target, 0)
+          attackMoveArmed = false
+          return
+        if structure.owner != player:
+          for id in selectedIds:
+            if id.isUnitId and run.world.unitOwner(id) == player:
+              queueAttack(player, id, target)
+          attackMoveArmed = false
+          return
+      elif run.world.hasUnit(target) and
+          run.world.unitOwner(target) != player:
+        for id in selectedIds:
+          if id.isUnitId and run.world.unitOwner(id) == player:
+            queueAttack(player, id, target)
+        attackMoveArmed = false
+        return
+    if run.world.treeWood[tree] > 0:
+      var harvested = false
+      for id in selectedIds:
+        if id.isUnitId and run.world.hasUnit(id):
+          let unit = run.world.units[run.world.unitIndex(id)]
+          if unit.owner == player and unit.kind == PeonUnit:
+            queueHarvest(player, id, tree, 1)
+            harvested = true
+      if harvested:
+        attackMoveArmed = false
+        return
+    issueSelectedMove(player, tile[0], tile[1])
+    attackMoveArmed = false
 
   proc cameraView(): Mat4 =
     ## Returns the shared fixed-north RTS view matrix.
     cameraEye = rtsCameraEye(cameraTarget, cameraDistance)
     lookAt(cameraEye, cameraTarget, vec3(0, 1, 0))
+
+  proc drawBuildingOutline(
+      structure: Building,
+      viewProjection: Mat4
+  ) =
+    ## Draws one structure's props into the current selection mask.
+    let centre = buildingCentre(structure)
+    if structure.kind == GoldMineBuilding:
+      for index, name in MineProps:
+        towerPack.drawProp(
+          name,
+          centre + vec3(float32(index) * 0.7'f32 - 0.7'f32, 0,
+            float32(index mod 2) * 0.6'f32 - 0.3'f32),
+          float32(index) * 1.1'f32,
+          [1.8'f32, 1.4'f32, 1.2'f32][index],
+          viewProjection
+        )
+      return
+    if structure.state == BuildingUnderConstruction:
+      for index, name in ConstructionProps:
+        towerPack.drawProp(
+          name,
+          centre + vec3(float32(index) - 1.0'f32, 0, float32(index mod 2)),
+          float32(index) * 0.9'f32,
+          0.8'f32,
+          viewProjection
+        )
+      return
+    let name = BuildingProps[structure.owner][structure.kind]
+    packFor(structure.owner, name).drawProp(
+      name,
+      centre,
+      0.0'f32,
+      BuildingPropHeights[structure.kind],
+      viewProjection
+    )
+
+  proc drawSelectedOutline(
+      view,
+      projection,
+      viewProjection: Mat4
+  ) =
+    ## Draws selected units and buildings into one yellow silhouette.
+    var
+      anyUnit = false
+      anyBuilding = false
+    for id in selectedIds:
+      if id.isUnitId and run.world.hasUnit(id):
+        let unit = run.world.units[run.world.unitIndex(id)]
+        if shownUnit(unit) and unit.state != UnitDying:
+          anyUnit = true
+      elif id.isBuildingId and run.world.hasBuilding(id):
+        let structure = run.world.buildings[run.world.buildingIndex(id)]
+        if shownBuilding(structure) and
+            structure.state != BuildingDying:
+          anyBuilding = true
+    if not anyUnit and not anyBuilding:
+      return
+    selectionOutline.beginMask(window.size)
+    if anyUnit:
+      beginCharacters(scene, window, view, projection, cameraEye)
+      for id in selectedIds:
+        if not id.isUnitId or not run.world.hasUnit(id):
+          continue
+        let unit = run.world.units[run.world.unitIndex(id)]
+        if not shownUnit(unit) or unit.state == UnitDying:
+          continue
+        let
+          model = unitModels[unit.owner][unit.kind]
+          clip = unitClips[unit.owner][unit.kind][unit.animation]
+        var animTime = renderTime(unit.animationTicks)
+        if unit.animation == DeathAnimation or
+            unit.animation == VictoryAnimation:
+          animTime = min(animTime, clipDuration(model, clip))
+        drawCharacter(
+          scene,
+          model,
+          renderPoint(unit),
+          renderFacing(unit),
+          clip,
+          animTime
+        )
+      finishCharacters(scene)
+    if anyBuilding:
+      for id in selectedIds:
+        if not id.isBuildingId or not run.world.hasBuilding(id):
+          continue
+        let structure = run.world.buildings[run.world.buildingIndex(id)]
+        if not shownBuilding(structure) or
+            structure.state == BuildingDying:
+          continue
+        drawBuildingOutline(structure, viewProjection)
+    selectionOutline.drawOutline()
+
+  proc drawBuildGhost(viewProjection: Mat4) =
+    ## Follows the pointer with a transparent building while placing.
+    if not playerMode() or pendingBuild < 0:
+      return
+    let
+      player = options.playerSlot - 1
+      kind = BuildingKind(pendingBuild)
+      side = BuildingTable[kind].footprint
+      origin = buildGhostOrigin(viewProjection)
+      valid = run.world.canPlace(kind, origin[0], origin[1])
+      x = float32(origin[0]) + float32(side) * 0.5'f32 - HalfGrid
+      z = float32(origin[1]) + float32(side) * 0.5'f32 - HalfGrid
+      centre = vec3(x, surfaceHeight(x, z), z)
+      name = BuildingProps[player][kind]
+      tint =
+        if valid:
+          vec4(0.55, 0.95, 0.65, 0.42)
+        else:
+          vec4(0.95, 0.28, 0.22, 0.42)
+    packFor(player, name).drawProp(
+      name,
+      centre,
+      0.0'f32,
+      BuildingPropHeights[kind],
+      viewProjection,
+      tint
+    )
 
   proc updateTerrainVision() =
     ## Uploads the selected team's softened visible and explored terrain.
@@ -1209,6 +1501,7 @@ proc runGraphics*() =
         barCameraRight = normalize(cross(cameraForward, vec3(0, 1, 0)))
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
       updateWorldSelection(viewProjection)
+      updatePlayerOrder(viewProjection)
       profileBlock "drawWorld":
         # One clock for the whole frame: the palette, the sun's position,
         # and its shadow map all follow the in-game hour. The fractional
@@ -1248,6 +1541,8 @@ proc runGraphics*() =
         beginCharacters(scene, window, view, projection, cameraEye)
         drawWorldUnits()
         finishCharacters(scene)
+        drawSelectedOutline(view, projection, viewProjection)
+        drawBuildGhost(viewProjection)
         drawWater(viewProjection, cameraEye)
         particles.drawParticles(
           viewProjection,
@@ -1308,10 +1603,24 @@ proc runGraphics*() =
     of KeyC: actionCam.toggle(followSelection)
     of KeyT: scene.toggleShading()
     of KeyE: showEdges = not showEdges
-    of KeyV: viewMode = (viewMode + 1) mod 3
+    of KeyV:
+      if not playerMode():
+        viewMode = (viewMode + 1) mod 3
+    of KeyX:
+      if playerMode():
+        let player = options.playerSlot - 1
+        for id in selectedIds:
+          if run.world.unitOwner(id) == player or
+              run.world.buildingOwner(id) == player:
+            queueCancel(player, id)
+        pendingBuild = -1
+        attackMoveArmed = false
     of KeyEscape:
-      when not defined(emscripten):
-        window.closeRequested = true
+      if playerMode() and pendingBuild >= 0:
+        pendingBuild = -1
+      else:
+        when not defined(emscripten):
+          window.closeRequested = true
     else: discard
 
   while not window.closeRequested:

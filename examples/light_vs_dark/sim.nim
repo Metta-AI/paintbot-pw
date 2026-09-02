@@ -715,6 +715,7 @@ proc footprintGoal(w: World, index: int32, origin: Tile2,
 proc nearestDropOff*(w: World, player: int32, origin: Tile2,
     wantWood: bool): int32 =
   ## Returns the closest completed structure that accepts a resource.
+  ## Wood may go to a hall or a mill. Gold only goes to a town hall.
   result = NoEntity
   var best = int32.high
   for structure in w.buildings:
@@ -1175,6 +1176,23 @@ proc beginDropOff(w: World, index: int32, wantWood: bool) =
   w.units[index].targetTile = keepTile
   w.units[index].sourceId = keepSource
 
+proc resumeTreeWork(w: World, index: int32) =
+  ## Returns a peon to its tree, or the nearest standing tree in that grove.
+  let tile = w.units[index].targetTile
+  if inGrid(tile) and w.treeWood[tileIndex(tile)] > 0:
+    w.beginTreeTrip(index, tileIndex(tile))
+    return
+  let fromTile =
+    if inGrid(tile):
+      tile
+    else:
+      w.units[index].tile
+  let next = w.nearestTree(fromTile)
+  if next >= 0:
+    w.beginTreeTrip(index, next)
+    return
+  w.units[index].clearOrder(true)
+
 proc handleInMine(w: World, index: int32) =
   ## Counts down a mining shift and pushes the peon back out with its load.
   if w.units[index].stateTicks > 0:
@@ -1203,7 +1221,7 @@ proc handleChopping(w: World, index: int32) =
     return
   let treeIndex = tileIndex(w.units[index].targetTile)
   if w.treeWood[treeIndex] <= 0:
-    w.units[index].clearOrder(true)
+    w.resumeTreeWork(index)
     return
   let carried = min(WoodPerTrip, int32(w.treeWood[treeIndex]))
   w.treeWood[treeIndex] = int16(int32(w.treeWood[treeIndex]) - carried)
@@ -1225,13 +1243,7 @@ proc resumeHarvest(w: World, index: int32) =
   if w.units[index].sourceId != NoEntity:
     w.beginMineTrip(index, w.units[index].sourceId)
     return
-  let tile = w.units[index].targetTile
-  if inGrid(tile) and w.treeWood[tileIndex(tile)] > 0:
-    w.beginTreeTrip(index, tileIndex(tile))
-    return
-  ## The source is gone. Idle with the flag set, so the overlord picks the
-  ## next one rather than the simulation guessing for it.
-  w.units[index].clearOrder(true)
+  w.resumeTreeWork(index)
 
 proc handleDeposit(w: World, index: int32) =
   ## Credits a delivered load and sends the peon straight back out. Peons

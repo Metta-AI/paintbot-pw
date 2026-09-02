@@ -132,6 +132,7 @@ var
   visibilityTex: Uniform[Sampler2D]
   visibilityOffset: Uniform[float32]
   visibilityScale: Uniform[float32]
+  propTint: Uniform[Vec4]
 
 proc texture(buffer: Uniform[Sampler2dArray], position: Vec3): Vec4 =
   ## Provides Shady with the texture-array builtin signature.
@@ -380,10 +381,10 @@ proc propFrag(
       fragmentColor, fragmentNormal, sampleSunShadow(shadowPos))
     gray = dot(litColor, vec3(0.30, 0.59, 0.11)) * 0.32
   fragColor = vec4(
-    litColor.x * visibility + gray * (1.0 - visibility),
-    litColor.y * visibility + gray * (1.0 - visibility),
-    litColor.z * visibility + gray * (1.0 - visibility),
-    1.0
+    (litColor.x * visibility + gray * (1.0 - visibility)) * propTint.x,
+    (litColor.y * visibility + gray * (1.0 - visibility)) * propTint.y,
+    (litColor.z * visibility + gray * (1.0 - visibility)) * propTint.z,
+    propTint.w
   )
 
 ## Tree shader: handpainted textured meshes whose foliage is alpha-cutout
@@ -579,6 +580,7 @@ var
   propProgram: GLuint
   propMvpLocation, propVisibilityTexLocation: GLint
   propVisibilityOffsetLocation, propVisibilityScaleLocation: GLint
+  propTintLocation: GLint
   treeProgram: GLuint
   treeMvpLocation, treeVisibilityTexLocation: GLint
   treeVisibilityOffsetLocation, treeVisibilityScaleLocation: GLint
@@ -1041,13 +1043,19 @@ proc uploadPropModel(model: PropModel) =
     glVertexAttribPointer(location.GLuint, 3, cGL_FLOAT, GL_FALSE, stride, nil)
   glBindVertexArray(0)
 
+proc setPropTint(tint: Vec4) =
+  ## Uploads the standalone or batched prop color multiply.
+  if propTintLocation >= 0:
+    glUniform4f(propTintLocation, tint.x, tint.y, tint.z, tint.w)
+
 proc drawProp*(
     pack: PropPack,
     name: string,
     position: Vec3,
     rotation,
     propScale: float32,
-    viewProjection: Mat4
+    viewProjection: Mat4,
+    tint = vec4(1, 1, 1, 1)
 ) =
   ## Draws one named prop immediately into the current framebuffer.
   if not pack.hasProp(name):
@@ -1058,7 +1066,13 @@ proc drawProp*(
     translate(position) * rotateY(rotation) *
     scale(vec3(propScale, propScale, propScale))
   var transform = viewProjection * model3d
-  glDisable(GL_BLEND)
+  if tint.w < 1.0'f32:
+    glEnable(GL_BLEND)
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+    glDepthMask(GL_FALSE)
+  else:
+    glDisable(GL_BLEND)
+    glDepthMask(GL_TRUE)
   glDisable(GL_CULL_FACE)
   glEnable(GL_DEPTH_TEST)
   glUseProgram(propProgram)
@@ -1079,10 +1093,13 @@ proc drawProp*(
     GL_FALSE,
     cast[ptr float32](transform.addr)
   )
+  setPropTint(tint)
   glBindVertexArray(model.vertexArray)
   glDrawArrays(GL_TRIANGLES, 0, model.vertexCount)
   glBindVertexArray(0)
   glUseProgram(0)
+  glDepthMask(GL_TRUE)
+  glDisable(GL_BLEND)
 
 ## Terrain parameters
 
@@ -2096,6 +2113,7 @@ proc initTerrain*() =
     toShader(propFrag, OpenGlShaderTarget, shaderFragment)
   )
   propMvpLocation = glGetUniformLocation(propProgram, "mvp")
+  propTintLocation = glGetUniformLocation(propProgram, "propTint")
   propEnv = envLocations(propProgram)
   propShadow = shadowLocations(propProgram)
   propVisibilityTexLocation = glGetUniformLocation(
@@ -2450,6 +2468,7 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
     glUseProgram(propProgram)
     setEnvUniforms(propEnv)
     setShadowUniforms(propShadow)
+    setPropTint(vec4(1, 1, 1, 1))
     glUniformMatrix4fv(
       propMvpLocation,
       1,

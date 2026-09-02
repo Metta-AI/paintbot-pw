@@ -5,7 +5,7 @@
 ## cannot write world fields directly.
 
 import
-  polyworld/[basic, cli, pathing, profiles],
+  polyworld/[basic, cli, controllers, pathing, profiles],
   content,
   sim,
   replays
@@ -199,27 +199,33 @@ proc buildHeroHost(heroId: int32): Host =
   targetAction("pickupTarget", ActionPickupTarget)
   targetAction("healTarget", ActionHealTarget)
 
-proc loadBots*(game: Game, groups: openArray[BotGroup]) =
-  ## Compiles and expands the configured programs into four isolated VMs.
+proc loadBots*(
+    game: Game,
+    groups: openArray[BotGroup],
+    playerSlot = 0'i32
+) =
+  ## Compiles bot files into every party slot except the optional human slot.
   let
     limits = heroLimits()
     schema = buildHeroHost(100)
-  var slot = 0
-  for group in groups:
-    let source = readFile(group.path)
-    for _ in 0 ..< group.count:
-      let program = compile(source, schema, limits)
-      if slot == 0:
-        bindHeroData(program)
-      game.heroVms[slot] = HeroVm(
-        runtime: initRuntime(
-          program,
-          buildHeroHost(int32(100 + slot)),
-          limits
-        ),
-        ready: true
-      )
-      inc slot
+    kinds = controllerKinds(PartySize, playerSlot)
+    sources = groups.expandBotSources(kinds)
+  var bound = false
+  for slot in 0 ..< PartySize:
+    if kinds[slot] == PlayerController:
+      continue
+    let program = compile(sources[slot], schema, limits)
+    if not bound:
+      bindHeroData(program)
+      bound = true
+    game.heroVms[slot] = HeroVm(
+      runtime: initRuntime(
+        program,
+        buildHeroHost(int32(100 + slot)),
+        limits
+      ),
+      ready: true
+    )
 
 proc runBotDecisions*(game: Game, slot: int32) {.measure.} =
   ## Runs one live hero VM decision.

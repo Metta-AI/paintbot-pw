@@ -47,4 +47,24 @@ block:
   doAssert target.z < 0
   doAssert not applyRtsPan(target, vec2(0, 0), 1.0'f32, 100, 64)
 
+echo "Testing follow frame lifts the subject"
+block:
+  let
+    subject = vec3(0, 1, 0)
+    framed = rtsFollowFrame(subject, 80)
+    farther = rtsFollowFrame(subject, 160)
+  doAssert framed.x == 0
+  doAssert framed.y == 1
+  doAssert framed.z > 0
+  doAssert farther.z > framed.z
+  let lower = rtsFollowFrame(subject, 80, RtsGotaFollowLift)
+  doAssert lower.z > 0
+  doAssert lower.z < framed.z
+
+echo "Testing ground tile picking"
+block:
+  let tile = groundTile(vec3(-63.2, 0, 4.1), 64, 128)
+  doAssert tile[0] == 0
+  doAssert tile[1] == 68
+
 echo "RTS camera tests passed"

@@ -8,6 +8,7 @@ import
   test_body_layers,
   test_chrome,
   test_cli,
+  test_controllers,
   test_cta_maps,
   test_cta_sim,
   test_fixed,

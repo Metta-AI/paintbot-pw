@@ -6,11 +6,12 @@
 
 import
   std/[os, strformat, strutils, times],
-  polyworld/[cli, profiles, tapes],
+  polyworld/[cli, controllers, profiles, tapes],
   content,
   maps,
   sim,
   bots,
+  controls,
   replays
 
 proc usage() =
@@ -19,6 +20,8 @@ proc usage() =
   echo "  --bot:PATH              Fill one of the four hero slots."
   echo "  --bot:PATH:N            Fill N slots with that BASIC program."
   echo "  --bot PATH[:N]          The equivalent two-argument form."
+  echo "  --player                Control the first hero; supply 3 bots."
+  echo "  --player:N              Control hero N (1-4); supply 3 bots."
   echo "  --replay PATH           Play recorded actions instead of bots."
   echo "  --record PATH           Record bot actions to a replay."
   echo "  --seed NUMBER           Live dungeon seed."
@@ -89,6 +92,9 @@ proc decideHeroSlot(game: Game, slot: int32) =
         action
     ):
       discard game.applyHeroAction(slot, action)
+    return
+  if isPlayerIndex(options.playerSlot, slot):
+    flushPlayerCommands(game)
     return
   runBotDecisions(game, slot)
 
@@ -221,6 +227,6 @@ if options.replayPath.len > 0:
 else:
   profileBlock "map":
     run = newGame(options.seed, options.maximumTicks)
-  loadBots(run, options.botGroups)
+  loadBots(run, options.botGroups, options.playerSlot)
   run.recorder = initReplayRecorder(run.world.setup)
   run.replayPlayer = ReplayPlayer(data: run.recorder.data)

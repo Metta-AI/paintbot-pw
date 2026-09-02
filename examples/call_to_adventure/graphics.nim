@@ -13,7 +13,7 @@ import
   polyworld/[actioncam, characters, common, fixed, particles, particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shadows, shapes, tapes, viewers, visions, worldbars],
-  content, maps, sim, game, replays, ui
+  content, maps, sim, game, replays, ui, controls
 
 when defined(takeScreenshot):
   import std/[os, strutils]
@@ -506,7 +506,9 @@ proc runGraphics*() =
     )
     primaryId = 0
     selectedIds: array[PartySize, bool]
+    playerSlot = options.playerSlot - 1
     selectionPressPosition = vec2(0)
+    rightPressPosition = vec2(0)
     selectionStarted = false
     selectionAdditive = false
     groupCameraScale = 1.0'f32
@@ -574,6 +576,10 @@ proc runGraphics*() =
 
   replayCheckpoints = @[captureCheckpoint()]
 
+  proc playerMode(): bool =
+    ## Returns whether this client issues orders for one party hero.
+    options.playerSlot > 0 and not run.replayMode
+
   proc partyCenter(): Vec3 =
     ## Returns the average interpolated position of the living party.
     var
@@ -614,6 +620,10 @@ proc runGraphics*() =
 
   proc selectedViewLevel(): int =
     ## Returns the uppermost floor a selected living hero stands on.
+    if playerMode() and
+        playerSlot >= 0 and
+        playerSlot < run.world.actors.len:
+      return int(run.world.actors[playerSlot].home.level)
     int(run.viewLevel(selectedIds))
 
   proc updateSelectionCamera() =
@@ -657,9 +667,34 @@ proc runGraphics*() =
     actionCam.takeManual()
     updateSelectionCamera()
 
-  selectAllHeroes()
-  actionCam.enabled = true
-  followSelection = false
+  proc clearSelection() =
+    ## Clears the party selection and leaves the camera free-floating.
+    for slot in 0 ..< PartySize:
+      selectedIds[slot] = false
+    followSelection = false
+    actionCam.takeManual()
+
+  proc playerHeroSelected(): bool =
+    ## Returns whether the human hero is currently selected and alive.
+    playerMode() and
+      playerSlot >= 0 and
+      playerSlot < run.world.actors.len and
+      selectedIds[playerSlot] and
+      run.world.actors[playerSlot].alive
+
+  if playerMode():
+    selectedIds[playerSlot] = true
+    primaryId = playerSlot
+    followSelection = true
+    actionCam.enabled = false
+    if playerSlot >= 0 and playerSlot < run.world.actors.len:
+      cameraTarget =
+        actorRenderPosition(run.world.actors[playerSlot]) +
+          vec3(0, 0.85'f32, 0)
+  else:
+    selectAllHeroes()
+    actionCam.enabled = true
+    followSelection = false
 
   proc selectedCenter(): Vec3 =
     ## Returns the midpoint of all selected living heroes.
@@ -846,6 +881,46 @@ proc runGraphics*() =
       (0.5'f32 - normalized.y * 0.5'f32) * window.size.y.float32
     )
 
+  proc pickLoot(viewProjection: Mat4): int32 =
+    ## Finds loose treasure under the pointer on the visible floor.
+    result = 0
+    var bestDistance = 28.0'f32
+    let visibleFrom = selectedViewLevel()
+    for item in run.world.items:
+      if item.carrier != 0 or int(item.tile.level) < visibleFrom:
+        continue
+      let
+        point = screenPosition(
+          tileCenter(
+            int(item.tile.level), int(item.tile.x), int(item.tile.z)
+          ) + vec3(0, 0.4'f32, 0),
+          viewProjection
+        )
+        distance = (point - window.mousePos.vec2).length
+      if distance < bestDistance:
+        bestDistance = distance
+        result = item.id
+
+  proc pickMonster(viewProjection: Mat4): int32 =
+    ## Finds a living monster under the pointer on the visible floor.
+    result = 0
+    var bestDistance = 32.0'f32
+    let visibleFrom = selectedViewLevel()
+    for slot in PartySize ..< run.world.actors.len:
+      let actor = run.world.actors[slot]
+      if not actor.alive or actor.kind != MonsterActor or
+          int(actor.home.level) < visibleFrom:
+        continue
+      let
+        point = screenPosition(
+          actorRenderPosition(actor) + vec3(0, 0.9'f32, 0),
+          viewProjection
+        )
+        distance = (point - window.mousePos.vec2).length
+      if distance < bestDistance:
+        bestDistance = distance
+        result = actor.id
+
   proc pickEntity(viewProjection: Mat4): int =
     ## Finds the nearest visible living hero under the pointer.
     result = -1
@@ -867,7 +942,8 @@ proc runGraphics*() =
         result = slot
 
   proc updateWorldSelection(viewProjection: Mat4) =
-    ## Selects a clicked hero without treating camera drags as clicks.
+    ## Left-click selects in spectator mode, or attacks, loots, and heals
+    ## for the human hero.
     if not window.buttonReleased[MouseLeft]:
       return
     let
@@ -875,15 +951,76 @@ proc runGraphics*() =
       dragDistance = sqrt(delta.x * delta.x + delta.y * delta.y)
     if selectionStarted and dragDistance <= 6.0'f32 and
         not mouseOverUi(window, sk.mousePos):
-      let picked = pickEntity(viewProjection)
-      if picked >= 0:
-        selectEntity(picked, selectionAdditive)
-      elif not selectionAdditive:
-        for slot in 0 ..< PartySize:
-          selectedIds[slot] = false
-        followSelection = false
-        actionCam.takeManual()
+      if playerMode():
+        let
+          slot = playerSlot
+          monster = pickMonster(viewProjection)
+          loot = pickLoot(viewProjection)
+          ally = pickEntity(viewProjection)
+        if monster != 0:
+          queueAttackTarget(slot, monster)
+        elif loot != 0:
+          queuePickupTarget(slot, loot)
+        elif ally == slot:
+          selectEntity(slot)
+        elif ally >= 0:
+          queueHealTarget(slot, run.world.actors[ally].id)
+        elif not selectionAdditive:
+          clearSelection()
+      else:
+        let picked = pickEntity(viewProjection)
+        if picked >= 0:
+          selectEntity(picked, selectionAdditive)
+        elif not selectionAdditive:
+          for slot in 0 ..< PartySize:
+            selectedIds[slot] = false
+          followSelection = false
+          actionCam.takeManual()
     selectionStarted = false
+
+  proc updatePlayerWalk(viewProjection: Mat4) =
+    ## Right-click walks the human hero onto the tile under the pointer.
+    if not playerMode():
+      return
+    if not window.buttonReleased[MouseRight]:
+      return
+    if mouseOverUi(window, sk.mousePos):
+      return
+    if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
+      return
+    let
+      (origin, dir) = mouseRay(
+        window.mousePos.vec2,
+        window.size.vec2,
+        viewProjection
+      )
+      picked = pickWalkableTile(
+        origin,
+        dir,
+        selectedViewLevel()
+      )
+    if picked.hit:
+      queueWalkTo(
+        int32(playerSlot),
+        int32(picked.layer),
+        int32(picked.x),
+        int32(picked.z)
+      )
+      selectEntity(playerSlot)
+
+  proc followPlayerHero(dt: float32) =
+    ## Keeps the camera on the selected human hero.
+    if playerSlot < 0 or playerSlot >= run.world.actors.len:
+      return
+    let actor = run.world.actors[playerSlot]
+    if not actor.alive:
+      return
+    followSelection = true
+    cameraTarget = mix(
+      cameraTarget,
+      actorRenderPosition(actor) + vec3(0, 0.85'f32, 0),
+      damping(5.0'f32, dt)
+    )
 
   proc drawWorldBars(
       viewProjection: Mat4,
@@ -983,24 +1120,31 @@ proc runGraphics*() =
           window.buttonDown[KeyRightShift]
     of MouseRight:
       if not mouseOverUi(window, sk.mousePos):
-        panning = true
+        rightPressPosition = window.mousePos.vec2
         lastMouse = window.mousePos
+    of MouseMiddle:
+      if not mouseOverUi(window, sk.mousePos):
+        lastMouse = window.mousePos
+    of KeyB:
+      lastMouse = window.mousePos
     of KeySpace:
       transport.handleKey(button)
     of KeyC:
-      actionCam.toggle(followSelection)
+      if not playerMode():
+        actionCam.toggle(followSelection)
     of KeyT:
       scene.toggleShading()
     of KeyF:
-      if selectedLivingCount() > 0:
+      if not playerMode() and selectedLivingCount() > 0:
         followSelection = not followSelection
         if followSelection:
           actionCam.takeManual()
     of KeyF1:
       debugMenuOpen = not debugMenuOpen
     of KeyA:
-      if window.buttonDown[KeyLeftControl] or
-          window.buttonDown[KeyRightControl]:
+      if not playerMode() and
+          (window.buttonDown[KeyLeftControl] or
+            window.buttonDown[KeyRightControl]):
         selectAllHeroes()
     of KeyEscape:
       when not defined(emscripten):
@@ -1008,17 +1152,14 @@ proc runGraphics*() =
     else:
       discard
 
-  window.onButtonRelease = proc(button: Button) =
-    case button
-    of MouseRight: panning = false
-    else: discard
-
   window.onScroll = proc() =
     sk.uiScale = hudUiScale(window)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     if not mouseOverUi(window, sk.mousePos):
-      actionCam.takeManual()
-      if followSelection and selectedLivingCount() > 1:
+      if not playerMode():
+        actionCam.takeManual()
+      if not playerMode() and
+          followSelection and selectedLivingCount() > 1:
         groupCameraScale = clamp(
           groupCameraScale *
             (1.0'f32 - window.scrollDelta.y * 0.1'f32 / 3.0'f32),
@@ -1110,77 +1251,96 @@ proc runGraphics*() =
 
       # Camera
       profileBlock "camera":
-        updateMinimapCamera(
-          window,
-          sk.mousePos,
-          cameraTarget,
-          minimapPanning,
-          followSelection,
-          selectedViewLevel()
-        )
-        if minimapPanning:
-          actionCam.takeManual()
-        if panning:
-          let delta = window.mousePos - lastMouse
-          lastMouse = window.mousePos
-          followSelection = false
-          actionCam.takeManual()
-          cameraTarget.x -= delta.x.float32 * 0.05'f32
-          cameraTarget.z -= delta.y.float32 * 0.05'f32
-          cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
-          cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
-        if not minimapPanning and
-            applyRtsPan(
-              cameraTarget,
-              rtsPanDir(window),
-              dt,
-              cameraDistance,
-              HalfGrid
-            ):
-          followSelection = false
-          actionCam.takeManual()
-        if actionCam.enabled:
-          feedCtaActions()
-          actionCam.chooseShot(dt, transport.speed)
-          actionCam.follow(
-            cameraTarget,
-            cameraDistance,
-            dt,
-            transport.speed
-          )
-        else:
-          let livingSelection = selectedLivingCount()
-          if followSelection and livingSelection == 1:
-            let
-              cameraHero = selectedLivingHero()
-              actor = run.world.actors[cameraHero]
-              targetPosition =
-                actorRenderPosition(actor) + vec3(0, 0.85'f32, 0)
-            cameraTarget = mix(
-              cameraTarget,
-              targetPosition,
-              damping(5.0'f32, dt)
-            )
-          elif followSelection and livingSelection > 1:
-            let
-              groupCenter = selectedCenter()
-              groupDistance = clamp(
-                10.0'f32 + selectedRadius(groupCenter) * 2.8'f32,
-                16.0'f32,
-                80.0'f32
-              ) * groupCameraScale
-            cameraTarget = mix(
-              cameraTarget,
-              groupCenter + vec3(0, 0.45'f32, 0),
-              damping(4.0'f32, dt)
-            )
-            cameraDistance = mix(
-              cameraDistance,
-              groupDistance,
-              damping(2.0'f32, dt)
-            )
-          elif followSelection:
+        let overUi = mouseOverUi(window, sk.mousePos)
+        if (window.buttonPressed[MouseMiddle] and not overUi) or
+            window.buttonPressed[KeyB]:
+          if playerMode():
+            clearSelection()
+          else:
             followSelection = false
+            actionCam.takeManual()
+          lastMouse = window.mousePos
+        let wantPan =
+          window.buttonDown[KeyB] or
+          (not overUi and window.buttonDown[MouseMiddle]) or
+          (not playerMode() and not overUi and window.buttonDown[MouseRight])
+        if wantPan and not panning:
+          lastMouse = window.mousePos
+        panning = wantPan
+        if playerHeroSelected():
+          followPlayerHero(dt)
+        else:
+          updateMinimapCamera(
+            window,
+            sk.mousePos,
+            cameraTarget,
+            minimapPanning,
+            followSelection,
+            selectedViewLevel()
+          )
+          if minimapPanning:
+            actionCam.takeManual()
+          if panning:
+            let delta = window.mousePos - lastMouse
+            lastMouse = window.mousePos
+            followSelection = false
+            actionCam.takeManual()
+            cameraTarget.x -= delta.x.float32 * 0.05'f32
+            cameraTarget.z -= delta.y.float32 * 0.05'f32
+            cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
+            cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
+          if not minimapPanning and
+              applyRtsPan(
+                cameraTarget,
+                rtsPanDir(window),
+                dt,
+                cameraDistance,
+                HalfGrid
+              ):
+            followSelection = false
+            actionCam.takeManual()
+          if not playerMode() and actionCam.enabled:
+            feedCtaActions()
+            actionCam.chooseShot(dt, transport.speed)
+            actionCam.follow(
+              cameraTarget,
+              cameraDistance,
+              dt,
+              transport.speed
+            )
+          else:
+            let livingSelection = selectedLivingCount()
+            if followSelection and livingSelection == 1:
+              let
+                cameraHero = selectedLivingHero()
+                actor = run.world.actors[cameraHero]
+                targetPosition =
+                  actorRenderPosition(actor) + vec3(0, 0.85'f32, 0)
+              cameraTarget = mix(
+                cameraTarget,
+                targetPosition,
+                damping(5.0'f32, dt)
+              )
+            elif followSelection and livingSelection > 1:
+              let
+                groupCenter = selectedCenter()
+                groupDistance = clamp(
+                  10.0'f32 + selectedRadius(groupCenter) * 2.8'f32,
+                  16.0'f32,
+                  80.0'f32
+                ) * groupCameraScale
+              cameraTarget = mix(
+                cameraTarget,
+                groupCenter + vec3(0, 0.45'f32, 0),
+                damping(4.0'f32, dt)
+              )
+              cameraDistance = mix(
+                cameraDistance,
+                groupDistance,
+                damping(2.0'f32, dt)
+              )
+            elif followSelection:
+              followSelection = false
 
       let
         eye = rtsCameraEye(cameraTarget, cameraDistance)
@@ -1197,6 +1357,7 @@ proc runGraphics*() =
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
 
       updateWorldSelection(viewProjection)
+      updatePlayerWalk(viewProjection)
 
       profileBlock "drawWorld":
         # One clock for the whole frame: the palette, the sun's position,

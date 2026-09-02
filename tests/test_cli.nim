@@ -143,6 +143,31 @@ block:
   let compact = parseCommon(@["--speed=16", "--bot:one.bas"])
   doAssert compact.speed == 16
 
+echo "Testing --player occupies one slot"
+block:
+  let options = parseCommon(
+    @["--player", "--bot:one.bas:9"],
+    liveBotCount = 10,
+    liveBotMessage = "need ten bots"
+  )
+  doAssert options.playerSlot == 1
+  doAssert options.botGroups.botCount == 9
+
+echo "Testing --player:N compact and equals forms"
+block:
+  let compact = parseCommon(
+    @["--player:2", "--bot:one.bas:3"],
+    liveBotCount = 4,
+    liveBotMessage = "need four bots"
+  )
+  doAssert compact.playerSlot == 2
+  let equals = parseCommon(
+    @["--player=1", "--bot:one.bas"],
+    liveBotCount = 2,
+    liveBotMessage = "need two bots"
+  )
+  doAssert equals.playerSlot == 1
+
 echo "Testing --windowSize is a shared flag"
 block:
   let options = parseCommon(@["--windowSize:800x400", "--bot:one.bas"])

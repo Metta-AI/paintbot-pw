@@ -352,17 +352,75 @@ block woodFlowsAndTreesFall:
   doAssert gained mod WoodPerTrip == 0, "wood arrived in a partial load"
   doAssert w.treeWood[treeIndex] == 0,
     "a tree survived four full trips"
-  doAssert w.terrainEdits.len == edits + 1,
+  doAssert w.terrainEdits.len >= edits + 1,
     "felling a tree did not log a terrain edit"
-  doAssert w.terrainEdits[^1].index == treeIndex
+  var felledAssigned = false
+  for edit in w.terrainEdits:
+    if edit.index == treeIndex:
+      felledAssigned = true
+  doAssert felledAssigned, "the assigned tree was never felled"
   doAssert w.tileOpen(tile2(treeIndex mod GridSide, treeIndex div GridSide)),
     "the felled tree still blocks its tile"
-  doAssert gained == int32(WoodPerTree),
-    &"a tree yielded {gained} wood instead of {WoodPerTree}"
-  ## With the tile exhausted the peon reports failure rather than guessing.
+  doAssert gained >= int32(WoodPerTree),
+    &"a tree yielded {gained} wood instead of at least {WoodPerTree}"
+  ## The grove still has trees, so the peon should keep chopping nearby.
   let index = w.unitIndex(peon)
-  doAssert w.units[index].orderFailed,
-    "an exhausted tree did not report an order failure"
+  doAssert not w.units[index].orderFailed,
+    "an exhausted tree idled instead of taking the next tree"
+  doAssert w.units[index].state in {
+    UnitToTree, UnitChopping, UnitToDropWood, UnitDepositWood
+  } or w.units[index].carryWood > 0,
+    "after felling one tree the peon was not assigned another"
+
+echo "Testing wood drop-off uses the closer hall or mill"
+block woodGoesToCloserDrop:
+  var w = newWorld(map, MatchTicks)
+  let
+    peon = w.units[0].id
+    hall = map.hallOrigin[LightPlayer]
+  var site = NoTile
+  for radius in 6'i32 .. 16'i32:
+    for dy in -radius .. radius:
+      for dx in -radius .. radius:
+        let
+          x = int32(hall.x) + dx
+          y = int32(hall.y) + dy
+        if w.canPlace(LumberMillBuilding, x, y):
+          site = tile2(x, y)
+          break
+      if inGrid(site):
+        break
+    if inGrid(site):
+      break
+  doAssert inGrid(site), "no mill site near the hall"
+  doAssert w.applyBuild(
+    LightPlayer,
+    peon,
+    int32(LumberMillBuilding.ord),
+    int32(site.x),
+    int32(site.y)
+  )
+  var millId = NoEntity
+  for structure in w.buildings.mitems:
+    if structure.kind == LumberMillBuilding and
+        structure.owner == LightPlayer:
+      structure.state = BuildingComplete
+      structure.hp = structure.maxHp
+      millId = structure.id
+  doAssert millId != NoEntity
+  var hallId = NoEntity
+  for structure in w.buildings:
+    if structure.kind == TownHallBuilding and
+        structure.owner == LightPlayer:
+      hallId = structure.id
+  doAssert hallId != NoEntity
+  doAssert w.nearestDropOff(LightPlayer, hall, true) == hallId,
+    "wood from the hall should drop at the hall"
+  doAssert w.nearestDropOff(LightPlayer, site, true) == millId,
+    "wood from the mill should drop at the mill"
+  let goldDrop = w.nearestDropOff(LightPlayer, site, false)
+  doAssert goldDrop == hallId,
+    "gold must only drop at a town hall"
 
 echo "Testing construction, training, food, and cancellation"
 block basesGrow:

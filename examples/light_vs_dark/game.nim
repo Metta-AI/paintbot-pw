@@ -7,11 +7,12 @@
 
 import
   std/[os, strformat, strutils, times],
-  polyworld/[cli, profiles, tapes],
+  polyworld/[cli, controllers, profiles, tapes],
   content,
   maps as mapgen,
   sim,
   bots,
+  controls,
   replays
 
 proc usage() =
@@ -20,6 +21,8 @@ proc usage() =
 Light vs Dark, a small real-time strategy match between two BASIC overlords.
 
   --bot PATH[:N]   Fill N of the two player slots with one BASIC program.
+  --player         Control Light; supply one bot.
+  --player:N       Control side N (1 Light, 2 Dark); supply one bot.
   --replay PATH    Play a recorded match instead of running bots.
   --record PATH    Record this match to a replay file.
   --seconds N      Duration in seconds (default 1200).
@@ -108,7 +111,13 @@ block:
       gameMap = generateMap(mapSeed)
     gameMap.validateMap()
     run = newGame(gameMap, maximumTicks)
-    loadBots(run, options.botGroups.botSources(PlayerCount))
+    let
+      kinds = controllerKinds(PlayerCount, options.playerSlot)
+      expanded = options.botGroups.expandBotSources(kinds)
+    var sources: array[PlayerCount, string]
+    for i in 0 ..< PlayerCount:
+      sources[i] = expanded[i]
+    loadBots(run, sources)
     run.recorder = initReplayRecorder(Setup(
       mapSeed: mapSeed,
       tickRate: uint16(TickRate),
@@ -141,6 +150,7 @@ proc decide(w: World) =
     while run.replayPlayer.takeActionAt(uint32(w.tick), action):
       w.applyReplayAction(action)
   else:
+    flushPlayerCommands(run)
     runBotDecisions(run)
 
 proc verifyTick(game: Game) =

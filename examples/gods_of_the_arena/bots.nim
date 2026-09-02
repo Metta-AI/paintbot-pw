@@ -2,7 +2,7 @@
 ## on the simulation.
 
 import
-  polyworld/[basic, cli, profiles, tapes],
+  polyworld/[basic, cli, controllers, profiles, tapes],
   content,
   sim,
   replays
@@ -245,24 +245,33 @@ proc initHeroHost(heroId: int32): Host =
   discard result.addFunction("buyItem", 1, buyItemProc, 20)
   discard result.addFunction("useItem", 1, useItemProc, 20)
 
-proc loadBots*(game: Game, groups: openArray[BotGroup]) =
-  ## Loads selected bot files and creates one isolated runtime per hero.
+proc loadBots*(
+    game: Game,
+    groups: openArray[BotGroup],
+    playerSlot = 0'i32
+) =
+  ## Loads bot files into every hero slot except the optional human slot.
   activeGame = game
-  let limits = heroVmLimits()
-  var schema = initHeroHost(0)
-  var programs: seq[Program]
-  for group in groups:
-    let program = compile(readFile(group.path), schema, limits)
-    for _ in 0 ..< group.count:
-      programs.add program
-  doAssert programs.len == game.world.heroes.len,
-    "every configured hero must have one BASIC program"
+  let
+    limits = heroVmLimits()
+    schema = initHeroHost(0)
+    kinds = controllerKinds(game.world.heroes.len, playerSlot)
+    sources = groups.expandBotSources(kinds)
   game.heroVms.setLen(game.world.heroes.len)
-  bindHeroData(programs[0])
+  var bound = false
   for i in 0 ..< game.world.heroes.len:
-    var host = initHeroHost(game.world.heroes[i].id)
+    if kinds[i] == PlayerController:
+      continue
+    let program = compile(sources[i], schema, limits)
+    if not bound:
+      bindHeroData(program)
+      bound = true
     game.heroVms[i] = HeroVm(
-      runtime: initRuntime(programs[i], host, limits),
+      runtime: initRuntime(
+        program,
+        initHeroHost(game.world.heroes[i].id),
+        limits
+      ),
       limits: limits,
       ready: true
     )

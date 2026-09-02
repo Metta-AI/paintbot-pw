@@ -1,8 +1,8 @@
 ## Shared command-line parsing for Polyworld games.
 ##
-## Every game understands `--bot`, `--replay`, `--record`, `--seed`,
-## `--play`, `--speed`, `--windowSize`, `--seconds`, `--minutes`, and
-## `--ticks`. Duration flags all write `maximumTicks`.
+## Every game understands `--bot`, `--player`, `--replay`, `--record`,
+## `--seed`, `--play`, `--speed`, `--windowSize`, `--seconds`, `--minutes`,
+## and `--ticks`. Duration flags all write `maximumTicks`.
 ## Each game runs its own argument loop, farms those flags through
 ## `takeCommonFlag`, and handles the rest itself.
 
@@ -36,6 +36,8 @@ type
       ## Graphical window width. Zero keeps the shared default.
     windowHeight*: int32
       ## Graphical window height. Zero keeps the shared default.
+    playerSlot*: int32
+      ## One-based human controller slot. Zero means bots fill every slot.
 
 proc fail*(message: string) {.noreturn.} =
   ## Prints one command-line error and exits.
@@ -184,6 +186,24 @@ proc takeDurationFlag(
     return false
   true
 
+proc takePlayerFlag(options: var GameOptions, argument: string): bool =
+  ## Handles `--player`, `--player:N`, and `--player=N`.
+  var text = ""
+  if argument == "--player":
+    text = "1"
+  elif argument.startsWith("--player:"):
+    text = argument[9 .. ^1]
+  elif argument.startsWith("--player="):
+    text = argument[9 .. ^1]
+  else:
+    return false
+  if options.playerSlot != 0:
+    fail("only one --player allowed")
+  if text.len == 0:
+    fail("--player requires a slot")
+  options.playerSlot = parsePositiveInt32(text, "--player")
+  true
+
 proc parsePlayFlag(text: string): bool =
   ## Parses `--play` as a boolean.
   case text.strip().toLowerAscii()
@@ -219,6 +239,8 @@ proc takeCommonFlag*(
       parseWindowSize(argument[13 .. ^1], "--windowSize")
     return true
   if options.takeDurationFlag(arguments, index, argument):
+    return true
+  if options.takePlayerFlag(argument):
     return true
   case argument
   of "--":
@@ -263,16 +285,36 @@ proc takeCommonFlag*(
 
 proc validateGameOptions*(
     options: GameOptions,
-    liveBotCount: int,
+    liveSlotCount: int,
     liveBotMessage: string
 ) =
   ## Checks replay exclusivity and the live-game bot count.
+  when defined(headless):
+    if options.playerSlot != 0:
+      fail("--player requires the graphical client")
   if options.replayPath.len > 0:
     if options.botGroups.len > 0:
       fail("--replay cannot be used with --bot")
+    if options.playerSlot != 0:
+      fail("--replay cannot be used with --player")
     if options.recordPath.len > 0:
       fail("--replay cannot be recorded again")
-  elif liveBotCount > 0:
-    let count = options.botGroups.botCount
-    if count != liveBotCount:
+  elif liveSlotCount > 0:
+    if options.playerSlot != 0 and
+        (options.playerSlot < 1 or
+          options.playerSlot > liveSlotCount):
+      fail("--player must be between 1 and " & $liveSlotCount)
+    let
+      needed =
+        if options.playerSlot != 0:
+          liveSlotCount - 1
+        else:
+          liveSlotCount
+      count = options.botGroups.botCount
+    if count != needed:
+      if options.playerSlot != 0:
+        fail(
+          "live games with --player require " & $needed &
+            " bots; configured " & $count
+        )
       fail(liveBotMessage & "; configured " & $count)

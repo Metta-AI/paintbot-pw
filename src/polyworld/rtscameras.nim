@@ -13,6 +13,11 @@ const
     ## Edge pan is only used while the window is fullscreen.
   RtsPanSpeed* = 0.96'f32
     ## World units per second per unit of camera distance.
+  RtsFollowLift* = 0.25'f32
+    ## Fraction of the visible ground height used to raise a followed
+    ## subject above the HUD.
+  RtsGotaFollowLift* = 0.15'f32
+    ## GOTA's HUD is shorter, so the hero sits closer to center.
 
 type MinimapViewRect* = object
   ## Describes the visible ground footprint inside a minimap rectangle.
@@ -26,6 +31,27 @@ proc rtsCameraEye*(target: Vec3, distance: float32): Vec3 =
     sin(RtsCameraPitch),
     cos(RtsCameraYaw) * cos(RtsCameraPitch)
   ) * distance
+
+proc rtsFollowFrame*(
+    subject: Vec3,
+    distance: float32,
+    liftAmount = RtsFollowLift
+): Vec3 =
+  ## Returns the look-at that places `subject` above the optical center.
+  let
+    halfVerticalFov = RtsFieldOfView * PI.float32 / 360.0'f32
+    cameraHeight = distance * sin(RtsCameraPitch)
+    cameraForward = distance * cos(RtsCameraPitch)
+    farOffset = cameraForward -
+      cameraHeight / tan(RtsCameraPitch - halfVerticalFov)
+    nearOffset = cameraForward -
+      cameraHeight / tan(RtsCameraPitch + halfVerticalFov)
+    lift = (nearOffset - farOffset) * liftAmount
+  subject + vec3(
+    sin(RtsCameraYaw) * lift,
+    0,
+    cos(RtsCameraYaw) * lift
+  )
 
 proc minimapWorldPoint*(
     pointer,
@@ -168,6 +194,47 @@ proc rtsPanDir*(window: Window): Vec2 =
 proc rtsPanSpeed*(distance: float32): float32 =
   ## Returns world-space pan speed for this camera zoom.
   max(distance, 1.0'f32) * RtsPanSpeed
+
+proc mouseRay*(
+    mouse,
+    windowSize: Vec2,
+    viewProjection: Mat4
+): (Vec3, Vec3) =
+  ## Unprojects the pointer to a world-space ray origin and direction.
+  let
+    ndcX = 2.0'f32 * mouse.x / max(windowSize.x, 1.0'f32) - 1.0'f32
+    ndcY = 1.0'f32 - 2.0'f32 * mouse.y / max(windowSize.y, 1.0'f32)
+    inv = inverse(viewProjection)
+  var
+    nearPoint = inv * vec4(ndcX, ndcY, -1, 1)
+    farPoint = inv * vec4(ndcX, ndcY, 1, 1)
+  let
+    origin = nearPoint.xyz / nearPoint.w
+    farPos = farPoint.xyz / farPoint.w
+  (origin, farPos - origin)
+
+proc pickGroundPoint*(
+    mouse,
+    windowSize: Vec2,
+    viewProjection: Mat4,
+    planeY = 0.0'f32
+): Vec3 =
+  ## Unprojects the pointer onto a horizontal plane in world space.
+  let (origin, dir) = mouseRay(mouse, windowSize, viewProjection)
+  if abs(dir.y) < 0.0001'f32:
+    return vec3(origin.x, planeY, origin.z)
+  origin + dir * ((planeY - origin.y) / dir.y)
+
+proc groundTile*(
+    point: Vec3,
+    halfSpan: float32,
+    tiles: int32
+): (int32, int32) =
+  ## Converts a ground point into a clamped map tile.
+  (
+    int32(clamp(int(floor(point.x + halfSpan)), 0, tiles - 1)),
+    int32(clamp(int(floor(point.z + halfSpan)), 0, tiles - 1))
+  )
 
 proc applyRtsPan*(
     target: var Vec3,

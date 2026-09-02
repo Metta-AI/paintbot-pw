@@ -92,6 +92,10 @@ block resourcesCanBeGatheredAndStored:
   doAssert woodDropOffs > 0, "wood can never be deposited"
   doAssert BuildingTable[TownHallBuilding].dropOffGold,
     "the town hall must accept gold or the opening cannot function"
+  doAssert BuildingTable[TownHallBuilding].dropOffWood,
+    "the town hall must accept wood when it is closer than a mill"
+  doAssert BuildingTable[LumberMillBuilding].dropOffWood,
+    "the lumber mill must accept wood"
   doAssert GoldPerTrip > 0 and MineTicks > 0 and MinersPerMine > 0
   doAssert WoodPerTrip > 0 and ChopTicks > 0
   doAssert WoodPerTree > 0 and WoodPerTree.int32 mod WoodPerTrip == 0,

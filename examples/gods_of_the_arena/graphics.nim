@@ -3,7 +3,7 @@
 import
   std/[math, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
-  content, sim, game, maps, replays, ui,
+  content, sim, game, maps, replays, ui, controls,
   polyworld/actioncam, polyworld/characters, polyworld/common, polyworld/pathing,
   polyworld/tapes,
   polyworld/particles, polyworld/particleshaders, polyworld/player,
@@ -441,7 +441,11 @@ proc runGraphics*() =
     previousUnitFacings: Table[int32, float32]
     renderAlpha = 1.0'f32
     animationAlpha = 0.0'f32
-    viewMode = 0'i32
+    viewMode =
+      if options.playerSlot > 0:
+        int32(run.world.heroes[options.playerSlot - 1].team.ord) + 1
+      else:
+        0'i32
     terrainVisionTick = int32.low
     terrainVisionMode = int32.low
 
@@ -679,6 +683,7 @@ proc runGraphics*() =
     primaryId = 0'i32
     selectedIds: seq[int32]
     selectionPressPosition = vec2(0)
+    rightPressPosition = vec2(0)
     selectionStarted = false
     selectionAdditive = false
     followSelection = false
@@ -730,8 +735,25 @@ proc runGraphics*() =
         return int32(fort.team.ord + 1)
     0
 
+  proc playerMode(): bool =
+    ## Returns whether this client issues orders for one hero.
+    options.playerSlot > 0 and not run.replayMode
+
+  proc playerHeroId(): int32 =
+    ## Returns the human hero identifier.
+    run.world.heroes[options.playerSlot - 1].id
+
+  if playerMode():
+    primaryId = playerHeroId()
+    selectedIds.add primaryId
+    followSelection = true
+
   proc syncViewMode() =
     ## Shows one team's fog when the selection is one-sided.
+    if playerMode():
+      viewMode =
+        int32(run.world.heroes[options.playerSlot - 1].team.ord) + 1
+      return
     var mode = 0'i32
     for id in selectedIds:
       let team = objectTeam(id)
@@ -837,6 +859,17 @@ proc runGraphics*() =
       primaryId = 0
     if selectedIds.len > 0 and not isSelected(primaryId):
       primaryId = selectedIds[0]
+
+  proc clearSelection() =
+    ## Clears the selection and leaves the camera free-floating.
+    selectedIds.setLen(0)
+    primaryId = 0
+    followSelection = false
+    actionCam.takeManual()
+
+  proc playerHeroSelected(): bool =
+    ## Returns whether the human hero is in the current selection.
+    playerMode() and isSelected(playerHeroId())
 
   proc selectedCenter(): Vec3 =
     ## Returns the midpoint of all currently selected world objects.
@@ -1163,19 +1196,36 @@ proc runGraphics*() =
         36
       )
 
+  proc followPlayerHero(dt: float32) =
+    ## Keeps the camera on the selected human hero.
+    let hero = heroById(run.world, playerHeroId())
+    if hero.id == 0:
+      return
+    followSelection = true
+    cameraTarget = mix(
+      cameraTarget,
+      rtsFollowFrame(
+        unitRenderPoint(hero.id, hero.position) + vec3(0, 0.9'f32, 0),
+        cameraDistance,
+        RtsGotaFollowLift
+      ),
+      damping(5.0'f32, dt)
+    )
+
   proc updateCamera(dt: float32) =
     ## Applies fixed-north RTS pan, zoom, and selection following.
     pruneSelection()
     syncViewMode()
-    updateMinimapCamera(
-      window,
-      sk.mousePos,
-      cameraTarget,
-      minimapPanning,
-      followSelection
-    )
-    if minimapPanning:
-      actionCam.takeManual()
+    if not playerHeroSelected():
+      updateMinimapCamera(
+        window,
+        sk.mousePos,
+        cameraTarget,
+        minimapPanning,
+        followSelection
+      )
+      if minimapPanning:
+        actionCam.takeManual()
     let overUi = mouseOverUi(window, sk.mousePos, primaryId)
     if window.buttonPressed[KeyA] and
         (window.buttonDown[KeyLeftControl] or
@@ -1188,11 +1238,47 @@ proc runGraphics*() =
         window.buttonDown[KeyLeftShift] or
         window.buttonDown[KeyRightShift]
     if window.buttonPressed[MouseRight] and not overUi:
-      panning = true
-    if not window.buttonDown[MouseRight]:
-      panning = false
+      rightPressPosition = window.mousePos.vec2
+    if (window.buttonPressed[MouseMiddle] and not overUi) or
+        window.buttonPressed[KeyB]:
+      if playerMode():
+        clearSelection()
+      else:
+        followSelection = false
+        actionCam.takeManual()
+    panning =
+      window.buttonDown[KeyB] or
+      (not overUi and window.buttonDown[MouseMiddle]) or
+      (not playerMode() and not overUi and window.buttonDown[MouseRight])
 
     let delta = window.mouseDelta.vec2
+    if playerMode():
+      if not overUi and window.scrollDelta.y != 0:
+        cameraDistance = clamp(
+          cameraDistance * pow(
+            0.92'f32,
+            window.scrollDelta.y / 3.0'f32
+          ),
+          5.0'f32,
+          400.0'f32
+        )
+      if playerHeroSelected():
+        followPlayerHero(dt)
+        return
+      if panning:
+        let panSpeed = cameraDistance * 0.0015
+        cameraTarget.x -= delta.x * panSpeed
+        cameraTarget.z -= delta.y * panSpeed
+        cameraTarget.x = clamp(cameraTarget.x, -HalfGrid, HalfGrid)
+        cameraTarget.z = clamp(cameraTarget.z, -HalfGrid, HalfGrid)
+      discard applyRtsPan(
+        cameraTarget,
+        rtsPanDir(window),
+        dt,
+        cameraDistance,
+        HalfGrid
+      )
+      return
     if panning:
       followSelection = false
       actionCam.takeManual()
@@ -1284,11 +1370,35 @@ proc runGraphics*() =
       if picked != 0:
         selectEntity(picked, selectionAdditive)
       elif not selectionAdditive:
-        selectedIds.setLen(0)
-        primaryId = 0
-        followSelection = false
-        actionCam.takeManual()
+        clearSelection()
     selectionStarted = false
+
+  proc updatePlayerOrder(viewProjection: Mat4) =
+    ## Turns a right-click into a walk or attack for the human hero.
+    if not playerMode():
+      return
+    if not window.buttonReleased[MouseRight]:
+      return
+    if mouseOverUi(window, sk.mousePos, primaryId):
+      return
+    if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
+      return
+    let
+      heroId = playerHeroId()
+      picked = pickEntity(viewProjection)
+    if picked != 0 and objectTeam(picked) != objectTeam(heroId):
+      queueAttackTarget(heroId, picked)
+    else:
+      let
+        ground = pickGroundPoint(
+          window.mousePos.vec2,
+          window.size.vec2,
+          viewProjection,
+          cameraTarget.y
+        )
+        tile = groundTile(ground, HalfGrid, GridTiles.int32)
+      queueWalkTo(heroId, tile[0], tile[1])
+      selectEntity(heroId)
 
   proc cameraView(): Mat4 =
     ## Updates the camera eye and returns its view matrix.
@@ -1515,19 +1625,31 @@ proc runGraphics*() =
         HealingAura,
         cameraTarget + vec3(0, 3.5'f32, 0)
       )
-    for hero in run.world.heroes:
-      if hero.class == Arcanist and hero.state != Dying:
-        primaryId = hero.id
-        selectedIds = @[hero.id]
-        followSelection = true
-        break
-    if primaryId == 0:
+    if not playerMode():
       for hero in run.world.heroes:
-        if hero.state != Dying:
+        if hero.class == Arcanist and hero.state != Dying:
           primaryId = hero.id
           selectedIds = @[hero.id]
           followSelection = true
           break
+      if primaryId == 0:
+        for hero in run.world.heroes:
+          if hero.state != Dying:
+            primaryId = hero.id
+            selectedIds = @[hero.id]
+            followSelection = true
+            break
+    else:
+      primaryId = playerHeroId()
+      selectedIds = @[primaryId]
+      followSelection = true
+      let hero = heroById(run.world, primaryId)
+      if hero.id != 0:
+        cameraTarget = rtsFollowFrame(
+          unitRenderPoint(hero.id, hero.position) + vec3(0, 0.9'f32, 0),
+          cameraDistance,
+          RtsGotaFollowLift
+        )
 
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
@@ -1594,6 +1716,7 @@ proc runGraphics*() =
         barCameraUp = normalize(cross(barCameraRight, cameraForward))
 
       updateWorldSelection(viewProjection)
+      updatePlayerOrder(viewProjection)
 
       profileBlock "drawWorld":
         # One clock for the whole frame: the palette, the sun's position,

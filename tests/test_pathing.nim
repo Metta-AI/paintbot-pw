@@ -1,4 +1,6 @@
-import polyworld/pathing
+import
+  vmath,
+  polyworld/pathing
 
 proc openTile(): Tile =
   ## Returns one flat tile with all cardinal edges connected.
@@ -102,5 +104,57 @@ block:
     layersSeen.incl uint8(tile.layer)
   doAssert 1'u8 in layersSeen,
     "a river crossing must keep at least one deck tile"
+
+echo "Testing walk pick hits ramps and skips holes"
+block:
+  proc flatTile(height: int16, flags = TileExists or
+      TileConnectedEast or TileConnectedSouth): Tile =
+    ## One flat tile at a packed height.
+    Tile(
+      tops: [height, height, height, height],
+      flags: flags
+    )
+  proc makeLayer(height: int16): QuadLayer =
+    result = QuadLayer(
+      originX: 0,
+      originZ: 0,
+      width: 3,
+      depth: 3,
+      tiles: newSeq[Tile](9)
+    )
+    for tile in result.tiles.mitems:
+      tile = flatTile(height)
+  let
+    upper = makeLayer(8)
+    lower = makeLayer(0)
+  # Shaft hole on the upper floor; the slope lives on the floor below.
+  upper.tiles[1 * 3 + 1] = Tile()
+  lower.tiles[1 * 3 + 1] = Tile(
+    tops: [0'i16, 8'i16, 0'i16, 8'i16],
+    flags: TileExists or TileConnectedEast or TileConnectedSouth
+  )
+  # A wall blocks the ray; the floor under it must not be picked.
+  upper.tiles[2 * 3 + 2] = flatTile(8, TileExists or TileImpassable)
+  layers = @[upper, lower]
+  computeWalkable()
+  proc tileRay(x, z: int, height: float32): (Vec3, Vec3) =
+    ## A downward ray through the centre of one world tile.
+    let
+      x0 = x.float32 - HalfGrid + 0.5
+      z0 = z.float32 - HalfGrid + 0.5
+    (vec3(x0, height, z0), vec3(0, -1, 0))
+  block:
+    let (origin, dir) = tileRay(1, 1, 4)
+    let hit = pickWalkableTile(origin, dir)
+    doAssert hit.hit, "a shaft hole must pick the ramp below"
+    doAssert hit.layer == 1 and hit.x == 1 and hit.z == 1
+  block:
+    let (origin, dir) = tileRay(0, 0, 4)
+    let hit = pickWalkableTile(origin, dir)
+    doAssert hit.hit and hit.layer == 0 and hit.x == 0 and hit.z == 0
+  block:
+    let (origin, dir) = tileRay(2, 2, 4)
+    let hit = pickWalkableTile(origin, dir)
+    doAssert not hit.hit, "an impassable tile must not be a walk target"
 
 echo "Pathing tests passed"

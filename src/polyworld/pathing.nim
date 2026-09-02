@@ -265,6 +265,87 @@ proc isWalkable*(layerIndex, x, z: int): bool =
   inLayer(layerIndex, x, z) and
     layerWalkable[layerIndex][z * layers[layerIndex].width + x]
 
+proc rayTriangle(origin, dir, a, b, c: Vec3): float32 =
+  ## Ray-triangle intersection distance, or -1 when there is no hit.
+  let
+    edge1 = b - a
+    edge2 = c - a
+    p = cross(dir, edge2)
+    det = dot(edge1, p)
+  if abs(det) < 1e-6:
+    return -1
+  let
+    invDet = 1.0'f32 / det
+    tv = origin - a
+    u = dot(tv, p) * invDet
+  if u < 0 or u > 1:
+    return -1
+  let
+    q = cross(tv, edge1)
+    v = dot(dir, q) * invDet
+  if v < 0 or u + v > 1:
+    return -1
+  let distance = dot(edge2, q) * invDet
+  if distance > 0: distance else: -1
+
+proc tileTopHit(origin, dir: Vec3, layer: QuadLayer, x, z: int): float32 =
+  ## Distance to this tile's top triangles, or -1 when they miss.
+  let tile = layer.tiles[z * layer.width + x]
+  if not tile.exists:
+    return -1
+  let
+    h = tile.tops.unpack
+    x0 = (layer.originX + x).float32 - HalfGrid
+    z0 = (layer.originZ + z).float32 - HalfGrid
+    v00 = vec3(x0, h[0], z0)
+    v10 = vec3(x0 + 1, h[1], z0)
+    v01 = vec3(x0, h[2], z0 + 1)
+    v11 = vec3(x0 + 1, h[3], z0 + 1)
+  result = -1
+  for distance in [
+    rayTriangle(origin, dir, v00, v10, v01),
+    rayTriangle(origin, dir, v10, v11, v01)
+  ]:
+    if distance > 0 and (result < 0 or distance < result):
+      result = distance
+
+proc pickWalkableTile*(
+    origin, dir: Vec3,
+    minLayer = 0,
+    maxLayer = -1
+): tuple[hit: bool, layer, x, z: int] =
+  ## Nearest existing tile top the ray hits, if that tile is walkable.
+  ## Missing tiles do not block, so a shaft hole picks the ramp below.
+  if dir.length < 1e-8:
+    return
+  let
+    ray = normalize(dir)
+    first = max(minLayer, 0)
+    last =
+      if maxLayer < 0:
+        layers.len - 1
+      else:
+        min(maxLayer, layers.len - 1)
+  var
+    best = float32.high
+    found = false
+    hitLayer, hitX, hitZ = 0
+  for li in first .. last:
+    let layer = layers[li]
+    if layer.water:
+      continue
+    for z in 0 ..< layer.depth:
+      for x in 0 ..< layer.width:
+        let distance = tileTopHit(origin, ray, layer, x, z)
+        if distance > 0 and distance < best:
+          best = distance
+          found = true
+          hitLayer = li
+          hitX = x
+          hitZ = z
+  if found and isWalkable(hitLayer, hitX, hitZ):
+    result = (true, hitLayer, hitX, hitZ)
+
 proc worldWalkable*(layerIndex, worldX, worldZ: int): bool =
   ## Walkability at a world tile, converted into that layer's local grid.
   if layerIndex < 0 or layerIndex >= layers.len:

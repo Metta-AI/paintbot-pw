@@ -11,6 +11,7 @@ import
   maps,
   sim,
   bots,
+  controls,
   replays
 
 proc usage() =
@@ -19,6 +20,8 @@ proc usage() =
   echo "  --bot:PATH              Fill one of the 10 hero slots."
   echo "  --bot:PATH:N            Fill N of the 10 slots with that file."
   echo "  --bot PATH[:N]          The equivalent two-argument form."
+  echo "  --player                Control the first hero; supply 9 bots."
+  echo "  --player:N              Control hero N (1-10); supply 9 bots."
   echo "  --replay PATH           Play an action replay instead of bots."
   echo "  --record PATH           Record bot actions to a replay."
   echo "  --seconds NUMBER        Duration in seconds (default 1200)."
@@ -102,7 +105,7 @@ block:
       int32(replayData.header.setup.spawnIntervalTicks)
     else:
       options.spawnIntervalTicks,
-    if replayMode: 0 else: options.botGroups.botCount,
+    if replayMode: 0 else: HeroClassCount,
     replayMode,
     replayData
   )
@@ -110,11 +113,14 @@ block:
     run.replayPlayer = initReplayPlayer(replayData)
     run.historyPlayback = true
   else:
-    loadBots(run, options.botGroups)
+    loadBots(run, options.botGroups, options.playerSlot)
 
 proc advanceGame*() =
   ## Advances one tick, including live BASIC decisions.
-  tickWorld(run, proc() = runBotDecisions(run))
+  tickWorld(run, proc() =
+    flushPlayerCommands(run)
+    runBotDecisions(run)
+  )
 
 ## Headless reporting and replay recording.
 
