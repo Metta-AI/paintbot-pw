@@ -11,7 +11,8 @@ import
   std/[math, os, strformat, strutils, tables, times, unicode],
   chroma, opengl, pixie, vmath, windy, silky,
   polyworld/[
-    actioncam, characters, chrome, common, fixed, particles, particleshaders,
+    actioncam, characters, chrome, clickmarks, common, fixed, particles,
+    particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shadows, tapes, viewers, visions, worldbars
   ],
@@ -376,6 +377,7 @@ proc runGraphics*() =
   setEnvironmentPalette(scene.toon)
   var
     particles = initParticleSystem()
+    clickMarks = initClickMarks()
     worldBarRenderer = initWorldBarRenderer()
     damageTrails: DamageTrailTracker
     selectionOutline = initSelectionOutline()
@@ -989,17 +991,27 @@ proc runGraphics*() =
           pendingBuild = -1
           return
 
-  proc issueSelectedMove(player, x, y: int32) =
+  proc clickTilePoint(x, y: int32): Vec3 =
+    ## Returns the render centre of one map tile.
+    let xz = tileCentreXZ(tile2(x, y))
+    vec3(xz.x, surfaceHeight(xz.x, xz.y), xz.y)
+
+  proc issueSelectedMove(player, x, y: int32): bool =
     ## Moves every selected owned unit, or rallies a selected building.
-    var moved = false
+    if not inGrid(x, y) or not run.world.terrainOpen(x, y):
+      return false
     for id in selectedIds:
       if id.isUnitId and run.world.unitOwner(id) == player:
+        if run.world.hasUnit(id):
+          let unit = run.world.units[run.world.unitIndex(id)]
+          if unit.state == UnitInMine:
+            continue
         if attackMoveArmed:
           queueAttackMove(player, id, x, y)
         else:
           queueMove(player, id, x, y)
-        moved = true
-    if not moved:
+        result = true
+    if not result:
       for id in selectedIds:
         if id.isBuildingId and run.world.buildingOwner(id) == player:
           queueSetRally(player, id, x, y)
@@ -1022,6 +1034,7 @@ proc runGraphics*() =
           origin[1]
       ):
         queuePendingBuild(origin[0], origin[1])
+        clickMarks.emitClickMark(clickTilePoint(origin[0], origin[1]))
       return
     let
       player = options.playerSlot - 1
@@ -1044,11 +1057,15 @@ proc runGraphics*() =
       if run.world.hasBuilding(target):
         let structure = run.world.buildings[run.world.buildingIndex(target)]
         if structure.kind == GoldMineBuilding:
+          var harvested = false
           for id in selectedIds:
             if id.isUnitId and run.world.hasUnit(id):
               let unit = run.world.units[run.world.unitIndex(id)]
               if unit.owner == player and unit.kind == PeonUnit:
                 queueHarvest(player, id, target, 0)
+                harvested = true
+          if harvested:
+            clickMarks.emitClickMark(buildingCentre(structure))
           attackMoveArmed = false
           return
         if structure.owner != player:
@@ -1073,9 +1090,11 @@ proc runGraphics*() =
             queueHarvest(player, id, tree, 1)
             harvested = true
       if harvested:
+        clickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
         attackMoveArmed = false
         return
-    issueSelectedMove(player, tile[0], tile[1])
+    if issueSelectedMove(player, tile[0], tile[1]):
+      clickMarks.emitClickMark(clickTilePoint(tile[0], tile[1]))
     attackMoveArmed = false
 
   proc cameraView(): Mat4 =
@@ -1485,6 +1504,7 @@ proc runGraphics*() =
           0.0'f32
       if active:
         particles.advanceParticles(dt)
+        clickMarks.advanceClickMarks(dt)
       inc framesSinceRebake
       if run.world.terrainEdits.len != placedEditCount or
           buildingKey() != placedBuildingKey:
@@ -1550,6 +1570,7 @@ proc runGraphics*() =
           barCameraUp,
           cameraForward
         )
+        clickMarks.drawClickMarks(viewProjection)
         drawWorldBars(
           viewProjection,
           barCameraRight,

@@ -4,7 +4,8 @@ import
   std/[math, strutils, tables, times],
   bumpy, chroma, opengl, pixie, silky, vmath,
   content, sim, game, maps, replays, ui, controls,
-  polyworld/actioncam, polyworld/characters, polyworld/common, polyworld/pathing,
+  polyworld/actioncam, polyworld/characters, polyworld/clickmarks,
+  polyworld/common, polyworld/pathing,
   polyworld/tapes,
   polyworld/particles, polyworld/particleshaders, polyworld/player,
   polyworld/profiles,
@@ -273,6 +274,7 @@ proc runGraphics*() =
     ]
   var
     particles = initParticleSystem()
+    clickMarks = initClickMarks()
     selectionOutline = initSelectionOutline()
     worldBarRenderer = initWorldBarRenderer()
     damageTrails: DamageTrailTracker
@@ -1388,17 +1390,26 @@ proc runGraphics*() =
       picked = pickEntity(viewProjection)
     if picked != 0 and objectTeam(picked) != objectTeam(heroId):
       queueAttackTarget(heroId, picked)
-    else:
-      let
-        ground = pickGroundPoint(
-          window.mousePos.vec2,
-          window.size.vec2,
-          viewProjection,
-          cameraTarget.y
-        )
-        tile = groundTile(ground, HalfGrid, GridTiles.int32)
-      queueWalkTo(heroId, tile[0], tile[1])
-      selectEntity(heroId)
+      return
+    let hero = heroById(run.world, heroId)
+    if hero.id == 0 or hero.state == Dying:
+      return
+    let
+      (origin, dir) = mouseRay(
+        window.mousePos.vec2,
+        window.size.vec2,
+        viewProjection
+      )
+      walk = pickWalkableTile(origin, dir)
+    if not walk.hit:
+      return
+    queueWalkTo(
+      heroId,
+      int32(layers[walk.layer].originX + walk.x),
+      int32(layers[walk.layer].originZ + walk.z)
+    )
+    selectEntity(heroId)
+    clickMarks.emitClickMark(tileCenter(walk.layer, walk.x, walk.z))
 
   proc cameraView(): Mat4 =
     ## Updates the camera eye and returns its view matrix.
@@ -1697,6 +1708,7 @@ proc runGraphics*() =
         animationAlpha = 0
       if active:
         particles.advanceParticles(dt)
+        clickMarks.advanceClickMarks(dt)
         for god in gods.mitems:
           god.animTime += dt
           if run.world.gameOver and god.team != run.world.winner:
@@ -1814,6 +1826,7 @@ proc runGraphics*() =
           barCameraUp,
           cameraForward
         )
+        clickMarks.drawClickMarks(viewProjection)
         drawWorldUnitBars(
           worldBarRenderer,
           viewProjection,

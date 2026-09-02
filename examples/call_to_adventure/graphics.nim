@@ -10,7 +10,8 @@
 import
   std/[math, tables, times],
   chroma, opengl, pixie, silky, vmath, windy,
-  polyworld/[actioncam, characters, common, fixed, particles, particleshaders,
+  polyworld/[actioncam, characters, clickmarks, common, fixed, particles,
+    particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shadows, shapes, tapes, viewers, visions, worldbars],
   content, maps, sim, game, replays, ui, controls
@@ -273,6 +274,7 @@ proc runGraphics*() =
   scene.useToonShading()
   var
     particles = initParticleSystem()
+    clickMarks = initClickMarks()
     worldBarRenderer = initWorldBarRenderer()
     worldShapes = initShapeRenderer()
     damageTrails: DamageTrailTracker
@@ -999,6 +1001,10 @@ proc runGraphics*() =
         dir,
         selectedViewLevel()
       )
+    if playerSlot < 0 or
+        playerSlot >= run.world.actors.len or
+        not run.world.actors[playerSlot].alive:
+      return
     if picked.hit:
       queueWalkTo(
         int32(playerSlot),
@@ -1007,6 +1013,9 @@ proc runGraphics*() =
         int32(picked.z)
       )
       selectEntity(playerSlot)
+      clickMarks.emitClickMark(
+        tileCenter(picked.layer, picked.x, picked.z)
+      )
 
   proc followPlayerHero(dt: float32) =
     ## Keeps the camera on the selected human hero.
@@ -1248,6 +1257,7 @@ proc runGraphics*() =
           1.0'f32
       if active:
         particles.advanceParticles(dt * transport.speed.float32)
+        clickMarks.advanceClickMarks(dt * transport.speed.float32)
 
       # Camera
       profileBlock "camera":
@@ -1473,6 +1483,7 @@ proc runGraphics*() =
           barCameraUp,
           cameraForward
         )
+        clickMarks.drawClickMarks(viewProjection)
         if showPaths:
           worldShapes.clear()
           worldShapes.addActorPaths(run.world, visibleFrom)
