@@ -1,0 +1,3017 @@
+{
+ "greeble_0": {
+  "desc": "drill gun body with grip",
+  "tags": [
+   "angular",
+   "handle",
+   "barrel"
+  ],
+  "roles": [
+   "weapon"
+  ]
+ },
+ "greeble.001_1": {
+  "desc": "flat mounting rail with brackets",
+  "tags": [
+   "flat",
+   "long",
+   "rail"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.002_2": {
+  "desc": "hollow angled duct scoop",
+  "tags": [
+   "duct",
+   "hollow",
+   "angled"
+  ],
+  "roles": [
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.003_3": {
+  "desc": "half-cylinder cowl with turbine",
+  "tags": [
+   "turbine",
+   "curved",
+   "intake"
+  ],
+  "roles": [
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.004_4": {
+  "desc": "stepped angular hopper",
+  "tags": [
+   "angular",
+   "stepped"
+  ],
+  "roles": [
+   "torso",
+   "foot"
+  ]
+ },
+ "greeble.006_5": {
+  "desc": "large hollow wedge block",
+  "tags": [
+   "wedge",
+   "large",
+   "hollow"
+  ],
+  "roles": [
+   "torso",
+   "foot"
+  ]
+ },
+ "greeble.009_6": {
+  "desc": "boxy paneled housing",
+  "tags": [
+   "boxy",
+   "panels"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.010_7": {
+  "desc": "tall crane arm mechanism",
+  "tags": [
+   "tall",
+   "arm",
+   "mechanism"
+  ],
+  "roles": [
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.011_8": {
+  "desc": "sloped block with vent fins",
+  "tags": [
+   "vented",
+   "sloped"
+  ],
+  "roles": [
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.012_9": {
+  "desc": "large radial fan disc",
+  "tags": [
+   "fan",
+   "round"
+  ],
+  "roles": [
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.013_10": {
+  "desc": "chunky finned engine block",
+  "tags": [
+   "chunky",
+   "finned"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.014_11": {
+  "desc": "turret assembly with barrels",
+  "tags": [
+   "turret",
+   "mechanism"
+  ],
+  "roles": [
+   "weapon",
+   "head"
+  ]
+ },
+ "greeble.015_12": {
+  "desc": "angular vented pod",
+  "tags": [
+   "angular",
+   "vented"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.016_13": {
+  "desc": "long hexagonal beam cowl",
+  "tags": [
+   "long",
+   "beam"
+  ],
+  "roles": [
+   "thigh",
+   "shin",
+   "weapon"
+  ]
+ },
+ "greeble.017_14": {
+  "desc": "small cylinder fitting assembly",
+  "tags": [
+   "small",
+   "detail"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.018_15": {
+  "desc": "curved low fender plate",
+  "tags": [
+   "flat",
+   "curved"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.019_16": {
+  "desc": "angled cowl with rounded window",
+  "tags": [
+   "cockpit",
+   "angled"
+  ],
+  "roles": [
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.020_17": {
+  "desc": "flat plate with notch cutouts",
+  "tags": [
+   "flat",
+   "plate"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.021_18": {
+  "desc": "angular fin bracket plate",
+  "tags": [
+   "fin",
+   "angular"
+  ],
+  "roles": [
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.022_19": {
+  "desc": "small flat rounded plate",
+  "tags": [
+   "flat",
+   "small"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.023_20": {
+  "desc": "pair of curved clamp handles",
+  "tags": [
+   "curved",
+   "clamp"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.024_21": {
+  "desc": "curved cowl fender shell",
+  "tags": [
+   "shell",
+   "cowl"
+  ],
+  "roles": [
+   "foot",
+   "torso"
+  ]
+ },
+ "greeble.025_22": {
+  "desc": "armored boxy container with panel lines",
+  "tags": [
+   "armored",
+   "boxy"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.026_23": {
+  "desc": "long thin channel rail",
+  "tags": [
+   "long",
+   "thin",
+   "rail"
+  ],
+  "roles": [
+   "shin",
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.027_24": {
+  "desc": "boxy container with lid",
+  "tags": [
+   "boxy"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.028_25": {
+  "desc": "flat hexagonal plate with notches",
+  "tags": [
+   "flat",
+   "plate"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.029_26": {
+  "desc": "flat plate with U cutout",
+  "tags": [
+   "flat",
+   "plate"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.030_27": {
+  "desc": "thick chevron plate with slot",
+  "tags": [
+   "flat",
+   "angular"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.031_28": {
+  "desc": "thick sloped brick block",
+  "tags": [
+   "blocky"
+  ],
+  "roles": [
+   "pelvis",
+   "torso"
+  ]
+ },
+ "greeble.032_29": {
+  "desc": "sloped block with parallel fins",
+  "tags": [
+   "vented",
+   "finned"
+  ],
+  "roles": [
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.033_30": {
+  "desc": "thin flat winged strip",
+  "tags": [
+   "flat",
+   "thin"
+  ],
+  "roles": [
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.034_31": {
+  "desc": "rounded-nose cowl block",
+  "tags": [
+   "cowl",
+   "rounded"
+  ],
+  "roles": [
+   "torso",
+   "foot"
+  ]
+ },
+ "greeble.035_32": {
+  "desc": "angular flanged bracket",
+  "tags": [
+   "bracket",
+   "angular"
+  ],
+  "roles": [
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.036_33": {
+  "desc": "tall stepped seat block",
+  "tags": [
+   "tall",
+   "stepped"
+  ],
+  "roles": [
+   "torso"
+  ]
+ },
+ "greeble.037_34": {
+  "desc": "thin zigzag rail strip",
+  "tags": [
+   "thin",
+   "long"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.038_35": {
+  "desc": "small boxes on a rail",
+  "tags": [
+   "small",
+   "detail"
+  ],
+  "roles": [
+   "weapon",
+   "head"
+  ]
+ },
+ "greeble.039_36": {
+  "desc": "angled hood cowl with notch",
+  "tags": [
+   "cowl",
+   "angled"
+  ],
+  "roles": [
+   "torso",
+   "foot"
+  ]
+ },
+ "greeble.040_37": {
+  "desc": "flat forked plate",
+  "tags": [
+   "flat",
+   "forked"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.041_38": {
+  "desc": "chunky cube cluster with panels",
+  "tags": [
+   "chunky",
+   "boxy"
+  ],
+  "roles": [
+   "torso",
+   "pelvis",
+   "head"
+  ]
+ },
+ "greeble.042_39": {
+  "desc": "faceted wedge nose cone",
+  "tags": [
+   "wedge",
+   "faceted"
+  ],
+  "roles": [
+   "foot",
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.043_40": {
+  "desc": "chunky angular knuckle cluster",
+  "tags": [
+   "chunky",
+   "angular"
+  ],
+  "roles": [
+   "pelvis",
+   "foot"
+  ]
+ },
+ "greeble.044_41": {
+  "desc": "round disc turntable with notch",
+  "tags": [
+   "round",
+   "disc"
+  ],
+  "roles": [
+   "pelvis",
+   "head"
+  ]
+ },
+ "greeble.045_42": {
+  "desc": "radial plate with splayed legs",
+  "tags": [
+   "radial",
+   "legs"
+  ],
+  "roles": [
+   "pelvis",
+   "back"
+  ]
+ },
+ "greeble.046_43": {
+  "desc": "angled open shroud hood",
+  "tags": [
+   "shroud",
+   "angled"
+  ],
+  "roles": [
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.047_44": {
+  "desc": "tall open shroud shell",
+  "tags": [
+   "shroud",
+   "tall"
+  ],
+  "roles": [
+   "torso"
+  ]
+ },
+ "greeble.048_45": {
+  "desc": "low faceted pod hull",
+  "tags": [
+   "pod",
+   "faceted"
+  ],
+  "roles": [
+   "foot",
+   "head"
+  ]
+ },
+ "greeble.049_46": {
+  "desc": "thin curved blade fender",
+  "tags": [
+   "blade",
+   "curved"
+  ],
+  "roles": [
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.050_47": {
+  "desc": "arch bracket with slot",
+  "tags": [
+   "arch",
+   "bracket"
+  ],
+  "roles": [
+   "pelvis",
+   "back"
+  ]
+ },
+ "greeble.051_48": {
+  "desc": "oval hollow tub basin",
+  "tags": [
+   "oval",
+   "hollow"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.052_49": {
+  "desc": "curved horn hood piece",
+  "tags": [
+   "curved",
+   "horn"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.053_50": {
+  "desc": "tall narrow slab with foot notch",
+  "tags": [
+   "tall",
+   "slab"
+  ],
+  "roles": [
+   "shin",
+   "thigh"
+  ]
+ },
+ "greeble.054_51": {
+  "desc": "layered flat console tray",
+  "tags": [
+   "layered",
+   "flat"
+  ],
+  "roles": [
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.055_52": {
+  "desc": "boxy bracket with vertical fin",
+  "tags": [
+   "bracket",
+   "fin"
+  ],
+  "roles": [
+   "torso",
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.056_53": {
+  "desc": "tall armored tower with notched top",
+  "tags": [
+   "tall",
+   "armored"
+  ],
+  "roles": [
+   "torso"
+  ]
+ },
+ "greeble.057_54": {
+  "desc": "thin strip with small pads",
+  "tags": [
+   "thin",
+   "detail"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.058_55": {
+  "desc": "tall forked pincer blades",
+  "tags": [
+   "forked",
+   "blades",
+   "tall"
+  ],
+  "roles": [
+   "back",
+   "weapon"
+  ]
+ },
+ "greeble.059_56": {
+  "desc": "Y-fork wishbone bracket",
+  "tags": [
+   "forked",
+   "bracket"
+  ],
+  "roles": [
+   "pelvis",
+   "back"
+  ]
+ },
+ "greeble.060_57": {
+  "desc": "angular scoop shell with opening",
+  "tags": [
+   "scoop",
+   "shell"
+  ],
+  "roles": [
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.061_58": {
+  "desc": "open walled tray hull",
+  "tags": [
+   "tray",
+   "hollow"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.062_59": {
+  "desc": "angular table canopy",
+  "tags": [
+   "arch",
+   "canopy"
+  ],
+  "roles": [
+   "pelvis",
+   "back"
+  ]
+ },
+ "greeble.063_60": {
+  "desc": "thick plate with slot cut",
+  "tags": [
+   "flat",
+   "thick"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.064_61": {
+  "desc": "flat plate with cutouts",
+  "tags": [
+   "flat",
+   "plate"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.065_62": {
+  "desc": "bent segmented linkage strip",
+  "tags": [
+   "bent",
+   "linkage"
+  ],
+  "roles": [
+   "thigh",
+   "shin"
+  ]
+ },
+ "greeble.066_63": {
+  "desc": "thick plate with twin leg cutouts",
+  "tags": [
+   "flat",
+   "notched"
+  ],
+  "roles": [
+   "pelvis",
+   "foot"
+  ]
+ },
+ "greeble.067_64": {
+  "desc": "thick jagged plate",
+  "tags": [
+   "flat",
+   "thick"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.068_65": {
+  "desc": "thick plate with round hole",
+  "tags": [
+   "flat",
+   "hole"
+  ],
+  "roles": [
+   "foot",
+   "pelvis"
+  ]
+ },
+ "greeble.069_66": {
+  "desc": "large thick polygonal plate",
+  "tags": [
+   "flat",
+   "large"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.070_67": {
+  "desc": "thick rounded plate",
+  "tags": [
+   "flat",
+   "thick"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.071_68": {
+  "desc": "overhanging C clamp bracket",
+  "tags": [
+   "clamp",
+   "bracket"
+  ],
+  "roles": [
+   "pelvis",
+   "back"
+  ]
+ },
+ "greeble.072_69": {
+  "desc": "low sloped tri-panel visor strip",
+  "tags": [
+   "sloped",
+   "panels"
+  ],
+  "roles": [
+   "head",
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.073_70": {
+  "desc": "long twin-barrel rail",
+  "tags": [
+   "long",
+   "barrels"
+  ],
+  "roles": [
+   "weapon"
+  ]
+ },
+ "greeble.074_71": {
+  "desc": "tall shell hood with window notch",
+  "tags": [
+   "shell",
+   "tall"
+  ],
+  "roles": [
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.075_72": {
+  "desc": "curved arch claw bracket",
+  "tags": [
+   "arch",
+   "curved"
+  ],
+  "roles": [
+   "back",
+   "shin"
+  ]
+ },
+ "greeble.076_73": {
+  "desc": "flat angled sheet wing",
+  "tags": [
+   "flat",
+   "angled"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.077_74": {
+  "desc": "thin kinked strip",
+  "tags": [
+   "thin",
+   "small"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.078_75": {
+  "desc": "open crate tray with angled interior",
+  "tags": [
+   "tray",
+   "hollow"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.079_76": {
+  "desc": "thick bent boomerang slab",
+  "tags": [
+   "flat",
+   "bent"
+  ],
+  "roles": [
+   "foot",
+   "pelvis"
+  ]
+ },
+ "greeble.080_77": {
+  "desc": "thin angular windshield frame",
+  "tags": [
+   "frame",
+   "thin"
+  ],
+  "roles": [
+   "back",
+   "head"
+  ]
+ },
+ "greeble.081_78": {
+  "desc": "long block hull with top posts",
+  "tags": [
+   "long",
+   "hull"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.082_79": {
+  "desc": "thin wall with hanging posts",
+  "tags": [
+   "thin",
+   "wall"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.083_80": {
+  "desc": "sign panel on articulated arm",
+  "tags": [
+   "panel",
+   "arm"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.084_81": {
+  "desc": "flat disc platform on feet",
+  "tags": [
+   "disc",
+   "flat"
+  ],
+  "roles": [
+   "foot",
+   "pelvis",
+   "back"
+  ]
+ },
+ "greeble.085_82": {
+  "desc": "four-legged table platform",
+  "tags": [
+   "table",
+   "legs"
+  ],
+  "roles": [
+   "pelvis",
+   "back"
+  ]
+ },
+ "greeble.086_83": {
+  "desc": "vertical pole with panel",
+  "tags": [
+   "pole",
+   "panel"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.087_84": {
+  "desc": "panel with dangling linkages",
+  "tags": [
+   "panel",
+   "linkage"
+  ],
+  "roles": [
+   "back",
+   "weapon"
+  ]
+ },
+ "greeble.088_85": {
+  "desc": "large billboard panel on post",
+  "tags": [
+   "panel",
+   "large"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.089_86": {
+  "desc": "segmented piston mast column",
+  "tags": [
+   "column",
+   "piston",
+   "segmented"
+  ],
+  "roles": [
+   "thigh",
+   "shin"
+  ]
+ },
+ "greeble.090_87": {
+  "desc": "three armored humps on plate",
+  "tags": [
+   "humps",
+   "armored"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.091_88": {
+  "desc": "instrument pole with brackets",
+  "tags": [
+   "pole",
+   "sensors"
+  ],
+  "roles": [
+   "back",
+   "head",
+   "weapon"
+  ]
+ },
+ "greeble.092_89": {
+  "desc": "spiral lattice antenna tower",
+  "tags": [
+   "truss",
+   "antenna"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.093_90": {
+  "desc": "lattice crane mast with collar",
+  "tags": [
+   "truss",
+   "tall"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.094_91": {
+  "desc": "crane jib arm on lattice base",
+  "tags": [
+   "crane",
+   "arm"
+  ],
+  "roles": [
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.095_92": {
+  "desc": "thin needle antenna with coil",
+  "tags": [
+   "needle",
+   "antenna"
+  ],
+  "roles": [
+   "back",
+   "weapon"
+  ]
+ },
+ "greeble.096_93": {
+  "desc": "rifle-like vertical assembly",
+  "tags": [
+   "gun",
+   "mechanism"
+  ],
+  "roles": [
+   "weapon"
+  ]
+ },
+ "greeble.097_94": {
+  "desc": "rifle with magazine and rails",
+  "tags": [
+   "gun",
+   "rails"
+  ],
+  "roles": [
+   "weapon"
+  ]
+ },
+ "greeble.098_95": {
+  "desc": "hook crane with counterweights",
+  "tags": [
+   "crane",
+   "hook"
+  ],
+  "roles": [
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.099_96": {
+  "desc": "twin coil piston shock rods",
+  "tags": [
+   "pistons",
+   "springs"
+  ],
+  "roles": [
+   "shin",
+   "thigh"
+  ]
+ },
+ "greeble.100_97": {
+  "desc": "needle probe with forked tip",
+  "tags": [
+   "needle",
+   "thin"
+  ],
+  "roles": [
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.101_98": {
+  "desc": "V pair of rods with ball ends",
+  "tags": [
+   "rods",
+   "linkage"
+  ],
+  "roles": [
+   "shin",
+   "back"
+  ]
+ },
+ "greeble.102_99": {
+  "desc": "piston actuator with hook",
+  "tags": [
+   "piston",
+   "mechanism"
+  ],
+  "roles": [
+   "shin",
+   "thigh",
+   "weapon"
+  ]
+ },
+ "greeble.103_100": {
+  "desc": "sphere tank on lattice tower",
+  "tags": [
+   "sphere",
+   "tower"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.104_101": {
+  "desc": "coil mast with instruments",
+  "tags": [
+   "coil",
+   "mast"
+  ],
+  "roles": [
+   "back",
+   "head"
+  ]
+ },
+ "greeble.105_102": {
+  "desc": "twin-disc antenna on pole",
+  "tags": [
+   "discs",
+   "antenna"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.106_103": {
+  "desc": "box canister with two antennas",
+  "tags": [
+   "box",
+   "antennas"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.107_104": {
+  "desc": "satellite with dish and panels",
+  "tags": [
+   "dish",
+   "panels"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.108_105": {
+  "desc": "thin whip antenna on base",
+  "tags": [
+   "whip",
+   "antenna"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.109_106": {
+  "desc": "geodesic dome",
+  "tags": [
+   "dome",
+   "faceted"
+  ],
+  "roles": [
+   "head",
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.110_107": {
+  "desc": "antenna with bent arm",
+  "tags": [
+   "antenna",
+   "arm"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.111_108": {
+  "desc": "small lattice tower section",
+  "tags": [
+   "truss",
+   "small"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.112_109": {
+  "desc": "rounded mast with side arms",
+  "tags": [
+   "mast",
+   "rounded"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.113_110": {
+  "desc": "scoop blade on cylinder post",
+  "tags": [
+   "scoop",
+   "blade"
+  ],
+  "roles": [
+   "weapon"
+  ]
+ },
+ "greeble.114_111": {
+  "desc": "round turret ring with lugs",
+  "tags": [
+   "ring",
+   "round"
+  ],
+  "roles": [
+   "head",
+   "pelvis"
+  ]
+ },
+ "greeble.115_112": {
+  "desc": "L-frame bracket with rails",
+  "tags": [
+   "frame",
+   "rails"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.116_113": {
+  "desc": "faceted ball on angled arm",
+  "tags": [
+   "ball",
+   "arm"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.117_114": {
+  "desc": "finned cylinder pod",
+  "tags": [
+   "pod",
+   "finned"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.118_115": {
+  "desc": "whip mast with box fittings",
+  "tags": [
+   "mast",
+   "thin"
+  ],
+  "roles": [
+   "back",
+   "weapon"
+  ]
+ },
+ "greeble.119_116": {
+  "desc": "caliper linkage on rod",
+  "tags": [
+   "linkage",
+   "thin"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.120_117": {
+  "desc": "large segmented sphere",
+  "tags": [
+   "sphere",
+   "large"
+  ],
+  "roles": [
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.121_118": {
+  "desc": "umbrella dish antenna",
+  "tags": [
+   "dish",
+   "round"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.122_119": {
+  "desc": "solar panel on stand",
+  "tags": [
+   "panel",
+   "flat"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.123_120": {
+  "desc": "slotted capsule canister",
+  "tags": [
+   "capsule",
+   "slots"
+  ],
+  "roles": [
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.124_121": {
+  "desc": "flat pack with hoses",
+  "tags": [
+   "pack",
+   "flat"
+  ],
+  "roles": [
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.125_122": {
+  "desc": "twin-gun turret on disc mounts",
+  "tags": [
+   "turret",
+   "barrels"
+  ],
+  "roles": [
+   "weapon",
+   "head"
+  ]
+ },
+ "greeble.126_123": {
+  "desc": "articulated boom with blade tip",
+  "tags": [
+   "boom",
+   "arm"
+  ],
+  "roles": [
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.127_124": {
+  "desc": "cross helix antenna array",
+  "tags": [
+   "antenna",
+   "array"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.128_125": {
+  "desc": "boom crane on turntable",
+  "tags": [
+   "crane",
+   "boom"
+  ],
+  "roles": [
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.129_126": {
+  "desc": "quad-blade turbine mast",
+  "tags": [
+   "mast",
+   "blades"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.130_127": {
+  "desc": "articulated twin-arm turret body",
+  "tags": [
+   "arms",
+   "turret"
+  ],
+  "roles": [
+   "weapon",
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.131_128": {
+  "desc": "instrument mast with box array",
+  "tags": [
+   "mast",
+   "sensors"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.132_129": {
+  "desc": "hull pod with three stacks",
+  "tags": [
+   "hull",
+   "stacks"
+  ],
+  "roles": [
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.133_130": {
+  "desc": "engine block with round intake",
+  "tags": [
+   "engine",
+   "chunky"
+  ],
+  "roles": [
+   "torso",
+   "weapon",
+   "pelvis"
+  ]
+ },
+ "greeble.134_131": {
+  "desc": "layered armored hull block",
+  "tags": [
+   "armored",
+   "layered"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.135_132": {
+  "desc": "sloped console with grid and hood",
+  "tags": [
+   "console",
+   "sloped"
+  ],
+  "roles": [
+   "torso",
+   "back",
+   "head"
+  ]
+ },
+ "greeble.136_133": {
+  "desc": "large wedge with bolt studs",
+  "tags": [
+   "wedge",
+   "studs"
+  ],
+  "roles": [
+   "torso",
+   "foot"
+  ]
+ },
+ "greeble.137_134": {
+  "desc": "cannon on pedestal base",
+  "tags": [
+   "cannon",
+   "barrel"
+  ],
+  "roles": [
+   "weapon"
+  ]
+ },
+ "greeble.138_135": {
+  "desc": "angular gunship pod with wings",
+  "tags": [
+   "pod",
+   "wings"
+  ],
+  "roles": [
+   "head",
+   "torso",
+   "weapon"
+  ]
+ },
+ "greeble.139_136": {
+  "desc": "sleek finned missile body",
+  "tags": [
+   "missile",
+   "fins"
+  ],
+  "roles": [
+   "weapon",
+   "head"
+  ]
+ },
+ "greeble.140_137": {
+  "desc": "smooth sloped hull cowl",
+  "tags": [
+   "cowl",
+   "sloped"
+  ],
+  "roles": [
+   "torso",
+   "foot",
+   "head"
+  ]
+ },
+ "greeble.141_138": {
+  "desc": "flat platform deck with rails",
+  "tags": [
+   "deck",
+   "rails"
+  ],
+  "roles": [
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.142_139": {
+  "desc": "pipe rollcage frame",
+  "tags": [
+   "frame",
+   "pipes"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.143_140": {
+  "desc": "sloped armored cabin with hatch",
+  "tags": [
+   "cabin",
+   "armored"
+  ],
+  "roles": [
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.144_141": {
+  "desc": "angular multi-fin cluster",
+  "tags": [
+   "fins",
+   "cluster"
+  ],
+  "roles": [
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.145_142": {
+  "desc": "tank turret with hatch and bore",
+  "tags": [
+   "turret",
+   "bore"
+  ],
+  "roles": [
+   "head",
+   "torso",
+   "weapon"
+  ]
+ },
+ "greeble.146_143": {
+  "desc": "platform with mini structures",
+  "tags": [
+   "platform",
+   "detail"
+  ],
+  "roles": [
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.147_144": {
+  "desc": "rounded armored helmet body",
+  "tags": [
+   "helmet",
+   "rounded"
+  ],
+  "roles": [
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.148_145": {
+  "desc": "long hull with cockpit ridge",
+  "tags": [
+   "hull",
+   "long"
+  ],
+  "roles": [
+   "foot",
+   "torso"
+  ]
+ },
+ "greeble.149_146": {
+  "desc": "bent wing panel",
+  "tags": [
+   "panel",
+   "bent"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.150_147": {
+  "desc": "chunky armored block with posts",
+  "tags": [
+   "armored",
+   "chunky"
+  ],
+  "roles": [
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.151_148": {
+  "desc": "faceted armored shell chunk",
+  "tags": [
+   "shell",
+   "faceted"
+  ],
+  "roles": [
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.152_149": {
+  "desc": "rounded shell with cutouts",
+  "tags": [
+   "shell",
+   "rounded"
+  ],
+  "roles": [
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.153_150": {
+  "desc": "X chassis with four leg stubs",
+  "tags": [
+   "cross",
+   "mounts"
+  ],
+  "roles": [
+   "pelvis"
+  ]
+ },
+ "greeble.154_151": {
+  "desc": "flat winged ship chassis",
+  "tags": [
+   "flat",
+   "wings"
+  ],
+  "roles": [
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.155_152": {
+  "desc": "long rail block with slots",
+  "tags": [
+   "rail",
+   "slots"
+  ],
+  "roles": [
+   "shin",
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.156_153": {
+  "desc": "angular bracket cluster",
+  "tags": [
+   "brackets",
+   "angular"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.157_154": {
+  "desc": "large C claw shell",
+  "tags": [
+   "claw",
+   "curved"
+  ],
+  "roles": [
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.158_155": {
+  "desc": "sloped hull segment with ridge",
+  "tags": [
+   "hull",
+   "sloped"
+  ],
+  "roles": [
+   "torso",
+   "foot"
+  ]
+ },
+ "greeble.159_156": {
+  "desc": "grooved shoulder pauldron slab",
+  "tags": [
+   "pauldron",
+   "grooved"
+  ],
+  "roles": [
+   "torso",
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.160_157": {
+  "desc": "thin vertical strip rail",
+  "tags": [
+   "thin",
+   "strip"
+  ],
+  "roles": [
+   "back"
+  ]
+ },
+ "greeble.161_158": {
+  "desc": "armored head shell with brow vents",
+  "tags": [
+   "helmet",
+   "vents"
+  ],
+  "roles": [
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.162_159": {
+  "desc": "armored block with two round ports",
+  "tags": [
+   "ports",
+   "armored"
+  ],
+  "roles": [
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.163_160": {
+  "desc": "angled beam with clamp",
+  "tags": [
+   "beam",
+   "clamp"
+  ],
+  "roles": [
+   "weapon",
+   "shin"
+  ]
+ },
+ "greeble.164_161": {
+  "desc": "armored boot shell with vents",
+  "tags": [
+   "boot",
+   "vents"
+  ],
+  "roles": [
+   "foot",
+   "torso"
+  ]
+ },
+ "greeble.165_162": {
+  "desc": "small cab block",
+  "tags": [
+   "cab",
+   "small"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.166_163": {
+  "desc": "open frame chassis sled",
+  "tags": [
+   "frame",
+   "sled"
+  ],
+  "roles": [
+   "back",
+   "pelvis"
+  ]
+ },
+ "greeble.167_164": {
+  "desc": "cylinder-topped turret base",
+  "tags": [
+   "cylinder",
+   "base"
+  ],
+  "roles": [
+   "torso",
+   "head",
+   "pelvis"
+  ]
+ },
+ "greeble.168_165": {
+  "desc": "ribbed cannon with mount",
+  "tags": [
+   "cannon",
+   "ribbed"
+  ],
+  "roles": [
+   "weapon"
+  ]
+ },
+ "greeble.169_166": {
+  "desc": "rounded plated carapace",
+  "tags": [
+   "carapace",
+   "plated"
+  ],
+  "roles": [
+   "torso",
+   "head",
+   "foot"
+  ]
+ },
+ "greeble.170_167": {
+  "desc": "large angular bucket scoop",
+  "tags": [
+   "bucket",
+   "scoop"
+  ],
+  "roles": [
+   "foot",
+   "torso"
+  ]
+ },
+ "greeble.171_168": {
+  "desc": "thick polygonal shield plate",
+  "tags": [
+   "shield",
+   "thick"
+  ],
+  "roles": [
+   "foot",
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.172_169": {
+  "desc": "rounded shell with vent slats",
+  "tags": [
+   "shell",
+   "slats"
+  ],
+  "roles": [
+   "torso",
+   "head",
+   "foot"
+  ]
+ },
+ "greeble.173_170": {
+  "desc": "long paneled box hull",
+  "tags": [
+   "hull",
+   "long"
+  ],
+  "roles": [
+   "torso",
+   "pelvis",
+   "foot"
+  ]
+ },
+ "greeble.174_171": {
+  "desc": "sloped panel with tile grid",
+  "tags": [
+   "tiles",
+   "sloped"
+  ],
+  "roles": [
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.175_172": {
+  "desc": "twin-prong finned sled",
+  "tags": [
+   "prongs",
+   "fins"
+  ],
+  "roles": [
+   "foot",
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.176_173": {
+  "desc": "chunky fist gauntlet",
+  "tags": [
+   "fist",
+   "chunky"
+  ],
+  "roles": [
+   "weapon",
+   "foot"
+  ]
+ },
+ "greeble.177_174": {
+  "desc": "armored slab with rib fins",
+  "tags": [
+   "slab",
+   "ribbed"
+  ],
+  "roles": [
+   "foot",
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.178_175": {
+  "desc": "small winged jet piece",
+  "tags": [
+   "winged",
+   "small"
+  ],
+  "roles": [
+   "back",
+   "head"
+  ]
+ },
+ "greeble.179_176": {
+  "desc": "large faceted bowl shell",
+  "tags": [
+   "bowl",
+   "faceted"
+  ],
+  "roles": [
+   "torso",
+   "head",
+   "pelvis"
+  ]
+ },
+ "greeble.180_177": {
+  "desc": "bent claw leg bracket",
+  "tags": [
+   "claw",
+   "bent"
+  ],
+  "roles": [
+   "weapon",
+   "shin",
+   "back"
+  ]
+ },
+ "greeble.181_178": {
+  "desc": "flat sled with dome disc",
+  "tags": [
+   "sled",
+   "dome"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.182_179": {
+  "desc": "L arm with box head",
+  "tags": [
+   "arm",
+   "angular"
+  ],
+  "roles": [
+   "weapon",
+   "back"
+  ]
+ },
+ "greeble.183_180": {
+  "desc": "open tray hull with corner posts",
+  "tags": [
+   "tray",
+   "posts"
+  ],
+  "roles": [
+   "pelvis",
+   "torso"
+  ]
+ },
+ "greeble.184_181": {
+  "desc": "large wedge slab",
+  "tags": [
+   "wedge",
+   "large"
+  ],
+  "roles": [
+   "foot",
+   "torso"
+  ]
+ },
+ "greeble.185_182": {
+  "desc": "X plate with arm cutouts",
+  "tags": [
+   "cross",
+   "flat"
+  ],
+  "roles": [
+   "pelvis",
+   "foot"
+  ]
+ },
+ "greeble.186_183": {
+  "desc": "sloped wall corner segment",
+  "tags": [
+   "wall",
+   "sloped"
+  ],
+  "roles": [
+   "torso",
+   "foot"
+  ]
+ },
+ "greeble.187_184": {
+  "desc": "small sloped ramp bracket",
+  "tags": [
+   "ramp",
+   "small"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.188_185": {
+  "desc": "boot block with open top",
+  "tags": [
+   "boot",
+   "hollow"
+  ],
+  "roles": [
+   "foot"
+  ]
+ },
+ "greeble.189_186": {
+  "desc": "curved fender quarter panel",
+  "tags": [
+   "fender",
+   "curved"
+  ],
+  "roles": [
+   "foot",
+   "torso"
+  ]
+ },
+ "greeble.190_187": {
+  "desc": "S-curve seat rail",
+  "tags": [
+   "curved",
+   "rail"
+  ],
+  "roles": [
+   "back",
+   "pelvis"
+  ]
+ },
+ "greeble.191_188": {
+  "desc": "armored face plate with teeth vents",
+  "tags": [
+   "grille",
+   "teeth"
+  ],
+  "roles": [
+   "head",
+   "torso",
+   "foot"
+  ]
+ },
+ "greeble.192_189": {
+  "desc": "chunky armored block with cutouts",
+  "tags": [
+   "armored",
+   "chunky"
+  ],
+  "roles": [
+   "torso",
+   "pelvis",
+   "head"
+  ]
+ },
+ "greeble.193_190": {
+  "desc": "angular hood wedge cowl",
+  "tags": [
+   "hood",
+   "wedge"
+  ],
+  "roles": [
+   "foot",
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.194_191": {
+  "desc": "rail with five claw hooks",
+  "tags": [
+   "hooks",
+   "rail"
+  ],
+  "roles": [
+   "back",
+   "weapon"
+  ]
+ },
+ "greeble.195_192": {
+  "desc": "block with large round bore",
+  "tags": [
+   "bore",
+   "block"
+  ],
+  "roles": [
+   "pelvis",
+   "torso",
+   "weapon"
+  ]
+ },
+ "greeble.196_193": {
+  "desc": "long armored gun casing",
+  "tags": [
+   "casing",
+   "long"
+  ],
+  "roles": [
+   "weapon",
+   "shin"
+  ]
+ },
+ "greeble.197_194": {
+  "desc": "sleek vented wedge hull",
+  "tags": [
+   "wedge",
+   "vents"
+  ],
+  "roles": [
+   "foot",
+   "head",
+   "back"
+  ]
+ },
+ "greeble.198_195": {
+  "desc": "thin scoop ski channel",
+  "tags": [
+   "ski",
+   "thin"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.199_196": {
+  "desc": "tall armored torso shell with shoulders",
+  "tags": [
+   "tall",
+   "shoulders"
+  ],
+  "roles": [
+   "torso"
+  ]
+ },
+ "greeble.200_197": {
+  "desc": "assembled engine block cluster",
+  "tags": [
+   "engine",
+   "cluster"
+  ],
+  "roles": [
+   "torso",
+   "back",
+   "pelvis"
+  ]
+ },
+ "greeble.201_198": {
+  "desc": "hexagonal armored dome hull",
+  "tags": [
+   "dome",
+   "hex"
+  ],
+  "roles": [
+   "torso",
+   "pelvis",
+   "head"
+  ]
+ },
+ "greeble.202_199": {
+  "desc": "armored corner shell with rails",
+  "tags": [
+   "shell",
+   "rails"
+  ],
+  "roles": [
+   "torso",
+   "foot"
+  ]
+ },
+ "greeble.203_200": {
+  "desc": "flat tank hull with turret hump",
+  "tags": [
+   "hull",
+   "tracked"
+  ],
+  "roles": [
+   "foot",
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.204_201": {
+  "desc": "broad winged deck hull",
+  "tags": [
+   "deck",
+   "wings"
+  ],
+  "roles": [
+   "foot",
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.205_202": {
+  "desc": "wide bow hull with grille and dome",
+  "tags": [
+   "hull",
+   "grille"
+  ],
+  "roles": [
+   "torso",
+   "foot",
+   "head"
+  ]
+ },
+ "greeble.206_203": {
+  "desc": "sloped narrow hull nose",
+  "tags": [
+   "nose",
+   "sloped"
+  ],
+  "roles": [
+   "foot",
+   "torso"
+  ]
+ },
+ "greeble.207_204": {
+  "desc": "thin slotted girder",
+  "tags": [
+   "girder",
+   "thin"
+  ],
+  "roles": [
+   "shin",
+   "back",
+   "weapon"
+  ]
+ },
+ "greeble.208_205": {
+  "desc": "wide deck with corner fittings",
+  "tags": [
+   "deck",
+   "flat"
+  ],
+  "roles": [
+   "pelvis",
+   "back",
+   "foot"
+  ]
+ },
+ "greeble.209_206": {
+  "desc": "large folded roof shell",
+  "tags": [
+   "shell",
+   "folded"
+  ],
+  "roles": [
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.210_207": {
+  "desc": "large folded angular shell",
+  "tags": [
+   "shell",
+   "angular"
+  ],
+  "roles": [
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.211_208": {
+  "desc": "Z bracket arm",
+  "tags": [
+   "bracket",
+   "bent"
+  ],
+  "roles": [
+   "back",
+   "shin"
+  ]
+ },
+ "greeble.212_209": {
+  "desc": "heavy ring collar with block",
+  "tags": [
+   "ring",
+   "collar"
+  ],
+  "roles": [
+   "pelvis",
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.213_210": {
+  "desc": "large ribbed drum cylinder",
+  "tags": [
+   "cylinder",
+   "drum"
+  ],
+  "roles": [
+   "thigh",
+   "torso",
+   "weapon"
+  ]
+ },
+ "greeble.214_211": {
+  "desc": "cylinder with angled cut disc",
+  "tags": [
+   "cylinder",
+   "angled"
+  ],
+  "roles": [
+   "head",
+   "weapon",
+   "thigh"
+  ]
+ },
+ "greeble.215_212": {
+  "desc": "rectangular funnel duct",
+  "tags": [
+   "funnel",
+   "tapered"
+  ],
+  "roles": [
+   "shin",
+   "back",
+   "weapon"
+  ]
+ },
+ "greeble.216_213": {
+  "desc": "large round pot vessel",
+  "tags": [
+   "pot",
+   "round"
+  ],
+  "roles": [
+   "torso",
+   "pelvis",
+   "head"
+  ]
+ },
+ "greeble.217_214": {
+  "desc": "round tub with rim clamps",
+  "tags": [
+   "tub",
+   "clamps"
+  ],
+  "roles": [
+   "torso",
+   "pelvis",
+   "head"
+  ]
+ },
+ "greeble.218_215": {
+  "desc": "round bowl with inner fins",
+  "tags": [
+   "bowl",
+   "vents"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.219_216": {
+  "desc": "round tank with rim posts",
+  "tags": [
+   "tank",
+   "round"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.220_217": {
+  "desc": "round tank platform on legs",
+  "tags": [
+   "tank",
+   "legs"
+  ],
+  "roles": [
+   "torso",
+   "pelvis",
+   "head"
+  ]
+ },
+ "greeble.221_218": {
+  "desc": "ship superstructure with stairs",
+  "tags": [
+   "structure",
+   "stepped"
+  ],
+  "roles": [
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.222_219": {
+  "desc": "sleek hull wedge with cockpit cut",
+  "tags": [
+   "wedge",
+   "cockpit"
+  ],
+  "roles": [
+   "foot",
+   "head",
+   "back"
+  ]
+ },
+ "greeble.223_220": {
+  "desc": "flat sled with hole and fins",
+  "tags": [
+   "sled",
+   "fins"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.224_221": {
+  "desc": "flat forked deck plate",
+  "tags": [
+   "fork",
+   "flat"
+  ],
+  "roles": [
+   "foot",
+   "pelvis"
+  ]
+ },
+ "greeble.225_222": {
+  "desc": "winged manta deck shell",
+  "tags": [
+   "shell",
+   "winged"
+  ],
+  "roles": [
+   "foot",
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.226_223": {
+  "desc": "long thin truss beam",
+  "tags": [
+   "truss",
+   "long"
+  ],
+  "roles": [
+   "shin",
+   "back"
+  ]
+ },
+ "greeble.227_224": {
+  "desc": "tall lattice tower column",
+  "tags": [
+   "truss",
+   "tall"
+  ],
+  "roles": [
+   "thigh",
+   "shin",
+   "back"
+  ]
+ },
+ "greeble.228_225": {
+  "desc": "open lattice box tower",
+  "tags": [
+   "truss",
+   "box"
+  ],
+  "roles": [
+   "thigh",
+   "shin",
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.229_226": {
+  "desc": "truss bridge with ramp feet",
+  "tags": [
+   "truss",
+   "bridge"
+  ],
+  "roles": [
+   "pelvis",
+   "back"
+  ]
+ },
+ "greeble.230_227": {
+  "desc": "bent truss walkway strip",
+  "tags": [
+   "truss",
+   "bent"
+  ],
+  "roles": [
+   "back",
+   "shin"
+  ]
+ },
+ "greeble.231_228": {
+  "desc": "four-legged flat table",
+  "tags": [
+   "table",
+   "legs"
+  ],
+  "roles": [
+   "pelvis",
+   "back"
+  ]
+ },
+ "greeble.232_229": {
+  "desc": "round vat on truss legs",
+  "tags": [
+   "vat",
+   "legs"
+  ],
+  "roles": [
+   "pelvis",
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.233_230": {
+  "desc": "thin boom with hook",
+  "tags": [
+   "boom",
+   "thin"
+  ],
+  "roles": [
+   "back",
+   "weapon"
+  ]
+ },
+ "greeble.234_231": {
+  "desc": "silo cylinder with cone top",
+  "tags": [
+   "silo",
+   "cylinder"
+  ],
+  "roles": [
+   "thigh",
+   "torso",
+   "weapon"
+  ]
+ },
+ "greeble.235_232": {
+  "desc": "cab with twin round tanks",
+  "tags": [
+   "cab",
+   "ports"
+  ],
+  "roles": [
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.236_233": {
+  "desc": "horizontal cylinder tank with hatch",
+  "tags": [
+   "cylinder",
+   "tank"
+  ],
+  "roles": [
+   "thigh",
+   "torso",
+   "weapon"
+  ]
+ },
+ "greeble.237_234": {
+  "desc": "tapered vat on base",
+  "tags": [
+   "vat",
+   "tapered"
+  ],
+  "roles": [
+   "torso",
+   "pelvis",
+   "thigh"
+  ]
+ },
+ "greeble.238_235": {
+  "desc": "small sled with cab",
+  "tags": [
+   "sled",
+   "cab"
+  ],
+  "roles": [
+   "foot",
+   "head"
+  ]
+ },
+ "greeble.239_236": {
+  "desc": "tall stepped hopper tower",
+  "tags": [
+   "hopper",
+   "stepped"
+  ],
+  "roles": [
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.240_237": {
+  "desc": "dual solar panels on mast",
+  "tags": [
+   "panels",
+   "mast"
+  ],
+  "roles": [
+   "back",
+   "head"
+  ]
+ },
+ "greeble.241_238": {
+  "desc": "boat hull with cabin frame",
+  "tags": [
+   "hull",
+   "frame"
+  ],
+  "roles": [
+   "foot",
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.242_239": {
+  "desc": "octagon ring platform with skirt",
+  "tags": [
+   "ring",
+   "octagon"
+  ],
+  "roles": [
+   "pelvis",
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.243_240": {
+  "desc": "tripod claw landing gear",
+  "tags": [
+   "tripod",
+   "claw"
+  ],
+  "roles": [
+   "foot",
+   "pelvis"
+  ]
+ },
+ "greeble.244_241": {
+  "desc": "armored bunker with console pipes",
+  "tags": [
+   "bunker",
+   "pipes"
+  ],
+  "roles": [
+   "torso",
+   "back",
+   "head"
+  ]
+ },
+ "greeble.245_242": {
+  "desc": "thin truss rail with posts",
+  "tags": [
+   "truss",
+   "thin"
+  ],
+  "roles": [
+   "back",
+   "shin"
+  ]
+ },
+ "greeble.246_243": {
+  "desc": "long truss girder",
+  "tags": [
+   "truss",
+   "girder"
+  ],
+  "roles": [
+   "shin",
+   "thigh",
+   "back"
+  ]
+ },
+ "greeble.247_244": {
+  "desc": "block with row of angled fins",
+  "tags": [
+   "radiator",
+   "fins"
+  ],
+  "roles": [
+   "back",
+   "foot",
+   "torso"
+  ]
+ },
+ "greeble.248_245": {
+  "desc": "stepped round tank stack",
+  "tags": [
+   "tank",
+   "stepped"
+  ],
+  "roles": [
+   "torso",
+   "pelvis",
+   "thigh"
+  ]
+ },
+ "greeble.249_246": {
+  "desc": "flat hex armored lid with clips",
+  "tags": [
+   "lid",
+   "hex"
+  ],
+  "roles": [
+   "foot",
+   "back",
+   "pelvis"
+  ]
+ },
+ "greeble.250_247": {
+  "desc": "rounded armored dome shell",
+  "tags": [
+   "dome",
+   "shell"
+  ],
+  "roles": [
+   "torso",
+   "head",
+   "foot"
+  ]
+ },
+ "greeble.251_248": {
+  "desc": "flat deck with corner clamps",
+  "tags": [
+   "deck",
+   "clamps"
+  ],
+  "roles": [
+   "pelvis",
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.252_249": {
+  "desc": "sloped armored roof with hatches",
+  "tags": [
+   "roof",
+   "hatches"
+  ],
+  "roles": [
+   "back",
+   "torso",
+   "foot"
+  ]
+ },
+ "greeble.253_250": {
+  "desc": "jet engine pod with front ring",
+  "tags": [
+   "engine",
+   "cylinder"
+  ],
+  "roles": [
+   "thigh",
+   "weapon",
+   "torso"
+  ]
+ },
+ "greeble.254_251": {
+  "desc": "capsule pill pod",
+  "tags": [
+   "capsule",
+   "rounded"
+  ],
+  "roles": [
+   "thigh",
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.255_252": {
+  "desc": "large open-top sphere",
+  "tags": [
+   "sphere",
+   "large"
+  ],
+  "roles": [
+   "torso",
+   "head"
+  ]
+ },
+ "greeble.256_253": {
+  "desc": "saucer dome disc",
+  "tags": [
+   "saucer",
+   "dome"
+  ],
+  "roles": [
+   "head",
+   "torso"
+  ]
+ },
+ "greeble.257_254": {
+  "desc": "half-sphere bowl with stairs",
+  "tags": [
+   "bowl",
+   "stairs"
+  ],
+  "roles": [
+   "head",
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.258_255": {
+  "desc": "barrel tank with lid clamps",
+  "tags": [
+   "barrel",
+   "clamps"
+  ],
+  "roles": [
+   "thigh",
+   "torso"
+  ]
+ },
+ "greeble.259_256": {
+  "desc": "tall slab tower on round base",
+  "tags": [
+   "slab",
+   "tall"
+  ],
+  "roles": [
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.260_257": {
+  "desc": "armored box with teeth and pipes",
+  "tags": [
+   "box",
+   "teeth"
+  ],
+  "roles": [
+   "torso",
+   "foot",
+   "head"
+  ]
+ },
+ "greeble.261_258": {
+  "desc": "octagonal low bunker lid",
+  "tags": [
+   "octagon",
+   "low"
+  ],
+  "roles": [
+   "pelvis",
+   "foot",
+   "head"
+  ]
+ },
+ "greeble.262_259": {
+  "desc": "flat hull deck with antennas",
+  "tags": [
+   "deck",
+   "antennas"
+  ],
+  "roles": [
+   "back",
+   "head"
+  ]
+ },
+ "greeble.263_260": {
+  "desc": "bunker block with pipes and hatch",
+  "tags": [
+   "bunker",
+   "pipes"
+  ],
+  "roles": [
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.264_261": {
+  "desc": "wedge with vent slats",
+  "tags": [
+   "wedge",
+   "slats"
+  ],
+  "roles": [
+   "foot",
+   "back"
+  ]
+ },
+ "greeble.265_262": {
+  "desc": "twin spheres in frame rack",
+  "tags": [
+   "spheres",
+   "frame"
+  ],
+  "roles": [
+   "back",
+   "torso"
+  ]
+ },
+ "greeble.266_263": {
+  "desc": "caged capsule with cylinders",
+  "tags": [
+   "capsule",
+   "cage"
+  ],
+  "roles": [
+   "torso",
+   "back"
+  ]
+ },
+ "greeble.267_264": {
+  "desc": "sphere with four legs",
+  "tags": [
+   "sphere",
+   "legs"
+  ],
+  "roles": [
+   "head",
+   "back"
+  ]
+ },
+ "greeble.268_265": {
+  "desc": "segmented cylinder stack",
+  "tags": [
+   "stack",
+   "segmented"
+  ],
+  "roles": [
+   "thigh",
+   "shin",
+   "back"
+  ]
+ },
+ "greeble.269_266": {
+  "desc": "caged cylinder of tanks",
+  "tags": [
+   "cage",
+   "cylinder"
+  ],
+  "roles": [
+   "thigh",
+   "shin",
+   "back"
+  ]
+ },
+ "greeble.270_267": {
+  "desc": "pot furnace with support frame",
+  "tags": [
+   "pot",
+   "frame"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.271_268": {
+  "desc": "squat round dome tank",
+  "tags": [
+   "dome",
+   "squat"
+  ],
+  "roles": [
+   "torso",
+   "pelvis",
+   "head"
+  ]
+ },
+ "greeble.005_269": {
+  "desc": "huge open-top cylinder vat",
+  "tags": [
+   "vat",
+   "cylinder"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ },
+ "greeble.007_270": {
+  "desc": "hexagonal open bin",
+  "tags": [
+   "bin",
+   "hex"
+  ],
+  "roles": [
+   "torso",
+   "pelvis"
+  ]
+ }
+}
