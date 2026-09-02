@@ -3,7 +3,8 @@
 ## while blocks, subroutines, and bounded logging. Source is compiled once;
 ## the runtime performs no memory allocation during normal execution.
 ## Native callbacks are trusted host code, and their own memory is not charged
-## to the script's VM memory budget.
+## to the script's VM memory budget. A bounded string pool at the end of this
+## module gives scripts handle-based text through metered host functions.
 
 import
   std/[strutils, tables]
@@ -1492,6 +1493,8 @@ proc parseArguments(
     callable: string
 ): seq[CallArgument] =
   ## Parses call arguments while preserving values across nested calls.
+  ## A quoted string argument compiles to its interned literal id, so hosts
+  ## can accept references to compile-time text without a runtime string type.
   discard parser.expectKind(
     LeftParenToken,
     "expected '(' after " & callable & " name"
@@ -1501,7 +1504,11 @@ proc parseArguments(
       if result.len >= expected:
         fail(parser.current, "too many " & callable & " arguments")
       let start = parser.code.len
-      let value = parser.parseExpression
+      let value =
+        if parser.current.kind == StringToken:
+          constant(parser.compiler[].literalId(parser.advance.text))
+        else:
+          parser.parseExpression
       result.add CallArgument(
         value: value,
         start: start,
@@ -2299,6 +2306,16 @@ proc routines*(program: Program): int {.inline.} =
   ## Returns the main routine plus the number of declared subs.
   program.routines.len
 
+proc literalCount*(program: Program): int {.inline.} =
+  ## Returns the number of interned compile-time string literals.
+  program.literals.len
+
+proc literal*(program: Program, id: int32): string =
+  ## Returns one interned print or call-argument literal by its id.
+  if id < 0 or int(id) >= program.literals.len:
+    fail("unknown BASIC literal id " & $id)
+  program.literals[int(id)]
+
 proc findGlobal(program: Program, name: string): int32 =
   ## Finds a global scalar by its case-insensitive source name.
   program.globalIds.getOrDefault(normalized(name), -1'i32)
@@ -2699,3 +2716,378 @@ proc run*(runtime: var Runtime, print: PrintProc = nil): RunStats =
     printBytes: runtime.printedBytes - startBytes,
     printEvents: runtime.printedEvents - startEvents
   )
+
+## String pool
+##
+## Bounded string values for untrusted scripts.
+##
+## Scripts never hold string data directly. A string is an int32 handle into
+## a per-runtime pool of immutable byte spans, and every operation on one is
+## a metered host function, so the register machine stays pure int32 and the
+## interpreter needs no string type. The pool preallocates its arena and caps
+## the handle count, the total bytes, and the length of any single string, so
+## a script that builds strings in a loop hits a deterministic BasicError
+## instead of growing host memory. Costly operations are priced for their
+## worst case against these caps, and substring search additionally carries
+## its own comparison cap because its worst case is quadratic.
+##
+## The pool is meant to reset alongside `restart` every decision, which makes
+## handles ephemeral: nothing a script builds survives into the next decision
+## except through host-side channels such as a mailbox. A handle kept in a
+## global across decisions goes stale and reads fail deterministically.
+##
+## Operations that address storage out of range fail hard, like array reads.
+## Operations that examine content are lenient, because scripts will parse
+## loosely formatted text such as chat from an LLM player: `strVal` of
+## non-numeric text is 0, `strFind` of an absent needle is -1, `strMid`
+## clamps, and `strWord` past the last word is the empty string.
+
+const
+  DefaultMaxStrings* = 256
+  DefaultMaxStringBytes* = 64 * 1024
+  DefaultMaxStringLength* = 1024
+  EmptyHandle* = 0'i32
+  SearchCapFactor = 64
+
+type
+  StringLimits* = object
+    maxStrings*: int
+    maxStringBytes*: int
+    maxStringLength*: int
+
+  StringSpan = object
+    start: int32
+    length: int32
+
+  StringPool* = ref object
+    limits: StringLimits
+    program: Program
+    arena: string
+    spans: seq[StringSpan]
+    literalHandles: seq[int32]
+
+proc defaultStringLimits*(): StringLimits =
+  ## Returns conservative defaults suitable for untrusted scripts.
+  StringLimits(
+    maxStrings: DefaultMaxStrings,
+    maxStringBytes: DefaultMaxStringBytes,
+    maxStringLength: DefaultMaxStringLength
+  )
+
+proc validate(limits: StringLimits) =
+  ## Rejects limits that could disable a pool boundary.
+  if limits.maxStrings < 1 or
+      limits.maxStringBytes < 0 or
+      limits.maxStringLength < 1:
+    fail("BASIC string limits must retain pool capacity")
+  if limits.maxStringLength > limits.maxStringBytes:
+    fail("BASIC string length limit exceeds the pool byte limit")
+  if limits.maxStrings > high(int32) or
+      limits.maxStringBytes > high(int32) or
+      limits.maxStringLength > high(int32):
+    fail("BASIC string limits must fit portable int32 indices")
+
+proc reset*(pool: StringPool) =
+  ## Discards every handle and interned literal while keeping capacity.
+  ## Call this alongside `restart` so each decision starts with an empty
+  ## pool and stale handles from earlier decisions fail deterministically.
+  pool.arena.setLen(0)
+  pool.spans.setLen(0)
+  pool.spans.add StringSpan()
+  for entry in pool.literalHandles.mitems:
+    entry = -1
+
+proc initStringPool*(limits = defaultStringLimits()): StringPool =
+  ## Preallocates a bounded pool; handle 0 is always the empty string.
+  limits.validate
+  result = StringPool(
+    limits: limits,
+    arena: newStringOfCap(limits.maxStringBytes),
+    spans: newSeqOfCap[StringSpan](limits.maxStrings)
+  )
+  result.reset
+
+proc bindProgram*(pool: StringPool, program: Program) =
+  ## Attaches the compiled program whose interned literals strNew copies.
+  ## Bind after `compile` and before the first run; binding resets the pool.
+  pool.program = program
+  pool.literalHandles = newSeq[int32](program.literalCount)
+  pool.reset
+
+proc stringCount*(pool: StringPool): int =
+  ## Returns the live handle count, including the shared empty string.
+  pool.spans.len
+
+proc bytesUsed*(pool: StringPool): int =
+  ## Returns the arena bytes used since the last reset.
+  pool.arena.len
+
+proc checkedSpan(pool: StringPool, handle: int32): StringSpan =
+  ## Resolves a handle after one unsigned bounds comparison, so forged
+  ## and stale handles fail instead of reading another string's bytes.
+  if cast[uint32](handle) >= cast[uint32](pool.spans.len):
+    fail("invalid BASIC string handle " & $handle)
+  pool.spans[int(handle)]
+
+proc getString*(pool: StringPool, handle: int32): string =
+  ## Reads one pooled string for host-side use, such as outgoing mail.
+  let span = pool.checkedSpan(handle)
+  if span.length == 0:
+    return ""
+  pool.arena[int(span.start) ..< int(span.start + span.length)]
+
+proc addChecked(pool: StringPool, text: openArray[char]): int32 =
+  ## Copies text into the pool, charging every limit before writing.
+  if text.len > pool.limits.maxStringLength:
+    fail("BASIC string exceeds the configured length limit")
+  if text.len == 0:
+    return EmptyHandle
+  if pool.spans.len >= pool.limits.maxStrings:
+    fail("BASIC string count exceeds the configured limit")
+  if pool.arena.len + text.len > pool.limits.maxStringBytes:
+    fail("BASIC string pool exceeds the configured byte limit")
+  let start = int32(pool.arena.len)
+  for c in text:
+    pool.arena.add c
+  result = int32(pool.spans.len)
+  pool.spans.add StringSpan(start: start, length: int32(text.len))
+
+proc putString*(pool: StringPool, text: openArray[char]): int32 =
+  ## Copies host text, such as incoming mail or an LLM reply, into the
+  ## pool, truncating to the single-string length cap. Handle and byte
+  ## exhaustion still fail, so hosts should inject bounded batches.
+  let length = min(text.len, pool.limits.maxStringLength)
+  pool.addChecked(text.toOpenArray(0, length - 1))
+
+proc literalHandle(pool: StringPool, id: int32): int32 =
+  ## Returns the pooled copy of one compile-time literal, interning it
+  ## once per reset so strNew in a loop cannot exhaust the pool.
+  if pool.program == nil:
+    fail("BASIC string pool has no program bound")
+  if cast[uint32](id) >= cast[uint32](pool.literalHandles.len):
+    fail("unknown BASIC literal id " & $id)
+  result = pool.literalHandles[int(id)]
+  if result >= 0:
+    return
+  result = pool.addChecked(pool.program.literal(id))
+  pool.literalHandles[int(id)] = result
+
+proc concat(pool: StringPool, left, right: int32): int32 =
+  ## Joins two strings, rejecting results above the length cap.
+  let
+    leftSpan = pool.checkedSpan(left)
+    rightSpan = pool.checkedSpan(right)
+  if int(leftSpan.length) + int(rightSpan.length) >
+      pool.limits.maxStringLength:
+    fail("BASIC string exceeds the configured length limit")
+  if leftSpan.length == 0:
+    return right
+  if rightSpan.length == 0:
+    return left
+  pool.addChecked(pool.getString(left) & pool.getString(right))
+
+proc byteAt(pool: StringPool, handle, index: int32): int32 =
+  ## Reads one byte with a hard bounds check, like an array element.
+  let span = pool.checkedSpan(handle)
+  if cast[uint32](index) >= cast[uint32](span.length):
+    fail(
+      "BASIC string index " & $index &
+      " is outside 0 .. " & $(span.length - 1)
+    )
+  int32(ord(pool.arena[int(span.start + index)]))
+
+proc slice(pool: StringPool, handle, start, length: int32): int32 =
+  ## Copies a clamped substring, QBasic MID$ style.
+  let span = pool.checkedSpan(handle)
+  let begin = clamp(start, 0'i32, span.length)
+  let count = clamp(length, 0'i32, span.length - begin)
+  if count == 0:
+    return EmptyHandle
+  if begin == 0 and count == span.length:
+    return handle
+  pool.addChecked(pool.arena.toOpenArray(
+    int(span.start + begin),
+    int(span.start + begin + count) - 1
+  ))
+
+proc findAt(pool: StringPool, handle, needle, start: int32): int32 =
+  ## Searches for a substring from a clamped byte offset, returning -1
+  ## when absent. The naive scan's worst case is quadratic, so it fails
+  ## once its comparison cap is exceeded rather than stalling the host.
+  let
+    haystack = pool.getString(handle)
+    pattern = pool.getString(needle)
+    cap = pool.limits.maxStringLength * SearchCapFactor
+    first = int(clamp(start, 0'i32, int32(haystack.len)))
+  if pattern.len == 0:
+    return int32(first)
+  var comparisons = 0
+  for base in first .. haystack.len - pattern.len:
+    var i = 0
+    while i < pattern.len:
+      inc comparisons
+      if comparisons > cap:
+        fail("BASIC string search exceeded its comparison cap")
+      if haystack[base + i] != pattern[i]:
+        break
+      inc i
+    if i == pattern.len:
+      return int32(base)
+  -1
+
+proc parsedValue(pool: StringPool, handle: int32): int32 =
+  ## Parses a leading integer, QBasic VAL style: whitespace then an
+  ## optional minus then digits. No digits is 0; overflow saturates.
+  let text = pool.getString(handle)
+  var i = 0
+  while i < text.len and text[i] in Whitespace:
+    inc i
+  var negative = false
+  if i < text.len and text[i] == '-':
+    negative = true
+    inc i
+  var
+    value = 0'i64
+    sawDigit = false
+  while i < text.len and text[i] in {'0' .. '9'}:
+    sawDigit = true
+    if value <= int64(high(int32)):
+      value = value * 10 + int64(ord(text[i]) - ord('0'))
+    inc i
+  if not sawDigit:
+    return 0
+  if negative:
+    int32(max(-value, int64(low(int32))))
+  else:
+    int32(min(value, int64(high(int32))))
+
+proc wordAt(pool: StringPool, handle, index: int32): int32 =
+  ## Returns the whitespace-separated word at an index, or the empty
+  ## string past the last word, so parse loops can probe without cost.
+  if index < 0:
+    return EmptyHandle
+  let span = pool.checkedSpan(handle)
+  let
+    first = int(span.start)
+    last = int(span.start + span.length)
+  var
+    i = first
+    count = 0'i32
+  while i < last:
+    while i < last and pool.arena[i] in Whitespace:
+      inc i
+    if i >= last:
+      break
+    let start = i
+    while i < last and pool.arena[i] notin Whitespace:
+      inc i
+    if count == index:
+      return pool.addChecked(pool.arena.toOpenArray(start, i - 1))
+    inc count
+  EmptyHandle
+
+proc wordCount(pool: StringPool, handle: int32): int32 =
+  ## Counts whitespace-separated words.
+  let span = pool.checkedSpan(handle)
+  let last = int(span.start + span.length)
+  var i = int(span.start)
+  while i < last:
+    while i < last and pool.arena[i] in Whitespace:
+      inc i
+    if i >= last:
+      break
+    inc result
+    while i < last and pool.arena[i] notin Whitespace:
+      inc i
+
+proc addStringFunctions*(host: var Host, pool: StringPool) =
+  ## Registers the bounded string toolkit onto a host. Work costs are
+  ## computed from the pool limits, so the compile-time schema host and
+  ## each player's live host must be built with identical limits or
+  ## `initRuntime` rejects the binding.
+  let
+    linearCost = 4 + pool.limits.maxStringLength div 16
+    searchCost = 4 + pool.limits.maxStringLength
+
+  let strNewProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.literalHandle(arguments[0])
+  discard host.addFunction("strNew", 1, strNewProc, linearCost)
+
+  let strLenProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.checkedSpan(arguments[0]).length
+  discard host.addFunction("strLen", 1, strLenProc, 2)
+
+  let strByteProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.byteAt(arguments[0], arguments[1])
+  discard host.addFunction("strByte", 2, strByteProc, 3)
+
+  let strAscProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    let span = pool.checkedSpan(arguments[0])
+    if span.length == 0:
+      -1'i32
+    else:
+      int32(ord(pool.arena[int(span.start)]))
+  discard host.addFunction("strAsc", 1, strAscProc, 3)
+
+  let strChrProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    if arguments[0] < 0 or arguments[0] > 255:
+      fail("BASIC strChr code is outside 0 .. 255")
+    pool.addChecked([char(arguments[0])])
+  discard host.addFunction("strChr", 1, strChrProc, 6)
+
+  let strFromIntProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.addChecked($arguments[0])
+  discard host.addFunction("strFromInt", 1, strFromIntProc, 8)
+
+  let strValProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.parsedValue(arguments[0])
+  discard host.addFunction("strVal", 1, strValProc, linearCost)
+
+  let strCatProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.concat(arguments[0], arguments[1])
+  discard host.addFunction("strCat", 2, strCatProc, linearCost)
+
+  let strCatIntProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    let digits = pool.addChecked($arguments[1])
+    pool.concat(arguments[0], digits)
+  discard host.addFunction("strCatInt", 2, strCatIntProc, linearCost)
+
+  let strMidProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.slice(arguments[0], arguments[1], arguments[2])
+  discard host.addFunction("strMid", 3, strMidProc, linearCost)
+
+  let strFindProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.findAt(arguments[0], arguments[1], arguments[2])
+  discard host.addFunction("strFind", 3, strFindProc, searchCost)
+
+  let strEqProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    int32(pool.getString(arguments[0]) == pool.getString(arguments[1]))
+  discard host.addFunction("strEq", 2, strEqProc, linearCost)
+
+  let strCmpProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    int32(clamp(
+      cmp(pool.getString(arguments[0]), pool.getString(arguments[1])),
+      -1,
+      1
+    ))
+  discard host.addFunction("strCmp", 2, strCmpProc, linearCost)
+
+  let strWordProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.wordAt(arguments[0], arguments[1])
+  discard host.addFunction("strWord", 2, strWordProc, linearCost)
+
+  let strWordCountProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.wordCount(arguments[0])
+  discard host.addFunction("strWordCount", 1, strWordCountProc, linearCost)
+
+  let strUpperProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.addChecked(pool.getString(arguments[0]).toUpperAscii)
+  discard host.addFunction("strUpper", 1, strUpperProc, linearCost)
+
+  let strLowerProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.addChecked(pool.getString(arguments[0]).toLowerAscii)
+  discard host.addFunction("strLower", 1, strLowerProc, linearCost)
+
+  let strTrimProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.addChecked(pool.getString(arguments[0]).strip)
+  discard host.addFunction("strTrim", 1, strTrimProc, linearCost)

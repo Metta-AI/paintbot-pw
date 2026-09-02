@@ -79,6 +79,39 @@ while i < 500000
 wend
 """
 
+  StringIterations = 50_000
+
+  StringBuildSource = """
+i = 0
+length = 0
+while i < 50000
+  m = strCatInt(strNew("attack "), i)
+  length = length + strLen(m)
+  i = i + 1
+wend
+"""
+
+  StringParseSource = """
+message = mail()
+i = 0
+total = 0
+while i < 50000
+  total = total + strVal(strWord(message, 1))
+  i = i + 1
+wend
+"""
+
+  StringFindSource = """
+message = mail()
+needle = strNew("34")
+i = 0
+found = 0
+while i < 50000
+  found = found + strFind(message, needle, 0)
+  i = i + 1
+wend
+"""
+
 proc benchLimits(): Limits =
   ## Returns limits large enough for every benchmark workload.
   result = defaultLimits()
@@ -88,6 +121,28 @@ proc benchLimits(): Limits =
 proc addDelta(arguments: openArray[int32]): int32 =
   ## Adds a small constant in the native callback benchmark.
   arguments[0] +% 3
+
+proc benchStringPool(): StringPool =
+  ## Returns a pool large enough for allocation-heavy string benchmarks.
+  var poolLimits = defaultStringLimits()
+  poolLimits.maxStrings = 200_000
+  poolLimits.maxStringBytes = 8 * 1024 * 1024
+  initStringPool(poolLimits)
+
+proc buildStringBench(
+    source: string,
+    limits: Limits
+): tuple[program: Program, runtime: Runtime, pool: StringPool] =
+  ## Compiles one string benchmark with its own pool and mail source.
+  var host = initHost()
+  let pool = benchStringPool()
+  host.addStringFunctions(pool)
+  let mailProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.putString("attack 12 34 hold")
+  discard host.addFunction("mail", 0, mailProc, 8)
+  let program = compile(source, host, limits)
+  pool.bindProgram(program)
+  (program, initRuntime(program, host, limits), pool)
 
 proc describe(name: string, program: Program, runtime: Runtime) =
   ## Prints stable bytecode and runtime-memory measurements.
@@ -118,6 +173,14 @@ var
   hostDataRuntime = initRuntime(hostDataProgram, host, limits)
   hostCallRuntime = initRuntime(hostCallProgram, host, limits)
 
+var
+  (stringBuildProgram, stringBuildRuntime, stringBuildPool) =
+    buildStringBench(StringBuildSource, limits)
+  (stringParseProgram, stringParseRuntime, stringParsePool) =
+    buildStringBench(StringParseSource, limits)
+  (stringFindProgram, stringFindRuntime, stringFindPool) =
+    buildStringBench(StringFindSource, limits)
+
 echo "BASIC register VM benchmark"
 echo "  arithmetic iterations=", ArithmeticIterations
 echo "  array iterations=", ArrayIterations, " elements=", ArraySize
@@ -125,12 +188,16 @@ echo "  branch iterations=", BranchIterations
 echo "  call iterations=", CallIterations
 echo "  host data iterations=", HostIterations
 echo "  host call iterations=", HostCallIterations
+echo "  string iterations=", StringIterations
 describe("arithmetic", arithmeticProgram, arithmeticRuntime)
 describe("array", arrayProgram, arrayRuntime)
 describe("branch", branchProgram, branchRuntime)
 describe("call", callProgram, callRuntime)
 describe("host data", hostDataProgram, hostDataRuntime)
 describe("host call", hostCallProgram, hostCallRuntime)
+describe("string build", stringBuildProgram, stringBuildRuntime)
+describe("string parse", stringParseProgram, stringParseRuntime)
+describe("string find", stringFindProgram, stringFindRuntime)
 
 timeIt("compile arithmetic", CompileRuns):
   let program = compile(ArithmeticSource, limits)
@@ -171,3 +238,24 @@ timeIt("execute host calls", BenchRuns):
   let stats = hostCallRuntime.run
   keep(stats.workUnits)
   keep(hostCallRuntime.getGlobal("total"))
+
+timeIt("execute string build", BenchRuns):
+  stringBuildPool.reset
+  stringBuildRuntime.reset
+  let stats = stringBuildRuntime.run
+  keep(stats.workUnits)
+  keep(stringBuildRuntime.getGlobal("length"))
+
+timeIt("execute string parse", BenchRuns):
+  stringParsePool.reset
+  stringParseRuntime.reset
+  let stats = stringParseRuntime.run
+  keep(stats.workUnits)
+  keep(stringParseRuntime.getGlobal("total"))
+
+timeIt("execute string find", BenchRuns):
+  stringFindPool.reset
+  stringFindRuntime.reset
+  let stats = stringFindRuntime.run
+  keep(stats.workUnits)
+  keep(stringFindRuntime.getGlobal("found"))

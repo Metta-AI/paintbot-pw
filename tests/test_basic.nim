@@ -454,4 +454,329 @@ block:
     except BasicError:
       discard
 
+proc stringVm(
+    source: string,
+    limits = defaultStringLimits()
+): tuple[runtime: Runtime, pool: StringPool] =
+  ## Compiles a script against the string toolkit and binds one pool.
+  var host = initHost()
+  let pool = initStringPool(limits)
+  host.addStringFunctions(pool)
+  let program = compile(source, host)
+  pool.bindProgram(program)
+  (initRuntime(program, host), pool)
+
+echo "Testing string literals as call arguments"
+block:
+  var host = initHost()
+  var seen = ""
+  var program: Program
+  let recordProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    seen = program.literal(arguments[0])
+  discard host.addFunction("record", 1, recordProc, 4)
+  program = compile("""
+record("hello mailbox")
+""", host)
+  doAssert program.literalCount == 1
+  var runtime = initRuntime(program, host)
+  discard runtime.run
+  doAssert seen == "hello mailbox"
+
+echo "Testing string building and reading"
+block:
+  var (runtime, pool) = stringVm("""
+s = strNew("attack ")
+s = strCatInt(s, 12)
+s = strCat(s, strNew(","))
+s = strCatInt(s, 34)
+length = strLen(s)
+first = strByte(s, 0)
+""")
+  discard runtime.run
+  doAssert pool.getString(runtime.getGlobal("s")) == "attack 12,34"
+  doAssert runtime.getGlobal("length") == 12
+  doAssert runtime.getGlobal("first") == int32(ord('a'))
+
+echo "Testing message parsing with words, val, find, and eq"
+block:
+  ## The host injects an incoming message, mailbox style, and the script
+  ## parses it without ever holding string data itself.
+  var host = initHost()
+  let pool = initStringPool()
+  host.addStringFunctions(pool)
+  let mailProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    pool.putString("  attack   12 34 ")
+  discard host.addFunction("mail", 0, mailProc, 8)
+  let program = compile("""
+message = mail()
+verb = strWord(message, 0)
+isAttack = strEq(verb, strNew("attack"))
+x = strVal(strWord(message, 1))
+y = strVal(strWord(message, 2))
+words = strWordCount(message)
+missing = strWord(message, 9)
+missingLen = strLen(missing)
+position = strFind(message, strNew("ck"), 0)
+absent = strFind(message, strNew("retreat"), 0)
+""", host)
+  pool.bindProgram(program)
+  var runtime = initRuntime(program, host)
+  discard runtime.run
+  doAssert runtime.getGlobal("isAttack") == 1
+  doAssert runtime.getGlobal("x") == 12
+  doAssert runtime.getGlobal("y") == 34
+  doAssert runtime.getGlobal("words") == 3
+  doAssert runtime.getGlobal("missingLen") == 0
+  doAssert runtime.getGlobal("position") == 6
+  doAssert runtime.getGlobal("absent") == -1
+
+echo "Testing val leniency and saturation"
+block:
+  var (runtime, pool) = stringVm("""
+plain = strVal(strNew("42"))
+padded = strVal(strNew("  -42abc"))
+junk = strVal(strNew("abc"))
+big = strVal(strNew("99999999999999999999"))
+small = strVal(strNew("-99999999999999999999"))
+""")
+  discard runtime.run
+  doAssert runtime.getGlobal("plain") == 42
+  doAssert runtime.getGlobal("padded") == -42
+  doAssert runtime.getGlobal("junk") == 0
+  doAssert runtime.getGlobal("big") == high(int32)
+  doAssert runtime.getGlobal("small") == low(int32)
+  discard pool
+
+echo "Testing mid clamping, case mapping, trim, chr, and asc"
+block:
+  var (runtime, pool) = stringVm("""
+s = strNew("  Hello World  ")
+t = strTrim(s)
+u = strUpper(t)
+l = strLower(t)
+clipped = strMid(t, 6, 99)
+empty = strMid(t, 50, 5)
+emptyLen = strLen(empty)
+h = strChr(72)
+code = strAsc(h)
+emptyAsc = strAsc(empty)
+same = strCmp(t, t)
+before = strCmp(strNew("apple"), strNew("banana"))
+""")
+  discard runtime.run
+  doAssert pool.getString(runtime.getGlobal("t")) == "Hello World"
+  doAssert pool.getString(runtime.getGlobal("u")) == "HELLO WORLD"
+  doAssert pool.getString(runtime.getGlobal("l")) == "hello world"
+  doAssert pool.getString(runtime.getGlobal("clipped")) == "World"
+  doAssert runtime.getGlobal("emptyLen") == 0
+  doAssert pool.getString(runtime.getGlobal("h")) == "H"
+  doAssert runtime.getGlobal("code") == 72
+  doAssert runtime.getGlobal("emptyAsc") == -1
+  doAssert runtime.getGlobal("same") == 0
+  doAssert runtime.getGlobal("before") == -1
+
+echo "Testing literal interning survives loops"
+block:
+  var (runtime, pool) = stringVm("""
+i = 0
+while i < 10000
+  s = strNew("looped literal")
+  i = i + 1
+wend
+""")
+  discard runtime.run
+  doAssert runtime.getGlobal("i") == 10000
+  ## One pooled copy plus the shared empty string.
+  doAssert pool.stringCount == 2
+
+echo "Testing string count limit stops allocation loops"
+block:
+  var limits = defaultStringLimits()
+  limits.maxStrings = 32
+  var (runtime, pool) = stringVm("""
+i = 0
+while i < 100000
+  s = strFromInt(i)
+  i = i + 1
+wend
+""", limits)
+  doAssert errorContains(
+    proc() = discard runtime.run,
+    "string count exceeds"
+  )
+  doAssert pool.stringCount <= 32
+
+echo "Testing single string length limit stops concat growth"
+block:
+  var (runtime, pool) = stringVm("""
+s = strNew("xxxxxxxxxxxxxxxx")
+i = 0
+while i < 100000
+  s = strCat(s, s)
+  i = i + 1
+wend
+""")
+  doAssert errorContains(
+    proc() = discard runtime.run,
+    "length limit"
+  )
+  discard pool
+
+echo "Testing arena byte limit stops fresh allocations"
+block:
+  var limits = defaultStringLimits()
+  limits.maxStrings = 100_000
+  limits.maxStringBytes = 512
+  limits.maxStringLength = 64
+  var (runtime, pool) = stringVm("""
+i = 0
+while i < 100000
+  s = strCat(strNew("0123456789"), strFromInt(i))
+  i = i + 1
+wend
+""", limits)
+  doAssert errorContains(
+    proc() = discard runtime.run,
+    "byte limit"
+  )
+  doAssert pool.bytesUsed <= 512
+
+echo "Testing forged and out-of-range handles fail"
+block:
+  var (runtime, pool) = stringVm("""
+n = strLen(9999)
+""")
+  doAssert errorContains(
+    proc() = discard runtime.run,
+    "invalid BASIC string handle"
+  )
+  var (indexed, indexedPool) = stringVm("""
+b = strByte(strNew("hi"), 2)
+""")
+  doAssert errorContains(
+    proc() = discard indexed.run,
+    "outside 0 .. 1"
+  )
+  discard pool
+  discard indexedPool
+
+echo "Testing stale handles fail after a pool reset"
+block:
+  var host = initHost()
+  let pool = initStringPool()
+  host.addStringFunctions(pool)
+  discard host.addData("phase")
+  let program = compile("""
+if phase = 0 then
+  kept = strNew("does not survive")
+else
+  n = strLen(kept)
+end if
+""", host)
+  pool.bindProgram(program)
+  var runtime = initRuntime(program, host)
+  discard runtime.run
+  doAssert pool.getString(runtime.getGlobal("kept")) == "does not survive"
+  pool.reset
+  runtime.restart
+  runtime.setData("phase", 1)
+  doAssert errorContains(
+    proc() = discard runtime.run,
+    "invalid BASIC string handle"
+  )
+
+echo "Testing pathological search hits its comparison cap"
+block:
+  var limits = defaultStringLimits()
+  limits.maxStringLength = 512
+  var (runtime, pool) = stringVm("""
+hay = strNew("a")
+i = 0
+while i < 9
+  hay = strCat(hay, hay)
+  i = i + 1
+wend
+needle = strCat(strMid(hay, 0, 400), strNew("b"))
+found = strFind(hay, needle, 0)
+""", limits)
+  doAssert errorContains(
+    proc() = discard runtime.run,
+    "comparison cap"
+  )
+  discard pool
+
+echo "Testing the work budget also bounds string churn"
+block:
+  var host = initHost()
+  let pool = initStringPool()
+  host.addStringFunctions(pool)
+  var limits = defaultLimits()
+  limits.maxWorkUnits = 5_000
+  let program = compile("""
+i = 0
+while i < 100000
+  s = strNew("cheap")
+  i = i + 1
+wend
+""", host, limits)
+  pool.bindProgram(program)
+  var runtime = initRuntime(program, host, limits)
+  doAssert errorContains(
+    proc() = discard runtime.run,
+    "work limit exceeded"
+  )
+
+echo "Testing host putString truncation and empty interning"
+block:
+  var limits = defaultStringLimits()
+  limits.maxStringLength = 8
+  let pool = initStringPool(limits)
+  var host = initHost()
+  host.addStringFunctions(pool)
+  let program = compile("""
+n = strLen(incoming)
+""", host)
+  ## putString truncates long host text instead of failing.
+  pool.bindProgram(program)
+  let handle = pool.putString("0123456789abcdef")
+  doAssert pool.getString(handle) == "01234567"
+  doAssert pool.putString("") == EmptyHandle
+  var runtime = initRuntime(program, host)
+  runtime.setGlobal("incoming", handle)
+  discard runtime.run
+  doAssert runtime.getGlobal("n") == 8
+
+echo "Testing a string bomb fails the script, not the host"
+block:
+  ## One giant literal, far beyond the single-string cap, must raise a
+  ## catchable BasicError before a byte lands in the arena, and the same
+  ## runtime must recover with a reset and restart, the way a game keeps
+  ## running after one bot's decision fails.
+  var host = initHost()
+  let pool = initStringPool()
+  host.addStringFunctions(pool)
+  discard host.addData("phase")
+  var bomb = ""
+  for i in 0 ..< 100_000:
+    bomb.add 'x'
+  let program = compile("""
+if phase = 0 then
+  s = strNew(""" & "\"" & bomb & "\"" & """)
+else
+  s = strNew("small and fine")
+end if
+""", host)
+  pool.bindProgram(program)
+  var runtime = initRuntime(program, host)
+  doAssert errorContains(
+    proc() = discard runtime.run,
+    "length limit"
+  )
+  doAssert pool.bytesUsed == 0
+  pool.reset
+  runtime.restart
+  runtime.setData("phase", 1)
+  discard runtime.run
+  doAssert pool.getString(runtime.getGlobal("s")) == "small and fine"
+
 echo "BASIC tests passed"
