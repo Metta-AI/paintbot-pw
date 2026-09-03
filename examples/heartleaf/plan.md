@@ -137,7 +137,8 @@ into the terrain mesh once with the houses.
 - Road verges: lamp posts spaced along the roads, and tufts, bushes,
   small rocks, and flowers on every other grass tile. Everything that
   grew or was left lying varies in size; everything gnomes made does not.
-- Outskirts: boulders in the meadow before the forest wall.
+- Outskirts: small rocks at the feet of the forest trees, the odd medium
+  one, and a rare boulder in the meadow before the wall.
 
 Every height and probability is a const at the top of `decor.nim`. The
 loader keeps only the named nodes from each kit and draws them textured,

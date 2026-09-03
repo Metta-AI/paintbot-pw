@@ -100,20 +100,22 @@ const
     ## Plants drift in brightness and between cool and warm green, so a
     ## row of bushes is not one bush.
   RockShade = 0.15'f32
-  RockCobbleLeast = 0.8'f32
-  RockCobbleMost = 1.0'f32
-    ## Every rock is pulled most of the way, and up to fully, toward the
-    ## cobble tint, so they read as the plaza's stone.
-  CobbleTint = vec3(1.35, 1.05, 1.32)
-    ## What the rock paint is multiplied by. The rock atlas averages a
-    ## neutral grey a shade darker than the paving, and the paving is lit
-    ## flatter than props are, so matching by the numbers alone still
-    ## reads grey; this overshoots into the paving's mauve on purpose.
+  RockDrift = 0.08'f32
+    ## Each rock's channels wander this much on top of the cobble match,
+    ## the way the cobbles themselves vary stone to stone.
+  CobbleTint = vec3(1.15, 1.03, 1.13)
+    ## What the rock paint is multiplied by to land on the cobble sheet's
+    ## average colour; the rock atlas is a neutral grey a shade darker.
   VergeBushSetback = 0.7'f32
     ## Tiles a verge bush is pushed away from the road, so a big one leans
     ## over the dirt instead of growing into it.
-  MediumRockOneIn = 7'i32
-  LargeRockOneIn = 25'i32
+  TreeRockOneIn = 6'i32
+    ## Small rocks beside forest trees, one in this many free tiles that
+    ## touch a tree.
+  MediumRockOneIn = 40'i32
+    ## Medium rocks beside forest trees, rarer.
+  LargeRockOneIn = 400'i32
+    ## Boulders anywhere in the meadow ring before the forest wall, rare.
 
   KitFiles: array[DecorKit, string] = [
     "terrain/toon_enchanted_meadow/props.glb",
@@ -174,11 +176,14 @@ proc plantTint(rng: var Rng): Vec3 =
     shade * (1.0'f32 - warmth))
 
 proc rockTint(rng: var Rng): Vec3 =
-  ## A rock shaded a little and pulled toward the cobble colour.
-  let
-    shade = 1.0'f32 + (rng.unit() - 0.5'f32) * 2.0'f32 * RockShade
-    pull = RockCobbleLeast + rng.unit() * (RockCobbleMost - RockCobbleLeast)
-  mix(vec3(1, 1, 1), CobbleTint, pull) * shade
+  ## The cobble match, shaded a little and drifted a little per channel,
+  ## so rocks scatter around the paving's colour rather than all landing
+  ## on one shade of it.
+  let shade = 1.0'f32 + (rng.unit() - 0.5'f32) * 2.0'f32 * RockShade
+  vec3(
+    CobbleTint.x + (rng.unit() - 0.5'f32) * 2.0'f32 * RockDrift,
+    CobbleTint.y + (rng.unit() - 0.5'f32) * 2.0'f32 * RockDrift,
+    CobbleTint.z + (rng.unit() - 0.5'f32) * 2.0'f32 * RockDrift) * shade
 
 proc yawAlong(x, y: float32): float32 =
   ## The yaw that points a prop's forward axis along a tile-space direction,
@@ -199,6 +204,15 @@ proc nearRoad(p: Placer, x, y: int32): bool =
     for dx in -1'i32 .. 1'i32:
       if inGrid(x + dx, y + dy) and
           p.map.kinds[tileIndex(x + dx, y + dy)] == uint8(RoadTile):
+        return true
+  false
+
+proc nearTree(p: Placer, x, y: int32): bool =
+  ## A forest tree tile within one step.
+  for dy in -1'i32 .. 1'i32:
+    for dx in -1'i32 .. 1'i32:
+      if inGrid(x + dx, y + dy) and
+          p.map.kinds[tileIndex(x + dx, y + dy)] == uint8(TreeTile):
         return true
   false
 
@@ -439,7 +453,8 @@ proc dressVerges(p: var Placer) =
           x, y, yaw, FlowerHeight, 0.3, NaturalVariance, p.rng.plantTint())
 
 proc dressOutskirts(p: var Placer) =
-  ## Boulders in the meadow between the village and the forest wall.
+  ## A few small rocks at the feet of the forest trees, the odd medium
+  ## one, and a rare boulder in the meadow before the wall.
   let middle = tile2(GridSide div 2, GridSide div 2)
   for y in 0'i32 ..< GridSide:
     for x in 0'i32 ..< GridSide:
@@ -452,10 +467,15 @@ proc dressOutskirts(p: var Placer) =
       if p.rng.below(LargeRockOneIn) == 0:
         discard p.claim(MeadowRocks, "rock_large_01a", OutskirtsArea, x, y,
           yaw, LargeRockHeight, 0.0, NaturalVariance, p.rng.rockTint())
-      elif p.rng.below(MediumRockOneIn) == 0:
-        discard p.claim(MeadowRocks, p.rng.pick(MediumRocks), OutskirtsArea,
-          x, y, yaw, MediumRockHeight, 0.3, NaturalVariance,
-          p.rng.rockTint())
+      elif p.nearTree(x, y):
+        if p.rng.below(MediumRockOneIn) == 0:
+          discard p.claim(MeadowRocks, p.rng.pick(MediumRocks),
+            OutskirtsArea, x, y, yaw, MediumRockHeight, 0.3,
+            NaturalVariance, p.rng.rockTint())
+        elif p.rng.below(TreeRockOneIn) == 0:
+          discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), OutskirtsArea,
+            x, y, yaw, SmallRockHeight, 0.3, NaturalVariance,
+            p.rng.rockTint())
 
 proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   ## Every decoration for one map, in a fixed order from one seeded stream.
