@@ -38,7 +38,7 @@ block placementRules:
         dy = d.y - centre
       doAssert dx * dx + dy * dy <= PlazaLimit * PlazaLimit,
         &"{d.node} strayed off the plaza"
-    elif d.node != "flower_pot_01a":
+    elif d.node != "flower_pot_01a" and d.lift == 0:
       let
         x = int32(d.x)
         y = int32(d.y)

@@ -2,10 +2,11 @@
 ## and derived from nothing but the generated map and its seed, so a live
 ## game and its replay dress identically. Nothing here reaches the sim.
 ##
-## The plaza gets a well, stalls, lamps, a cart, and seating between the
-## road entrances. Each house gets a mailbox, flower pots, a back fence,
-## flower beds, and a bush. Garden plots get a fence piece. Road verges get
-## tufts, bushes, and small rocks. The outskirts get boulders.
+## The plaza gets a well, stalls, a cart, and seating between the road
+## entrances, with signposts outside. Each house gets a mailbox, flower
+## pots, a back fence, flower beds, and a bush. Garden plots get a fence
+## piece. Road verges get lamp posts, tufts, bushes, and small rocks. The
+## outskirts get boulders.
 
 import
   std/[math, sets],
@@ -42,12 +43,11 @@ type
 const
   DecorSalt = 0xDEC0'u64
   PlazaDressRadius = 5.5'f32
-  PlazaLampRadius = 7.0'f32
   PlazaSignRadius = 10.5'f32
   PlazaLimit* = 7.5'f32
     ## Everything placed on the plaza sits within this many tiles of its
     ## centre; the curb starts at eight.
-  WellHeight = 1.4'f32
+  WellHeight = 2.6'f32
   StallHeight = 1.6'f32
   CanopyLift = 1.45'f32
   CanopyHeight = 0.6'f32
@@ -59,7 +59,13 @@ const
   BarrelHeight = 0.8'f32
   SackHeight = 0.7'f32
   BoxHeight = 0.5'f32
-  SignHeight = 1.4'f32
+  SignPoleHeight = 1.7'f32
+  SignBoardHeight = 0.2'f32
+    ## The valley sign is only the board; it hangs on a meadow fence pole.
+  SignBoardLift = 1.25'f32
+  LampOneIn = 30'i32
+  LampSpacing = 7'i32
+    ## Lamp posts stand on road verges this many tiles apart at least.
   MailboxHeight = 1.1'f32
   PotHeight = 0.4'f32
   FenceHeight = 1.0'f32
@@ -92,7 +98,8 @@ const
     @["market_stand_01a", "canopy_01a", "canopy_02a", "canopy_03a",
       "canopy_04a", "apple_crate_01a", "pepper_crate_01a", "lamp_post_01a",
       "wood_cart_01a", "wood_barrel_01a", "sack_pile_01a", "wood_crate_01a",
-      "mailbox_01a", "flower_pot_01a", "wood_fence_01a", "wood_fence_02a"],
+      "mailbox_01a", "flower_pot_01a", "wood_fence_01a", "wood_fence_02a",
+      "wood_fence_pole_01a"],
     @["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a",
       "flower_bush_01a", "bush_01a", "grass_patch_01a", "grass_patch_02a",
       "grass_patch_03a", "grass_patch_04a", "grass_patch_05a"],
@@ -214,7 +221,11 @@ proc dressPlaza(p: var Placer) =
       p.add(MeadowBuildings, "wood_bench_01a", PlazaArea,
         x - tangentX * 0.9'f32, y - tangentY * 0.9'f32, facing, BenchHeight)
     of 2:
-      p.add(MeadowProps, "lamp_post_01a", PlazaArea, x, y, facing, LampHeight)
+      p.add(MeadowBuildings, "wood_bench_01a", PlazaArea, x, y, facing,
+        BenchHeight)
+      for side in [-1.0'f32, 1.0'f32]:
+        p.add(MeadowProps, "flower_pot_01a", PlazaArea,
+          x + tangentX * side, y + tangentY * side, facing, PotHeight)
     of 3:
       p.add(MeadowProps, "wood_cart_01a", PlazaArea, x, y, facing + PI / 2,
         CartHeight)
@@ -227,18 +238,19 @@ proc dressPlaza(p: var Placer) =
       p.add(MeadowProps, "sack_pile_01a", PlazaArea, x, y, facing, SackHeight)
       p.add(MeadowProps, "wood_crate_01a", PlazaArea,
         x + tangentX * 0.8'f32, y + tangentY * 0.8'f32, facing, BoxHeight)
-    ## Lamps beside every third entrance, signs beside the next ones.
-    let beside = entrance + 0.22'f32
-    if i mod 3 == 0:
-      p.add(MeadowProps, "lamp_post_01a", PlazaArea,
-        centre + cos(beside) * PlazaLampRadius,
-        centre + sin(beside) * PlazaLampRadius, 0.0, LampHeight)
-    elif i mod 3 == 1:
+    ## A signpost on the grass beside every third entrance: a fence pole
+    ## with the sign board hung on it, turned to face the road.
+    if i mod 3 == 1:
       let
+        beside = entrance + 0.22'f32
         signX = int32(centre + cos(beside) * PlazaSignRadius)
         signY = int32(centre + sin(beside) * PlazaSignRadius)
-      discard p.claim(ValleyProps, "wood_sign_01a", RoadArea, signX, signY,
-        yawAlong(-cos(entrance), -sin(entrance)), SignHeight)
+        toward = yawAlong(-cos(entrance), -sin(entrance))
+      if p.claim(MeadowProps, "wood_fence_pole_01a", RoadArea, signX, signY,
+          toward, SignPoleHeight):
+        p.add(ValleyProps, "wood_sign_01a", RoadArea,
+          float32(signX) + 0.5'f32, float32(signY) + 0.5'f32, toward,
+          SignBoardHeight, SignBoardLift)
 
 proc dressHouses(p: var Placer) =
   ## Mailbox, door pots, back fence, flower beds, and a bush per house.
@@ -317,11 +329,23 @@ proc dressGardens(p: var Placer) =
         break
 
 proc dressVerges(p: var Placer) =
-  ## Tufts, bushes, small rocks, and flowers along the road edges.
+  ## Lamp posts, tufts, bushes, small rocks, and flowers along the road
+  ## edges.
+  var lamps: seq[Tile2]
   for y in 0'i32 ..< GridSide:
     for x in 0'i32 ..< GridSide:
       if not p.tileFree(x, y) or not p.nearRoad(x, y):
         continue
+      if p.rng.below(LampOneIn) == 0:
+        var crowded = false
+        for lamp in lamps:
+          if chebyshev(lamp, tile2(x, y)) < LampSpacing:
+            crowded = true
+            break
+        if not crowded and p.claim(MeadowProps, "lamp_post_01a", RoadArea,
+            x, y, p.rng.unit() * 2 * PI, LampHeight):
+          lamps.add tile2(x, y)
+          continue
       if p.rng.below(RoadDecorOneIn) != 0:
         continue
       let yaw = p.rng.unit() * 2 * PI

@@ -729,6 +729,30 @@ var
   rockPlacements: seq[TreePlacement]
   propPlacements: seq[PropPlacement]
 
+proc bakedTexel(image: Image, x, y: int): ColorRGBX =
+  ## The colour to bake for one uv sample. Cutout foliage atlases are mostly
+  ## transparent and store premultiplied colour, so a vertex whose uv lands
+  ## on a clear texel must not bake black: the nearest texel with coverage
+  ## in a widening window stands in, and the colour is unpremultiplied.
+  for radius in 0 .. 24:
+    for dy in -radius .. radius:
+      for dx in -radius .. radius:
+        if max(abs(dx), abs(dy)) != radius:
+          continue
+        let
+          px = x + dx
+          py = y + dy
+        if px < 0 or py < 0 or px >= image.width or py >= image.height:
+          continue
+        let texel = image[px, py]
+        if texel.a >= 8:
+          return rgbx(
+            uint8(min(int(texel.r) * 255 div int(texel.a), 255)),
+            uint8(min(int(texel.g) * 255 div int(texel.a), 255)),
+            uint8(min(int(texel.b) * 255 div int(texel.a), 255)),
+            255)
+  rgbx(128, 128, 128, 255)
+
 proc collectPropModels(
     node: gltf.Node, parent: Mat4, models: var seq[PropModel],
     skipPrefix = "", only: seq[string] = @[]
@@ -775,7 +799,7 @@ proc collectPropModels(
             uv = primitive.uvs[index]
             px = clamp(int(uv.x * image.width.float32), 0, image.width - 1)
             py = clamp(int(uv.y * image.height.float32), 0, image.height - 1)
-            sample = image[px, py]
+            sample = bakedTexel(image, px, py)
           colors.add vec3(
             sample.r.float32 / 255 * primitive.material.baseColorFactor.r,
             sample.g.float32 / 255 * primitive.material.baseColorFactor.g,

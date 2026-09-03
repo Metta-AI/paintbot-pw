@@ -130,13 +130,14 @@ into the terrain mesh once with the houses.
 
 - Plaza: the golden valley well at the centre; between each pair of road
   entrances one of a market stand with a canopy and crates, a bench and
-  table, a lamp post, a cart with barrels, or sacks and a crate; lamp posts
-  beside every third entrance and a signpost beside the next.
+  table, a bench with pots, a cart with barrels, or sacks and a crate; a
+  signpost, a fence pole with the sign board hung on it, beside every
+  third entrance.
 - Houses: a mailbox beside the door, flower pots flanking it, a run of
   fence along the back, three flower beds and a bush in the yard.
 - Gardens: a fence piece on one side of every plot, flowers beside some.
-- Road verges: tufts, bushes, small rocks, and flowers on one grass tile
-  in seven along the roads.
+- Road verges: lamp posts spaced along the roads, and tufts, bushes,
+  small rocks, and flowers on one grass tile in seven.
 - Outskirts: boulders in the meadow before the forest wall.
 
 Every height and probability is a const at the top of `decor.nim`. The
