@@ -1200,8 +1200,8 @@ proc runGraphics*() =
         followSelection = not followSelection
         if followSelection:
           actionCam.takeManual()
-    of KeyF1:
-      debugMenuOpen = not debugMenuOpen
+    of KeyF1, KeyF2:
+      discard handleChromeKey(button)
     of KeyEscape:
       when not defined(emscripten):
         window.closeRequested = true
