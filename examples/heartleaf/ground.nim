@@ -60,6 +60,18 @@ const
     ## Tiles past the curb's outer edge over which its stones drop out.
   StoneInset = 0.3'f32
     ## The cobbles reach this far past the plaza radius, under the curb.
+  RoadStoneReach = 0.6'f32
+    ## Tiles from a road tile's centre line that are cobbled, before
+    ## rounding. Two-wide roads get a band a little over two tiles wide,
+    ## the one-wide ring path a little over one.
+  RoadRoundTexels = 6
+    ## Box blur radius applied to the road cobble field before it is
+    ## thresholded, which fillets every corner inside and out.
+  RoadStoneEdge = 0.3'f32
+  RoadStoneBand = 0.4'f32
+    ## Where the blurred field crosses RoadStoneEdge the cobbles start to
+    ## drop out, and they are gone RoadStoneBand later.
+  RoadStoneWobbleStream = 0x5A17E5'u64
 
   MaskTexelsPerTile* = 8
   MaskSize* = GridTiles * MaskTexelsPerTile
@@ -284,6 +296,31 @@ proc distanceTransform(sources: seq[bool], size: int): seq[float32] =
       grid[y * size + x] = sqrt(d[x])
   grid
 
+proc boxBlur(field: var seq[float32], size, radius: int) =
+  ## Separable box blur with clamped edges, in place.
+  var line = newSeq[float32](size)
+  let window = float32(2 * radius + 1)
+  for y in 0 ..< size:
+    for x in 0 ..< size:
+      line[x] = field[y * size + x]
+    var total = 0.0'f32
+    for x in -radius .. radius:
+      total += line[clamp(x, 0, size - 1)]
+    for x in 0 ..< size:
+      field[y * size + x] = total / window
+      total += line[clamp(x + radius + 1, 0, size - 1)] -
+        line[clamp(x - radius, 0, size - 1)]
+  for x in 0 ..< size:
+    for y in 0 ..< size:
+      line[y] = field[y * size + x]
+    var total = 0.0'f32
+    for y in -radius .. radius:
+      total += line[clamp(y, 0, size - 1)]
+    for y in 0 ..< size:
+      field[y * size + x] = total / window
+      total += line[clamp(y + radius + 1, 0, size - 1)] -
+        line[clamp(y - radius, 0, size - 1)]
+
 proc wobble(seed: int32, stream: uint64, x, y: int): float32 =
   ## Smooth wander in tiles for one mask texel.
   float32(valueNoise(seed, stream, x, y, WobbleSpacing)) /
@@ -296,14 +333,30 @@ proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
   let
     center = float32(GridSide div 2) + 0.5'f32
     texelsPerTile = float32(MaskTexelsPerTile)
-  var sources = newSeq[bool](MaskSize * MaskSize)
+  var
+    sources = newSeq[bool](MaskSize * MaskSize)
+    centres = newSeq[bool](MaskSize * MaskSize)
   for ty in 0 ..< MaskSize:
     for tx in 0 ..< MaskSize:
       let kind = map.kinds[tileIndex(
         int32(tx div MaskTexelsPerTile), int32(ty div MaskTexelsPerTile))]
       sources[ty * MaskSize + tx] =
         kind == uint8(RoadTile) or kind == uint8(StoneTile)
-  let dirtDistance = distanceTransform(sources, MaskSize)
+      centres[ty * MaskSize + tx] = kind == uint8(RoadTile) and
+        tx mod MaskTexelsPerTile == MaskTexelsPerTile div 2 and
+        ty mod MaskTexelsPerTile == MaskTexelsPerTile div 2
+  let
+    dirtDistance = distanceTransform(sources, MaskSize)
+    centreDistance = distanceTransform(centres, MaskSize)
+  ## Road cobbles: everything within reach of a road centre line, blurred
+  ## so the corners of the tile doglegs round off, then thresholded with a
+  ## band for the stone-by-stone dropout.
+  var roadStone = newSeq[float32](MaskSize * MaskSize)
+  for i, distance in centreDistance:
+    roadStone[i] =
+      if distance / texelsPerTile <= RoadStoneReach: 1.0'f32 else: 0.0'f32
+  boxBlur(roadStone, MaskSize, RoadRoundTexels)
+  boxBlur(roadStone, MaskSize, RoadRoundTexels)
   result = newSeq[uint8](MaskSize * MaskSize * MaskChannels)
   for ty in 0 ..< MaskSize:
     for tx in 0 ..< MaskSize:
@@ -318,9 +371,14 @@ proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
         y = (float32(ty) + 0.5'f32) / texelsPerTile
         plazaDistance = sqrt((x - center) * (x - center) +
           (y - center) * (y - center))
-        stone = clamp(
+        plazaStone = clamp(
           (float32(PlazaStoneRadius) + StoneInset - plazaDistance) / StoneBand,
           0.0'f32, 1.0'f32)
+        roadEdge = RoadStoneEdge +
+          wobble(seed, RoadStoneWobbleStream, tx, ty) * 0.25'f32
+        stone = max(plazaStone, clamp(
+          (roadStone[ty * MaskSize + tx] - roadEdge) / RoadStoneBand,
+          0.0'f32, 1.0'f32))
         roadClearance = dirtDistance[ty * MaskSize + tx] / texelsPerTile
         roadDistance = roadClearance +
           wobble(seed, DirtWobbleStream, tx, ty) *

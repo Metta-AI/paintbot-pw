@@ -99,8 +99,9 @@ block maskCoverage:
       let tile = tile2(int32(x), int32(y))
       if map.kinds[tileIndex(tile)] == uint8(RoadTile) and
           chebyshev(tile, tile2(int32(middle), int32(middle))) > 12:
-        let (_, dirt) = tileTexel(tile)
+        let (stone, dirt) = tileTexel(tile)
         doAssert dirt == 255, &"road tile {x},{y} has dirt coverage {dirt}"
+        doAssert stone > 0, &"road tile {x},{y} has no cobbles"
         roadFound = true
   doAssert roadFound, "no road tile away from the plaza"
 

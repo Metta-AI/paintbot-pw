@@ -94,10 +94,13 @@ two things at startup, on the CPU, from nothing but the seed and the map:
 - A tiling cobble sheet of square-ish cells. Every stone carries one fixed
   height in the sheet's height channel, mortar carries zero. Colours sit
   near the square-stone swatch in the enchanted meadow atlas.
-- A ground mask at eight texels per tile with two channels: stone coverage,
-  full inside the plaza and stepping off underneath the curb, and dirt
-  coverage from a distance transform of every road and plaza tile, with a
-  little low-frequency wobble so road edges are not ruler lines. Gardens and house
+- A ground mask at eight texels per tile with two channels. Stone coverage
+  is full inside the plaza, stepping off underneath the curb, and runs down
+  the middle of every road: a distance field from the road tiles' centre
+  lines, blurred so the corners of the tile doglegs round off, then
+  thresholded with a band. Dirt coverage comes from a distance transform
+  of every road and plaza tile. Both carry a little low-frequency wobble
+  so no edge is a ruler line. Gardens and house
   pads are left to the ordinary tile materials.
 
 A curb of larger cut stones rings the plaza. It is a second, cleaner
@@ -108,9 +111,9 @@ outer edge like the cobbles do.
 
 The terrain shader keeps a stone only where coverage still beats the
 stone's height, so wherever coverage tapers the rim is ragged whole stones
-with dirt between them; on the plaza the curb is the hard edge and the
-cobbles run straight up to it, and the taper is there for roads. Dirt then
-height-blends into grass. Roads ride the same dirt field, so
+with dirt between them: road cobbles fray into the dirt at their sides,
+while on the plaza the curb is the hard edge and the cobbles run straight
+up to it. Dirt then height-blends into grass. Roads ride the same dirt field, so
 they get rounded edges and join the plaza apron without a seam. Road and
 plaza tiles bake as grass underneath; the mask owns every stone and dirt
 texel. Roads wear the meadow pack dirt. In the viewer, `D` cycles the dirt
