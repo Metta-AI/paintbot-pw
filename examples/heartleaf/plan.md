@@ -116,10 +116,8 @@ while on the plaza the curb is the hard edge and the cobbles run straight
 up to it. Dirt then height-blends into grass. Roads ride the same dirt field, so
 they get rounded edges and join the plaza apron without a seam. Road and
 plaza tiles bake as grass underneath; the mask owns every stone and dirt
-texel. Roads wear the meadow pack dirt. In the viewer, `D` cycles the dirt
-layer through meadow dirt, cartoon dirt, the golden valley forest floor,
-and the engine's sand, printing the choice to the terminal. The two toon textures load at startup
-into the unused marsh and volcanic slots.
+texel. Roads wear the meadow pack dirt, loaded at startup into the unused
+marsh slot.
 
 ## Decorations
 
@@ -141,7 +139,10 @@ into the terrain mesh once with the houses.
 - Outskirts: boulders in the meadow before the forest wall.
 
 Every height and probability is a const at the top of `decor.nim`. The
-loader keeps only the named nodes from each kit.
+loader keeps only the named nodes from each kit. In the viewer, `D` cycles
+the plaza centrepiece through the well, the well on a stone plinth, the
+golden valley hero tree, a ruined column, and the carved rock idol,
+re-placing the props and rebaking, and prints the choice.
 
 ## Commands
 

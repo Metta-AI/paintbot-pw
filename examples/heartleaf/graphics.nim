@@ -38,20 +38,12 @@ const
     ## The modular presets that ship pre-rendered profile portraits.
   HousePropScale = 5.2'f32
   GardenPropScale = 1.1'f32
-  DecorBrightness: array[DecorKit, float32] = [1.5, 1.2, 1.3, 1.2, 1.5]
+  DecorBrightness: array[DecorKit, float32] = [1.5, 1.2, 1.3, 1.2, 1.5, 1.2]
     ## The toon atlases bake dark through the prop loader; the props kits
     ## most of all.
   MeadowDirtPath = DataRoot & "/terrain/toon_enchanted_meadow/terrain_dirt_01d.png"
-  ForestFloorPath = DataRoot & "/terrain/toon_golden_valley/terrain_forest_floor_01d.png"
-  DirtChoices = [
-    (name: "meadow dirt", layer: MarshMaterial),
-    (name: "cartoon dirt", layer: DirtMaterial),
-    (name: "forest floor", layer: VolcanicMaterial),
-    (name: "cartoon sand", layer: SandMaterial),
-  ]
-    ## What the roads and plaza apron can wear, meadow dirt first as the
-    ## default. The toon textures borrow the marsh and volcanic slots, which
-    ## the village never uses.
+    ## Roads and the plaza apron wear the meadow dirt, loaded into the
+    ## marsh slot, which the village never uses.
   PlazaBlendDepth = 0.05'f32
   PlazaHeightBlend = 2.0'f32
     ## Tighter than the engine defaults so dirt breaks into grass along the
@@ -74,7 +66,7 @@ var
   panning = false
   minimapPanning* = false
   showEdges = false
-  dirtChoice = 0
+  centerPiece = WellPiece
   followSlot* = -1'i32
   rightPressPosition = vec2(0)
   seekCheckpoints: seq[SeekCheckpoint]
@@ -146,13 +138,6 @@ proc tileCentreXZ(tile: Tile2): Vec2 =
   ## Converts a tile coordinate to the world-space centre of that tile.
   vec2(float32(tile.x) - HalfGrid + 0.5'f32,
        float32(tile.y) - HalfGrid + 0.5'f32)
-
-proc applyDirtChoice() =
-  ## Points the ground mask's dirt at the chosen texture and says which.
-  setGroundLayers(
-    StoneMaterial, DirtChoices[dirtChoice].layer, GrassMaterial,
-    UnderwaterMaterial)
-  echo "ground: ", DirtChoices[dirtChoice].name
 
 proc tileWorldPoint(tile: Tile2): Vec3 =
   ## Returns the render centre of one map tile.
@@ -262,18 +247,21 @@ proc runGraphics*() =
       plaza.x, plaza.y, CurbInner, CurbInner + CurbWidth,
       CurbStones, CurbStyle.cells, CurbFade)
     uploadGroundMask(buildGroundMask(run.world.map, run.mapSeed), MaskSize)
-    let
-      meadowDirt = loadGroundSheet(MeadowDirtPath)
-      forestFloor = loadGroundSheet(ForestFloorPath)
+    let meadowDirt = loadGroundSheet(MeadowDirtPath)
     setTerrainMaterial(int(MarshMaterial), meadowDirt.color, meadowDirt.height)
-    setTerrainMaterial(
-      int(VolcanicMaterial), forestFloor.color, forestFloor.height)
-    applyDirtChoice()
+    setGroundLayers(
+      StoneMaterial, MarshMaterial, GrassMaterial, UnderwaterMaterial)
     scatterGrass(800, run.mapSeed)
 
-  var villagePack: PropPack
-  profileBlock "props":
-    villagePack = loadPropPack(VillagePropPack)
+  var
+    villagePack: PropPack
+    kits: array[DecorKit, PropPack]
+
+  proc placeVillageProps() =
+    ## Lays out every prop from scratch: houses, plots, and decorations
+    ## around the current centrepiece. Walkability never changes, so the
+    ## terrain rebakes without it.
+    clearProps()
     for slot in 0 ..< VillagerCount:
       let house = run.world.map.houses[slot]
       villagePack.placeProp(
@@ -290,16 +278,18 @@ proc runGraphics*() =
         float32(garden) * 1.3'f32,
         GardenPropScale
       )
-    var kits: array[DecorKit, PropPack]
+    for d in placeDecor(run.world.map, run.mapSeed, centerPiece):
+      kits[d.kit].placeProp(d.node, decorWorldPoint(d), d.yaw, d.height)
+    bakeTerrain(rebuildWalkability = false)
+
+  profileBlock "props":
+    villagePack = loadPropPack(VillagePropPack)
     for kit in DecorKit:
       kits[kit] = loadPropPack(
         DataRoot & "/" & kitFile(kit),
         brightness = DecorBrightness[kit],
         only = nodesFor(kit))
-    for d in placeDecor(run.world.map, run.mapSeed):
-      kits[d.kit].placeProp(d.node, decorWorldPoint(d), d.yaw, d.height)
-    ## The village map never changes, so the terrain bakes exactly once.
-    bakeTerrain(rebuildWalkability = false)
+    placeVillageProps()
 
   ## Everything is always visible; there is no fog in a village.
   block:
@@ -782,8 +772,10 @@ proc runGraphics*() =
         followSlot = -1
     of KeyT: scene.toggleShading()
     of KeyD:
-      dirtChoice = (dirtChoice + 1) mod DirtChoices.len
-      applyDirtChoice()
+      centerPiece = CenterPiece((ord(centerPiece) + 1) mod
+        (ord(high(CenterPiece)) + 1))
+      placeVillageProps()
+      echo "centre: ", centerName(centerPiece)
     of KeyE:
       if playerMode():
         queueExitHouse(options.playerSlot - 1)
