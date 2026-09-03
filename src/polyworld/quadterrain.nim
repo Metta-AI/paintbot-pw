@@ -960,11 +960,19 @@ proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
   glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, wrap)
   glBindTexture(GL_TEXTURE_2D_ARRAY, 0)
 
-proc loadPropPack*(path: string): PropPack =
-  ## Loads named glTF nodes as independently placeable unit-height models.
+proc loadPropPack*(
+    path: string, unitHeight = true, brightness = 1.0'f32
+): PropPack =
+  ## Loads named glTF nodes as independently placeable models. Each model is
+  ## scaled to unit height unless unitHeight is false, which keeps the
+  ## authored units so flat pieces stay flat and relative sizes survive.
+  ## Brightness scales the baked colors for packs authored dark.
   result = PropPack()
   collectPropModels(readGltfFile(path).root, mat4(), result.models)
-  result.models.normalizeModels()
+  if unitHeight:
+    result.models.normalizeModels()
+  if brightness != 1.0'f32:
+    result.models.brighten(brightness)
   for i, model in result.models:
     result.names[model.name] = i
 
@@ -1281,6 +1289,42 @@ proc loadTerrainMaterials(): seq[seq[Image]] =
       for i in 0 ..< colors[level].data.len:
         colors[level].data[i].a = heights[level].data[i].r
     result.add colors
+
+proc setTerrainMaterial*(index: int, color, height: Image) =
+  ## Replaces one material layer with a generated basecolor and height map,
+  ## packed the same way as the shipped materials. Needs the texture array
+  ## that initTerrain builds.
+  if terrainTextureArray == 0:
+    raise newException(
+      QuadTerrainError,
+      "terrain materials can only be replaced after initTerrain"
+    )
+  if index < 0 or index >= TerrainMaterials.len:
+    raise newException(
+      QuadTerrainError,
+      "terrain material index out of range: " & $index
+    )
+  if color.width != TerrainTextureSize or
+      color.height != TerrainTextureSize or
+      height.width != color.width or height.height != color.height:
+    raise newException(
+      QuadTerrainError,
+      "terrain material replacement has the wrong dimensions"
+    )
+  let
+    colors = mipChain(color)
+    heights = mipChain(height)
+  glBindTexture(GL_TEXTURE_2D_ARRAY, terrainTextureArray)
+  for level in 0 ..< colors.len:
+    let mip = colors[level]
+    for i in 0 ..< mip.data.len:
+      mip.data[i].a = heights[level].data[i].r
+    glTexSubImage3D(
+      GL_TEXTURE_2D_ARRAY, level.GLint, 0, 0, index.GLint,
+      mip.width.GLsizei, mip.height.GLsizei, 1,
+      GL_RGBA, GL_UNSIGNED_BYTE, mip.data[0].addr
+    )
+  glBindTexture(GL_TEXTURE_2D_ARRAY, 0)
 
 proc uploadTerrainVisibility*(values: openArray[uint8]) =
   ## Uploads one visibility value per world tile for terrain fog rendering.

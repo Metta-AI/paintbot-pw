@@ -45,10 +45,10 @@ puts it back on the doorstep.
 
 `maps.nim` generates the village with integers from one seed: a gentle
 meadow pressed flat inside the village ring, nine houses on a jittered
-ring of unit-circle points around a stone plaza, two-wide roads from every
-door to the plaza plus a one-wide ring path, three garden plots in the
-grass near each house, and a noise-gated forest thickening to a solid wall
-at the map edge. A flood fill from the plaza must reach every door and
+ring of unit-circle points around a round paved plaza with a one-tile
+dirt apron, two-wide dirt roads from every door to the plaza plus a
+one-wide ring path, three garden plots in the grass near each house, and
+a noise-gated forest thickening to a solid wall at the map edge. A flood fill from the plaza must reach every door and
 every garden or the generator retries the seed deterministically.
 
 ## What is different from the other examples
@@ -85,6 +85,15 @@ outside at six.
 - The 17:59 door crush is real: nine bodies shove on one doorstep, so
   `enterHouse` accepts from a king-move of one around the door tile and
   `tests/test_hlf_sim.nim` sends all nine through one door.
+
+## Plaza paving
+
+The plaza's stone material is not a shipped texture. `graphics.nim` crops
+the square-stone swatch out of the enchanted meadow atlas at startup, tiles
+it into a sheet, derives a height map from its luminance, and swaps it in
+over the engine's flagstone layer. Roads use the cartoon pack's dirt. In
+the viewer, `D` flips roads between dirt and the engine's sand and rebakes
+the terrain, so the two can be compared live.
 
 ## Commands
 

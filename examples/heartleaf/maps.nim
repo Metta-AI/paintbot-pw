@@ -28,8 +28,10 @@ const
     ## Inside this ring the meadow is pressed almost flat.
   VillageFadeRadius = 46'i32
     ## Between flat and fade the meadow rises back to full height.
-  PlazaStoneRadius = 3'i32
-  PlazaRoadRadius = 5'i32
+  PlazaStoneRadius* = 8'i32
+    ## The plaza is a disc of paving this many tiles across from the middle.
+  PlazaRoadRadius = 9'i32
+    ## A one-tile road apron rings the paving.
   HouseRingRadius = 26'i32
   HouseRingJitter = 6'i32
     ## Ring radius varies 26 .. 31 per house.
@@ -93,6 +95,10 @@ const StepOffsets* = [
 proc centerDistance(x, y: int32): int32 =
   ## King-move distance from the middle of the map.
   max(abs(x - MapCenter), abs(y - MapCenter))
+
+proc centerDistanceSquared(x, y: int32): int32 =
+  ## Squared straight-line distance from the middle of the map.
+  (x - MapCenter) * (x - MapCenter) + (y - MapCenter) * (y - MapCenter)
 
 ## Generation
 
@@ -193,12 +199,14 @@ proc buildMap(seed: int32): MapData =
           corner(x, y + 1), corner(x + 1, y + 1)])
       )
 
-  ## Plaza: a stone heart with a road apron.
+  ## Plaza: a round stone heart with a road apron.
   for y in MapCenter - PlazaRoadRadius .. MapCenter + PlazaRoadRadius:
     for x in MapCenter - PlazaRoadRadius .. MapCenter + PlazaRoadRadius:
-      groundTile(x, y).kind =
-        if centerDistance(x, y) <= PlazaStoneRadius: StoneTile
-        else: RoadTile
+      let distance = centerDistanceSquared(x, y)
+      if distance <= PlazaStoneRadius * PlazaStoneRadius:
+        groundTile(x, y).kind = StoneTile
+      elif distance <= PlazaRoadRadius * PlazaRoadRadius:
+        groundTile(x, y).kind = RoadTile
 
   ## House footprints: impassable pads the props stand on.
   for slot in 0 ..< VillagerCount:
