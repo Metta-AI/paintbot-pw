@@ -259,7 +259,8 @@ proc runGraphics*() =
     (window, sk) = initGameWindow(
       "Call to Adventure",
       AtlasPath,
-      gameWindowSize(options.windowWidth, options.windowHeight)
+      gameWindowSize(options.windowWidth, options.windowHeight),
+      options.vsync
     )
   let splash = startSplash(sk, window)
   # The stack spans about 45 tiles top to bottom; the shading uses amplitude
@@ -1656,7 +1657,7 @@ proc runGraphics*() =
           "examples/call_to_adventure/shot.png"
         )
       profileBlock "present":
-        window.swapBuffers()
+        window.presentFrame(framePaceHz)
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true

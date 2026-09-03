@@ -227,7 +227,8 @@ proc runGraphics*() =
     (window, sk) = initGameWindow(
       "Gods of the Arena",
       AtlasPath,
-      gameWindowSize(options.windowWidth, options.windowHeight)
+      gameWindowSize(options.windowWidth, options.windowHeight),
+      options.vsync
     )
   let splash = startSplash(sk, window)
   profileBlock "terrain":
@@ -2014,7 +2015,7 @@ proc runGraphics*() =
           "examples/gods_of_the_arena/gota_shot.png"
         )
       profileBlock "present":
-        window.swapBuffers()
+        window.presentFrame(framePaceHz)
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true

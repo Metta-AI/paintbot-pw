@@ -340,7 +340,8 @@ proc runGraphics*() =
     (window, sk) = initGameWindow(
       WindowTitle,
       AtlasPath,
-      gameWindowSize(options.windowWidth, options.windowHeight)
+      gameWindowSize(options.windowWidth, options.windowHeight),
+      options.vsync
     )
   if options.playerSlot > 0 and not run.replayMode:
     let player = options.playerSlot - 1
@@ -1644,7 +1645,7 @@ proc runGraphics*() =
           "light_vs_dark.png"
         )
       profileBlock "present":
-        window.swapBuffers()
+        window.presentFrame(framePaceHz)
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true

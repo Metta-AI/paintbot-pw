@@ -30,6 +30,7 @@ Heartleaf, a village dinner-party week between nine BASIC villagers.
   --play=false     Start the graphical transport paused.
   --speed N        Graphical start speed: 1, 2, 4, or 16.
   --windowSize WxH Graphical window, such as 800x400.
+  --vsync:off      Unlock the frame rate (default on).
   --help           Show this message.
 
 Compile with -d:headless for a command-line game.

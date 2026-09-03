@@ -32,6 +32,7 @@ proc usage() =
   echo "  --play=false            Start the graphical transport paused."
   echo "  --speed NUMBER          Graphical start speed: 1, 2, 4, or 16."
   echo "  --windowSize WxH        Graphical window, such as 1024x576."
+  echo "  --vsync:off             Unlock the frame rate (default on)."
   echo "Compile with -d:headless for command-line simulation."
   echo "Compile with -d:emscripten for the web backend."
 

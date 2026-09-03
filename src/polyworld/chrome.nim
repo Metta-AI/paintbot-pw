@@ -1,6 +1,7 @@
 ## Shared Silky HUD chrome for Polyworld games.
 
 import
+  std/[math, times],
   chroma, pixie, silky, vmath, windy,
   gameuis, inputs, rtscameras
 
@@ -27,7 +28,15 @@ const
     ## Wall-clock seconds in one in-game day. A 20 minute match is four days.
   DebugWindowTitle* = "Debug"
   DebugWindowOrigin* = vec2(360, 32)
-  DebugWindowSize* = vec2(280, 150)
+  DebugWindowSize* = vec2(460, 230)
+  FpsLimitMin* = 15
+  FpsLimitMax* = 240
+  FpsAvgTau = 1.0'f32
+  FpsAvgPeriod = 0.5
+  FpsLabelSize = vec2(40, 22)
+  FpsNowSize = vec2(70, 22)
+  FpsAvgSize = vec2(168, 22)
+  FpsStdSize = vec2(148, 22)
 
 var
   hudScratch*: string
@@ -35,6 +44,15 @@ var
   interpolateVisuals* = true
   showPaths* = false
   showTiles* = false
+  framePaceHz* = 60
+  fpsLastTime = 0.0
+  fpsLabelTime = 0.0
+  fpsHasAvg = false
+  fpsAvgValue = 0.0'f32
+  fpsVarValue = 0.0'f32
+  fpsNowText = "  0.00"
+  fpsAvgText = "frame   0.00 ms"
+  fpsStdText = "  0.00 ms std"
 
 proc addDigits(s: var string, value: int) =
   ## Appends an unsigned decimal value.
@@ -478,6 +496,65 @@ proc drawError*(
       CenterAlign
     )
 
+proc addFixedFps(s: var string, value: float32) =
+  ## Appends a 6-character 2-decimal value like " 12.34".
+  var cents = int(value * 100.0'f32 + 0.5'f32)
+  if cents < 0:
+    cents = 0
+  if cents > 99999:
+    cents = 99999
+  let
+    whole = cents div 100
+    frac = cents mod 100
+  if whole < 100:
+    s.add ' '
+  if whole < 10:
+    s.add ' '
+  s.addHudInt(whole)
+  s.add '.'
+  s.addPad2(frac)
+
+proc writeFpsNow(now: float32) =
+  ## Formats the current fps into its fixed-width label.
+  fpsNowText.setLen(0)
+  addFixedFps(fpsNowText, now)
+
+proc writeFpsStats() =
+  ## Formats the moving frame-time avg and std in milliseconds.
+  fpsAvgText.setLen(0)
+  fpsAvgText.add "frame "
+  addFixedFps(fpsAvgText, fpsAvgValue)
+  fpsAvgText.add " ms"
+  fpsStdText.setLen(0)
+  addFixedFps(fpsStdText, sqrt(max(fpsVarValue, 0.0'f32)))
+  fpsStdText.add " ms std"
+
+proc noteFps() =
+  ## Records this frame's fps and refreshes the debug labels.
+  let now = epochTime()
+  if fpsLastTime > 0:
+    let dt = now - fpsLastTime
+    if dt > 0.0001 and dt < 1.0:
+      let
+        fps = 1.0'f32 / dt.float32
+        ms = dt.float32 * 1000.0'f32
+      if not fpsHasAvg:
+        fpsAvgValue = ms
+        fpsVarValue = 0.0'f32
+        fpsHasAvg = true
+      else:
+        let
+          k = 1.0'f32 - exp(-dt.float32 / FpsAvgTau)
+          delta = ms - fpsAvgValue
+        fpsAvgValue += k * delta
+        fpsVarValue =
+          (1.0'f32 - k) * (fpsVarValue + k * delta * delta)
+      writeFpsNow(fps)
+      if fpsLabelTime == 0.0 or now - fpsLabelTime >= FpsAvgPeriod:
+        writeFpsStats()
+        fpsLabelTime = now
+  fpsLastTime = now
+
 proc mouseOverDebugMenu*(mouse: Vec2): bool =
   ## Returns whether the pointer is over the F1 debug window.
   if not debugMenuOpen or DebugWindowTitle notin subWindowStates:
@@ -492,6 +569,7 @@ proc mouseOverDebugMenu*(mouse: Vec2): bool =
 
 proc drawDebugMenu*(sk: Silky, window: Window) =
   ## Draws the shared F1 debug window when it is open.
+  noteFps()
   if not debugMenuOpen:
     return
   sk.beginDsl()
@@ -502,6 +580,49 @@ proc drawDebugMenu*(sk: Silky, window: Window) =
       DebugWindowOrigin,
       DebugWindowSize
     ):
+      group "fpsRow":
+        box(
+          FpsLabelSize.x + FpsNowSize.x + FpsAvgSize.x + FpsStdSize.x,
+          FpsLabelSize.y
+        )
+        text "fpsCaption":
+          box 0, 0, FpsLabelSize.x, FpsLabelSize.y
+          characters "FPS:"
+          textAlign LeftAlign, MiddleAlign
+        text "fpsNow":
+          box FpsLabelSize.x, 0, FpsNowSize.x, FpsNowSize.y
+          font "Mono"
+          characters fpsNowText
+          textAlign RightAlign, MiddleAlign
+        text "fpsAvg":
+          box(
+            FpsLabelSize.x + FpsNowSize.x,
+            0,
+            FpsAvgSize.x,
+            FpsAvgSize.y
+          )
+          font "Mono"
+          characters fpsAvgText
+          textAlign RightAlign, MiddleAlign
+        text "fpsStd":
+          box(
+            FpsLabelSize.x + FpsNowSize.x + FpsAvgSize.x,
+            0,
+            FpsStdSize.x,
+            FpsStdSize.y
+          )
+          font "Mono"
+          characters fpsStdText
+          textAlign RightAlign, MiddleAlign
+      text "fpsLimitCaption":
+        characters "FPS limit"
+      scrubber(
+        "fpsLimit",
+        framePaceHz,
+        FpsLimitMin,
+        FpsLimitMax,
+        $framePaceHz
+      )
       checkBox "Interpolation", interpolateVisuals
       checkBox "Show paths", showPaths
       checkBox "Show tiles", showTiles

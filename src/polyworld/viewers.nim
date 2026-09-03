@@ -9,6 +9,7 @@ const
   DefaultWindowSize* = ivec2(1280, 800)
   DefaultFontPath* = DataRoot & "/fonts/Rubik-Regular.ttf"
   BoldFontPath* = DataRoot & "/fonts/Rubik-Bold.ttf"
+  MonoFontPath* = DataRoot & "/fonts/OverpassMono-Regular.ttf"
   EditorThemeDir* = DataRoot & "/themes/editor/"
   UiDir* = DataRoot & "/ui/"
   IconDir* = DataRoot & "/icons/"
@@ -49,6 +50,7 @@ proc addDefaultFonts*(builder: AtlasBuilder) =
   builder.addFont(DefaultFontPath, "Default", 18.0)
   builder.addFont(DefaultFontPath, "Hud", 15.0)
   builder.addFont(DefaultFontPath, "Small", 12.0)
+  builder.addFont(MonoFontPath, "Mono", 18.0)
 
 proc applyEditorPatches*(sk: Silky) =
   ## Uses the measured corner slices of the editor 9-patches.
@@ -96,7 +98,7 @@ proc initGameWindow*(
     title,
     atlasPath: string,
     size = DefaultWindowSize,
-    vsync = false
+    vsync = true
 ): (Window, Silky) =
   ## Creates the spectator window, GL context, and Silky atlas client.
   let window = newWindow(title, size, vsync = vsync)
@@ -161,6 +163,32 @@ proc holdSplash*(
       quit(0)
     drawSplash(sk, window, splash.name)
     sleep(10)
+
+var
+  presentDeadline = 0.0
+  presentPaceHz = 0
+
+proc presentFrame*(window: Window, paceHz = 60) =
+  ## Swaps the back buffer, then waits so presents stay on one cadence.
+  ## ProMotion vsync alone flips between 8.33 ms and 16.67 ms.
+  window.swapBuffers()
+  if paceHz <= 0:
+    presentDeadline = 0
+    presentPaceHz = 0
+    return
+  if paceHz != presentPaceHz:
+    presentDeadline = 0
+    presentPaceHz = paceHz
+  let
+    step = 1.0 / paceHz.float64
+    now = epochTime()
+  if presentDeadline <= 0 or now > presentDeadline + step * 2:
+    presentDeadline = now + step
+    return
+  let remain = presentDeadline - now
+  if remain > 0.001:
+    sleep(int(remain * 1000.0))
+  presentDeadline += step
 
 proc frameDelta*(
     lastFrameTime: var float64,
