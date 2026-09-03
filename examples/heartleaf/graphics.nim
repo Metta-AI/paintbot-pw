@@ -249,7 +249,7 @@ proc runGraphics*() =
     setTerrainMaterial(int(UnderwaterMaterial), curb.color, curb.height)
     setGroundRing(
       plaza.x, plaza.y, CurbInner, CurbInner + CurbWidth,
-      CurbStones, CurbStyle.cells, CurbFade, CurbWobble)
+      CurbStones, CurbStyle.cells, CurbFade)
     uploadGroundMask(buildGroundMask(run.world.map, run.mapSeed), MaskSize)
     let
       meadowDirt = loadGroundSheet(MeadowDirtPath)

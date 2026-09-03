@@ -136,7 +136,7 @@ var
   groundMaskEnabled: Uniform[float32]
   groundLayers: Uniform[Vec4]
   groundRing: Uniform[Vec4]
-  groundRingShape: Uniform[Vec4]
+  groundRingShape: Uniform[Vec3]
   propTint: Uniform[Vec4]
 
 proc texture(buffer: Uniform[Sampler2dArray], position: Vec3): Vec4 =
@@ -289,11 +289,8 @@ proc terrainFrag(
       tilesPerPixel = length(
         vec2(dFdx(ringDistance), dFdy(ringDistance)))
       turns = atan(ringDz, ringDx) / 6.2831853 + 0.5
-      wander = groundRingShape.w * (
-        sin(turns * 18.849556 + 1.7) * 0.6 +
-        sin(turns * 43.982297 + 0.4) * 0.4)
-      inner = groundRing.z + wander
-      outer = groundRing.w + wander
+      inner = groundRing.z
+      outer = groundRing.w
     if ringDistance >= inner:
       let cover = clamp(
         (outer + groundRingShape.z - ringDistance) / groundRingShape.z,
@@ -662,7 +659,7 @@ var
   groundMaskActive = false
   groundLayerIndices = vec4(4, 5, 0, 0)
   groundRingValues = vec4(0)
-  groundRingShapeValues = vec4(0)
+  groundRingShapeValues = vec3(0)
   waterProgram: GLuint
   waterMvpLocation, waterCameraLocation: GLint
   waterVisibilityTexLocation: GLint
@@ -1482,19 +1479,17 @@ proc setGroundLayers*(stone, dirt, grass: float32, curb = 0.0'f32) =
 
 proc setGroundRing*(
     centerX, centerZ, inner, outer: float32,
-    stones, cells: int, fade: float32, wobble = 0.0'f32
+    stones, cells: int, fade: float32
 ) =
   ## Draws a curb of cut stones around a circle in world xz: `stones` around
   ## the ring from a sheet holding `cells` stones per side, one stone row
   ## spanning inner .. outer, dropping out over `fade` past the outer edge.
-  ## `wobble` lets the ring wander that many tiles off a true circle.
   groundRingValues = vec4(centerX, centerZ, inner, outer)
-  groundRingShapeValues = vec4(
-    float32(stones), float32(cells), fade, wobble)
+  groundRingShapeValues = vec3(float32(stones), float32(cells), fade)
 
 proc clearGroundRing*() =
   ## Removes the curb.
-  groundRingShapeValues = vec4(0)
+  groundRingShapeValues = vec3(0)
 
 proc bindGroundMask() =
   ## Sets the ground mask uniforms for one terrain draw. Units 2 and 3 are
@@ -1509,10 +1504,10 @@ proc bindGroundMask() =
     groundRingLocation,
     groundRingValues.x, groundRingValues.y, groundRingValues.z,
     groundRingValues.w)
-  glUniform4f(
+  glUniform3f(
     groundRingShapeLocation,
     groundRingShapeValues.x, groundRingShapeValues.y,
-    groundRingShapeValues.z, groundRingShapeValues.w)
+    groundRingShapeValues.z)
   glActiveTexture(GL_TEXTURE4)
   glBindTexture(GL_TEXTURE_2D, groundMaskTexture)
   glUniform1i(groundMaskLocation, 4)
