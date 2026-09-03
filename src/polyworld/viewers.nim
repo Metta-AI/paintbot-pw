@@ -10,7 +10,7 @@ const
   DefaultFontPath* = DataRoot & "/fonts/Rubik-Regular.ttf"
   BoldFontPath* = DataRoot & "/fonts/Rubik-Bold.ttf"
   MonoFontPath* = DataRoot & "/fonts/OverpassMono-Regular.ttf"
-  EditorThemeDir* = DataRoot & "/themes/editor/"
+  MainThemeDir* = DataRoot & "/themes/main/"
   UiDir* = DataRoot & "/ui/"
   IconDir* = DataRoot & "/icons/"
   HudIconSize = 64
@@ -48,12 +48,13 @@ proc addDefaultFonts*(builder: AtlasBuilder) =
   ## Adds the shared HUD type ramp used by every graphical client.
   builder.addFont(BoldFontPath, "H1", 32.0)
   builder.addFont(DefaultFontPath, "Default", 18.0)
+  builder.addFont(BoldFontPath, "Bold", 18.0)
   builder.addFont(DefaultFontPath, "Hud", 15.0)
   builder.addFont(DefaultFontPath, "Small", 12.0)
   builder.addFont(MonoFontPath, "Mono", 18.0)
 
-proc applyEditorPatches*(sk: Silky) =
-  ## Uses the measured corner slices of the editor 9-patches.
+proc applyThemePatches*(sk: Silky) =
+  ## Uses the measured corner slices of the main theme 9-patches.
   sk.theme.windowPatch = 7
   sk.theme.headerPatch = 4
   sk.theme.framePatch = 5
@@ -81,9 +82,9 @@ proc addHudGlyphs(builder: AtlasBuilder) =
       )
 
 proc newHudAtlas*(size = 1024): AtlasBuilder =
-  ## Starts an atlas with the shared editor theme and UI images.
+  ## Starts an atlas with the shared main theme and UI images.
   result = newAtlasBuilder(size, 4)
-  result.addDir(EditorThemeDir, EditorThemeDir)
+  result.addDir(MainThemeDir, MainThemeDir)
   result.addDir(UiDir, UiDir)
   result.addHudGlyphs()
 
@@ -105,7 +106,7 @@ proc initGameWindow*(
   window.makeContextCurrent()
   loadExtensions()
   let sk = newSilky(window, atlasPath)
-  sk.applyEditorPatches()
+  sk.applyThemePatches()
   window.runeInputEnabled = true
   window.onRune = proc(rune: Rune) =
     sk.inputRunes.add(rune)

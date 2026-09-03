@@ -192,36 +192,15 @@ proc makeCircleIcon(size: int, fill: ColorRGBA): Image =
   )
 
 proc addHudIcons(builder: AtlasBuilder) =
-  ## Packs textured HUD plates into the atlas.
-  const PanelDir = DataRoot & "/themes/cta/"
+  ## Packs the theme logo and compact HUD glyphs.
   builder.addThemeLogo(LogoPath)
   if not builder.addImage(
       "cta_badge",
       makeCircleIcon(22, rgba(18, 20, 28, 255))
-    ) or
-      not builder.addImage(
-        "cta_leftTop",
-        readImage(PanelDir & "leftTop.png")
-      ) or
-      not builder.addImage(
-        "cta_leftRight",
-        readImage(PanelDir & "leftRight.png")
-      ) or
-      not builder.addImage(
-        "cta_bottomLeft",
-        readImage(PanelDir & "bottomLeft.png")
-      ) or
-      not builder.addImage(
-        "cta_bottomCenter",
-        readImage(PanelDir & "bottomCenter.png")
-      ) or
-      not builder.addImage(
-        "cta_bottomRight",
-        readImage(PanelDir & "bottomRight.png")
-      ):
+    ):
     raise newException(
       ValueError,
-      "the UI atlas is too small for HUD panels"
+      "the UI atlas is too small for HUD glyphs"
     )
 
 proc addAbilityIcons(builder: AtlasBuilder) =

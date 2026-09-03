@@ -26,7 +26,7 @@ import
 const
   DataDir = "../polyworld_data"
   GreeblePath = DataDir & "/greeble/271_greebles_low_poly_model.glb"
-  ThemeDir = DataDir & "/themes/editor/"
+  ThemeDir = DataDir & "/themes/main/"
   TagsPath = "experiments/mech_factory/parts_tags.json"
   PresetsDir = "experiments/mech_factory/presets"
 

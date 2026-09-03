@@ -34,9 +34,11 @@ const
   HeroSlotXs = [21.0'f32, 116, 212, 307, 401]
   HeroSlotXsBlue = [570.0'f32, 665, 760, 856, 951]
   AbilitySlotXs = [
-    389.0'f32, 498, 608, 717, 832, 927
+    194.0'f32, 284, 374, 464, 566, 656
   ]
-  AbilitySlotWs = [87.0'f32, 87, 87, 87, 78, 78]
+  AbilitySlotWs = [82.0'f32, 82, 82, 82, 82, 82]
+  AbilitySlotY = 186.0'f32
+  AbilitySlotH = 82.0'f32
   InventorySlotsPos = [
     vec2(38, 70), vec2(142, 71), vec2(245, 71),
     vec2(38, 164), vec2(141, 164), vec2(245, 164)
@@ -509,20 +511,14 @@ proc drawHeroPortrait(
     x = heroCardX(hero)
     portrait = panel.imageSlot(x, 10, 78, 80)
     picked = isPicked(hero.id, selectedIds)
-  if picked:
-    sk.drawRoundedRect(
-      portrait.origin - vec2(2),
-      portrait.size + vec2(4),
-      rgbx(244, 224, 154, 255),
-      wellRadius(portrait.size + vec2(4))
-    )
   sk.drawWellImage(
     portrait,
     HeroPortraitKeys[hero.class],
     if hero.state == Dying or hero.hp <= 0:
       rgbx(140, 140, 148, 255)
     else:
-      rgbx(255, 255, 255, 255)
+      rgbx(255, 255, 255, 255),
+    selected = picked
   )
   if window.clicked(sk, portrait):
     actionCam.takeManual()
@@ -647,16 +643,16 @@ proc drawUi*(
   ## Draws every Silky HUD panel for the current frame.
   let
     chrome = currentChrome(window)
-    scorePanel = sk.beginImagePanel(chrome.score, "gota_leftTop")
-    heroesPanel = sk.beginImagePanel(chrome.heroes, "gota_topCenter")
-    clockPanel = sk.beginImagePanel(chrome.clock, "gota_leftRight")
-    minimapPanel = sk.beginImagePanel(chrome.minimap, "gota_bottomLeft")
-    inventoryPanel = sk.beginImagePanel(chrome.inventory, "gota_bottomRight")
+    scorePanel = sk.beginFrame(chrome.score)
+    heroesPanel = sk.beginFrame(chrome.heroes)
+    clockPanel = sk.beginFrame(chrome.clock)
+    minimapPanel = sk.beginFrame(chrome.minimap)
+    inventoryPanel = sk.beginFrame(chrome.inventory)
     hudTime = currentHudTime()
   var selection = selectedUnit(primaryId, viewMode)
   let detailsPanel =
     if selection != nil:
-      sk.beginImagePanel(chrome.details, "gota_bottomCenter")
+      sk.beginFrame(chrome.details)
     else:
       chrome.details
 
@@ -719,11 +715,8 @@ proc drawUi*(
   )
 
   let mapArea = minimapPanel.minimapMap()
-  sk.drawRoundedRect(
-    mapArea.origin,
-    mapArea.size,
-    rgbx(35, 54, 49, 255),
-    wellRadius(mapArea.size)
+  sk.drawFrame(
+    GameUiPanel(origin: mapArea.origin, size: mapArea.size)
   )
   sk.drawRect(
     mapArea.origin + mapArea.size * 0.5'f32 - vec2(2),
@@ -793,7 +786,7 @@ proc drawUi*(
   if selection != nil:
     let
       teamColor = teamHudColor(selection.team)
-      portrait = detailsPanel.imageSlot(32, 32, 150, 211)
+      portrait = detailsPanel.imageSlot(32, 32, 150, 150)
     if selection.kind == SelectedHero:
       sk.drawWellImage(portrait, selection.portraitKey)
     else:
@@ -821,9 +814,9 @@ proc drawUi*(
           i = slot.ord
           well = detailsPanel.imageSlot(
             AbilitySlotXs[i],
-            186,
+            AbilitySlotY,
             AbilitySlotWs[i],
-            87
+            AbilitySlotH
           )
           spec = selection.abilities[slot].abilitySpec
           remaining = selection.cooldowns[slot]
@@ -837,17 +830,18 @@ proc drawUi*(
         )
         sk.drawCooldownSweep(well, remaining, spec.cooldownTicks)
       for i in 0 .. 1:
-        let item = selection.inventory[i]
-        if item != NoItem:
-          sk.drawAbilityIcon(
-            detailsPanel.imageSlot(
-              AbilitySlotXs[4 + i],
-              186,
-              AbilitySlotWs[4 + i],
-              86
-            ),
-            itemIconKey(item)
+        let
+          well = detailsPanel.imageSlot(
+            AbilitySlotXs[4 + i],
+            AbilitySlotY,
+            AbilitySlotWs[4 + i],
+            AbilitySlotH
           )
+          item = selection.inventory[i]
+        if item != NoItem:
+          sk.drawAbilityIcon(well, itemIconKey(item))
+        else:
+          sk.drawWellImage(well, "")
   let playerHero =
     options.playerSlot > 0 and not run.replayMode
   let playerHeroId =
@@ -893,18 +887,20 @@ proc drawUi*(
           if selection == nil: NoItem else: selection.inventory[slot]
       if item != NoItem:
         sk.drawWellImage(slotPanel, itemIconKey(item))
+      else:
+        sk.drawSlot(slotPanel)
       if playerHero and window.clicked(sk, slotPanel):
         queueUseItem(playerHeroId, int32(slot))
 
   if selection != nil:
     let
       teamColor = teamHudColor(selection.team)
-      badge = detailsPanel.imageSlot(30, 243, 51, 50)
-      namePos = detailsPanel.origin + vec2(200, 40)
-      statPos = detailsPanel.origin + vec2(200, 92)
-      hpBar = detailsPanel.imageSlot(440, 38, 532, 28)
-      manaBar = detailsPanel.imageSlot(440, 83, 532, 28)
-      xpBar = detailsPanel.imageSlot(440, 129, 532, 28)
+      badge = detailsPanel.imageSlot(26, 136, 48, 48)
+      namePos = detailsPanel.origin + vec2(194, 36)
+      statPos = detailsPanel.origin + vec2(194, 86)
+      hpBar = detailsPanel.imageSlot(300, 36, 688, 28)
+      manaBar = detailsPanel.imageSlot(300, 74, 688, 28)
+      xpBar = detailsPanel.imageSlot(300, 112, 688, 28)
     sk.drawBadge(badge.origin, badge.size, $selection.level)
     sk.drawLabel(
       selection.callsign,
@@ -975,9 +971,9 @@ proc drawUi*(
     for i in 0 .. 5:
       let well = detailsPanel.imageSlot(
         AbilitySlotXs[i],
-        186,
+        AbilitySlotY,
         AbilitySlotWs[i],
-        if i < 4: 87.0'f32 else: 86.0'f32
+        AbilitySlotH
       )
       if i < 4 and selection.kind == SelectedHero:
         let remaining = selection.cooldowns[HeroAbilitySlot(i)]

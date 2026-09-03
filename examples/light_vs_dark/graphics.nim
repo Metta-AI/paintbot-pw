@@ -205,8 +205,7 @@ proc clipIndex(model: CharacterModel, slot: AnimationSlot): int =
   raise newException(GraphicsError, "missing clip for " & $slot)
 
 proc addHudIcons(builder: AtlasBuilder) =
-  ## Packs portraits, resource glyphs, and textured HUD panels.
-  const PanelDir = DataRoot & "/themes/lvd/"
+  ## Packs portraits and the theme logo.
   builder.addThemeLogo(LogoPath)
   for player in 0'i32 ..< PlayerCount:
     for kind in UnitKind:
@@ -229,26 +228,6 @@ proc addHudIcons(builder: AtlasBuilder) =
           GraphicsError,
           "the UI atlas is too small for building portraits"
         )
-  if not builder.addImage(
-        "lvd_leftTop",
-        readImage(PanelDir & "leftTop.png")
-      ) or
-      not builder.addImage(
-        "lvd_leftRight",
-        readImage(PanelDir & "leftRight.png")
-      ) or
-      not builder.addImage(
-        "lvd_bottomLeft",
-        readImage(PanelDir & "bottomLeft.png")
-      ) or
-      not builder.addImage(
-        "lvd_bottomRight",
-        readImage(PanelDir & "bottomRight.png")
-      ):
-    raise newException(
-      GraphicsError,
-      "the UI atlas is too small for HUD panels"
-    )
 
 proc tileCentreXZ(tile: Tile2): Vec2 =
   ## Converts a tile coordinate to the world-space centre of that tile.

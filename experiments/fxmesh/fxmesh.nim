@@ -646,14 +646,14 @@ proc tick(app: var FxApp, window: Window) =
 proc main() =
   ## Creates and runs the standalone fx mesh experiment.
   let atlasBuilder = newAtlasBuilder(1024, 4)
-  atlasBuilder.addDir("../polyworld_data/themes/editor/", "../polyworld_data/themes/editor/")
+  atlasBuilder.addDir("../polyworld_data/themes/main/", "../polyworld_data/themes/main/")
   atlasBuilder.addFont(
-    "../polyworld_data/themes/editor/IBMPlexSans-Regular.ttf",
+    "../polyworld_data/themes/main/IBMPlexSans-Regular.ttf",
     "H1",
     32.0'f
   )
   atlasBuilder.addFont(
-    "../polyworld_data/themes/editor/IBMPlexSans-Regular.ttf",
+    "../polyworld_data/themes/main/IBMPlexSans-Regular.ttf",
     "Default",
     18.0'f
   )

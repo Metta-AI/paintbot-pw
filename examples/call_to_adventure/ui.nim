@@ -13,7 +13,8 @@ const
     316,
     PanelPartyCard.y * 4 + PartyGap * 3
   )
-  PanelMinimap = vec2(334, 468)
+  PanelMinimap = vec2(252, 252)
+  PanelQuest = vec2(448, 132)
   PanelChat = vec2(337, 177)
   PanelAbilities = vec2(947, 157)
   PanelMenu = vec2(407, 71)
@@ -61,6 +62,7 @@ type
     party: GameUiPanel
     chat: GameUiPanel
     minimap: GameUiPanel
+    quest: GameUiPanel
     abilities: GameUiPanel
     menu: GameUiPanel
 
@@ -70,6 +72,7 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
   result.party = layout.panel(GameUiRegion.TopLeft, PanelParty)
   result.chat = layout.panel(GameUiRegion.BottomLeft, PanelChat)
   result.minimap = layout.panel(GameUiRegion.TopRight, PanelMinimap)
+  result.quest = layout.panel(GameUiRegion.TopCenter, PanelQuest)
   result.abilities = layout.panel(
     GameUiRegion.BottomCenter,
     PanelAbilities
@@ -87,6 +90,7 @@ proc hudLayoutFits(layoutSize: Vec2): bool =
       chrome.party,
       chrome.chat,
       chrome.minimap,
+      chrome.quest,
       chrome.abilities,
       chrome.menu
     ],
@@ -123,18 +127,35 @@ proc partyCard(panel: GameUiPanel, slot: int): GameUiPanel =
     size: PanelPartyCard
   )
 
+proc minimapMap(panel: GameUiPanel): GameUiPanel =
+  ## Returns the square that bounds the circular minimap well.
+  panel
+
+proc minimapInner(panel: GameUiPanel): GameUiPanel =
+  ## Returns the map disk inside the circular rim.
+  panel.minimapMap().inset(12)
+
+proc insideMinimapCircle(area: GameUiPanel, point: Vec2): bool =
+  ## Returns whether a point sits inside the circular map well.
+  let
+    radius = area.size.x * 0.5'f32
+    delta = point - (area.origin + vec2(radius))
+  delta.x * delta.x + delta.y * delta.y <= radius * radius
+
 proc mouseOverUi*(window: Window, mouse: Vec2): bool =
   ## Returns whether camera input begins inside any visible HUD panel.
   if mouseOverDebugMenu(mouse):
     return true
   let chrome = currentChrome(window)
+  if insideMinimapCircle(chrome.minimap.minimapInner(), mouse):
+    return true
   mouseOverPanels(
     mouse,
     chrome.layout,
     [
       chrome.party,
       chrome.chat,
-      chrome.minimap,
+      chrome.quest,
       chrome.abilities,
       chrome.menu
     ]
@@ -292,17 +313,6 @@ proc minimapPoint(tile: TileRef, origin, size: Vec2): Vec2 =
     float32(tile.z) / float32(GridTiles) * size.y
   )
 
-proc minimapMap(panel: GameUiPanel): GameUiPanel =
-  ## Returns the square that bounds the circular minimap well.
-  panel.imageSlot(66, 40, 252, 252)
-
-proc insideMinimapCircle(area: GameUiPanel, point: Vec2): bool =
-  ## Returns whether a point sits inside the circular map well.
-  let
-    radius = area.size.x * 0.5'f32
-    delta = point - (area.origin + vec2(radius))
-  delta.x * delta.x + delta.y * delta.y <= radius * radius
-
 proc drawPip(
     sk: Silky,
     tile: TileRef,
@@ -334,7 +344,7 @@ proc updateMinimapCamera*(
   ## Moves the free camera while the primary button drags on the minimap.
   let
     chrome = currentChrome(window)
-    area = chrome.minimap.minimapMap()
+    area = chrome.minimap.minimapInner()
   if window.mousePressed(MouseLeft) and
       insideMinimapCircle(area, mouse):
     minimapPanning = true
@@ -390,10 +400,10 @@ proc drawUi*(
   ## Draws every Silky HUD panel for the current frame.
   let
     chrome = currentChrome(window)
-    chatPanel = sk.beginImagePanel(chrome.chat, "cta_bottomLeft")
-    questPanel = sk.beginImagePanel(chrome.minimap, "cta_leftRight")
-    detailsPanel = sk.beginImagePanel(chrome.abilities, "cta_bottomCenter")
-    menuPanel = sk.beginImagePanel(chrome.menu, "cta_bottomRight")
+    chatPanel = sk.beginFrame(chrome.chat)
+    questPanel = sk.beginFrame(chrome.quest)
+    detailsPanel = sk.beginFrame(chrome.abilities)
+    menuPanel = sk.beginFrame(chrome.menu)
     selectedActor = run.world.actors[primaryId]
     selectedClass = selectedActor.heroClass
     shownLevel = run.viewLevel(selectedIds)
@@ -406,23 +416,25 @@ proc drawUi*(
       class = actor.heroClass
       card = chrome.party.partyCard(slot)
       portrait = card.imageSlot(6, 7, 86, 91)
+      nameBox = card.imageSlot(111, 10, 193, 28)
       hpBar = card.imageSlot(111, 44, 193, 20)
       manaBar = card.imageSlot(111, 67, 193, 25)
-    discard sk.beginImagePanel(card, "cta_leftTop")
-    if selectedIds[slot]:
-      sk.drawRoundedRect(
-        portrait.origin - vec2(2),
-        portrait.size + vec2(4),
-        rgbx(235, 216, 154, 255),
-        wellRadius(portrait.size + vec2(4))
-      )
+    discard sk.beginFrame(card)
     sk.drawWellImage(
       portrait,
       HeroPortraitKeys[class],
       if actor.alive:
         rgbx(255, 255, 255, 255)
       else:
-        rgbx(140, 140, 148, 255)
+        rgbx(140, 140, 148, 255),
+      selected = selectedIds[slot]
+    )
+    sk.drawLabel(
+      HeroNames[class],
+      nameBox.origin,
+      nameBox.size,
+      rgbx(255, 255, 255, 255),
+      "Bold"
     )
     sk.drawBar(
       hpBar.origin,
@@ -436,13 +448,6 @@ proc drawUi*(
       hpBar.origin + vec2(2, 2),
       vec2(16),
       healthColor(actor)
-    )
-    sk.drawLabel(
-      HeroNames[class],
-      hpBar.origin + vec2(20, 0),
-      vec2(58, hpBar.size.y),
-      rgbx(245, 229, 178, 255),
-      "Small"
     )
     writeRatio(
       hudScratch,
@@ -552,8 +557,10 @@ proc drawUi*(
       "Small"
     )
   let
-    mapArea = questPanel.minimapMap()
-    mapCell = mapArea.size.x / float32(GridTiles)
+    mapArea = chrome.minimap.minimapMap()
+    mapInner = chrome.minimap.minimapInner()
+    mapCell = mapInner.size.x / float32(GridTiles)
+  sk.drawSprite("minimap", mapArea.origin, mapArea.size)
   const MapSampleStride = 3
   for z in countup(0, GridTiles - 1, MapSampleStride):
     for x in countup(0, GridTiles - 1, MapSampleStride):
@@ -563,10 +570,10 @@ proc drawUi*(
           x: uint8(x),
           z: uint8(z)
         )
-        pos = minimapPoint(tile, mapArea.origin, mapArea.size)
+        pos = minimapPoint(tile, mapInner.origin, mapInner.size)
         cell = vec2(max(mapCell * MapSampleStride.float32, 1.0'f32))
         mid = pos + cell * 0.5'f32
-      if not insideMinimapCircle(mapArea, mid):
+      if not insideMinimapCircle(mapInner, mid):
         continue
       let
         known = run.world.explored(tile)
@@ -587,7 +594,7 @@ proc drawUi*(
   sk.drawPip(
     objective,
     shownLevel,
-    mapArea,
+    mapInner,
     11,
     rgbx(246, 202, 59, 255)
   )
@@ -597,7 +604,7 @@ proc drawUi*(
       sk.drawPip(
         actor.home,
         shownLevel,
-        mapArea,
+        mapInner,
         if selectedIds[slot]: 9 else: 6,
         heroColor(actor.heroClass)
       )
@@ -608,18 +615,22 @@ proc drawUi*(
       sk.drawPip(
         actor.home,
         shownLevel,
-        mapArea,
+        mapInner,
         4,
         rgbx(216, 76, 68, 255)
       )
   sk.drawMinimapCamera(
     window,
-    mapArea.origin,
-    mapArea.size,
+    mapInner.origin,
+    mapInner.size,
     cameraTarget,
     cameraDistance
   )
-  let themeName = questPanel.imageSlot(102, 4, 186, 24)
+  let
+    themeName = questPanel.imageSlot(18, 10, 412, 22)
+    questTitleBox = questPanel.imageSlot(18, 56, 412, 22)
+    clockRow = questPanel.imageSlot(18, 80, 412, 20)
+    enemyRow = questPanel.imageSlot(18, 102, 412, 18)
   sk.drawLabel(
     Themes[shownLevel].name,
     themeName.origin,
@@ -628,11 +639,10 @@ proc drawUi*(
     "Small",
     CenterAlign
   )
-  let questBox = questPanel.imageSlot(10, 364, 308, 106)
   sk.drawLabel(
     "Quests",
-    questBox.origin + vec2(8, 0),
-    vec2(questBox.size.x - 16, 28),
+    questPanel.origin + vec2(18, 32),
+    vec2(412, 22),
     rgbx(198, 158, 77, 255),
     "Small"
   )
@@ -647,15 +657,15 @@ proc drawUi*(
       "Descend to " & Themes[shownLevel + 1].name
   sk.drawLabel(
     questTitle,
-    questBox.origin + vec2(8, 36),
-    vec2(questBox.size.x - 16, 20),
+    questTitleBox.origin,
+    questTitleBox.size,
     rgbx(239, 225, 180, 255),
     "Small"
   )
   let clockHour = hudHour()
   sk.drawSprite(
     if clockHour < 6 or clockHour >= 18: "night" else: "day",
-    questBox.origin + vec2(8, 54),
+    clockRow.origin,
     vec2(18)
   )
   hudScratch.setLen(0)
@@ -666,8 +676,8 @@ proc drawUi*(
   hudScratch.addHudInt(LevelCount)
   sk.drawLabel(
     hudScratch,
-    questBox.origin + vec2(30, 56),
-    vec2(questBox.size.x - 38, 18),
+    clockRow.origin + vec2(22, 0),
+    clockRow.size - vec2(22, 0),
     rgbx(160, 171, 188, 255),
     "Small"
   )
@@ -676,8 +686,8 @@ proc drawUi*(
   hudScratch.addHudInt(run.monstersOn(shownLevel))
   sk.drawLabel(
     hudScratch,
-    questBox.origin + vec2(8, 74),
-    vec2(questBox.size.x - 16, 18),
+    enemyRow.origin,
+    enemyRow.size,
     rgbx(160, 171, 188, 255),
     "Small"
   )
@@ -698,10 +708,12 @@ proc drawUi*(
         bag = index - 4
         itemId = selectedActor.inventory[bag]
         itemIndex = run.world.itemIndex(itemId)
+      var icon = ""
       if itemIndex >= 0:
         let ability = LootAbilities[run.world.items[itemIndex].kind]
         if ability != NoAbility:
-          sk.drawWellImage(slotPanel, abilityIconKey(ability))
+          icon = abilityIconKey(ability)
+      sk.drawWellImage(slotPanel, icon)
       if options.playerSlot > 0 and
           not run.replayMode and
           primaryId == options.playerSlot - 1:

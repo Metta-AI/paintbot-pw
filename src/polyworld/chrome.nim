@@ -12,9 +12,9 @@ const
   ErrorFill* = rgbx(79, 18, 24, 248)
   ErrorLine* = rgbx(245, 80, 85, 255)
   CameraFrame* = rgbx(238, 235, 205, 255)
-  WindowPatch* = 7
-  FramePatch* = 5
-  WindowMargin* = 32.0'f32
+  WindowMargin* = 16.0'f32
+  SlotPatch = 5
+  TabPatch = 3
   BarTrackName = "bartrack.9patch"
   BarFillName = "barfill.9patch"
   BarTrackPatch = 7
@@ -207,22 +207,74 @@ proc drawPanel*(
     panel: GameUiPanel,
     accent = PanelAccent
 ) =
-  ## Draws one HUD panel as window chrome with an inner frame.
+  ## Draws one HUD panel with the main theme window 9-patch.
   discard accent
-  sk.draw9Patch("window.9patch", WindowPatch, panel.origin, panel.size)
+  sk.draw9Patch(
+    "window.9patch",
+    sk.theme.windowPatch,
+    panel.origin,
+    panel.size
+  )
+
+proc drawFrame*(
+    sk: Silky,
+    panel: GameUiPanel
+) =
+  ## Draws one inner frame 9-patch over a panel.
   sk.draw9Patch(
     "frame.9patch",
-    FramePatch,
-    panel.origin + vec2(2),
-    panel.size - vec2(4)
+    sk.theme.framePatch,
+    panel.origin,
+    panel.size
   )
+
+proc drawFaintFrame*(
+    sk: Silky,
+    panel: GameUiPanel
+) =
+  ## Draws one faded inner frame 9-patch over a panel.
+  sk.draw9Patch(
+    "frame.faint.9patch",
+    sk.theme.framePatch,
+    panel.origin,
+    panel.size
+  )
+
+proc drawSlot*(
+    sk: Silky,
+    panel: GameUiPanel,
+    selected = false
+) =
+  ## Draws one item or portrait slot 9-patch.
+  let name =
+    if selected:
+      "slot.selected.9patch"
+    else:
+      "slot.9patch"
+  sk.draw9Patch(name, SlotPatch, panel.origin, panel.size)
+
+proc drawTab*(
+    sk: Silky,
+    panel: GameUiPanel,
+    selected = false,
+    hovered = false
+) =
+  ## Draws one theme tab 9-patch.
+  let name =
+    if selected:
+      "panel.tab.selected.9patch"
+    elif hovered:
+      "panel.tab.hover.9patch"
+    else:
+      "panel.tab.9patch"
+  sk.draw9Patch(name, TabPatch, panel.origin, panel.size)
 
 proc beginPanel*(
     sk: Silky,
     panel: GameUiPanel,
     accent = PanelAccent
 ): GameUiPanel =
-  ## Draws window and frame chrome, then returns the inner content rect.
+  ## Draws window chrome, then returns the inner content rect.
   sk.drawPanel(panel, accent)
   panel.inset(WindowMargin)
 
@@ -296,10 +348,6 @@ proc drawBar*(
   else:
     sk.drawRect(innerPos, fillSize, color)
 
-proc wellRadius*(size: Vec2): float32 =
-  ## Corner radius that matches the bronze wells on the HUD plates.
-  max(min(size.x, size.y) * 0.12'f32, 4.0'f32)
-
 proc drawSprite*(
     sk: Silky,
     name: string,
@@ -324,37 +372,27 @@ proc drawSprite*(
     color
   )
 
-proc drawRoundedRect*(
-    sk: Silky,
-    pos,
-    size: Vec2,
-    color: ColorRGBX,
-    radius: float32
-) =
-  ## Draws one solid rounded rectangle.
-  sk.drawRoundedImage(WhiteTileKey, pos, size, radius, color)
-
 proc drawWellImage*(
     sk: Silky,
     well: GameUiPanel,
     name: string,
     color = rgbx(255, 255, 255, 255),
-    pad = 4.0'f32
+    pad = 4.0'f32,
+    selected = false
 ) =
-  ## Draws one atlas image inside a well, after the plate, with matching
-  ## rounded corners.
-  let
-    inner = well.inset(min(pad, min(well.size.x, well.size.y) * 0.08'f32))
-    radius = wellRadius(inner.size)
-  sk.drawSprite(name, inner.origin, inner.size, color, radius)
+  ## Draws one atlas image inside a theme slot.
+  sk.drawSlot(well, selected)
+  if name.len == 0:
+    return
+  let inner = well.inset(min(pad, min(well.size.x, well.size.y) * 0.08'f32))
+  sk.drawSprite(name, inner.origin, inner.size, color)
 
-proc beginImagePanel*(
+proc beginFrame*(
     sk: Silky,
-    panel: GameUiPanel,
-    image: string
+    panel: GameUiPanel
 ): GameUiPanel =
-  ## Draws one textured panel sprite and returns the same outer rect.
-  sk.drawSprite(image, panel.origin, panel.size)
+  ## Draws silky window chrome and returns the same outer rect.
+  sk.drawPanel(panel)
   panel
 
 proc drawValueBar*(
@@ -407,6 +445,10 @@ proc clicked*(
 ): bool =
   ## Returns whether this frame pressed inside a panel.
   window.mousePressed(MouseLeft) and panel.contains(sk.mousePos)
+
+proc hovered*(sk: Silky, panel: GameUiPanel): bool =
+  ## Returns whether the pointer is inside a panel.
+  panel.contains(sk.mousePos)
 
 proc mapArea*(
     panel: GameUiPanel,

@@ -36,9 +36,9 @@ const
 ## Atlas
 
 let builder = newAtlasBuilder(1024, 4)
-builder.addDir("../polyworld_data/themes/editor/", "../polyworld_data/themes/editor/")
-builder.addFont("../polyworld_data/themes/editor/IBMPlexSans-Regular.ttf", "H1", 32.0)
-builder.addFont("../polyworld_data/themes/editor/IBMPlexSans-Regular.ttf", "Default", 18.0)
+builder.addDir("../polyworld_data/themes/main/", "../polyworld_data/themes/main/")
+builder.addFont("../polyworld_data/themes/main/IBMPlexSans-Regular.ttf", "H1", 32.0)
+builder.addFont("../polyworld_data/themes/main/IBMPlexSans-Regular.ttf", "Default", 18.0)
 builder.write("tmp/editor.atlas.png")
 
 ## Window

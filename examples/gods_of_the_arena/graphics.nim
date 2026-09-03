@@ -71,37 +71,8 @@ proc addItemIcons(builder: AtlasBuilder) =
       )
 
 proc addHudIcons(builder: AtlasBuilder) =
-  ## Packs the textured HUD panels into the atlas.
-  const PanelDir = DataRoot & "/themes/gota/"
+  ## Packs the theme logo into the atlas.
   builder.addThemeLogo(LogoPath)
-  if not builder.addImage(
-        "gota_leftTop",
-        readImage(PanelDir & "leftTop.png")
-      ) or
-      not builder.addImage(
-        "gota_topCenter",
-        readImage(PanelDir & "topCenter.png")
-      ) or
-      not builder.addImage(
-        "gota_leftRight",
-        readImage(PanelDir & "leftRight.png")
-      ) or
-      not builder.addImage(
-        "gota_bottomLeft",
-        readImage(PanelDir & "bottomLeft.png")
-      ) or
-      not builder.addImage(
-        "gota_bottomCenter",
-        readImage(PanelDir & "bottomCenter.png")
-      ) or
-      not builder.addImage(
-        "gota_bottomRight",
-        readImage(PanelDir & "bottomRight.png")
-      ):
-    raise newException(
-      GraphicsError,
-      "the UI atlas is too small for HUD panels"
-    )
 
 proc laneRenderPath(lane: int): seq[Vec3] =
   ## Converts one integer lane polyline into render-space points.

@@ -7,10 +7,16 @@ import
   content, sim, game, controls
 
 const
-  PanelScore = vec2(353, 461)
-  PanelMinimap = vec2(788, 432)
+  PanelScore = vec2(353, 150)
+  PanelResources = vec2(700, 90)
+  PanelMinimap = vec2(320, 372)
   PanelSelection = vec2(488, 250)
   PanelBuild = vec2(642, 283)
+  ResourceColors = [
+    rgbx(232, 196, 86, 255),
+    rgbx(196, 168, 120, 255),
+    rgbx(160, 200, 160, 255)
+  ]
   HudClearance = 48.0'f32
   CommandTabs = ["BUILD", "UNITS", "UPGRADES"]
   ViewLabels = ["A", "L", "D", "*"]
@@ -29,8 +35,12 @@ const
     vec2(457, 172)
   ]
   BuildSlotSize = vec2(91, 91)
-  CommandTabXs = [28.0'f32, 164, 357]
-  CommandTabWs = [133.0'f32, 191, 227]
+  CommandTabX = 20.0'f32
+  CommandTabY = 16.0'f32
+  CommandTabW = 196.0'f32
+  CommandTabH = 34.0'f32
+  CommandTabGap = 4.0'f32
+  CommandTabLift = 4.0'f32
 
 var commandTab = 0
 
@@ -38,6 +48,7 @@ type
   HudChrome = object
     layout: GameUiLayout
     score: GameUiPanel
+    resources: GameUiPanel
     minimap: GameUiPanel
     selection: GameUiPanel
     build: GameUiPanel
@@ -77,8 +88,6 @@ proc drawPortrait(
     color = rgbx(255, 255, 255, 255)
 ) =
   ## Draws a profile sprite inside a well after the plate.
-  if key.len == 0:
-    return
   sk.drawWellImage(well, key, color)
 
 proc commandPlayer(viewMode: int32): int32 =
@@ -116,6 +125,7 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
   result.layout = layout
   result.score = layout.panel(GameUiRegion.TopLeft, PanelScore)
+  result.resources = layout.panel(GameUiRegion.TopCenter, PanelResources)
   result.minimap = layout.panel(GameUiRegion.TopRight, PanelMinimap)
   result.selection = layout.panel(
     GameUiRegion.BottomLeft,
@@ -132,6 +142,7 @@ proc hudLayoutFits(layoutSize: Vec2): bool =
     layout,
     [
       chrome.score,
+      chrome.resources,
       chrome.minimap,
       chrome.selection,
       chrome.build
@@ -169,6 +180,7 @@ proc mouseOverUi*(window: Window, mouse: Vec2): bool =
     chrome.layout,
     [
       chrome.score,
+      chrome.resources,
       chrome.minimap,
       chrome.selection,
       chrome.build
@@ -333,7 +345,7 @@ proc shownBuilding(structure: Building, viewMode: int32): bool =
 
 proc minimapWell(panel: GameUiPanel): GameUiPanel =
   ## Returns the chrome well that holds the minimap.
-  panel.imageSlot(522, 78, 256, 282)
+  panel.imageSlot(12, 12, panel.size.x - 24, panel.size.y - 80)
 
 proc minimapMap(panel: GameUiPanel): GameUiPanel =
   ## Returns the square map centered in the minimap well.
@@ -486,15 +498,12 @@ proc drawUi*(
   ## Draws every Silky HUD panel for the current frame.
   let
     chrome = currentChrome(window)
-    scorePanel = sk.beginImagePanel(chrome.score, "lvd_leftTop")
-    minimapPanel = sk.beginImagePanel(chrome.minimap, "lvd_leftRight")
-    selectionPanel = sk.beginImagePanel(
-      chrome.selection,
-      "lvd_bottomLeft"
-    )
-    buildPanel = sk.beginImagePanel(chrome.build, "lvd_bottomRight")
+    scorePanel = sk.beginFrame(chrome.score)
+    resourcePanel = sk.beginFrame(chrome.resources)
+    minimapPanel = sk.beginFrame(chrome.minimap)
+    selectionPanel = sk.beginFrame(chrome.selection)
+    buildPanel = sk.beginFrame(chrome.build)
     light = run.world.players[LightPlayer]
-    resourceBox = scorePanel.imageSlot(16, 188, 240, 252)
 
   sk.drawLabel(
     "WHO IS WINNING NOW?",
@@ -506,117 +515,78 @@ proc drawUi*(
   sk.drawScoreRow(scorePanel.origin + vec2(16, 0), LightPlayer, 48)
   sk.drawScoreRow(scorePanel.origin + vec2(16, 0), DarkPlayer, 96)
 
-  sk.drawLabel(
-    "RESOURCES",
-    resourceBox.origin,
-    vec2(resourceBox.size.x, 20),
-    rgbx(200, 205, 216, 255),
-    "Small"
-  )
   let resourceRows = [
     ("GOLD", light.gold, gatherRate(light.goldGathered)),
     ("WOOD", light.wood, gatherRate(light.woodGathered)),
     ("FOOD", light.foodUsed, 0'i32)
   ]
+  const ResourceCell = vec2(216, 62)
   for i, row in resourceRows:
-    let y = 28.0'f32 + i.float32 * 48
+    let
+      cell = resourcePanel.imageSlot(
+        12 + i.float32 * (ResourceCell.x + 10),
+        14,
+        ResourceCell.x,
+        ResourceCell.y
+      )
+    sk.drawFaintFrame(cell)
     sk.drawSprite(
       ResourceIcons[i],
-      resourceBox.origin + vec2(0, y + 8),
-      vec2(16)
+      cell.origin + vec2(10, 22),
+      vec2(18)
+    )
+    sk.drawLabel(
+      row[0],
+      cell.origin + vec2(34, 8),
+      vec2(70, 20),
+      rgbx(166, 174, 190, 255),
+      "Small"
     )
     if i == 2:
       writeRatio(hudScratch, row[1].int, light.foodCap.int)
     else:
       writeAmount(hudScratch, row[1].int)
     sk.drawLabel(
-      row[0],
-      resourceBox.origin + vec2(22, y),
-      vec2(52, 20),
-      rgbx(166, 174, 190, 255),
-      "Small"
-    )
-    sk.drawLabel(
       hudScratch,
-      resourceBox.origin + vec2(76, y),
-      vec2(80, 20)
+      cell.origin + vec2(34, 30),
+      vec2(90, 24),
+      ResourceColors[i],
+      "Hud"
     )
-    hudScratch.setLen(0)
-    hudScratch.add '+'
-    hudScratch.addHudInt(row[2].int)
-    hudScratch.add " /m"
-    sk.drawLabel(
-      hudScratch,
-      resourceBox.origin + vec2(156, y),
-      vec2(72, 20),
-      rgbx(120, 196, 90, 255),
-      "Small"
-    )
+    if i < 2:
+      hudScratch.setLen(0)
+      hudScratch.add '+'
+      hudScratch.addHudInt(row[2].int)
+      hudScratch.add " /m"
+      sk.drawLabel(
+        hudScratch,
+        cell.origin + vec2(128, 30),
+        vec2(76, 24),
+        rgbx(120, 196, 90, 255),
+        "Small"
+      )
 
-  let strip = minimapPanel.imageSlot(12, 10, 700, 50)
-  sk.drawSprite("gold", strip.origin + vec2(8, 16), vec2(16))
-  sk.drawLabel(
-    formatAmount(light.gold.int),
-    strip.origin + vec2(28, 12),
-    vec2(80, 28),
-    rgbx(232, 196, 86, 255)
-  )
-  sk.drawSprite(
-    "wood",
-    strip.origin + vec2(180, 16),
-    vec2(16)
-  )
-  sk.drawLabel(
-    formatAmount(light.wood.int),
-    strip.origin + vec2(200, 12),
-    vec2(80, 28),
-    rgbx(196, 168, 120, 255)
-  )
-  sk.drawSprite(
-    "food",
-    strip.origin + vec2(350, 16),
-    vec2(16)
-  )
-  hudScratch.setLen(0)
-  hudScratch.addHudInt(light.foodUsed.int)
-  hudScratch.add '/'
-  hudScratch.addHudInt(light.foodCap.int)
-  sk.drawLabel(
-    hudScratch,
-    strip.origin + vec2(370, 12),
-    vec2(80, 28),
-    rgbx(160, 200, 160, 255)
-  )
   let hudTime = currentHudTime()
   sk.drawSprite(
     if hudTime.hour < 6 or hudTime.hour >= 18: "night" else: "day",
-    strip.origin + vec2(500, 16),
+    minimapPanel.origin + vec2(16, minimapPanel.size.y - 60),
     vec2(16)
   )
   writeClock(hudScratch, hudTime.hour, hudTime.minute)
   sk.drawLabel(
     hudScratch,
-    strip.origin + vec2(522, 12),
-    vec2(160, 28),
-    rgbx(247, 221, 143, 255)
+    minimapPanel.origin + vec2(38, minimapPanel.size.y - 64),
+    vec2(80, 24),
+    rgbx(247, 221, 143, 255),
+    "Small"
   )
   let
     well = minimapPanel.minimapWell()
     area = minimapPanel.minimapMap()
   const MapSampleStride = 2'i32
   let cell = area.size.x / float32(GridSide)
-  sk.drawRoundedRect(
-    well.origin,
-    well.size,
-    rgbx(16, 18, 22, 255),
-    wellRadius(well.size)
-  )
-  sk.drawRoundedRect(
-    area.origin,
-    area.size,
-    rgbx(24, 30, 24, 255),
-    wellRadius(area.size)
-  )
+  sk.drawFrame(well)
+  sk.drawFrame(area)
   for y in countup(0'i32, GridSide - 1, MapSampleStride):
     for x in countup(0'i32, GridSide - 1, MapSampleStride):
       let index = tileIndex(x, y)
@@ -661,9 +631,9 @@ proc drawUi*(
   for index in 0 .. 3:
     let
       button = minimapPanel.imageSlot(
-        530 + index.float32 * 62,
-        374,
-        58,
+        128 + index.float32 * 46,
+        minimapPanel.size.y - 64,
+        42,
         52
       )
       hot = viewMode == int32(index)
@@ -833,27 +803,37 @@ proc drawUi*(
 
   for i, label in CommandTabs:
     let
+      selected = commandTab == i
       tab = buildPanel.imageSlot(
-        CommandTabXs[i],
-        18,
-        CommandTabWs[i],
-        36
+        CommandTabX + i.float32 * (CommandTabW + CommandTabGap),
+        if selected:
+          CommandTabY - CommandTabLift
+        else:
+          CommandTabY,
+        CommandTabW,
+        if selected:
+          CommandTabH + CommandTabLift
+        else:
+          CommandTabH
       )
+      over = sk.hovered(tab)
       tint =
-        if commandTab == i: rgbx(235, 216, 154, 255)
+        if selected: rgbx(235, 216, 154, 255)
+        elif over: rgbx(210, 214, 224, 255)
         else: rgbx(150, 158, 172, 255)
+    sk.drawTab(tab, selected, over)
     sk.drawSprite(
       CommandTabIcons[i],
-      tab.origin + vec2(8, 6),
-      vec2(24),
+      tab.origin + vec2(12, (tab.size.y - 20) * 0.5'f32),
+      vec2(20),
       tint
     )
     sk.drawLabel(
       label,
-      tab.origin + vec2(34, 0),
-      tab.size - vec2(40, 0),
+      tab.origin + vec2(36, 0),
+      tab.size - vec2(44, 0),
       tint,
-      "Small",
+      if selected: "Bold" else: "Small",
       CenterAlign
     )
     if window.clicked(sk, tab):

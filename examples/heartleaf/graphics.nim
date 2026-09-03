@@ -8,7 +8,7 @@ import
   std/[json, math, os, strutils, times],
   chroma, opengl, pixie, vmath, windy, silky,
   polyworld/[
-    actioncam, characters, chrome, clickmarks, common, fixed, inputs,
+    actioncam, characters, chrome, clickmarks, common, fixed, gameuis, inputs,
     pathing, player, profiles, quadterrain, rtscameras, shadows, shapes, tapes,
     viewers
   ],
@@ -673,11 +673,11 @@ proc runGraphics*() =
             viewProjection
           ) / sk.uiScale
           let width = float32(inside.len) * 22 - 2
-          sk.drawRoundedRect(
-            anchor - vec2(width * 0.5'f32 + 4, 12),
-            vec2(width + 8, 26),
-            rgbx(18, 22, 20, 190),
-            6
+          sk.drawSlot(
+            GameUiPanel(
+              origin: anchor - vec2(width * 0.5'f32 + 4, 12),
+              size: vec2(width + 8, 26)
+            )
           )
           for index, slot in inside:
             sk.drawSprite(
