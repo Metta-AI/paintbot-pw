@@ -105,9 +105,9 @@ stone's height, so the rim is ragged whole stones with dirt between them,
 and dirt then height-blends into grass. Roads ride the same dirt field, so
 they get rounded edges and join the plaza apron without a seam. Road and
 plaza tiles bake as grass underneath; the mask owns every stone and dirt
-texel. In the viewer, `D` cycles the dirt layer through cartoon dirt, the
-meadow pack dirt, the golden valley forest floor, and the engine's sand,
-printing the choice to the terminal. The two toon textures load at startup
+texel. Roads wear the meadow pack dirt. In the viewer, `D` cycles the dirt
+layer through meadow dirt, cartoon dirt, the golden valley forest floor,
+and the engine's sand, printing the choice to the terminal. The two toon textures load at startup
 into the unused marsh and volcanic slots.
 
 ## Commands

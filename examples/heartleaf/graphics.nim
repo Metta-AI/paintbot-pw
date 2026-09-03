@@ -40,13 +40,14 @@ const
   MeadowDirtPath = DataRoot & "/terrain/toon_enchanted_meadow/terrain_dirt_01d.png"
   ForestFloorPath = DataRoot & "/terrain/toon_golden_valley/terrain_forest_floor_01d.png"
   DirtChoices = [
-    (name: "cartoon dirt", layer: DirtMaterial),
     (name: "meadow dirt", layer: MarshMaterial),
+    (name: "cartoon dirt", layer: DirtMaterial),
     (name: "forest floor", layer: VolcanicMaterial),
     (name: "cartoon sand", layer: SandMaterial),
   ]
-    ## What the roads and plaza apron can wear. The toon textures borrow the
-    ## marsh and volcanic slots, which the village never uses.
+    ## What the roads and plaza apron can wear, meadow dirt first as the
+    ## default. The toon textures borrow the marsh and volcanic slots, which
+    ## the village never uses.
   PlazaBlendDepth = 0.05'f32
   PlazaHeightBlend = 2.0'f32
     ## Tighter than the engine defaults so dirt breaks into grass along the
