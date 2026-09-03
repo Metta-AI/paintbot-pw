@@ -75,19 +75,20 @@ const
   GardenFenceHeight = 0.9'f32
   FenceSpacing = 1.3'f32
     ## One meadow fence piece is about this many tiles long at FenceHeight.
-  FlowerHeight = 0.4'f32
-  BushHeight = 1.35'f32
-  TuftHeight = 0.35'f32
-  VergeBushHeight = 1.2'f32
+  FlowerHeight = 0.6'f32
+  BushHeight = 1.8'f32
+  TuftHeight = 0.55'f32
+  VergeBushHeight = 1.6'f32
     ## Nobody trims anything; the villagers are busy with the vegetables.
-  SmallRockHeight = 0.45'f32
-  MediumRockHeight = 1.2'f32
-  LargeRockHeight = 2.5'f32
-  HouseFlowerBeds = 3
+  SmallRockHeight = 0.7'f32
+  MediumRockHeight = 1.7'f32
+  LargeRockHeight = 3.5'f32
+  HouseFlowerBeds = 5
+  HouseBushes = 2
   HouseDecorReach = 3'i32
-  HouseDecorAttempts = 12
-  GardenFlowerOneIn = 3'i32
-  RoadDecorOneIn = 3'i32
+  HouseDecorAttempts = 20
+  GardenFlowerOneIn = 2'i32
+  RoadDecorOneIn = 2'i32
   NaturalVariance = 0.45'f32
     ## Things that grew or were left lying vary this much in size either
     ## way. Things gnomes made, signs, lamps, fences, do not.
@@ -100,8 +101,8 @@ const
     ## Rocks drift toward the plaza cobble's mauve grey by up to this much.
   CobbleHue = vec3(1.0, 0.905, 0.952)
     ## The cobble base colour relative to its red channel.
-  MediumRockOneIn = 12'i32
-  LargeRockOneIn = 40'i32
+  MediumRockOneIn = 7'i32
+  LargeRockOneIn = 25'i32
 
   KitFiles: array[DecorKit, string] = [
     "terrain/toon_enchanted_meadow/props.glb",
@@ -337,7 +338,10 @@ proc dressHouses(p: var Placer) =
           p.rng.unit() * 2 * PI, FlowerHeight, 0.25, NaturalVariance,
           p.rng.plantTint()):
         inc beds
+    var bushes = 0
     for attempt in 0 ..< HouseDecorAttempts:
+      if bushes >= HouseBushes:
+        break
       let
         x = cx + p.rng.below(HouseDecorReach * 2 + 1) - HouseDecorReach
         y = cy + p.rng.below(HouseDecorReach * 2 + 1) - HouseDecorReach
@@ -347,7 +351,7 @@ proc dressHouses(p: var Placer) =
       if p.claim(MeadowVegetation, bush, HouseArea, x, y,
           p.rng.unit() * 2 * PI, BushHeight, 0.2, NaturalVariance,
           p.rng.plantTint()):
-        break
+        inc bushes
 
 proc dressGardens(p: var Placer) =
   ## A fence piece beside every plot, flowers beside some.

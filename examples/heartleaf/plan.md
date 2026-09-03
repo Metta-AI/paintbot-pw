@@ -132,10 +132,10 @@ into the terrain mesh once with the houses.
   signpost, a fence pole with the sign board hung on it, beside every
   third entrance.
 - Houses: a mailbox beside the door, flower pots flanking it, a run of
-  fence along the back, three flower beds and a bush in the yard.
+  fence along the back, five flower beds and two bushes in the yard.
 - Gardens: a fence piece on one side of every plot, flowers beside some.
 - Road verges: lamp posts spaced along the roads, and tufts, bushes,
-  small rocks, and flowers on one grass tile in three. Everything that
+  small rocks, and flowers on every other grass tile. Everything that
   grew or was left lying varies in size; everything gnomes made does not.
 - Outskirts: boulders in the meadow before the forest wall.
 
