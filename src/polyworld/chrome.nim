@@ -11,13 +11,13 @@ const
   ErrorFill* = rgbx(79, 18, 24, 248)
   ErrorLine* = rgbx(245, 80, 85, 255)
   CameraFrame* = rgbx(238, 235, 205, 255)
-  WindowPatch* = 32
-  FramePatch* = 30
-  WindowMargin* = WindowPatch.float32
+  WindowPatch* = 7
+  FramePatch* = 5
+  WindowMargin* = 32.0'f32
   BarTrackName = "bartrack.9patch"
   BarFillName = "barfill.9patch"
-  BarTrackPatch = 12
-  BarFillPatch = 11
+  BarTrackPatch = 7
+  BarFillPatch = 5
   BarInset = 3.0'f32
   UiScaleSteps* = [
     0.25'f32, 0.5'f32, 1.0'f32, 1.25'f32, 2.0'f32, 2.5'f32, 4.0'f32
@@ -25,8 +25,16 @@ const
   UiCrispSteps* = [0.25'f32, 0.5'f32, 1.0'f32, 2.0'f32, 4.0'f32]
   HudDaySeconds* = 300'i32
     ## Wall-clock seconds in one in-game day. A 20 minute match is four days.
+  DebugWindowTitle* = "Debug"
+  DebugWindowOrigin* = vec2(360, 32)
+  DebugWindowSize* = vec2(280, 150)
 
-var hudScratch*: string
+var
+  hudScratch*: string
+  debugMenuOpen* = false
+  interpolateVisuals* = true
+  showPaths* = false
+  showTiles* = false
 
 proc addDigits(s: var string, value: int) =
   ## Appends an unsigned decimal value.
@@ -469,3 +477,33 @@ proc drawError*(
       "Small",
       CenterAlign
     )
+
+proc mouseOverDebugMenu*(mouse: Vec2): bool =
+  ## Returns whether the pointer is over the F1 debug window.
+  if not debugMenuOpen or DebugWindowTitle notin subWindowStates:
+    return false
+  let state = subWindowStates[DebugWindowTitle]
+  if state == nil or not state.visible:
+    return false
+  mouse.x >= state.pos.x and
+    mouse.x <= state.pos.x + state.size.x and
+    mouse.y >= state.pos.y and
+    mouse.y <= state.pos.y + state.size.y
+
+proc drawDebugMenu*(sk: Silky, window: Window) =
+  ## Draws the shared F1 debug window when it is open.
+  if not debugMenuOpen:
+    return
+  sk.beginDsl()
+  try:
+    subWindow(
+      DebugWindowTitle,
+      debugMenuOpen,
+      DebugWindowOrigin,
+      DebugWindowSize
+    ):
+      checkBox "Interpolation", interpolateVisuals
+      checkBox "Show paths", showPaths
+      checkBox "Show tiles", showTiles
+  finally:
+    sk.endDsl()

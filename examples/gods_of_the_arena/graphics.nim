@@ -11,8 +11,8 @@ import
   polyworld/profiles,
   polyworld/quadterrain,
   polyworld/shadows,
-  polyworld/[chrome, inputs, rtscameras, selectionoutlines, viewers, visions,
-    worldbars]
+  polyworld/[chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
+    visions, worldbars]
 
 when defined(takeScreenshot):
   import std/os
@@ -275,6 +275,7 @@ proc runGraphics*() =
   var
     particles = initParticleSystem()
     clickMarks = initClickMarks()
+    worldShapes = initShapeRenderer()
     selectionOutline = initSelectionOutline()
     worldBarRenderer = initWorldBarRenderer()
     damageTrails: DamageTrailTracker
@@ -465,6 +466,8 @@ proc runGraphics*() =
   proc unitRenderPoint(id: int32, position: WorldPoint): Vec3 =
     ## Interpolates one mobile unit between the latest simulation snapshots.
     let current = renderPoint(position)
+    if not interpolateVisuals:
+      return current
     mix(
       previousUnitPositions.getOrDefault(id, current),
       current,
@@ -473,6 +476,8 @@ proc runGraphics*() =
 
   proc unitRenderFacing(id: int32, facing: Heading): float32 =
     ## Interpolates yaw the short way so a +pi / -pi flip is not a spin.
+    if not interpolateVisuals:
+      return renderFacing(facing)
     let
       current = renderFacing(facing)
       previous = previousUnitFacings.getOrDefault(id, current)
@@ -741,7 +746,6 @@ proc runGraphics*() =
     cameraTarget = vec3(0, 0, 0)
     panning = false
     minimapPanning = false
-    showEdges = false
     cameraEye = vec3(0, 0, 0)
     primaryId = 0'i32
     selectedIds: seq[int32]
@@ -784,6 +788,8 @@ proc runGraphics*() =
       actionCam.toggle(followSelection)
     elif button == KeyT:
       scene.toggleShading()
+    elif button == KeyF1:
+      debugMenuOpen = not debugMenuOpen
 
   proc objectTeam(id: int32): int32 =
     ## Returns 1 for red, 2 for blue, or 0 when the id is unknown.
@@ -1739,7 +1745,7 @@ proc runGraphics*() =
     applyScreenshotCamera(cameraDistance)
     if existsEnv("CAM_X"): cameraTarget.x = getEnv("CAM_X").parseFloat.float32
     if existsEnv("CAM_Z"): cameraTarget.z = getEnv("CAM_Z").parseFloat.float32
-    if existsEnv("SHOW_EDGES"): showEdges = getEnv("SHOW_EDGES") != "0"
+    if existsEnv("SHOW_EDGES"): showTiles = getEnv("SHOW_EDGES") != "0"
     if run.replayMode and existsEnv("REPLAY_TICK"):
       transport.seekTo(int32(getEnv("REPLAY_TICK").parseInt))
     if existsEnv("SIM_SECONDS"):
@@ -1923,7 +1929,7 @@ proc runGraphics*() =
         glClearColor(0.05, 0.06, 0.09, 1.0)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
         updateTerrainVision()
-        drawTerrain(viewProjection, showEdges)
+        drawTerrain(viewProjection, showTiles)
         for tower in run.world.towers:
           if tower.hp <= 0 or not visibleInView(tower.team, tower.position):
             continue
@@ -1947,6 +1953,27 @@ proc runGraphics*() =
           cameraForward
         )
         clickMarks.drawClickMarks(viewProjection)
+        if showPaths:
+          worldShapes.clear()
+          for hero in run.world.heroes:
+            if hero.state == Dying or hero.hp <= 0:
+              continue
+            if hero.movePathIndex >= hero.movePath.len:
+              continue
+            let color =
+              if hero.team == RedTeam:
+                rgbx(210, 72, 64, 255)
+              else:
+                rgbx(64, 120, 220, 255)
+            var points: seq[Vec3]
+            let now = unitRenderPoint(hero.id, hero.position)
+            points.add vec3(now.x, now.y + 0.2'f32, now.z)
+            for i in hero.movePathIndex ..< hero.movePath.len:
+              let p = renderPoint(hero.movePath[i])
+              points.add vec3(p.x, p.y + 0.2'f32, p.z)
+            if points.len >= 2:
+              worldShapes.addPolyline(points, color)
+          worldShapes.draw(viewProjection)
         drawWorldUnitBars(
           worldBarRenderer,
           viewProjection,

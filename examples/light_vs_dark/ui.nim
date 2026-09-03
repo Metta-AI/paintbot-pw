@@ -161,6 +161,8 @@ proc currentChrome(window: Window): HudChrome =
 
 proc mouseOverUi*(window: Window, mouse: Vec2): bool =
   ## Returns whether the pointer is over an anchored game UI panel.
+  if mouseOverDebugMenu(mouse):
+    return true
   let chrome = currentChrome(window)
   mouseOverPanels(
     mouse,
@@ -949,3 +951,4 @@ proc drawUi*(
       &"REPLAY DIVERGED - {run.hashCheck.mismatches} mismatches, " &
         &"first at tick {run.hashCheck.firstTick}"
     )
+  sk.drawDebugMenu(window)

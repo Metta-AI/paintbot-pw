@@ -12,8 +12,6 @@ const
   EditorThemeDir* = DataRoot & "/themes/editor/"
   UiDir* = DataRoot & "/ui/"
   IconDir* = DataRoot & "/icons/"
-  WindowPatchPath = EditorThemeDir & "window.9patch.png"
-  FramePatchPath = EditorThemeDir & "frame.9patch.png"
   HudIconSize = 64
   SplashName* = "logo"
   SplashSeconds* = 3.0
@@ -52,16 +50,19 @@ proc addDefaultFonts*(builder: AtlasBuilder) =
   builder.addFont(DefaultFontPath, "Hud", 15.0)
   builder.addFont(DefaultFontPath, "Small", 12.0)
 
-proc addScaledPatch(builder: AtlasBuilder, path, name: string) =
-  ## Packs a 2x 9-patch so a 32px slice still has a stretchable center.
-  let
-    source = readImage(path)
-    scaled = source.resize(source.width * 2, source.height * 2)
-  if not builder.addImage(name, scaled):
-    raise newException(
-      ValueError,
-      "Failed to allocate space for " & path
-    )
+proc applyEditorPatches*(sk: Silky) =
+  ## Uses the measured corner slices of the editor 9-patches.
+  sk.theme.windowPatch = 7
+  sk.theme.headerPatch = 4
+  sk.theme.framePatch = 5
+  sk.theme.buttonPatch = 5
+  sk.theme.dropdownPatch = 5
+  sk.theme.textboxPatch = 4
+  sk.theme.tooltipPatch = 3
+  sk.theme.scrollbarPatch = 5
+  sk.theme.scrollbarTrackPatch = 3
+  sk.theme.progressBarPatch = 3
+  sk.theme.scrubberPatch = 3
 
 proc addHudGlyphs(builder: AtlasBuilder) =
   ## Packs the shared transport and HUD glyphs every game can draw.
@@ -82,8 +83,6 @@ proc newHudAtlas*(size = 1024): AtlasBuilder =
   result = newAtlasBuilder(size, 4)
   result.addDir(EditorThemeDir, EditorThemeDir)
   result.addDir(UiDir, UiDir)
-  result.addScaledPatch(WindowPatchPath, "window.9patch")
-  result.addScaledPatch(FramePatchPath, "frame.9patch")
   result.addHudGlyphs()
 
 proc gameWindowSize*(width, height: int32): IVec2 =
@@ -104,6 +103,7 @@ proc initGameWindow*(
   window.makeContextCurrent()
   loadExtensions()
   let sk = newSilky(window, atlasPath)
+  sk.applyEditorPatches()
   window.runeInputEnabled = true
   window.onRune = proc(rune: Rune) =
     sk.inputRunes.add(rune)

@@ -46,9 +46,6 @@ const
     "settings"
   ]
   MenuIconTint = rgbx(245, 230, 190, 255)
-  DebugWindowTitle = "Debug"
-  DebugWindowOrigin = vec2(360, 32)
-  DebugWindowSize = vec2(280, 150)
   HeroNames: array[HeroClass, string] = [
     "Brom", "Nyra", "Fenn", "Zyra"
   ]
@@ -66,12 +63,6 @@ type
     minimap: GameUiPanel
     abilities: GameUiPanel
     menu: GameUiPanel
-
-var
-  debugMenuOpen* = false
-  interpolateVisuals* = true
-  showPaths* = false
-  showTiles* = false
 
 proc placeChrome(layout: GameUiLayout): HudChrome =
   ## Places every textured HUD panel in one layout space.
@@ -131,21 +122,6 @@ proc partyCard(panel: GameUiPanel, slot: int): GameUiPanel =
     ),
     size: PanelPartyCard
   )
-
-proc mouseOverDebugMenu(mouse: Vec2): bool =
-  ## Returns whether the pointer is over the F1 debug window.
-  if not debugMenuOpen or DebugWindowTitle notin subWindowStates:
-    return false
-  let state = subWindowStates[DebugWindowTitle]
-  if state == nil or not state.visible:
-    return false
-  let
-    left = state.pos.x
-    top = state.pos.y
-    right = left + state.size.x
-    bottom = top + state.size.y
-  mouse.x >= left and mouse.x <= right and
-    mouse.y >= top and mouse.y <= bottom
 
 proc mouseOverUi*(window: Window, mouse: Vec2): bool =
   ## Returns whether camera input begins inside any visible HUD panel.
@@ -799,17 +775,4 @@ proc drawUi*(
       &"REPLAY DIVERGED - {run.hashCheck.mismatches} mismatches, " &
         &"first at tick {run.hashCheck.firstTick}"
     )
-  if debugMenuOpen:
-    sk.beginDsl()
-    try:
-      subWindow(
-        DebugWindowTitle,
-        debugMenuOpen,
-        DebugWindowOrigin,
-        DebugWindowSize
-      ):
-        checkBox "Interpolation", interpolateVisuals
-        checkBox "Show paths", showPaths
-        checkBox "Show tiles", showTiles
-    finally:
-      sk.endDsl()
+  sk.drawDebugMenu(window)

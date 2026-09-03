@@ -142,6 +142,8 @@ proc mouseOverUi*(
     primaryId = 0'i32
 ): bool =
   ## Returns whether the pointer is over a visible game UI panel.
+  if mouseOverDebugMenu(mouse):
+    return true
   let chrome = currentChrome(window)
   if primaryId == 0:
     result = mouseOverPanels(
@@ -1053,3 +1055,4 @@ proc drawUi*(
     actionCam,
     followSelection
   )
+  sk.drawDebugMenu(window)

@@ -12,7 +12,7 @@ import
   chroma, opengl, pixie, silky, vmath, windy,
   polyworld/[actioncam, characters, clickmarks, common, fixed, inputs, particles,
     particleshaders,
-    pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
+    chrome, pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shadows, shapes, tapes, viewers, visions, worldbars],
   content, maps, sim, game, replays, ui, controls
 
