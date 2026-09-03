@@ -20,7 +20,7 @@ when defined(takeScreenshot):
   import std/[os, strutils]
 
 const
-  AtlasPath = DataRoot & "/themes/cta.atlas.png"
+  AtlasPath = TmpRoot & "/cta.atlas.png"
   LogoPath = DataRoot & "/themes/cta/cta_logo.png"
   SimulationStep = 1.0'f32 / TickRate.float32
   SeekCheckpointTicks = TickRate * 10

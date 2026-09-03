@@ -18,7 +18,7 @@ when defined(takeScreenshot):
   import std/os
 
 const
-  AtlasPath = DataRoot & "/themes/gota.atlas.png"
+  AtlasPath = TmpRoot & "/gota.atlas.png"
   LogoPath = DataRoot & "/themes/gota/gota_logo.png"
 
 type

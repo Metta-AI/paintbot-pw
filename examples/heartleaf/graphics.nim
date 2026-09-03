@@ -22,7 +22,7 @@ import
 
 const
   WindowTitle = "Heartleaf"
-  AtlasPath = DataRoot & "/themes/heartleaf.atlas.png"
+  AtlasPath = TmpRoot & "/heartleaf.atlas.png"
   LogoPath = DataRoot & "/themes/heartleaf/heartleaf_logo.png"
   SeekCheckpointTicks = TickRate * 10
     ## One saved world every ten seconds, so a seek re-simulates at most

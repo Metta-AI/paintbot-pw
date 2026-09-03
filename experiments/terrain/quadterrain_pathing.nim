@@ -49,7 +49,7 @@ let builder = newAtlasBuilder(1024, 4)
 builder.addDir("../polyworld_data/themes/editor/", "../polyworld_data/themes/editor/")
 builder.addFont("../polyworld_data/themes/editor/IBMPlexSans-Regular.ttf", "H1", 32.0)
 builder.addFont("../polyworld_data/themes/editor/IBMPlexSans-Regular.ttf", "Default", 18.0)
-builder.write("../polyworld_data/themes/editor.atlas.png")
+builder.write("tmp/editor.atlas.png")
 
 ## Window
 
@@ -61,7 +61,7 @@ let window = newWindow(
 makeContextCurrent(window)
 loadExtensions()
 
-let sk = newSilky(window, "../polyworld_data/themes/editor.atlas.png")
+let sk = newSilky(window, "tmp/editor.atlas.png")
 
 ## Terrain texture array
 ##

@@ -657,7 +657,7 @@ proc main() =
     "Default",
     18.0'f
   )
-  atlasBuilder.write("../polyworld_data/themes/editor.atlas.png")
+  atlasBuilder.write("tmp/editor.atlas.png")
 
   let maxFrames = maxFramesFromArgs()
   let window = newWindow(
@@ -668,7 +668,7 @@ proc main() =
   )
   makeContextCurrent(window)
   loadExtensions()
-  let sk = newSilky(window, "../polyworld_data/themes/editor.atlas.png")
+  let sk = newSilky(window, "tmp/editor.atlas.png")
   window.runeInputEnabled = true
   window.onRune = proc(rune: Rune) =
     sk.inputRunes.add rune

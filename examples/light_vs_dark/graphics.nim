@@ -25,7 +25,7 @@ import
 
 const
   WindowTitle = "Light vs Dark"
-  AtlasPath = DataRoot & "/themes/lvd.atlas.png"
+  AtlasPath = TmpRoot & "/lvd.atlas.png"
   LogoPath = DataRoot & "/themes/lvd/lvd_logo.png"
   SeekCheckpointTicks = TickRate * 10
     ## One saved world every ten seconds, so a seek re-simulates at most
