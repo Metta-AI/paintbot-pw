@@ -124,18 +124,17 @@ marsh slot.
 ## Houses
 
 Neither toon kit ships a whole cottage, so `houses.nim` builds every
-house from the parts. The golden valley roofs are steep A-frames close
-to seven metres tall, made to stand on the ground as chalets, and that
-is the shape every house takes: a ring of stone foundation a metre high,
-the A-frame on top with its ridge running front to back, a plank gable
-closing each end, the door in the front gable, either raised on the
-foundation with stairs or at ground level through a gap in it, windows
-by coin flip, a chimney by coin flip, and a per-house paint drift. A
-cottage is two or three roof segments deep under slate, shingle, or reed
-thatch. One house in three is a longhouse: three segments under straw
-thatch tinted hard to turf, with grass along the ridge and in rows down
-both slopes, the viking sod house. The village pack houses are gone and the
-blocked footprint is five tiles square. The house lab,
+house from the parts and checks them over a magenta ground for holes. A
+cottage is a ring of stone foundation a metre high, a row of plank and
+plaster wall panels three metres tall with a door panel and windows, and
+two or three golden valley A-frame roof segments on top with the ridge
+running front to back, plank gables closing each end, corner pillars,
+stairs to the door, a chimney by coin flip, and a per-house paint drift.
+Roof segments overlap so their rolled edges nest. One house in three is
+a longhouse: the stone ring alone under three segments of straw thatch
+tinted hard to turf with grass along the ridge and down both slopes, the
+door set in the ring, the viking sod house. The village pack houses are
+gone and the blocked footprint is five tiles square. The house lab,
 `nim r experiments/houses/houses.nim`, shows a grid of houses from
 consecutive seeds with `R` to reroll, `K` to switch kinds, and `P` for a
 magenta ground that shows any hole in a house.

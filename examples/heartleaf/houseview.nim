@@ -9,10 +9,10 @@ import
   houses
 
 const
-  TilesPerMeter* = 0.6'f32
-    ## The kits are authored a little over life size; this puts a door at
-    ## about a villager's height and a three-module cottage inside the
-    ## five-tile house pad.
+  TilesPerMeter* = 0.5'f32
+    ## The kits are authored well over life size; at this a walled cottage
+    ## with its A-frame is about five and a half tiles tall, the old
+    ## village-pack height, and fits the five-tile house pad.
 
 type HousePacks* = array[DecorKit, PropPack]
 
