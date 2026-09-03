@@ -81,6 +81,31 @@ proc toByte(value: float32): uint8 =
   ## Clamps a 0 .. 1 value into a texel byte.
   uint8(clamp(value * 255.0'f32 + 0.5'f32, 0.0'f32, 255.0'f32))
 
+proc loadGroundSheet*(path: string): tuple[color, height: Image] =
+  ## Loads a loose ground texture as a terrain material. The toon packs ship
+  ## no height maps, so height is the colour's contrast-stretched luminance,
+  ## the same stand-in the engine uses for its handpainted grass.
+  var color = readImage(path)
+  if color.width != SheetSize or color.height != SheetSize:
+    color = color.resize(SheetSize, SheetSize)
+  var
+    darkest = 255.0'f32
+    brightest = 0.0'f32
+  for px in color.data:
+    let l = 0.30'f32 * px.r.float32 + 0.59'f32 * px.g.float32 +
+      0.11'f32 * px.b.float32
+    darkest = min(darkest, l)
+    brightest = max(brightest, l)
+  let span = max(brightest - darkest, 1.0'f32)
+  var height = newImage(SheetSize, SheetSize)
+  for i, px in color.data:
+    let
+      l = 0.30'f32 * px.r.float32 + 0.59'f32 * px.g.float32 +
+        0.11'f32 * px.b.float32
+      value = toByte((l - darkest) / span)
+    height.data[i] = rgbx(value, value, value, 255)
+  (color: color, height: height)
+
 proc buildCobbleSheet*(seed: int32): CobbleSheet =
   ## Generates a tiling sheet of square-ish cobbles: colour in RGB, stone
   ## height in the height image, one fixed height per stone.

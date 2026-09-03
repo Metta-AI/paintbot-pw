@@ -37,6 +37,16 @@ const
     ## The modular presets that ship pre-rendered profile portraits.
   HousePropScale = 5.2'f32
   GardenPropScale = 1.1'f32
+  MeadowDirtPath = DataRoot & "/terrain/toon_enchanted_meadow/terrain_dirt_01d.png"
+  ForestFloorPath = DataRoot & "/terrain/toon_golden_valley/terrain_forest_floor_01d.png"
+  DirtChoices = [
+    (name: "cartoon dirt", layer: DirtMaterial),
+    (name: "meadow dirt", layer: MarshMaterial),
+    (name: "forest floor", layer: VolcanicMaterial),
+    (name: "cartoon sand", layer: SandMaterial),
+  ]
+    ## What the roads and plaza apron can wear. The toon textures borrow the
+    ## marsh and volcanic slots, which the village never uses.
   PlazaBlendDepth = 0.05'f32
   PlazaHeightBlend = 2.0'f32
     ## Tighter than the engine defaults so dirt breaks into grass along the
@@ -59,7 +69,7 @@ var
   panning = false
   minimapPanning* = false
   showEdges = false
-  roadsAreDirt = true
+  dirtChoice = 0
   followSlot* = -1'i32
   rightPressPosition = vec2(0)
   seekCheckpoints: seq[SeekCheckpoint]
@@ -132,11 +142,10 @@ proc tileCentreXZ(tile: Tile2): Vec2 =
   vec2(float32(tile.x) - HalfGrid + 0.5'f32,
        float32(tile.y) - HalfGrid + 0.5'f32)
 
-proc setGroundLayers(dirt: bool) =
-  ## Roads and the plaza apron read as packed dirt, or as the sand the other
-  ## games use.
-  setGroundLayers(
-    StoneMaterial, if dirt: DirtMaterial else: SandMaterial, GrassMaterial)
+proc applyDirtChoice() =
+  ## Points the ground mask's dirt at the chosen texture and says which.
+  setGroundLayers(StoneMaterial, DirtChoices[dirtChoice].layer, GrassMaterial)
+  echo "ground: ", DirtChoices[dirtChoice].name
 
 proc tileWorldPoint(tile: Tile2): Vec3 =
   ## Returns the render centre of one map tile.
@@ -231,7 +240,13 @@ proc runGraphics*() =
     let cobble = buildCobbleSheet(run.mapSeed)
     setTerrainMaterial(int(StoneMaterial), cobble.color, cobble.height)
     uploadGroundMask(buildGroundMask(run.world.map, run.mapSeed), MaskSize)
-    setGroundLayers(roadsAreDirt)
+    let
+      meadowDirt = loadGroundSheet(MeadowDirtPath)
+      forestFloor = loadGroundSheet(ForestFloorPath)
+    setTerrainMaterial(int(MarshMaterial), meadowDirt.color, meadowDirt.height)
+    setTerrainMaterial(
+      int(VolcanicMaterial), forestFloor.color, forestFloor.height)
+    applyDirtChoice()
     scatterGrass(800, run.mapSeed)
 
   var villagePack: PropPack
@@ -743,8 +758,8 @@ proc runGraphics*() =
         followSlot = -1
     of KeyT: scene.toggleShading()
     of KeyD:
-      roadsAreDirt = not roadsAreDirt
-      setGroundLayers(roadsAreDirt)
+      dirtChoice = (dirtChoice + 1) mod DirtChoices.len
+      applyDirtChoice()
     of KeyE:
       if playerMode():
         queueExitHouse(options.playerSlot - 1)
