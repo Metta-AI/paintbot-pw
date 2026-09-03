@@ -54,16 +54,23 @@ const
     ## Doors and windows stand this far outside the gable they sit in.
   DoorReach = 1.4'f32
     ## The door slides this far either side of the gable centre.
-  WindowLift = 1.2'f32
-  WindowReach = 1.6'f32
+  WindowLift = 0.9'f32
+  WindowReach = 0.9'f32
+    ## Windows stay this close to the gable centre so they sit under the
+    ## slope at their height.
   ChimneySink = 1.1'f32
   StairsStandOff = 1.0'f32
-  SodTint* = vec3(0.6, 0.95, 0.45)
-    ## Thatch multiplied to read as turf.
+  SodTint* = vec3(0.34, 0.72, 0.28)
+    ## Thatch multiplied hard toward green so it reads as turf, not straw.
+  SodTuftsPerSlope = 2
+    ## Grass tufts down each slope per roof segment, besides the ridge one.
   SodGrassTint = vec3(0.95, 1.05, 0.85)
   SodGrassRidgeDrop = 0.35'f32
-  SodGrassSlopeAt = 2.0'f32
+  SodGrassSlopeAt = 1.8'f32
     ## Metres from the ridge, across, where the slope tufts sit.
+  SegmentOverlap = 0.06'f32
+    ## Roof segments nudge into each other so their end caps do not show as
+    ## seams.
   PaintShade = 0.12'f32
   PaintWarmth = 0.06'f32
   Turn = PI / 2
@@ -163,11 +170,13 @@ proc buildChalet(
     for side in [1.0'f32, -1.0'f32]:
       let gap = side > 0 and not raisedDoor and abs(x - doorX) < 1.0'f32
       if not gap:
-        b.add(MeadowBuildings, b.rng.pick(Cubes), x, 0, halfDepth * side - 0.5'f32)
+        b.add(MeadowBuildings, b.rng.pick(Cubes), x, 0, halfDepth * side)
     x += 1.0'f32
-  ## Roof, ridge along z.
+  ## Roof, ridge along z, segments nudged together.
+  let pitch = (depth - SegmentOverlap) / float32(modules)
   for i in 0 ..< modules:
-    let segZ = -halfDepth + roof.along * (float32(i) + 0.5'f32)
+    let segZ = -halfDepth + SegmentOverlap * 0.5'f32 +
+      pitch * (float32(i) + 0.5'f32)
     b.addTinted(ValleyBuildings, roof.node, 0, FoundationHeight, segZ, Turn,
       roofTint)
   ## Gable walls closing each end, the door and windows set into them.
@@ -202,24 +211,28 @@ proc buildCottage(b: var Builder) =
       (b.rng.unit() - 0.5'f32) * house.depth * 0.6'f32)
 
 proc buildLonghouse(b: var Builder) =
-  ## Three or four segments of straw thatch tinted to turf, grass along
-  ## the ridge and down the slopes, a squat chimney by coin flip.
+  ## Three segments of straw thatch tinted hard to turf, grass along the
+  ## ridge and in rows down both slopes, a squat chimney by coin flip.
+  ## Three segments keep the gables inside the house footprint.
   let
     roof = ThatchRoof
-    modules = 3 + int(b.rng.below(2))
+    modules = 3
     house = b.buildChalet(roof, modules, SodTint * b.tint, false)
     peak = FoundationHeight + roof.height
     halfDepth = house.depth * 0.5'f32
+    slopeLift = FoundationHeight +
+      roof.height * (1.0'f32 - SodGrassSlopeAt / (roof.span * 0.5'f32))
   for i in 0 ..< modules:
     let z = -halfDepth + roof.along * (float32(i) + 0.5'f32)
     b.addTinted(MeadowVegetation, b.rng.pick(SodGrass), 0,
       peak - SodGrassRidgeDrop, z, b.rng.unit() * 2 * PI, SodGrassTint)
-  let slopeLift = FoundationHeight +
-    roof.height * (1.0'f32 - SodGrassSlopeAt / (roof.span * 0.5'f32))
-  for side in [1.0'f32, -1.0'f32]:
-    b.addTinted(MeadowVegetation, b.rng.pick(SodGrass), SodGrassSlopeAt * side,
-      slopeLift, (b.rng.unit() - 0.5'f32) * house.depth * 0.8'f32,
-      b.rng.unit() * 2 * PI, SodGrassTint)
+    for side in [1.0'f32, -1.0'f32]:
+      for k in 0 ..< SodTuftsPerSlope:
+        let along = z + (float32(k) + 0.5'f32) / float32(SodTuftsPerSlope) *
+          roof.along - roof.along * 0.5'f32
+        b.addTinted(MeadowVegetation, b.rng.pick(SodGrass),
+          SodGrassSlopeAt * side + (b.rng.unit() - 0.5'f32) * 0.6'f32,
+          slopeLift, along, b.rng.unit() * 2 * PI, SodGrassTint)
   if b.rng.coin():
     b.add(ValleyBuildings, "chimney_03a", 0, peak - 0.4'f32,
       (b.rng.unit() - 0.5'f32) * house.depth * 0.6'f32)

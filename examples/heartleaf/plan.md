@@ -132,9 +132,9 @@ closing each end, the door in the front gable, either raised on the
 foundation with stairs or at ground level through a gap in it, windows
 by coin flip, a chimney by coin flip, and a per-house paint drift. A
 cottage is two or three roof segments deep under slate, shingle, or reed
-thatch. One house in three is a longhouse: three or four segments under
-straw thatch tinted to turf, with grass along the ridge and down the
-slopes, the viking sod house. The village pack houses are gone and the
+thatch. One house in three is a longhouse: three segments under straw
+thatch tinted hard to turf, with grass along the ridge and in rows down
+both slopes, the viking sod house. The village pack houses are gone and the
 blocked footprint is five tiles square. The house lab,
 `nim r experiments/houses/houses.nim`, shows a grid of houses from
 consecutive seeds with `R` to reroll and `K` to switch kinds.
@@ -161,8 +161,8 @@ into the terrain mesh once with the houses.
   table, a bench with pots, a cart with barrels, or sacks and a crate; a
   signpost, a fence pole with the sign board hung on it, beside every
   third entrance.
-- Houses: a mailbox beside the door, flower pots flanking it, a run of
-  fence along the back, five flower beds and two bushes in the yard.
+- Houses: a mailbox beside the door, flower pots flanking it, five
+  flower beds and two bushes in the yard.
 - Gardens: flowers beside some plots.
 - Road verges: lamp posts spaced along the roads, and tufts, bushes,
   small rocks, and flowers on every other grass tile. Everything that
