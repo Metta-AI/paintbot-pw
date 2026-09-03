@@ -18,7 +18,8 @@ import
   game,
   replays,
   ui,
-  controls
+  controls,
+  ground
 
 const
   WindowTitle = "Heartleaf"
@@ -36,16 +37,10 @@ const
     ## The modular presets that ship pre-rendered profile portraits.
   HousePropScale = 5.2'f32
   GardenPropScale = 1.1'f32
-  CobbleAtlasPath = DataRoot & "/terrain/toon_enchanted_meadow/atlas_1a.png"
-  CobblePatch = (x: 256, y: 768, size: 256)
-    ## The square-stone paving swatch inside the meadow atlas.
-  CobbleRepeats = 4
-    ## Swatch repeats across the material sheet; more repeats, smaller stones.
-  CobbleSheetSize = 1024
   PlazaBlendDepth = 0.05'f32
   PlazaHeightBlend = 2.0'f32
-    ## Tighter than the engine defaults so the paving edge breaks along the
-    ## stones instead of feathering across a whole tile.
+    ## Tighter than the engine defaults so dirt breaks into grass along the
+    ## texture instead of feathering across a whole tile.
   CropProps = ["carrot1", "carrot2", "tomato1", "tomato2"]
     ## A stocked garden shows one of these; an empty plot is bare dirt.
 
@@ -137,45 +132,11 @@ proc tileCentreXZ(tile: Tile2): Vec2 =
   vec2(float32(tile.x) - HalfGrid + 0.5'f32,
        float32(tile.y) - HalfGrid + 0.5'f32)
 
-proc luminance(px: ColorRGBX): float32 =
-  ## Perceived brightness of one texel.
-  0.30'f32 * px.r.float32 + 0.59'f32 * px.g.float32 + 0.11'f32 * px.b.float32
-
-proc buildCobbleSheet(): tuple[color, height: Image] =
-  ## Tiles the atlas paving swatch into a terrain material, with a height
-  ## map stretched from its luminance so the blend breaks along the stones.
-  let
-    atlas = readImage(CobbleAtlasPath)
-    patch = atlas.subImage(
-      CobblePatch.x, CobblePatch.y, CobblePatch.size, CobblePatch.size)
-    step = CobbleSheetSize div CobbleRepeats
-    swatch =
-      if step == CobblePatch.size: patch
-      else: patch.resize(step, step)
-  var color = newImage(CobbleSheetSize, CobbleSheetSize)
-  for y in 0 ..< CobbleRepeats:
-    for x in 0 ..< CobbleRepeats:
-      color.draw(
-        swatch, translate(vec2(float32(x * step), float32(y * step))))
-  var
-    darkest = 255.0'f32
-    brightest = 0.0'f32
-  for px in color.data:
-    darkest = min(darkest, luminance(px))
-    brightest = max(brightest, luminance(px))
-  let span = max(brightest - darkest, 1.0'f32)
-  var height = newImage(CobbleSheetSize, CobbleSheetSize)
-  for i, px in color.data:
-    let value = uint8(clamp(
-      (luminance(px) - darkest) / span * 255.0'f32, 0.0'f32, 255.0'f32))
-    height.data[i] = rgbx(value, value, value, 255)
-  (color: color, height: height)
-
-proc setRoadMaterial(dirt: bool) =
-  ## Roads read as packed dirt, or as the sand the other games use.
-  let material = if dirt: DirtMaterial else: SandMaterial
-  setTileMaterial(
-    int(RoadTile), material, DirtMaterial, vec3(1), vec3(0.85), 5)
+proc setGroundLayers(dirt: bool) =
+  ## Roads and the plaza apron read as packed dirt, or as the sand the other
+  ## games use.
+  setGroundLayers(
+    StoneMaterial, if dirt: DirtMaterial else: SandMaterial, GrassMaterial)
 
 proc tileWorldPoint(tile: Tile2): Vec3 =
   ## Returns the render centre of one map tile.
@@ -245,7 +206,12 @@ proc runGraphics*() =
     quadterrain.seed = run.mapSeed
     terrainBlendDepth = PlazaBlendDepth
     terrainHeightBlend = PlazaHeightBlend
-    setRoadMaterial(roadsAreDirt)
+    ## The ground mask owns every stone and dirt texel, so road and plaza
+    ## tiles bake as plain grass underneath it.
+    setTileMaterial(
+      int(RoadTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
+    setTileMaterial(
+      int(StoneTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
     ## Tilled plots read as dirt; house pads read as stone.
     setTileMaterial(
       int(GardenTileKind),
@@ -260,9 +226,12 @@ proc runGraphics*() =
       8
     )
     initTerrain()
-    ## The plaza wears the meadow paving swatch instead of the flagstone.
-    let cobble = buildCobbleSheet()
+    ## The plaza wears procedural cobbles instead of the flagstone, placed
+    ## stone by stone through the ground mask.
+    let cobble = buildCobbleSheet(run.mapSeed)
     setTerrainMaterial(int(StoneMaterial), cobble.color, cobble.height)
+    uploadGroundMask(buildGroundMask(run.world.map, run.mapSeed), MaskSize)
+    setGroundLayers(roadsAreDirt)
     scatterGrass(800, run.mapSeed)
 
   var villagePack: PropPack
@@ -775,8 +744,7 @@ proc runGraphics*() =
     of KeyT: scene.toggleShading()
     of KeyD:
       roadsAreDirt = not roadsAreDirt
-      setRoadMaterial(roadsAreDirt)
-      bakeTerrain(rebuildWalkability = false)
+      setGroundLayers(roadsAreDirt)
     of KeyE:
       if playerMode():
         queueExitHouse(options.playerSlot - 1)

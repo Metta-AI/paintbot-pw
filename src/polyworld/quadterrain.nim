@@ -132,6 +132,9 @@ var
   visibilityTex: Uniform[Sampler2D]
   visibilityOffset: Uniform[float32]
   visibilityScale: Uniform[float32]
+  groundMask: Uniform[Sampler2D]
+  groundMaskEnabled: Uniform[float32]
+  groundLayers: Uniform[Vec3]
   propTint: Uniform[Vec4]
 
 proc texture(buffer: Uniform[Sampler2dArray], position: Vec3): Vec4 =
@@ -231,7 +234,34 @@ proc terrainFrag(
       sample2.xyz * weight2 +
       sample3.xyz * weight3
     ) / max(totalWeight, 0.001)
-  var color = blended * vertColor * (0.75 + 0.5 * h)
+  # Ground mask: where a game baked stone and dirt coverage, cobbles are
+  # discrete. A stone survives only while coverage beats its height, so the
+  # rim is ragged whole stones with dirt showing between them, and dirt then
+  # height-blends into grass.
+  var ground = blended
+  if groundMaskEnabled > 0.5:
+    let
+      maskUv = vec2(
+        (tilePos.x + visibilityOffset) * visibilityScale,
+        (tilePos.y + visibilityOffset) * visibilityScale
+      )
+      mask = texture(groundMask, maskUv)
+    if mask.x + mask.y > 0.002:
+      let
+        stone = texture(terrainTextures, vec3(uv.x, uv.y, groundLayers.x))
+        dirt = texture(terrainTextures, vec3(uv.x, uv.y, groundLayers.y))
+        grass = texture(terrainTextures, vec3(uv.x, uv.y, groundLayers.z))
+        dirtBlend = mask.y + dirt.w * heightBlend
+        grassBlend = (1.0 - mask.y) + grass.w * heightBlend
+        groundCutoff = max(dirtBlend, grassBlend) - blendDepth
+        dirtWeight = max(dirtBlend - groundCutoff, 0.0)
+        grassWeight = max(grassBlend - groundCutoff, 0.0)
+        soil = (dirt.xyz * dirtWeight + grass.xyz * grassWeight) /
+          max(dirtWeight + grassWeight, 0.001)
+      ground = soil
+      if stone.w >= 1.0 - mask.x:
+        ground = stone.xyz
+  var color = ground * vertColor * (0.75 + 0.5 * h)
   # Passability borders draw on upward faces only (walls sit exactly on
   # integer x/z, so the fract test would classify their every pixel as
   # border), and only while the edge display is toggled on. Each strip is
@@ -571,8 +601,11 @@ var
   heightScaleLocation, edgesEnabledLocation: GLint
   texScaleLocation, blendDepthLocation, heightBlendLocation: GLint
   terrainTexturesLocation, visibilityTexLocation: GLint
+  groundMaskLocation, groundMaskEnabledLocation, groundLayersLocation: GLint
   visibilityOffsetLocation, visibilityScaleLocation: GLint
-  terrainTextureArray, visibilityTexture: GLuint
+  terrainTextureArray, visibilityTexture, groundMaskTexture: GLuint
+  groundMaskActive = false
+  groundLayerIndices = vec3(4, 5, 0)
   waterProgram: GLuint
   waterMvpLocation, waterCameraLocation: GLint
   waterVisibilityTexLocation: GLint
@@ -1348,6 +1381,58 @@ proc uploadTerrainVisibility*(values: openArray[uint8]) =
     unsafeAddr values[0]
   )
   glBindTexture(GL_TEXTURE_2D, 0)
+
+proc uploadGroundMask*(values: openArray[uint8], size: int) =
+  ## Uploads a square two-channel coverage mask (stone, dirt) the terrain
+  ## shader samples by tile position, and switches the ground path on.
+  if values.len != size * size * 2:
+    raise newException(
+      QuadTerrainError,
+      "ground mask must hold two bytes per texel"
+    )
+  if groundMaskTexture == 0:
+    glGenTextures(1, groundMaskTexture.addr)
+    glBindTexture(GL_TEXTURE_2D, groundMaskTexture)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
+    glTexParameteri(
+      GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
+    glTexParameteri(
+      GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
+  glBindTexture(GL_TEXTURE_2D, groundMaskTexture)
+  glTexImage2D(
+    GL_TEXTURE_2D,
+    0,
+    GL_RG8.GLint,
+    size.GLsizei,
+    size.GLsizei,
+    0,
+    GL_RG,
+    GL_UNSIGNED_BYTE,
+    unsafeAddr values[0]
+  )
+  glBindTexture(GL_TEXTURE_2D, 0)
+  groundMaskActive = true
+
+proc clearGroundMask*() =
+  ## Returns the terrain to plain corner-material blending.
+  groundMaskActive = false
+
+proc setGroundLayers*(stone, dirt, grass: float32) =
+  ## Names the texture-array layers the ground mask path draws with.
+  groundLayerIndices = vec3(stone, dirt, grass)
+
+proc bindGroundMask() =
+  ## Sets the ground mask uniforms for one terrain draw. Units 2 and 3 are
+  ## the sun shadow maps.
+  glUniform1f(
+    groundMaskEnabledLocation, if groundMaskActive: 1.0 else: 0.0)
+  glUniform3f(
+    groundLayersLocation,
+    groundLayerIndices.x, groundLayerIndices.y, groundLayerIndices.z)
+  glActiveTexture(GL_TEXTURE4)
+  glBindTexture(GL_TEXTURE_2D, groundMaskTexture)
+  glUniform1i(groundMaskLocation, 4)
 
 proc showAllTerrain*() =
   ## Restores fully lit terrain for an omniscient spectator view.
@@ -2127,6 +2212,12 @@ proc initTerrain*() =
     terrainProgram,
     "visibilityTex"
   )
+  groundMaskLocation = glGetUniformLocation(terrainProgram, "groundMask")
+  groundMaskEnabledLocation = glGetUniformLocation(
+    terrainProgram,
+    "groundMaskEnabled"
+  )
+  groundLayersLocation = glGetUniformLocation(terrainProgram, "groundLayers")
   visibilityOffsetLocation = glGetUniformLocation(
     terrainProgram,
     "visibilityOffset"
@@ -2512,6 +2603,7 @@ proc drawTerrainRange*(
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(visibilityTexLocation, 1)
+  bindGroundMask()
   glActiveTexture(GL_TEXTURE0)
   glBindTexture(GL_TEXTURE_2D_ARRAY, terrainTextureArray)
   glUniform1i(terrainTexturesLocation, 0)
@@ -2542,6 +2634,7 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(visibilityTexLocation, 1)
+  bindGroundMask()
   glActiveTexture(GL_TEXTURE0)
   glBindTexture(GL_TEXTURE_2D_ARRAY, terrainTextureArray)
   glUniform1i(terrainTexturesLocation, 0)

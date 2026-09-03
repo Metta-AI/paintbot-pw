@@ -88,12 +88,24 @@ outside at six.
 
 ## Plaza paving
 
-The plaza's stone material is not a shipped texture. `graphics.nim` crops
-the square-stone swatch out of the enchanted meadow atlas at startup, tiles
-it into a sheet, derives a height map from its luminance, and swaps it in
-over the engine's flagstone layer. Roads use the cartoon pack's dirt. In
-the viewer, `D` flips roads between dirt and the engine's sand and rebakes
-the terrain, so the two can be compared live.
+Cobbles are discrete objects, not a blended material. `ground.nim` builds
+two things at startup, on the CPU, from nothing but the seed and the map:
+
+- A tiling cobble sheet of square-ish cells. Every stone carries one fixed
+  height in the sheet's height channel, mortar carries zero. Colours sit
+  near the square-stone swatch in the enchanted meadow atlas.
+- A ground mask at eight texels per tile with two channels: stone coverage,
+  full inside the plaza and falling off over a band past its radius, and
+  dirt coverage from a distance transform of every road and plaza tile.
+  Both distances carry a little low-frequency wobble. Gardens and house
+  pads are left to the ordinary tile materials.
+
+The terrain shader keeps a stone only where coverage still beats the
+stone's height, so the rim is ragged whole stones with dirt between them,
+and dirt then height-blends into grass. Roads ride the same dirt field, so
+they get rounded edges and join the plaza apron without a seam. Road and
+plaza tiles bake as grass underneath; the mask owns every stone and dirt
+texel. In the viewer, `D` swaps the dirt layer for the engine's sand.
 
 ## Commands
 
