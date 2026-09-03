@@ -73,9 +73,10 @@ const
   FenceSpacing = 1.3'f32
     ## One meadow fence piece is about this many tiles long at FenceHeight.
   FlowerHeight = 0.4'f32
-  BushHeight = 0.9'f32
+  BushHeight = 1.35'f32
   TuftHeight = 0.35'f32
-  VergeBushHeight = 0.8'f32
+  VergeBushHeight = 1.2'f32
+    ## Nobody trims anything; the villagers are busy with the vegetables.
   SmallRockHeight = 0.45'f32
   MediumRockHeight = 1.2'f32
   LargeRockHeight = 2.5'f32
