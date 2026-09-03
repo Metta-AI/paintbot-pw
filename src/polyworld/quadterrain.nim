@@ -1662,6 +1662,18 @@ proc bindGroundMask() =
     groundRingShapeLocation,
     groundRingShapeValues.x, groundRingShapeValues.y,
     groundRingShapeValues.z)
+  if groundMaskTexture == 0:
+    glGenTextures(1, groundMaskTexture.addr)
+    glBindTexture(GL_TEXTURE_2D, groundMaskTexture)
+    var pixel = [0'u8, 0]
+    glTexImage2D(
+      GL_TEXTURE_2D, 0, GL_RG8.GLint, 1, 1, 0,
+      GL_RG, GL_UNSIGNED_BYTE, pixel[0].addr
+    )
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
   glActiveTexture(GL_TEXTURE4)
   glBindTexture(GL_TEXTURE_2D, groundMaskTexture)
   glUniform1i(groundMaskLocation, 4)

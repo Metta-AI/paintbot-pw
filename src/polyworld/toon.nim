@@ -392,6 +392,23 @@ type
     skyColor*, horizonColor*, groundColor*: Color  ## background gradient
     horizonHeight*: float32      ## where the horizon sits, 0 bottom .. 1 top
 
+var blackTexture: GLuint
+
+proc ensureBlackTexture(): GLuint =
+  ## A 1x1 black texel for materials that have no emissive map.
+  if blackTexture == 0:
+    glGenTextures(1, blackTexture.addr)
+    glBindTexture(GL_TEXTURE_2D, blackTexture)
+    var pixel = [0'u8, 0, 0, 255]
+    glTexImage2D(
+      GL_TEXTURE_2D, 0, GL_RGBA.GLint, 1, 1, 0,
+      GL_RGBA, GL_UNSIGNED_BYTE, pixel[0].addr
+    )
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+    glBindTexture(GL_TEXTURE_2D, 0)
+  blackTexture
+
 proc uploadRamp(ctx: ToonContext, image: Image) =
   if ctx.rampTexture == 0:
     glGenTextures(1, ctx.rampTexture.addr)
@@ -556,7 +573,12 @@ proc drawPrimitive(
     material.baseColorFactor.b, material.baseColorFactor.a)
   glActiveTexture(GL_TEXTURE1)
   glUniform1i(u.emissiveTexture, 1)
-  glBindTexture(GL_TEXTURE_2D, material.data.emissiveId)
+  let emissiveId =
+    if material.data.emissiveId != 0:
+      material.data.emissiveId
+    else:
+      ensureBlackTexture()
+  glBindTexture(GL_TEXTURE_2D, emissiveId)
   glUniform3f(
     u.emissiveFactor, material.emissiveFactor.r, material.emissiveFactor.g,
     material.emissiveFactor.b)
