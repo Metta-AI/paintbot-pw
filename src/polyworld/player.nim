@@ -266,12 +266,7 @@ proc drawTransport*(
     followSelection: var bool
 ) =
   ## Draws the shared play/replay bar and applies clicks.
-  sk.draw9Patch(
-    "window.9patch",
-    sk.theme.windowPatch,
-    panel.origin,
-    panel.size
-  )
+  sk.drawRibbon(panel)
   let playing = player.playing or player.targetTick >= 0
   var x = 12.0'f32
   let

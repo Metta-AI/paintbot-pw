@@ -240,6 +240,18 @@ proc drawFaintFrame*(
     panel.size
   )
 
+proc drawRibbon*(
+    sk: Silky,
+    panel: GameUiPanel
+) =
+  ## Draws the shared transport ribbon 9-patch.
+  sk.draw9Patch(
+    "frame.pureblack.9patch",
+    sk.theme.framePatch,
+    panel.origin,
+    panel.size
+  )
+
 proc drawSlot*(
     sk: Silky,
     panel: GameUiPanel,
