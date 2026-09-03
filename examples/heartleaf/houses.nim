@@ -161,9 +161,12 @@ proc buildChalet(
     depth = float32(modules) * roof.along
     halfDepth = depth * 0.5'f32
     halfSpan = roof.span * 0.5'f32
-    doorX = round((b.rng.unit() - 0.5'f32) * 2.0'f32 * DoorReach)
-      ## Snapped to the foundation cube grid so a ground door takes exactly
-      ## one cube out.
+    gableCubes = int(ceil(roof.span - 2.0'f32))
+    cubeShift = float32(gableCubes - 1) * 0.5'f32
+    doorX = round((b.rng.unit() - 0.5'f32) * 2.0'f32 * DoorReach + cubeShift) -
+      cubeShift
+      ## Snapped onto the gable's cube positions, whole or half integers,
+      ## so a ground door takes exactly one cube out.
     doorZ = halfDepth
   ## Foundation: cubes under the eaves and along both gables.
   var z = -halfDepth + 0.5'f32
@@ -173,9 +176,8 @@ proc buildChalet(
     z += 1.0'f32
   ## Gable rows: enough cubes to meet the eave cubes, overlapping a little
   ## rather than leaving a corner open, and one cube out for a ground door.
-  let gableCubes = int(ceil(roof.span - 2.0'f32))
   for i in 0 ..< gableCubes:
-    let x = (float32(i) - float32(gableCubes - 1) * 0.5'f32)
+    let x = float32(i) - cubeShift
     for side in [1.0'f32, -1.0'f32]:
       let gap = side > 0 and not raisedDoor and abs(x - doorX) < 0.5'f32
       if not gap:
@@ -193,8 +195,12 @@ proc buildChalet(
   for side in [1.0'f32, -1.0'f32]:
     b.add(ValleyBuildings, "roof_structure_01a", 0, GableLift,
       halfDepth * side, Turn)
-  let doorLift = if raisedDoor: FoundationHeight else: 0.0'f32
-  b.add(ValleyBuildings, "door_01a", doorX, doorLift, doorZ + GableProud, Turn)
+  ## A raised door stands proud of the gable above the cubes; a ground
+  ## door stands proud of the cube faces, in the gap.
+  let
+    doorLift = if raisedDoor: FoundationHeight else: 0.0'f32
+    doorProud = if raisedDoor: GableProud else: 0.5'f32 + GableProud * 0.5'f32
+  b.add(ValleyBuildings, "door_01a", doorX, doorLift, doorZ + doorProud, Turn)
   if raisedDoor:
     b.add(MeadowBuildings, "stairs_03a", doorX, 0, doorZ + StairsStandOff)
   if b.rng.coin():
