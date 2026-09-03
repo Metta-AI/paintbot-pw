@@ -529,6 +529,64 @@ proc treeFrag(
     1.0
   )
 
+proc texturedPropVert(
+    gl_Position: var Vec4,
+    vertPos: Vec3,
+    vertUv: Vec3,
+    normal: Vec3,
+    vertTint: Vec3,
+    fragUv: var Vec3,
+    fragmentNormal: var Vec3,
+    fragmentPosition: var Vec3,
+    shadowPos: var Vec3,
+    fragTint: var Vec3
+) =
+  ## Tree vertex outputs plus a per-instance tint for textured props.
+  gl_Position = mvp * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)
+  shadowPos = vec3(
+    vertPos.x + normal.x * 0.08,
+    vertPos.y + normal.y * 0.08,
+    vertPos.z + normal.z * 0.08
+  )
+  fragUv = vertUv
+  fragmentNormal = normal
+  fragmentPosition = vertPos
+  fragTint = vertTint
+
+proc texturedPropFrag(
+    fragColor: var Vec4,
+    fragUv: Vec3,
+    fragmentNormal,
+    fragmentPosition: Vec3,
+    shadowPos: Vec3,
+    fragTint: Vec3
+) =
+  ## The tree cutout shading with the instance tint folded into the paint.
+  let texel = texture(treeTextures, fragUv)
+  if texel.w < treeAlphaCutoff:
+    discardFragment()
+  let
+    visibilityUv = vec2(
+      (fragmentPosition.x + visibilityOffset) * visibilityScale,
+      (fragmentPosition.z + visibilityOffset) * visibilityScale
+    )
+    visibility = smoothstep(
+      0.05,
+      0.95,
+      texture(visibilityTex, visibilityUv).x
+    )
+    paint = vec3(
+      texel.x * fragTint.x, texel.y * fragTint.y, texel.z * fragTint.z)
+    litColor = envShadeTwoSided(
+      paint, fragmentNormal, sampleSunShadow(shadowPos))
+    gray = dot(litColor, vec3(0.30, 0.59, 0.11)) * 0.32
+  fragColor = vec4(
+    litColor.x * visibility + gray * (1.0 - visibility),
+    litColor.y * visibility + gray * (1.0 - visibility),
+    litColor.z * visibility + gray * (1.0 - visibility),
+    1.0
+  )
+
 proc compileStage(kind: GLenum, source, label: string): GLuint =
   ## Compiles one OpenGL shader stage or terminates with its diagnostic.
   result = glCreateShader(kind)
@@ -668,7 +726,13 @@ var
   propMvpLocation, propVisibilityTexLocation: GLint
   propVisibilityOffsetLocation, propVisibilityScaleLocation: GLint
   propTintLocation: GLint
-  treeProgram: GLuint
+  treeProgram, texturedPropProgram: GLuint
+  texturedPropMvpLocation, texturedPropVisibilityTexLocation: GLint
+  texturedPropVisibilityOffsetLocation: GLint
+  texturedPropVisibilityScaleLocation: GLint
+  texturedPropTexturesLocation, texturedPropAlphaCutoffLocation: GLint
+  texturedPropEnv: EnvLocations
+  texturedPropShadow: ShadowLocations
   treeMvpLocation, treeVisibilityTexLocation: GLint
   treeVisibilityOffsetLocation, treeVisibilityScaleLocation: GLint
   treeTexturesLocation, treeAlphaCutoffLocation: GLint
@@ -711,9 +775,10 @@ type
     textureArray: GLuint    # set when the pack was loaded textured
 
   TexturedBatch = object
-    ## Every baked placement of one textured pack, drawn like the trees.
+    ## Every baked placement of one textured pack, drawn like the trees
+    ## with a per-instance tint.
     textureArray: GLuint
-    mesh: seq[float32]      # x y z u v layer nx ny nz
+    mesh: seq[float32]      # x y z u v layer nx ny nz r g b
     vertexArray, vertexBuffer, depthVertexArray: GLuint
 
   PropPlacement = object
@@ -721,6 +786,7 @@ type
     position: Vec3
     rotation: float32
     scale: float32
+    tint: Vec3              # multiplies the texture of textured models
 
   TreeModel = object
     name: string
@@ -1193,9 +1259,11 @@ proc placeProp*(
     name: string,
     position: Vec3,
     rotation = 0.0'f32,
-    scale = 1.0'f32
+    scale = 1.0'f32,
+    tint = vec3(1, 1, 1)
 ) =
-  ## Adds one named prop to the next baked terrain mesh.
+  ## Adds one named prop to the next baked terrain mesh. The tint multiplies
+  ## the paint of textured models and is ignored by vertex-coloured ones.
   if not pack.hasProp(name):
     raise newException(
       QuadTerrainError,
@@ -1205,7 +1273,8 @@ proc placeProp*(
     model: pack.models[pack.names[name]],
     position: position,
     rotation: rotation,
-    scale: scale
+    scale: scale,
+    tint: tint
   )
 
 proc clearProps*() =
@@ -1817,6 +1886,7 @@ proc bakeTexturedInstance(
     position: Vec3,
     rotation,
     instanceScale: float32,
+    tint: Vec3,
     mesh: var seq[float32]
 ) =
   ## Appends one transformed textured prop to a batch mesh.
@@ -1841,12 +1911,15 @@ proc bakeTexturedInstance(
     mesh.add cosine * normalX - sine * normalZ
     mesh.add model.vertices[i + 7]
     mesh.add sine * normalX + cosine * normalZ
+    mesh.add tint.x
+    mesh.add tint.y
+    mesh.add tint.z
     i += 9
 
 proc initTexturedVertexArrays(batch: var TexturedBatch) =
-  ## Creates the tree-layout vertex arrays for one textured batch: the lit
-  ## draw and the position-plus-uv view for the cutout depth pass.
-  const stride = (9 * sizeof(float32)).GLsizei
+  ## Creates the vertex arrays for one textured batch: the tinted lit draw
+  ## and the position-plus-uv view for the cutout depth pass.
+  const stride = (12 * sizeof(float32)).GLsizei
   glGenBuffers(1, batch.vertexBuffer.addr)
   glGenVertexArrays(1, batch.vertexArray.addr)
   glBindVertexArray(batch.vertexArray)
@@ -1854,9 +1927,11 @@ proc initTexturedVertexArrays(batch: var TexturedBatch) =
   for attribute in [
     (name: "vertPos", count: 3, offset: 0),
     (name: "vertUv", count: 3, offset: 3 * sizeof(float32)),
-    (name: "normal", count: 3, offset: 6 * sizeof(float32))
+    (name: "normal", count: 3, offset: 6 * sizeof(float32)),
+    (name: "vertTint", count: 3, offset: 9 * sizeof(float32))
   ]:
-    let location = glGetAttribLocation(treeProgram, attribute.name.cstring)
+    let location = glGetAttribLocation(
+      texturedPropProgram, attribute.name.cstring)
     doAssert location >= 0
     glEnableVertexAttribArray(location.GLuint)
     glVertexAttribPointer(
@@ -1896,7 +1971,7 @@ proc rebuildTexturedBatches() =
       found = texturedBatches.high
     bakeTexturedInstance(
       placement.model, placement.position, placement.rotation,
-      placement.scale, texturedBatches[found].mesh)
+      placement.scale, placement.tint, texturedBatches[found].mesh)
   for batch in texturedBatches.mitems:
     if batch.mesh.len == 0:
       continue
@@ -2589,6 +2664,23 @@ proc initTerrain*() =
     treeProgram,
     "visibilityScale"
   )
+  texturedPropProgram = compileProgram(
+    toShader(texturedPropVert, OpenGlShaderTarget, shaderVertex),
+    toShader(texturedPropFrag, OpenGlShaderTarget, shaderFragment)
+  )
+  texturedPropMvpLocation = glGetUniformLocation(texturedPropProgram, "mvp")
+  texturedPropEnv = envLocations(texturedPropProgram)
+  texturedPropShadow = shadowLocations(texturedPropProgram)
+  texturedPropVisibilityTexLocation = glGetUniformLocation(
+    texturedPropProgram, "visibilityTex")
+  texturedPropVisibilityOffsetLocation = glGetUniformLocation(
+    texturedPropProgram, "visibilityOffset")
+  texturedPropVisibilityScaleLocation = glGetUniformLocation(
+    texturedPropProgram, "visibilityScale")
+  texturedPropTexturesLocation = glGetUniformLocation(
+    texturedPropProgram, "treeTextures")
+  texturedPropAlphaCutoffLocation = glGetUniformLocation(
+    texturedPropProgram, "treeAlphaCutoff")
   treeTexturesLocation = glGetUniformLocation(treeProgram, "treeTextures")
   treeAlphaCutoffLocation = glGetUniformLocation(
     treeProgram,
@@ -2907,6 +2999,34 @@ proc drawTexturedMesh(
   glDrawArrays(GL_TRIANGLES, 0, vertexCount.GLsizei)
   glBindVertexArray(0)
 
+proc drawTexturedBatch(batch: TexturedBatch, mvp: Mat4) =
+  ## Draws one textured prop batch with its per-instance tints.
+  var matrix = mvp
+  glUseProgram(texturedPropProgram)
+  setEnvUniforms(texturedPropEnv)
+  setShadowUniforms(texturedPropShadow)
+  glUniformMatrix4fv(
+    texturedPropMvpLocation,
+    1,
+    GL_FALSE,
+    cast[ptr float32](matrix.addr)
+  )
+  glUniform1f(texturedPropVisibilityOffsetLocation, HalfGrid)
+  glUniform1f(
+    texturedPropVisibilityScaleLocation,
+    1.0'f32 / GridTiles.float32
+  )
+  glUniform1f(texturedPropAlphaCutoffLocation, TreeAlphaCutoff)
+  glActiveTexture(GL_TEXTURE1)
+  glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+  glUniform1i(texturedPropVisibilityTexLocation, 1)
+  glActiveTexture(GL_TEXTURE0)
+  glBindTexture(GL_TEXTURE_2D_ARRAY, batch.textureArray)
+  glUniform1i(texturedPropTexturesLocation, 0)
+  glBindVertexArray(batch.vertexArray)
+  glDrawArrays(GL_TRIANGLES, 0, (batch.mesh.len div 12).GLsizei)
+  glBindVertexArray(0)
+
 proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
   ## Opaque terrain and prop passes. Disables back-face culling itself (the
   ## gltf PBR renderer's beginFrame leaves culling on and the terrain mesh
@@ -2966,8 +3086,7 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
       treeVertexArray, treeTextureArray, treeMesh.len div 9, mvp)
   for batch in texturedBatches:
     if batch.mesh.len > 0:
-      drawTexturedMesh(
-        batch.vertexArray, batch.textureArray, batch.mesh.len div 9, mvp)
+      drawTexturedBatch(batch, mvp)
   glUseProgram(0)
 
 proc drawWater*(viewProjection: Mat4, cameraEye: Vec3) =
@@ -3027,7 +3146,7 @@ proc drawTerrainSunDepth*(firstVertex = 0, vertexCount = -1) =
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_2D_ARRAY, batch.textureArray)
     glBindVertexArray(batch.depthVertexArray)
-    glDrawArrays(GL_TRIANGLES, 0, (batch.mesh.len div 9).GLsizei)
+    glDrawArrays(GL_TRIANGLES, 0, (batch.mesh.len div 12).GLsizei)
   glBindVertexArray(0)
 
 proc drawPropSunDepth*(

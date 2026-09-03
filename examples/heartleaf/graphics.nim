@@ -274,7 +274,8 @@ proc runGraphics*() =
         GardenPropScale
       )
     for d in placeDecor(run.world.map, run.mapSeed):
-      kits[d.kit].placeProp(d.node, decorWorldPoint(d), d.yaw, d.height)
+      kits[d.kit].placeProp(
+        d.node, decorWorldPoint(d), d.yaw, d.height, d.tint)
     bakeTerrain(rebuildWalkability = false)
 
   profileBlock "props":

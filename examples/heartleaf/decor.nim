@@ -10,6 +10,7 @@
 
 import
   std/[math, sets],
+  vmath,
   polyworld/[pathing, rngs],
   content,
   maps
@@ -33,6 +34,8 @@ type
     height*: float32
       ## Tiles tall. The prop loader normalises models to unit height, so
       ## this is the placement scale.
+    tint*: Vec3
+      ## Multiplies the paint of textured props; one for as authored.
 
   Placer = object
     map: MapData
@@ -85,9 +88,18 @@ const
   HouseDecorAttempts = 12
   GardenFlowerOneIn = 3'i32
   RoadDecorOneIn = 3'i32
-  NaturalVariance = 0.3'f32
+  NaturalVariance = 0.45'f32
     ## Things that grew or were left lying vary this much in size either
     ## way. Things gnomes made, signs, lamps, fences, do not.
+  PlantShade = 0.15'f32
+  PlantWarmth = 0.12'f32
+    ## Plants drift in brightness and between cool and warm green, so a
+    ## row of bushes is not one bush.
+  RockShade = 0.15'f32
+  RockCobble = 0.6'f32
+    ## Rocks drift toward the plaza cobble's mauve grey by up to this much.
+  CobbleHue = vec3(1.0, 0.905, 0.952)
+    ## The cobble base colour relative to its red channel.
   MediumRockOneIn = 12'i32
   LargeRockOneIn = 40'i32
 
@@ -139,6 +151,23 @@ proc pick[T](rng: var Rng, items: openArray[T]): T =
   ## One uniformly chosen item.
   items[rng.below(int32(items.len))]
 
+proc plantTint(rng: var Rng): Vec3 =
+  ## A slightly brighter or darker, cooler or warmer green.
+  let
+    shade = 1.0'f32 + (rng.unit() - 0.5'f32) * 2.0'f32 * PlantShade
+    warmth = (rng.unit() - 0.5'f32) * 2.0'f32 * PlantWarmth
+  vec3(
+    shade * (1.0'f32 + warmth),
+    shade,
+    shade * (1.0'f32 - warmth))
+
+proc rockTint(rng: var Rng): Vec3 =
+  ## A rock shaded a little and pulled toward the cobble colour.
+  let
+    shade = 1.0'f32 + (rng.unit() - 0.5'f32) * 2.0'f32 * RockShade
+    pull = rng.unit() * RockCobble
+  mix(vec3(1, 1, 1), CobbleHue, pull) * shade
+
 proc yawAlong(x, y: float32): float32 =
   ## The yaw that points a prop's forward axis along a tile-space direction,
   ## matching how the houses face their doors.
@@ -163,17 +192,17 @@ proc nearRoad(p: Placer, x, y: int32): bool =
 
 proc add(
     p: var Placer, kit: DecorKit, node: string, area: DecorArea,
-    x, y, yaw, height: float32, lift = 0.0'f32
+    x, y, yaw, height: float32, lift = 0.0'f32, tint = vec3(1, 1, 1)
 ) =
   ## Records one decoration.
   p.placed.add Decoration(
     kit: kit, node: node, area: area, x: x, y: y, lift: lift, yaw: yaw,
-    height: height)
+    height: height, tint: tint)
 
 proc claim(
     p: var Placer, kit: DecorKit, node: string, area: DecorArea,
     tileX, tileY: int32, yaw, height: float32, jitter = 0.0'f32,
-    variance = 0.0'f32
+    variance = 0.0'f32, tint = vec3(1, 1, 1)
 ): bool =
   ## Places one decoration on a free grass tile and marks the tile used.
   ## Jitter moves it off the tile centre by up to that many tiles;
@@ -187,7 +216,7 @@ proc claim(
     grown = height * (1.0'f32 + (p.rng.unit() - 0.5'f32) * 2.0'f32 * variance)
   p.add(kit, node, area,
     float32(tileX) + 0.5'f32 + offsetX, float32(tileY) + 0.5'f32 + offsetY,
-    yaw, grown)
+    yaw, grown, 0.0, tint)
   true
 
 proc dressPlaza(p: var Placer) =
@@ -305,7 +334,8 @@ proc dressHouses(p: var Placer) =
       if max(abs(x - cx), abs(y - cy)) < 2:
         continue
       if p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), HouseArea, x, y,
-          p.rng.unit() * 2 * PI, FlowerHeight, 0.25, NaturalVariance):
+          p.rng.unit() * 2 * PI, FlowerHeight, 0.25, NaturalVariance,
+          p.rng.plantTint()):
         inc beds
     for attempt in 0 ..< HouseDecorAttempts:
       let
@@ -315,7 +345,8 @@ proc dressHouses(p: var Placer) =
         continue
       let bush = if p.rng.below(2) == 0: "flower_bush_01a" else: "bush_01a"
       if p.claim(MeadowVegetation, bush, HouseArea, x, y,
-          p.rng.unit() * 2 * PI, BushHeight, 0.2, NaturalVariance):
+          p.rng.unit() * 2 * PI, BushHeight, 0.2, NaturalVariance,
+          p.rng.plantTint()):
         break
 
 proc dressGardens(p: var Placer) =
@@ -337,7 +368,8 @@ proc dressGardens(p: var Placer) =
           fenced = true
       elif p.rng.below(GardenFlowerOneIn) == 0:
         discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), GardenArea,
-          x, y, p.rng.unit() * 2 * PI, FlowerHeight, 0.25, NaturalVariance)
+          x, y, p.rng.unit() * 2 * PI, FlowerHeight, 0.25, NaturalVariance,
+          p.rng.plantTint())
         break
 
 proc dressVerges(p: var Placer) =
@@ -364,16 +396,16 @@ proc dressVerges(p: var Placer) =
       case p.rng.below(4)
       of 0:
         discard p.claim(MeadowVegetation, p.rng.pick(Tufts), RoadArea, x, y,
-          yaw, TuftHeight, 0.3, NaturalVariance)
+          yaw, TuftHeight, 0.3, NaturalVariance, p.rng.plantTint())
       of 1:
         discard p.claim(MeadowVegetation, "bush_01a", RoadArea, x, y, yaw,
-          VergeBushHeight, 0.2, NaturalVariance)
+          VergeBushHeight, 0.2, NaturalVariance, p.rng.plantTint())
       of 2:
         discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), RoadArea, x, y,
-          yaw, SmallRockHeight, 0.3, NaturalVariance)
+          yaw, SmallRockHeight, 0.3, NaturalVariance, p.rng.rockTint())
       else:
         discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), RoadArea,
-          x, y, yaw, FlowerHeight, 0.3, NaturalVariance)
+          x, y, yaw, FlowerHeight, 0.3, NaturalVariance, p.rng.plantTint())
 
 proc dressOutskirts(p: var Placer) =
   ## Boulders in the meadow between the village and the forest wall.
@@ -388,10 +420,11 @@ proc dressOutskirts(p: var Placer) =
       let yaw = p.rng.unit() * 2 * PI
       if p.rng.below(LargeRockOneIn) == 0:
         discard p.claim(MeadowRocks, "rock_large_01a", OutskirtsArea, x, y,
-          yaw, LargeRockHeight, 0.0, NaturalVariance)
+          yaw, LargeRockHeight, 0.0, NaturalVariance, p.rng.rockTint())
       elif p.rng.below(MediumRockOneIn) == 0:
         discard p.claim(MeadowRocks, p.rng.pick(MediumRocks), OutskirtsArea,
-          x, y, yaw, MediumRockHeight, 0.3, NaturalVariance)
+          x, y, yaw, MediumRockHeight, 0.3, NaturalVariance,
+          p.rng.rockTint())
 
 proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   ## Every decoration for one map, in a fixed order from one seeded stream.
