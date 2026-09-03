@@ -15,7 +15,7 @@ import
 const
   LevelCount* = 6      ## surface, pyramid, rooms, caves, lava hall, vault
   PartySize* = 4
-  InventorySlots* = 6
+  InventorySlots* = 2
   ChatLines* = 16      ## ring buffer of recent party chatter
   TilesPerLevel* = GridTiles * GridTiles
   WorldTiles* = LevelCount * TilesPerLevel
@@ -238,16 +238,39 @@ type
     path*: seq[PathStep]
     pathIndex*: int32
     stuckTicks*: int16
+    hasteTicks*: int16
 
 ## Items, doors, chat
 
 type
-  Treasure* = enum
-    GoldPile, Gemstone, Chalice, Idol, Crown
+  LootKind* = enum
+    ## Floor drops. Treasure kinds only add gold. Gear kinds also fill Q or E.
+    GoldPile,
+    Gemstone,
+    Chalice,
+    Idol,
+    Crown,
+    HealingPotionLoot,
+    ManaPotionLoot,
+    BattleHornLoot,
+    WingedBootLoot,
+    IronFlailLoot,
+    InfernoAegisLoot,
+    BlazingBladeLoot,
+    IceWallLoot,
+    LightningStormLoot,
+    ArcaneMeteorLoot,
+    VoidBladeLoot,
+    ShadowCometLoot,
+    GaleSlashLoot,
+    ThornRingLoot,
+    FirePhoenixLoot,
+    NatureTalismanLoot,
+    CosmicFlareLoot
 
   Item* = object
     id*: int32
-    treasure*: Treasure
+    kind*: LootKind
     tile*: TileRef
     carrier*: int32            ## actor id, 0 when lying on the floor
     value*: int32
@@ -267,8 +290,52 @@ type
     value*: int32
     tick*: int32
 
-const TreasureValues*: array[Treasure, int32] = [10, 60, 140, 300, 900]
-const TreasureWeights*: array[Treasure, int32] = [5, 2, 8, 40, 15]
+const
+  LootValues*: array[LootKind, int32] = [
+    12, 60, 140, 300, 900,
+    40, 45, 80, 100,
+    70, 75, 90,
+    70, 110, 120,
+    80, 85, 90, 70,
+    100, 85, 95
+  ]
+  LootWeights*: array[LootKind, int32] = [
+    0, 0, 0, 0, 0,
+    1, 1, 2, 2,
+    2, 2, 2,
+    2, 2, 2,
+    2, 2, 2, 1,
+    2, 1, 2
+  ]
+  LootAbilities*: array[LootKind, Ability] = [
+    NoAbility, NoAbility, NoAbility, NoAbility, NoAbility,
+    HealingPotion, ManaCrystal, BattleHorn, WingedBoot,
+    IronFlail, InfernoAegis, BlazingBlade,
+    IceWall, LightningStorm, ArcaneMeteor,
+    VoidBlade, ShadowComet, GaleSlash, ThornRing,
+    FirePhoenix, NatureTalisman, CosmicFlare
+  ]
+  LootConsumable*: array[LootKind, bool] = [
+    false, false, false, false, false,
+    true, true, false, false,
+    false, false, false,
+    false, false, false,
+    false, false, false, false,
+    false, false, false
+  ]
+  HeroAbilities*: array[HeroClass, array[4, Ability]] = [
+    [FirebrandSword, MoltenFist, LionGuard, BlazingBlade],
+    [MeteorStrike, FrostLance, VoidPortal, LightningStorm],
+    [VenomDagger, VerdantArrow, ShadowCloak, GaleSlash],
+    [SolarHammer, HealingBloom, AngelicEmblem, SunOrb]
+  ]
+  UsableLoot*: array[17, LootKind] = [
+    HealingPotionLoot, ManaPotionLoot, BattleHornLoot, WingedBootLoot,
+    IronFlailLoot, InfernoAegisLoot, BlazingBladeLoot,
+    IceWallLoot, LightningStormLoot, ArcaneMeteorLoot,
+    VoidBladeLoot, ShadowCometLoot, GaleSlashLoot, ThornRingLoot,
+    FirePhoenixLoot, NatureTalismanLoot, CosmicFlareLoot
+  ]
 
 ## Class tuning
 
@@ -369,6 +436,10 @@ type World* = ref object
   nextItemId*: int32
 
 ## Small helpers on the types above
+
+proc lootUsesSlot*(kind: LootKind): bool =
+  ## True when this drop occupies a Q or E slot after pickup.
+  LootAbilities[kind] != NoAbility
 
 proc tileIndex*(tile: TileRef): int32 =
   ## Flat index into `claims`, `explored`, and the visibility bitmaps.

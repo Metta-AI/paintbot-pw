@@ -52,6 +52,22 @@ proc queueHealTarget*(slot, targetId: int32) =
     first: targetId
   ))
 
+proc queueUseItem*(slot, bag: int32) =
+  ## Queues using one carried item.
+  queueHeroAction(slot, ReplayAction(
+    kind: ActionUseItem,
+    heroId: 100 + slot,
+    first: bag
+  ))
+
+proc queueDropItem*(slot, bag: int32) =
+  ## Queues dropping one carried item onto the hero's tile.
+  queueHeroAction(slot, ReplayAction(
+    kind: ActionDropItem,
+    heroId: 100 + slot,
+    first: bag
+  ))
+
 proc flushPlayerCommands*(game: Game) =
   ## Drains the human queue on that hero's decision turn.
   if pending.len == 0:

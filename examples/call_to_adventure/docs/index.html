@@ -141,7 +141,7 @@
         <a href="#dungeon">Dungeon</a>
         <a href="#party">Party</a>
         <a href="#monsters">Monsters</a>
-        <a href="#treasure">Treasure</a>
+        <a href="#loot">Loot</a>
       </nav>
     </div>
   </header>
@@ -149,15 +149,16 @@
   <main class="wrap">
     <p class="lede">
       A fighter, a wizard, a rogue, and a cleric descend a seeded dungeon.
-      Clear each floor, haul treasure, then climb back to the surface before
-      the vault's reinforcements close the way out.
+      They start with empty bags. Kill monsters for gold and gear, pick the
+      piles up off the floor, then climb back to the surface before the
+      vault's reinforcements close the way out.
     </p>
 
     <section class="facts">
       <div class="fact"><img src="../../../../polyworld_data/icons/champion.png" alt=""><div><b>4</b><span>HEROES</span></div></div>
       <div class="fact"><img src="../../../../polyworld_data/icons/map_marker.png" alt=""><div><b>6</b><span>LEVELS</span></div></div>
-      <div class="fact"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>6</b><span>ITEM SLOTS</span></div></div>
-      <div class="fact"><img src="../../../../polyworld_data/icons/gold.png" alt=""><div><b>5</b><span>TREASURES</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>2</b><span>ITEM SLOTS</span></div></div>
+      <div class="fact"><img src="../../../../polyworld_data/icons/gold.png" alt=""><div><b>22</b><span>DROPS</span></div></div>
       <div class="fact"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>20</b><span>MINUTES</span></div></div>
     </section>
 
@@ -173,19 +174,23 @@
             script drives each hero.
           </p>
           <p>
-            The party starts on the surface and fights down. When the vault is
-            empty they turn around. On the climb, monsters respawn on floors
-            above them every 15 seconds. Treasure is worth more the deeper it
-            dropped. A hero banks gold only after reaching the surface. If
-            everyone dies, the run is lost. If time runs out, the match ends
-            wherever they stand.
+            The party starts on the surface with no items and fights down.
+            When the vault is empty they turn around. On the climb, monsters
+            respawn on floors above them every 15 seconds. Every kill drops
+            gold. Deeper floors, and golems, can also drop a usable item.
+            Gold goes into that hero's purse, not a shared pot. Gear fills
+            one of two item slots. A hero banks gold only after reaching the
+            surface. If everyone dies, the
+            run is lost. If time runs out, the match ends wherever they stand.
           </p>
           <p>
-            Each class has a ten-ability HUD bar (keys 1–6, Q, E, R, F). The
-            native AI spends combat on one primary strike, uses Chain Axe to
-            pick up loot, and lets the cleric cast Healing Bloom. Damage rolls
-            <b>base + 0..spread</b>, then a class power percent. Healing is
-            negative damage and skips that percent.
+            Each class has four abilities (keys 1–4) and two item slots
+            (Q, E). Click a pile or item on the floor to pick it up. Click an
+            item slot or press Q or E to use it. Right-click a slot or hold
+            Shift and press Q or E to drop it. Clicking an enemy paints it
+            with a red outline. Damage rolls <b>base + 0..spread</b>, then a
+            class power percent. Healing is negative damage and skips that
+            percent.
           </p>
         </div>
         <div class="lanes">
@@ -204,7 +209,7 @@
       <h2>Heroes and ability bars</h2>
       <p>
         Speed is in tiles per second. Power is the percent applied to strike
-        damage. Carry is inventory weight. Light is vision radius in tiles.
+        damage. Items is the two-slot bag. Light is vision radius in tiles.
       </p>
       <div class="roster">
         <article class="hero-card">
@@ -220,7 +225,7 @@
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>0</b><span class="muted">MANA</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>150%</b><span class="muted">POWER</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.50</b><span class="muted">SPEED</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>120</b><span class="muted">CARRY</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>2</b><span class="muted">ITEMS</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>6</b><span class="muted">LIGHT</span></div></div>
               </div>
             </div>
@@ -229,13 +234,7 @@
             <div class="ability"><img src="../../../../polyworld_data/abilities/firebrand_sword.png" alt=""><div class="key">1</div><div><h4>Firebrand Sword</h4><div class="meta"><span class="tag">PRIMARY</span><span class="tag">14–20 DMG</span><span class="tag">21–30 HIT</span><span class="tag">1 TILE</span><span class="tag">NO CD</span></div></div></div>
             <div class="ability"><img src="../../../../polyworld_data/abilities/molten_fist.png" alt=""><div class="key">2</div><div><h4>Molten Fist</h4><div class="meta"><span class="tag">34–44 DMG</span><span class="tag">51–66 HIT</span><span class="tag">1 TILE</span><span class="tag">5s CD</span></div></div></div>
             <div class="ability"><img src="../../../../polyworld_data/abilities/lion_guard.png" alt=""><div class="key">3</div><div><h4>Lion Guard</h4><div class="meta"><span class="tag">SELF</span><span class="tag">2s CD</span><span class="tag">NO MANA</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/chain_axe.png" alt=""><div class="key">4</div><div><h4>Chain Axe</h4><div class="meta"><span class="tag loot">LOOT PICKUP</span><span class="tag">NO CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/arcane_gateway.png" alt=""><div class="key">5</div><div><h4>Arcane Gateway</h4><div class="meta"><span class="tag">1 TILE</span><span class="tag">NO CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/battle_horn.png" alt=""><div class="key">6</div><div><h4>Battle Horn</h4><div class="meta"><span class="tag">0.5s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/iron_flail.png" alt=""><div class="key">Q</div><div><h4>Iron Flail</h4><div class="meta"><span class="tag">18–26 DMG</span><span class="tag">27–39 HIT</span><span class="tag">2 TILES</span><span class="tag">3s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/inferno_aegis.png" alt=""><div class="key">E</div><div><h4>Inferno Aegis</h4><div class="meta"><span class="tag">SELF</span><span class="tag">2.7s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/winged_boot.png" alt=""><div class="key">R</div><div><h4>Winged Boot</h4><div class="meta"><span class="tag">3 TILES</span><span class="tag">7.5s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/blazing_blade.png" alt=""><div class="key">F</div><div><h4>Blazing Blade</h4><div class="meta"><span class="tag">28–36 DMG</span><span class="tag">42–54 HIT</span><span class="tag">1 TILE</span><span class="tag">4s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/blazing_blade.png" alt=""><div class="key">4</div><div><h4>Blazing Blade</h4><div class="meta"><span class="tag">28–36 DMG</span><span class="tag">42–54 HIT</span><span class="tag">1 TILE</span><span class="tag">4s CD</span></div></div></div>
           </div>
         </article>
 
@@ -252,7 +251,7 @@
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>160</b><span class="muted">MANA</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>125%</b><span class="muted">POWER</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.60</b><span class="muted">SPEED</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>45</b><span class="muted">CARRY</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>2</b><span class="muted">ITEMS</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>8</b><span class="muted">LIGHT</span></div></div>
               </div>
             </div>
@@ -261,13 +260,7 @@
             <div class="ability"><img src="../../../../polyworld_data/abilities/meteor_strike.png" alt=""><div class="key">1</div><div><h4>Meteor Strike</h4><div class="meta"><span class="tag">PRIMARY</span><span class="tag">22–30 DMG</span><span class="tag">27–37 HIT</span><span class="tag">12 MANA</span><span class="tag">7 TILES</span><span class="tag">1.5s CD</span></div></div></div>
             <div class="ability"><img src="../../../../polyworld_data/abilities/frost_lance.png" alt=""><div class="key">2</div><div><h4>Frost Lance</h4><div class="meta"><span class="tag">10–14 DMG</span><span class="tag">12–17 HIT</span><span class="tag">16 MANA</span><span class="tag">5 TILES</span><span class="tag">4s CD</span></div></div></div>
             <div class="ability"><img src="../../../../polyworld_data/abilities/void_portal.png" alt=""><div class="key">3</div><div><h4>Void Portal</h4><div class="meta"><span class="tag">20 MANA</span><span class="tag">4 TILES</span><span class="tag">10s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/chain_axe.png" alt=""><div class="key">4</div><div><h4>Chain Axe</h4><div class="meta"><span class="tag loot">LOOT PICKUP</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/arcane_gateway.png" alt=""><div class="key">5</div><div><h4>Arcane Gateway</h4><div class="meta"><span class="tag">1 TILE</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/battle_horn.png" alt=""><div class="key">6</div><div><h4>Battle Horn</h4><div class="meta"><span class="tag">0.5s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/ice_wall.png" alt=""><div class="key">Q</div><div><h4>Ice Wall</h4><div class="meta"><span class="tag">SELF</span><span class="tag">3.3s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/lightning_storm.png" alt=""><div class="key">E</div><div><h4>Lightning Storm</h4><div class="meta"><span class="tag">30–40 DMG</span><span class="tag">37–50 HIT</span><span class="tag">18 MANA</span><span class="tag">6 TILES</span><span class="tag">2s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/mana_crystal.png" alt=""><div class="key">R</div><div><h4>Mana Crystal</h4><div class="meta"><span class="tag">14 MANA</span><span class="tag">3 TILES</span><span class="tag">5s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/arcane_meteor.png" alt=""><div class="key">F</div><div><h4>Arcane Meteor</h4><div class="meta"><span class="tag">36–48 DMG</span><span class="tag">45–60 HIT</span><span class="tag">22 MANA</span><span class="tag">8 TILES</span><span class="tag">3s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/lightning_storm.png" alt=""><div class="key">4</div><div><h4>Lightning Storm</h4><div class="meta"><span class="tag">30–40 DMG</span><span class="tag">37–50 HIT</span><span class="tag">18 MANA</span><span class="tag">6 TILES</span><span class="tag">2s CD</span></div></div></div>
           </div>
         </article>
 
@@ -284,7 +277,7 @@
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>40</b><span class="muted">MANA</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>135%</b><span class="muted">POWER</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>3.40</b><span class="muted">SPEED</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>70</b><span class="muted">CARRY</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>2</b><span class="muted">ITEMS</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>5</b><span class="muted">LIGHT</span></div></div>
               </div>
             </div>
@@ -293,13 +286,7 @@
             <div class="ability"><img src="../../../../polyworld_data/abilities/venom_dagger.png" alt=""><div class="key">1</div><div><h4>Venom Dagger</h4><div class="meta"><span class="tag">PRIMARY</span><span class="tag">12–16 DMG</span><span class="tag">16–21 HIT</span><span class="tag">1 TILE</span><span class="tag">4s CD</span></div></div></div>
             <div class="ability"><img src="../../../../polyworld_data/abilities/verdant_arrow.png" alt=""><div class="key">2</div><div><h4>Verdant Arrow</h4><div class="meta"><span class="tag">9–14 DMG</span><span class="tag">12–18 HIT</span><span class="tag">6 TILES</span><span class="tag">1s CD</span></div></div></div>
             <div class="ability"><img src="../../../../polyworld_data/abilities/shadow_cloak.png" alt=""><div class="key">3</div><div><h4>Shadow Cloak</h4><div class="meta"><span class="tag">SELF</span><span class="tag">15s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/chain_axe.png" alt=""><div class="key">4</div><div><h4>Chain Axe</h4><div class="meta"><span class="tag loot">LOOT PICKUP</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/arcane_gateway.png" alt=""><div class="key">5</div><div><h4>Arcane Gateway</h4><div class="meta"><span class="tag">1 TILE</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/battle_horn.png" alt=""><div class="key">6</div><div><h4>Battle Horn</h4><div class="meta"><span class="tag">0.5s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/void_blade.png" alt=""><div class="key">Q</div><div><h4>Void Blade</h4><div class="meta"><span class="tag">16–21 DMG</span><span class="tag">21–28 HIT</span><span class="tag">1 TILE</span><span class="tag">3.3s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/shadow_comet.png" alt=""><div class="key">E</div><div><h4>Shadow Comet</h4><div class="meta"><span class="tag">14–20 DMG</span><span class="tag">18–27 HIT</span><span class="tag">7 TILES</span><span class="tag">1.5s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/gale_slash.png" alt=""><div class="key">R</div><div><h4>Gale Slash</h4><div class="meta"><span class="tag">20–26 DMG</span><span class="tag">27–35 HIT</span><span class="tag">1 TILE</span><span class="tag">2s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/thorn_ring.png" alt=""><div class="key">F</div><div><h4>Thorn Ring</h4><div class="meta"><span class="tag">SELF</span><span class="tag">3.8s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/gale_slash.png" alt=""><div class="key">4</div><div><h4>Gale Slash</h4><div class="meta"><span class="tag">20–26 DMG</span><span class="tag">27–35 HIT</span><span class="tag">1 TILE</span><span class="tag">2s CD</span></div></div></div>
           </div>
         </article>
 
@@ -316,22 +303,16 @@
                 <div class="stat"><img src="../../../../polyworld_data/icons/mana.png" alt=""><div><b>180</b><span class="muted">MANA</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/attack.png" alt=""><div><b>100%</b><span class="muted">POWER</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/move.png" alt=""><div><b>2.70</b><span class="muted">SPEED</span></div></div>
-                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>80</b><span class="muted">CARRY</span></div></div>
+                <div class="stat"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>2</b><span class="muted">ITEMS</span></div></div>
                 <div class="stat"><img src="../../../../polyworld_data/icons/day.png" alt=""><div><b>6</b><span class="muted">LIGHT</span></div></div>
               </div>
             </div>
           </div>
           <div class="abilities">
             <div class="ability"><img src="../../../../polyworld_data/abilities/solar_hammer.png" alt=""><div class="key">1</div><div><h4>Solar Hammer</h4><div class="meta"><span class="tag">PRIMARY</span><span class="tag">14–20 DMG</span><span class="tag">1 TILE</span><span class="tag">NO CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/healing_bloom.png" alt=""><div class="key">2</div><div><h4>Healing Bloom</h4><div class="meta"><span class="tag heal">HEAL 62–70</span><span class="tag">18 MANA</span><span class="tag">4 TILES</span><span class="tag">3s CD</span></div></div></div>
+            <div class="ability"><img src="../../../../polyworld_data/abilities/healing_bloom.png" alt=""><div class="key">2</div><div><h4>Healing Bloom</h4><div class="meta"><span class="tag heal">HEAL 70</span><span class="tag">18 MANA</span><span class="tag">4 TILES</span><span class="tag">3s CD</span></div></div></div>
             <div class="ability"><img src="../../../../polyworld_data/abilities/angelic_emblem.png" alt=""><div class="key">3</div><div><h4>Angelic Emblem</h4><div class="meta"><span class="tag">24 MANA</span><span class="tag">4 TILES</span><span class="tag">15s CD</span></div></div></div>
             <div class="ability"><img src="../../../../polyworld_data/abilities/sun_orb.png" alt=""><div class="key">4</div><div><h4>Sun Orb</h4><div class="meta"><span class="tag">26–36 DMG</span><span class="tag">20 MANA</span><span class="tag">5 TILES</span><span class="tag">10s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/chain_axe.png" alt=""><div class="key">5</div><div><h4>Chain Axe</h4><div class="meta"><span class="tag loot">LOOT PICKUP</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/battle_horn.png" alt=""><div class="key">6</div><div><h4>Battle Horn</h4><div class="meta"><span class="tag">0.5s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/healing_potion.png" alt=""><div class="key">Q</div><div><h4>Healing Potion</h4><div class="meta"><span class="tag heal">HEAL</span><span class="tag">0.5s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/fire_phoenix.png" alt=""><div class="key">E</div><div><h4>Fire Phoenix</h4><div class="meta"><span class="tag heal">HEAL 90</span><span class="tag">22 MANA</span><span class="tag">4 TILES</span><span class="tag">12.5s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/nature_talisman.png" alt=""><div class="key">R</div><div><h4>Nature Talisman</h4><div class="meta"><span class="tag">16 MANA</span><span class="tag">4 TILES</span><span class="tag">10s CD</span></div></div></div>
-            <div class="ability"><img src="../../../../polyworld_data/abilities/cosmic_flare.png" alt=""><div class="key">F</div><div><h4>Cosmic Flare</h4><div class="meta"><span class="tag">24–32 DMG</span><span class="tag">20 MANA</span><span class="tag">6 TILES</span><span class="tag">7.5s CD</span></div></div></div>
           </div>
         </article>
       </div>
@@ -372,54 +353,195 @@
             <img class="icon" src="../../../../polyworld_data/characters/mini_legion/sentinel/rock_golem.profile.png" alt="Golem">
             <div><h3>Golem</h3><div class="muted">LAVA / VAULT</div></div>
           </div>
-          <p class="bonus">260 HP base. Speed 1.40. Sight 5. Power 110%. Often drops an idol.</p>
+          <p class="bonus">260 HP base. Speed 1.40. Sight 5. Power 110%. Often drops a usable item.</p>
         </article>
       </div>
     </section>
 
-    <section id="treasure" class="panel">
+    <section id="loot" class="panel">
       <p class="kicker">THE HAUL</p>
-      <h2>Treasure, weight, and value</h2>
+      <h2>Monster drops</h2>
       <p>
-        Six inventory slots. Value on the ground is the table below plus 15
-        gold per dungeon level. Weight slows the bearer through encumbrance.
-        Gold only counts as banked after a living hero walks it onto the surface.
+        Items are not attached to heroes. The four abilities on each bar are
+        the class kit. Q and E start empty. Every drop lands on the monster's
+        tile. A hero holds gear only after they pick it up, and they can drop
+        it again. Every drop has a gold value. Treasure is gold only and goes
+        straight into that hero's purse. The old per-hero extras (four from each
+        class bar) are now shared drops. Any hero can use any of them. A
+        fighter gets little from a mana potion, and a wizard still swings a
+        flail if they pick one up.
       </p>
+      <p>
+        Every kill leaves a gold pile. Deeper floors, and golems, can also
+        drop one extra item from the table below. Click the pile or the item
+        to pick it up. Right-click a slot, or hold Shift and press Q or E, to
+        drop gear back on the floor. Each hero keeps their own gold. It only
+        counts as banked after that hero walks it onto the surface.
+      </p>
+      <div class="lanes" style="margin: 0 0 18px">
+        <div class="chip"><img src="../../../../polyworld_data/icons/units.png" alt=""><div><b>Not on the kit</b><div class="muted">Heroes spawn with empty Q / E slots</div></div></div>
+        <div class="chip"><img src="../../../../polyworld_data/icons/map_marker.png" alt=""><div><b>On the tile</b><div class="muted">Drops land on the monster's floor tile</div></div></div>
+        <div class="chip"><img src="../../../../polyworld_data/icons/inventory.png" alt=""><div><b>After pickup</b><div class="muted">A hero holds an item only once they take it</div></div></div>
+        <div class="chip"><img src="../../../../polyworld_data/icons/waypoint.png" alt=""><div><b>Can drop</b><div class="muted">Shift+Q / Shift+E or right-click the slot</div></div></div>
+      </div>
+      <h3 style="margin: 0 0 10px">Gold value</h3>
       <div class="shop">
         <article class="item-card">
           <div class="item-top">
             <img class="icon" src="../../../../polyworld_data/items/merchant_coin_purse.png" alt="Gold pile">
-            <div><h3>Gold Pile</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">10</div></div>
+            <div><h3>Gold Pile</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">12+</div></div>
           </div>
-          <p class="bonus">Weight 5. Common on the upper floors.</p>
+          <p class="bonus">Always dropped. Purse only. Value is 12 plus 8 per floor.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
             <img class="icon" src="../../../../polyworld_data/items/amethyst_crystal.png" alt="Gemstone">
             <div><h3>Gemstone</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">60</div></div>
           </div>
-          <p class="bonus">Weight 2. Light and valuable.</p>
+          <p class="bonus">Purse only. Common extra drop on the upper floors.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
             <img class="icon" src="../../../../polyworld_data/abilities/sanguine_chalice.png" alt="Chalice">
             <div><h3>Chalice</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">140</div></div>
           </div>
-          <p class="bonus">Weight 8. Starts appearing in the flooded deep.</p>
+          <p class="bonus">Purse only. Starts showing up in the flooded deep.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
             <img class="icon" src="../../../../polyworld_data/items/whisperwood_idol.png" alt="Idol">
             <div><h3>Idol</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">300</div></div>
           </div>
-          <p class="bonus">Weight 40. Heavy. Golems drop these often.</p>
+          <p class="bonus">Purse only. Lava, vault, and golem extra drop.</p>
         </article>
         <article class="item-card">
           <div class="item-top">
             <img class="icon" src="../../../../polyworld_data/abilities/crystal_crown.png" alt="Crown">
             <div><h3>Crown</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">900</div></div>
           </div>
-          <p class="bonus">Weight 15. Vault-only prize.</p>
+          <p class="bonus">Purse only. Vault prize. Golems can roll it too.</p>
+        </article>
+      </div>
+      <h3 style="margin: 18px 0 10px">Usable by every hero</h3>
+      <div class="shop">
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/healing_potion.png" alt="Healing potion">
+            <div><h3>Healing Potion</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">40</div></div>
+          </div>
+          <p class="bonus">Consumable. Cleric extra. Heals 80.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/fire_phoenix.png" alt="Fire phoenix">
+            <div><h3>Fire Phoenix</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">100</div></div>
+          </div>
+          <p class="bonus">Cooldown. Cleric extra. Heals 90 on use.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/nature_talisman.png" alt="Nature talisman">
+            <div><h3>Nature Talisman</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">85</div></div>
+          </div>
+          <p class="bonus">Cooldown. Cleric extra. Heals 40 and restores 30 mana.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/cosmic_flare.png" alt="Cosmic flare">
+            <div><h3>Cosmic Flare</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">95</div></div>
+          </div>
+          <p class="bonus">Cooldown. Cleric extra. 24–32 damage at 6 tiles.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/iron_flail.png" alt="Iron flail">
+            <div><h3>Iron Flail</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">70</div></div>
+          </div>
+          <p class="bonus">Cooldown. Fighter extra. 18–26 damage at 2 tiles.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/inferno_aegis.png" alt="Inferno aegis">
+            <div><h3>Inferno Aegis</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">75</div></div>
+          </div>
+          <p class="bonus">Cooldown. Fighter extra. Self guard for 2.7s.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/winged_boot.png" alt="Winged boot">
+            <div><h3>Winged Boot</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">100</div></div>
+          </div>
+          <p class="bonus">Cooldown. Fighter extra. 130% move speed for 3s.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/blazing_blade.png" alt="Blazing blade">
+            <div><h3>Blazing Blade</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">90</div></div>
+          </div>
+          <p class="bonus">Cooldown. Fighter extra. 28–36 damage at 1 tile.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/ice_wall.png" alt="Ice wall">
+            <div><h3>Ice Wall</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">70</div></div>
+          </div>
+          <p class="bonus">Cooldown. Wizard extra. Self guard. No mana needed as an item.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/lightning_storm.png" alt="Lightning storm">
+            <div><h3>Lightning Storm</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">110</div></div>
+          </div>
+          <p class="bonus">Cooldown. Wizard extra. 30–40 damage at 6 tiles.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/mana_crystal.png" alt="Mana potion">
+            <div><h3>Mana Crystal</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">45</div></div>
+          </div>
+          <p class="bonus">Consumable. Wizard extra. Restores 50 mana. Useless to Brom.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/arcane_meteor.png" alt="Arcane meteor">
+            <div><h3>Arcane Meteor</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">120</div></div>
+          </div>
+          <p class="bonus">Cooldown. Wizard extra. 36–48 damage at 8 tiles.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/void_blade.png" alt="Void blade">
+            <div><h3>Void Blade</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">80</div></div>
+          </div>
+          <p class="bonus">Cooldown. Rogue extra. 16–21 damage at 1 tile.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/shadow_comet.png" alt="Shadow comet">
+            <div><h3>Shadow Comet</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">85</div></div>
+          </div>
+          <p class="bonus">Cooldown. Rogue extra. 14–20 damage at 7 tiles.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/gale_slash.png" alt="Gale slash">
+            <div><h3>Gale Slash</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">90</div></div>
+          </div>
+          <p class="bonus">Cooldown. Rogue extra. 20–26 damage at 1 tile.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/thorn_ring.png" alt="Thorn ring">
+            <div><h3>Thorn Ring</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">70</div></div>
+          </div>
+          <p class="bonus">Cooldown. Rogue extra. Self guard.</p>
+        </article>
+        <article class="item-card">
+          <div class="item-top">
+            <img class="icon" src="../../../../polyworld_data/abilities/battle_horn.png" alt="Battle horn">
+            <div><h3>Battle Horn</h3><div class="cost"><img src="../../../../polyworld_data/icons/gold.png" alt="">80</div></div>
+          </div>
+          <p class="bonus">Cooldown. Shared extra. Guards nearby allies for 2s.</p>
         </article>
       </div>
     </section>

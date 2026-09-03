@@ -52,10 +52,10 @@ proc populate(world: World) =
   ))
   world.items.add Item(
     id: 1,
-    treasure: Idol,
+    kind: HealingPotionLoot,
     tile: TileRef(level: 4, x: 60, z: 61),
-    value: TreasureValues[Idol],
-    weight: TreasureWeights[Idol]
+    value: LootValues[HealingPotionLoot],
+    weight: LootWeights[HealingPotionLoot]
   )
   world.doors.add Door(id: 1, tile: TileRef(level: 2, x: 33, z: 44))
   world.markExplored(TileRef(level: 2, x: 33, z: 44))
@@ -180,7 +180,8 @@ block:
 
   mutates "actors": world.actors[0].facing = North
   mutates "actor cooldowns": world.actors[0].cooldowns[int(FirebrandSword)] = 12
-  mutates "actor inventory": world.actors[0].inventory[2] = 77
+  mutates "actor inventory": world.actors[0].inventory[1] = 77
+  mutates "actor haste": world.actors[0].hasteTicks = 12
   mutates "actor path":
     world.actors[0].path.add PathStep(
       tile: TileRef(level: 0, x: 12, z: 10), direction: East)
@@ -572,5 +573,32 @@ block:
   let dir = direction(world.actors[slot].body.facing)
   doAssert abs(dir.x) > 0.25'fx and abs(dir.y) > 0.25'fx,
     "the hero snapped to a cardinal instead of facing the diagonal"
+
+echo "Testing a hero can drop a carried item"
+block:
+  let
+    game = newGame(2026, 240)
+    slot = 0'i32
+    hero = game.world.actors[slot]
+    itemId = game.world.nextItemId
+  game.world.items.add Item(
+    id: itemId,
+    kind: HealingPotionLoot,
+    tile: hero.home,
+    carrier: hero.id,
+    weight: LootWeights[HealingPotionLoot]
+  )
+  inc game.world.nextItemId
+  game.world.actors[slot].inventory[0] = itemId
+  doAssert game.applyHeroAction(slot, ReplayAction(
+    heroId: 100,
+    kind: ActionDropItem,
+    first: 0
+  ))
+  doAssert game.world.actors[slot].inventory[0] == 0
+  let index = game.world.itemIndex(itemId)
+  doAssert index >= 0
+  doAssert game.world.items[index].carrier == 0
+  doAssert game.world.items[index].tile == hero.home
 
 echo "test_cta_sim: all checks passed"

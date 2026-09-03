@@ -511,6 +511,7 @@ proc runGraphics*() =
     primaryId = 0
     selectedIds: array[PartySize, bool]
     playerSlot = options.playerSlot - 1
+    attackTargetId = 0'i32
     selectionPressPosition = vec2(0)
     rightPressPosition = vec2(0)
     selectionStarted = false
@@ -954,12 +955,15 @@ proc runGraphics*() =
           loot = pickLoot(viewProjection)
           ally = pickEntity(viewProjection)
         if monster != 0:
+          attackTargetId = monster
           queueAttackTarget(slot, monster)
         elif loot != 0:
+          attackTargetId = 0
           queuePickupTarget(slot, loot)
         elif ally == slot:
           selectEntity(slot)
         elif ally >= 0:
+          attackTargetId = 0
           queueHealTarget(slot, run.world.actors[ally].id)
         elif not selectionAdditive:
           clearSelection()
@@ -999,7 +1003,19 @@ proc runGraphics*() =
         playerSlot >= run.world.actors.len or
         not run.world.actors[playerSlot].alive:
       return
+    let
+      monster = pickMonster(viewProjection)
+      loot = pickLoot(viewProjection)
+    if monster != 0:
+      attackTargetId = monster
+      queueAttackTarget(int32(playerSlot), monster)
+      return
+    if loot != 0:
+      attackTargetId = 0
+      queuePickupTarget(int32(playerSlot), loot)
+      return
     if picked.hit:
+      attackTargetId = 0
       queueWalkTo(
         int32(playerSlot),
         int32(picked.layer),
@@ -1080,33 +1096,84 @@ proc runGraphics*() =
     damageTrails.finishFrame()
     worldBarRenderer.draw(viewProjection, cameraRight, cameraUp)
 
+  proc attackTargetSlot(visibleFrom: int): int32 =
+    ## Returns the living attack-target slot, or minus one.
+    if attackTargetId == 0:
+      return -1
+    let slot = run.world.actorSlot(attackTargetId)
+    if slot < 0:
+      attackTargetId = 0
+      return -1
+    let actor = run.world.actors[slot]
+    if not actor.alive or actor.kind != MonsterActor:
+      attackTargetId = 0
+      return -1
+    if int(actor.home.level) < visibleFrom or
+        not selectedVisible(actor.home):
+      return -1
+    slot
+
+  proc drawActorOutline(
+      slot: int32,
+      view,
+      projection: Mat4,
+      cameraEye: Vec3,
+      outlineColor: Vec3
+  ) =
+    ## Draws one actor silhouette and composites it in `outlineColor`.
+    if slot < 0 or slot >= run.world.actors.len or slot >= visuals.len:
+      return
+    let actor = run.world.actors[slot]
+    if actor.id == 0:
+      return
+    let model =
+      if actor.kind == HeroActor:
+        heroModels[actor.heroClass]
+      else:
+        monsterModels[actor.species]
+    selectionOutline.beginMask(window.size)
+    beginCharacters(scene, window, view, projection, cameraEye)
+    drawCharacter(
+      scene,
+      model,
+      actorRenderPosition(actor),
+      visuals[slot].angle,
+      visuals[slot].clip,
+      visuals[slot].animTime,
+      color(1, 1, 1, 1)
+    )
+    finishCharacters(scene)
+    selectionOutline.drawOutline(outlineColor)
+
   proc drawSelectedOutline(
       view,
       projection: Mat4,
       cameraEye: Vec3,
       visibleFrom: int
   ) =
-    ## Draws selected animated heroes and composites their exact outlines.
-    if selectedLivingCount() == 0:
-      return
-    selectionOutline.beginMask(window.size)
-    beginCharacters(scene, window, view, projection, cameraEye)
+    ## Draws the yellow party outline and the red attack-target outline.
     for slot in 0 ..< min(PartySize, run.world.actors.len):
       let actor = run.world.actors[slot]
       if not selectedIds[slot] or not actor.alive or
-          slot >= visuals.len or int(actor.home.level) < visibleFrom:
+          int(actor.home.level) < visibleFrom:
         continue
-      drawCharacter(
-        scene,
-        heroModels[actor.heroClass],
-        actorRenderPosition(actor),
-        visuals[slot].angle,
-        visuals[slot].clip,
-        visuals[slot].animTime,
-        color(1, 1, 1, 1)
+      drawActorOutline(
+        int32(slot),
+        view,
+        projection,
+        cameraEye,
+        SelectionOutlineColor
       )
-    finishCharacters(scene)
-    selectionOutline.drawOutline()
+    if playerMode():
+      let target = attackTargetSlot(visibleFrom)
+      if target >= 0:
+        drawActorOutline(
+          target,
+          view,
+          projection,
+          cameraEye,
+          AttackOutlineColor
+        )
 
   window.onButtonPress = proc(button: Button) =
     sk.uiScale = hudUiScale(window)
@@ -1140,6 +1207,16 @@ proc runGraphics*() =
           actionCam.takeManual()
     of KeyF1:
       debugMenuOpen = not debugMenuOpen
+    of KeyQ, KeyE:
+      if playerMode() and
+          playerSlot >= 0 and
+          playerSlot < run.world.actors.len:
+        let bag = int32(if button == KeyQ: 0 else: 1)
+        if window.buttonDown[KeyLeftShift] or
+            window.buttonDown[KeyRightShift]:
+          queueDropItem(int32(playerSlot), bag)
+        else:
+          queueUseItem(int32(playerSlot), bag)
     of KeyA:
       if not playerMode() and
           (window.buttonDown[KeyLeftControl] or
@@ -1444,8 +1521,7 @@ proc runGraphics*() =
               visuals[slot].clip, visuals[slot].animTime,
               sizeFactor = if hero: 1.0 else: 0.95)
 
-          # Treasure still on the floor, drawn as a small spinning marker so
-          # you can see what the party is walking toward.
+          # Floor gold and gear, tinted so piles read differently from items.
           for item in run.world.items:
             if item.carrier != 0:
               continue
@@ -1453,13 +1529,44 @@ proc runGraphics*() =
               continue
             if not selectedVisible(item.tile):
               continue
-            let position = tileCenter(
-              int(item.tile.level), int(item.tile.x), int(item.tile.z))
+            let
+              position = tileCenter(
+                int(item.tile.level), int(item.tile.x), int(item.tile.z))
+              tint =
+                case item.kind
+                of GoldPile:
+                  color(1.0, 0.85, 0.25, 1)
+                of Gemstone:
+                  color(0.72, 0.55, 0.95, 1)
+                of Chalice:
+                  color(0.85, 0.82, 0.55, 1)
+                of Idol:
+                  color(0.62, 0.48, 0.32, 1)
+                of Crown:
+                  color(1.0, 0.78, 0.28, 1)
+                of HealingPotionLoot, FirePhoenixLoot:
+                  color(0.95, 0.28, 0.28, 1)
+                of ManaPotionLoot, NatureTalismanLoot:
+                  color(0.32, 0.52, 0.95, 1)
+                of BattleHornLoot, InfernoAegisLoot, ThornRingLoot:
+                  color(0.95, 0.72, 0.28, 1)
+                of WingedBootLoot, IceWallLoot:
+                  color(0.45, 0.85, 0.55, 1)
+                of IronFlailLoot, BlazingBladeLoot, GaleSlashLoot,
+                    VoidBladeLoot:
+                  color(0.92, 0.42, 0.22, 1)
+                of LightningStormLoot, ArcaneMeteorLoot, ShadowCometLoot,
+                    CosmicFlareLoot:
+                  color(0.55, 0.45, 0.95, 1)
+              scale =
+                if item.kind.lootUsesSlot: 0.38'f32
+                elif item.kind == GoldPile: 0.28'f32
+                else: 0.32'f32
             drawCharacter(
               scene, monsterModels[SkeletonSpecies],
               position + vec3(0, 0.1, 0),
               run.world.tick.float32 * 0.02,
-              monsterIdle[SkeletonSpecies], 0, color(1.0, 0.85, 0.25, 1), 0.35)
+              monsterIdle[SkeletonSpecies], 0, tint, scale)
 
         let shadowPassRan =
           sunShadowsActive() and layerVertexRanges.len > visibleFrom

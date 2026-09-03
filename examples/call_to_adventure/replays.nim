@@ -9,12 +9,14 @@ import
 const
   ReplayGame* = "call_to_adventure"
   ReplayFormatVersion* = 1'u16
-  ReplayGameVersion* = 11'u16
+  ReplayGameVersion* = 14'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8
   ActionPickupTarget* = 3'u8
   ActionHealTarget* = 4'u8
-  ActionKindHigh* = ActionHealTarget
+  ActionUseItem* = 5'u8
+  ActionDropItem* = 6'u8
+  ActionKindHigh* = ActionDropItem
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 4_000_000
   MaxReplayHashes* = 10_000_000
@@ -26,6 +28,7 @@ type
     kind*: uint8
     first*, second*, third*: int32
       ## Walk uses level, x, z. Target actions use `first` as the target ID.
+      ## Use and drop use `first` as the inventory slot.
 
   ReplayHeader* = TapeHeader[Setup]
   ReplayData* = ActionTape[Setup, ReplayAction]
@@ -114,6 +117,9 @@ proc validateAction(action: ReplayAction, setup: Setup) =
         action.second < 0 or action.second >= GridTiles or
         action.third < 0 or action.third >= GridTiles:
       fail("replay walk names a tile outside the dungeon")
+  elif action.kind == ActionUseItem or action.kind == ActionDropItem:
+    if action.first < 0 or action.first >= InventorySlots:
+      fail("replay item action names a slot outside the bag")
   elif action.first <= 0:
     fail("replay target action has an invalid target ID")
 

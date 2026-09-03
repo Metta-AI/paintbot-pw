@@ -375,6 +375,45 @@ proc itemIndex*(world: World, id: int32): int32 =
       return int32(index)
   -1
 
+proc deleteItem(world: World, index: int32) =
+  ## Removes one floor or carried item by seq index.
+  if index < 0 or index >= world.items.len:
+    return
+  world.items.del(int(index))
+
+proc freeInventorySlot(actor: Actor): int32 =
+  ## First empty item slot, or -1 when both are full.
+  for index in 0 ..< InventorySlots:
+    if actor.inventory[index] == 0:
+      return int32(index)
+  -1
+
+proc refreshSpeed(actor: Actor) =
+  ## Applies encumbrance and a short winged-boot haste.
+  var scale = EncumbranceScale[actor.encumbrance(actor.carryCapacity)]
+  if actor.hasteTicks > 0:
+    scale = scale * 13 div 10
+  actor.speed = max(actor.baseSpeed * scale div 100, 1)
+
+proc spawnLoot(
+    game: Game,
+    kind: LootKind,
+    tile: TileRef,
+    value = 0'i32
+): int32 =
+  ## Places one pile or usable item on a tile and returns its id.
+  result = game.world.nextItemId
+  game.world.items.add Item(
+    id: result,
+    kind: kind,
+    tile: tile,
+    value:
+      if value > 0: value
+      else: LootValues[kind],
+    weight: LootWeights[kind]
+  )
+  inc game.world.nextItemId
+
 proc doorIndex*(world: World, id: int32): int32 =
   if id == 0:
     return -1
@@ -1008,6 +1047,8 @@ proc nearestLoot*(game: Game, slot: int32): int32 =
       continue
     if not game.world.visible(slot, item.tile):
       continue
+    if item.kind.lootUsesSlot and actor.freeInventorySlot() < 0:
+      continue
     let distance = tileDistance(actor.home, item.tile)
     if distance >= 0 and distance < bestDistance:
       bestDistance = distance
@@ -1024,28 +1065,40 @@ proc beginAbility(game: Game, slot: int32, ability: Ability, target: int32) =
   game.world.actors[slot].actionTicks = 0
   game.world.actors[slot].target = target
 
+proc extraLootKind(level: int, species: Species, rng: var Rng): LootKind =
+  ## Picks one extra drop. Deeper floors and golems roll richer treasure.
+  if rng.chance(45):
+    if level >= 5 or (species == GolemSpecies and rng.chance(35)):
+      return Crown
+    if level >= 4 or species == GolemSpecies:
+      if rng.chance(55):
+        return Idol
+      return Chalice
+    if level >= 3:
+      if rng.chance(50):
+        return Chalice
+      return Gemstone
+    if level >= 2 and rng.chance(35):
+      return Chalice
+    return Gemstone
+  UsableLoot[rng.below(int32(UsableLoot.len))]
+
 proc dropLoot(game: Game, slot: int32) =
-  ## A dead monster leaves treasure worth more the deeper it was killed.
+  ## A dead monster always leaves gold, and often a second floor drop.
   var rng = game.world.rng
   let
     actor = game.world.actors[slot]
     level = int(actor.home.level)
-  var treasure =
-    if level >= 5: Crown
-    elif level >= 4: (if rng.chance(40): Idol else: Chalice)
-    elif level >= 3: (if rng.chance(50): Chalice else: Gemstone)
-    elif level >= 2: (if rng.chance(60): Gemstone else: GoldPile)
-    else: GoldPile
-  if actor.species == GolemSpecies and rng.chance(60):
-    treasure = Idol
-  game.world.items.add Item(
-    id: game.world.nextItemId,
-    treasure: treasure,
-    tile: actor.home,
-    value: TreasureValues[treasure] + int32(level) * 15,
-    weight: TreasureWeights[treasure]
-  )
-  inc game.world.nextItemId
+    gold = LootValues[GoldPile] + int32(level) * 8
+  discard game.spawnLoot(GoldPile, actor.home, gold)
+  var itemChance = 22 + level * 8
+  if actor.species == GolemSpecies:
+    itemChance += 25
+  if rng.chance(int32(min(itemChance, 75))):
+    discard game.spawnLoot(
+      extraLootKind(level, actor.species, rng),
+      actor.home
+    )
   game.world.rng = rng
 
 proc killActor(game: Game, slot: int32) =
@@ -1055,8 +1108,10 @@ proc killActor(game: Game, slot: int32) =
     inc game.world.killed
     game.world.removeActor(slot)
   else:
-    # A fallen hero drops what they were carrying, so the rest of the party
-    # can still bank it. Their tile frees up; the body is not simulated.
+    # A fallen hero drops gold and gear so the rest of the party can
+    # still take it. Their tile frees up; the body is not simulated.
+    if actor.carriedValue > 0:
+      discard game.spawnLoot(GoldPile, actor.home, actor.carriedValue)
     for index in 0 ..< InventorySlots:
       let itemId = actor.inventory[index]
       if itemId == 0:
@@ -1078,21 +1133,50 @@ proc applyAbility(game: Game, slot: int32) =
   if ability == ChainAxe:
     let itemIndex = game.world.itemIndex(actor.target)
     if itemIndex >= 0 and game.world.items[itemIndex].carrier == 0:
-      for index in 0 ..< InventorySlots:
-        if game.world.actors[slot].inventory[index] == 0:
+      let item = game.world.items[itemIndex]
+      if not item.kind.lootUsesSlot:
+        game.world.actors[slot].carriedValue += item.value
+        inc game.world.collected
+        game.world.deleteItem(itemIndex)
+      else:
+        let bag = game.world.actors[slot].freeInventorySlot()
+        if bag >= 0:
+          game.world.actors[slot].carriedValue += item.value
+          game.world.items[itemIndex].value = 0
           game.world.items[itemIndex].carrier = actor.id
-          game.world.actors[slot].inventory[index] =
-            game.world.items[itemIndex].id
-          game.world.actors[slot].carriedWeight +=
-            game.world.items[itemIndex].weight
-          game.world.actors[slot].carriedValue +=
-            game.world.items[itemIndex].value
+          game.world.actors[slot].inventory[bag] = item.id
+          game.world.actors[slot].carriedWeight += item.weight
           inc game.world.collected
-          break
-      let capacity = game.world.actors[slot].carryCapacity
-      game.world.actors[slot].speed =
-        game.world.actors[slot].baseSpeed *
-        EncumbranceScale[game.world.actors[slot].encumbrance(capacity)] div 100
+          game.world.actors[slot].refreshSpeed()
+    return
+  if ability == HealingPotion:
+    game.world.actors[slot].hp = min(
+      actor.hp + 80,
+      actor.maxHp
+    )
+    return
+  if ability == ManaCrystal:
+    game.world.actors[slot].mana = min(
+      actor.mana + 50,
+      actor.maxMana
+    )
+    return
+  if ability == BattleHorn:
+    for other in 0 ..< PartySize:
+      if game.world.actors[other].alive and
+          game.world.actors[other].home.level == actor.home.level:
+        game.world.actors[other].guardTicks = 48
+    return
+  if ability == WingedBoot:
+    game.world.actors[slot].hasteTicks = 72
+    game.world.actors[slot].refreshSpeed()
+    return
+  if ability in {InfernoAegis, IceWall, ThornRing}:
+    game.world.actors[slot].guardTicks = 64
+    return
+  if ability == NatureTalisman:
+    game.world.actors[slot].hp = min(actor.hp + 40, actor.maxHp)
+    game.world.actors[slot].mana = min(actor.mana + 30, actor.maxMana)
     return
 
   let targetSlot = game.world.actorSlot(actor.target)
@@ -1237,17 +1321,12 @@ proc decideHero(game: Game, slot: int32) =
   let lootIndex = game.nearestLoot(slot)
   if lootIndex >= 0:
     let item = game.world.items[lootIndex]
-    var free = false
-    for index in 0 ..< InventorySlots:
-      if actor.inventory[index] == 0:
-        free = true
-    if free and actor.carriedWeight < actor.carryCapacity:
-      if tileDistance(actor.home, item.tile) <= LootPickupRange:
-        game.world.clearPath(slot)
-        game.beginAbility(slot, ChainAxe, item.id)
-      else:
-        discard game.world.stepToward(slot, item.tile)
-      return
+    if tileDistance(actor.home, item.tile) <= LootPickupRange:
+      game.world.clearPath(slot)
+      game.beginAbility(slot, ChainAxe, item.id)
+    else:
+      discard game.world.stepToward(slot, item.tile)
+    return
 
   # Floor is clear: take the stairs.
   if game.world.phase == DescendingPhase:
@@ -1349,17 +1428,65 @@ proc applyHeroAction*(
       return false
     if not game.world.visible(slot, item.tile):
       return false
-    var free = false
-    for inventoryId in actor.inventory:
-      if inventoryId == 0:
-        free = true
-        break
-    if not free or actor.carriedWeight >= actor.carryCapacity:
-      return false
+    if item.kind.lootUsesSlot:
+      if actor.freeInventorySlot() < 0:
+        return false
     if tileDistance(actor.home, item.tile) > LootPickupRange:
       return game.world.stepToward(slot, item.tile)
     game.world.clearPath(slot)
     game.beginAbility(slot, ChainAxe, item.id)
+    true
+  of ActionUseItem:
+    if action.first < 0 or action.first >= InventorySlots:
+      return false
+    let itemId = actor.inventory[action.first]
+    let itemIndex = game.world.itemIndex(itemId)
+    if itemIndex < 0:
+      return false
+    let
+      kind = game.world.items[itemIndex].kind
+      ability = LootAbilities[kind]
+    if ability == NoAbility or actor.cooldowns[int(ability)] != 0:
+      return false
+    if kind == ManaPotionLoot and actor.maxMana <= 0:
+      return false
+    let spec = Abilities[ability]
+    var targetId = actor.id
+    if spec.damage > 0:
+      let prey = game.nearestEnemy(
+        slot,
+        max(int32(spec.rangeTiles), HeroAggroTiles)
+      )
+      if prey < 0:
+        return false
+      if not game.world.actorCanSee(slot, prey) or
+          tileDistance(
+            actor.home,
+            game.world.actors[prey].home
+          ) > int32(spec.rangeTiles):
+        return game.world.stepToward(slot, game.world.actors[prey].home)
+      targetId = game.world.actors[prey].id
+    game.beginAbility(slot, ability, targetId)
+    if LootConsumable[kind]:
+      game.world.actors[slot].carriedWeight -=
+        game.world.items[itemIndex].weight
+      game.world.actors[slot].inventory[action.first] = 0
+      game.world.deleteItem(itemIndex)
+      game.world.actors[slot].refreshSpeed()
+    true
+  of ActionDropItem:
+    if action.first < 0 or action.first >= InventorySlots:
+      return false
+    let itemId = actor.inventory[action.first]
+    let itemIndex = game.world.itemIndex(itemId)
+    if itemIndex < 0:
+      return false
+    game.world.items[itemIndex].carrier = 0
+    game.world.items[itemIndex].tile = actor.home
+    game.world.actors[slot].carriedWeight -=
+      game.world.items[itemIndex].weight
+    game.world.actors[slot].inventory[action.first] = 0
+    game.world.actors[slot].refreshSpeed()
     true
   of ActionHealTarget:
     if actor.heroClass != ClericClass or
@@ -1476,6 +1603,12 @@ proc tickWorld*(
         dec game.world.actors[slot].cooldowns[ability]
     if game.world.actors[slot].sinceHitTicks < 30_000:
       inc game.world.actors[slot].sinceHitTicks
+    if game.world.actors[slot].hasteTicks > 0:
+      dec game.world.actors[slot].hasteTicks
+      if game.world.actors[slot].hasteTicks == 0:
+        game.world.actors[slot].refreshSpeed()
+    if game.world.actors[slot].guardTicks > 0:
+      dec game.world.actors[slot].guardTicks
     # Wounds close slowly once a fight is over, and mana comes back with
     # them, so the party can afford the walk back up.
     if game.world.actors[slot].kind == HeroActor and
@@ -1557,15 +1690,12 @@ proc tickWorld*(
         game.log.add HeroClass(game.world.actors[slot].class).`$` &
           " banks " & $game.world.actors[slot].carriedValue & " gold"
         game.world.actors[slot].carriedValue = 0
-        game.world.actors[slot].carriedWeight = 0
-        for index in 0 ..< InventorySlots:
-          game.world.actors[slot].inventory[index] = 0
-        game.world.actors[slot].speed = game.world.actors[slot].baseSpeed
     if living > 0 and surfaced == living:
       game.world.phase = EscapedPhase
       game.log.add "the party escapes with " & $game.world.banked & " gold"
 
 proc partyGold*(game: Game): int32 =
+  ## Sum of gold still carried by living heroes. Each hero has a private purse.
   for slot in 0 ..< PartySize:
     if game.world.actors[slot].alive:
       result += game.world.actors[slot].carriedValue

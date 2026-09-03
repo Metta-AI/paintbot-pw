@@ -8,6 +8,15 @@
 ' pickup used to halt the hero in place. On the vault, walkTo now heads
 ' for remaining monsters the party has not seen yet, then the stairs home.
 
+if hp * 2 <= maxHp then
+  if useItem(0) <> 0 then
+    stop
+  end if
+  if useItem(1) <> 0 then
+    stop
+  end if
+end if
+
 friend = woundedAlly()
 if friend <> 0 then
   if healTarget(friend) <> 0 then

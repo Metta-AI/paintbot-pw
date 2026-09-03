@@ -4,7 +4,7 @@ import
   std/[strformat, strutils],
   chroma, pixie, silky, vmath, windy,
   polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras],
-  content, maps, sim, game
+  content, maps, sim, game, controls
 
 const
   PanelPartyCard = vec2(316, 104)
@@ -19,22 +19,22 @@ const
   PanelMenu = vec2(407, 71)
   HudClearance = 48.0'f32
   AbilitySlotXs = [
-    30.0'f32, 127, 222, 315, 409, 503, 620, 702, 784, 863
+    30.0'f32, 127, 222, 315, 620, 702
   ]
   AbilitySlotYs = [
-    15.0'f32, 15, 15, 15, 15, 15, 23, 23, 23, 23
+    15.0'f32, 15, 15, 15, 23, 23
   ]
   AbilitySlotWs = [
-    79.0'f32, 76, 75, 77, 76, 76, 62, 63, 61, 61
+    79.0'f32, 76, 75, 77, 62, 63
   ]
   AbilitySlotHs = [
-    82.0'f32, 82, 82, 82, 82, 82, 64, 64, 64, 64
+    82.0'f32, 82, 82, 82, 64, 64
   ]
   MenuSlotXs = [
     16.0'f32, 72, 127, 183, 238, 293, 349
   ]
   ActionKeys = [
-    "1", "2", "3", "4", "5", "6", "Q", "E", "R", "F"
+    "1", "2", "3", "4", "Q", "E"
   ]
   MenuIcons = [
     "inventory",
@@ -58,29 +58,6 @@ const
   HeroPortraitKeys*: array[HeroClass, string] = [
     "hero_fighter", "hero_wizard", "hero_rogue", "hero_cleric"
   ]
-  HeroAbilities: array[HeroClass, array[10, Ability]] = [
-    [
-      FirebrandSword, MoltenFist, LionGuard,
-      ChainAxe, ArcaneGateway, BattleHorn,
-      IronFlail, InfernoAegis, WingedBoot, BlazingBlade
-    ],
-    [
-      MeteorStrike, FrostLance, VoidPortal,
-      ChainAxe, ArcaneGateway, BattleHorn,
-      IceWall, LightningStorm, ManaCrystal, ArcaneMeteor
-    ],
-    [
-      VenomDagger, VerdantArrow, ShadowCloak,
-      ChainAxe, ArcaneGateway, BattleHorn,
-      VoidBlade, ShadowComet, GaleSlash, ThornRing
-    ],
-    [
-      SolarHammer, HealingBloom, AngelicEmblem,
-      SunOrb, ChainAxe, BattleHorn,
-      HealingPotion, FirePhoenix, NatureTalisman, CosmicFlare
-    ]
-  ]
-
 type
   HudChrome = object
     layout: GameUiLayout
@@ -728,24 +705,35 @@ proc drawUi*(
     rgbx(160, 171, 188, 255),
     "Small"
   )
-  for index in 0 .. 9:
+  for index in 0 .. 5:
     let slotPanel = detailsPanel.imageSlot(
       AbilitySlotXs[index],
       AbilitySlotYs[index],
       AbilitySlotWs[index],
       AbilitySlotHs[index]
     )
-    sk.drawWellImage(
-      slotPanel,
-      abilityIconKey(HeroAbilities[selectedClass][index])
-    )
-  for index in 0 .. 9:
-    let slotPanel = detailsPanel.imageSlot(
-      AbilitySlotXs[index],
-      AbilitySlotYs[index],
-      AbilitySlotWs[index],
-      AbilitySlotHs[index]
-    )
+    if index < 4:
+      sk.drawWellImage(
+        slotPanel,
+        abilityIconKey(HeroAbilities[selectedClass][index])
+      )
+    else:
+      let
+        bag = index - 4
+        itemId = selectedActor.inventory[bag]
+        itemIndex = run.world.itemIndex(itemId)
+      if itemIndex >= 0:
+        let ability = LootAbilities[run.world.items[itemIndex].kind]
+        if ability != NoAbility:
+          sk.drawWellImage(slotPanel, abilityIconKey(ability))
+      if options.playerSlot > 0 and
+          not run.replayMode and
+          primaryId == options.playerSlot - 1:
+        if window.clicked(sk, slotPanel):
+          queueUseItem(int32(primaryId), int32(bag))
+        elif window.buttonReleased[MouseRight] and
+            slotPanel.contains(sk.mousePos):
+          queueDropItem(int32(primaryId), int32(bag))
     sk.drawLabel(
       ActionKeys[index],
       slotPanel.origin + vec2(0, slotPanel.size.y - 16),
@@ -777,7 +765,7 @@ proc drawUi*(
     vec2(28)
   )
   sk.drawLabel(
-    formatAmount(run.partyGold().int),
+    formatAmount(selectedActor.carriedValue.int),
     goldBox.origin + vec2(28, 0),
     vec2(goldBox.size.x - 30, goldBox.size.y),
     rgbx(232, 196, 86, 255),

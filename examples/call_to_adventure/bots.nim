@@ -63,6 +63,8 @@ proc validReplayPayload(action: ReplayAction): bool =
       action.third >= 0 and action.third < GridTiles
   of ActionAttackTarget, ActionPickupTarget, ActionHealTarget:
     action.first > 0
+  of ActionUseItem, ActionDropItem:
+    action.first >= 0 and action.first < InventorySlots
   else:
     false
 
@@ -132,21 +134,8 @@ proc buildHeroHost(heroId: int32): Host =
       arguments: openArray[int32]
   ): int32 =
     discard arguments
-    let
-      actor = activeGame.world.actors[activeHeroSlot]
-      itemIndex = activeGame.nearestLoot(activeHeroSlot)
+    let itemIndex = activeGame.nearestLoot(activeHeroSlot)
     if itemIndex < 0:
-      return 0
-    var free = false
-    for inventoryId in actor.inventory:
-      if inventoryId == 0:
-        free = true
-        break
-    if not free or actor.carriedWeight >= (
-      if actor.kind == HeroActor:
-        ClassCarryWeight[HeroClass(actor.class)]
-      else:
-        0):
       return 0
     activeGame.world.items[itemIndex].id
   discard result.addFunction("nearestLoot", 0, nearestLootProc, 20)
@@ -198,6 +187,24 @@ proc buildHeroHost(heroId: int32): Host =
   targetAction("attackTarget", ActionAttackTarget)
   targetAction("pickupTarget", ActionPickupTarget)
   targetAction("healTarget", ActionHealTarget)
+
+  let useItemProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    issueHeroAction(ReplayAction(
+      tick: uint32(activeGame.world.tick),
+      heroId: heroId,
+      kind: ActionUseItem,
+      first: arguments[0]
+    ))
+  discard result.addFunction("useItem", 1, useItemProc, 40)
+
+  let dropItemProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    issueHeroAction(ReplayAction(
+      tick: uint32(activeGame.world.tick),
+      heroId: heroId,
+      kind: ActionDropItem,
+      first: arguments[0]
+    ))
+  discard result.addFunction("dropItem", 1, dropItemProc, 40)
 
 proc loadBots*(
     game: Game,
