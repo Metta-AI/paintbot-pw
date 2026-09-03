@@ -46,7 +46,7 @@ puts it back on the doorstep.
 `maps.nim` generates the village with integers from one seed: a gentle
 meadow pressed flat inside the village ring, nine houses on a jittered
 ring of unit-circle points around a round paved plaza with a one-tile
-dirt apron, two-wide dirt roads from every door to the plaza plus a
+dirt apron and a blocked three-by-three well footprint at its centre, two-wide dirt roads from every door to the plaza plus a
 one-wide ring path, three garden plots in the grass near each house, and
 a noise-gated forest thickening to a solid wall at the map edge. A flood fill from the plaza must reach every door and
 every garden or the generator retries the seed deterministically.
@@ -68,7 +68,7 @@ props bake exactly once.
 ## The scripted villager
 
 `players/base.bas` plays the known-strong plan from the original game:
-gather all day; three villagers are due to host each night by rotation
+gather all day, then loiter between spots around the well; three villagers are due to host each night by rotation
 (`(day + slot) mod 3 == 0`); hosts wave invitations at anyone passing
 within three tiles; guests walk to the nearest due host; everyone budgets
 about two game minutes per tile plus a half-hour margin and never stands

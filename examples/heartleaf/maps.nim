@@ -32,6 +32,9 @@ const
     ## The plaza is a disc of paving this many tiles across from the middle.
   PlazaRoadRadius = 9'i32
     ## A one-tile road apron rings the paving.
+  WellRadius* = 1'i32
+    ## The well in the middle of the plaza blocks this far around the
+    ## centre tile; nobody walks through it.
   HouseRingRadius = 26'i32
   HouseRingJitter = 6'i32
     ## Ring radius varies 26 .. 31 per house.
@@ -207,6 +210,10 @@ proc buildMap(seed: int32): MapData =
         groundTile(x, y).kind = StoneTile
       elif distance <= PlazaRoadRadius * PlazaRoadRadius:
         groundTile(x, y).kind = RoadTile
+  ## The well stands on the centre and blocks its footprint.
+  for y in MapCenter - WellRadius .. MapCenter + WellRadius:
+    for x in MapCenter - WellRadius .. MapCenter + WellRadius:
+      groundTile(x, y).impassable = true
 
   ## House footprints: impassable pads the props stand on.
   for slot in 0 ..< VillagerCount:
@@ -417,9 +424,13 @@ proc floodFrom(map: MapData, start: Tile2): seq[uint8] =
       result[index] = 1
       frontier.add tile2(nextX, nextY)
 
+const PlazaStart = tile2(MapCenter + WellRadius + 1, MapCenter)
+  ## Where connectivity checks begin: the plaza paving just east of the
+  ## well, since the well itself is blocked.
+
 proc mapPlayable(map: MapData): bool =
   ## Quietly checks connectivity, for the retry loop.
-  let reached = map.floodFrom(tile2(MapCenter, MapCenter))
+  let reached = map.floodFrom(PlazaStart)
   for house in map.houses:
     if not inGrid(house.door) or reached[tileIndex(house.door)] == 0:
       return false
@@ -444,8 +455,8 @@ proc generateMap*(seed: int32): MapData {.measure.} =
 proc validateMap*(map: MapData) =
   ## Asserts that a generated map is connected and playable.
   let seed = map.seed
-  let reached = map.floodFrom(tile2(MapCenter, MapCenter))
-  doAssert reached[tileIndex(tile2(MapCenter, MapCenter))] == 1,
+  let reached = map.floodFrom(PlazaStart)
+  doAssert reached[tileIndex(PlazaStart)] == 1,
     &"seed {seed}: the plaza itself is blocked"
   for slot, house in map.houses:
     doAssert inGrid(house.door),

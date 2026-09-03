@@ -39,6 +39,26 @@
 ' by rotation; guests walk to the nearest due host; never be alone at six.
 
 dim invitedMark(8)
+dim spotX(7)
+dim spotY(7)
+
+' Eight loitering spots around the well, five tiles out.
+spotX(0) = 5
+spotY(0) = 0
+spotX(1) = 4
+spotY(1) = 4
+spotX(2) = 0
+spotY(2) = 5
+spotX(3) = -4
+spotY(3) = 4
+spotX(4) = -5
+spotY(4) = 0
+spotX(5) = -4
+spotY(5) = -4
+spotX(6) = 0
+spotY(6) = -5
+spotX(7) = 4
+spotY(7) = -4
 
 ' New-day reset.
 if dayMark <> day then
@@ -149,16 +169,20 @@ else
       wend
     end if
 
-    ' Gather whatever still grows; drift toward the plaza when the gardens
-    ' are bare so the village keeps bumping into itself.
+    ' Gather whatever still grows; when the gardens are bare, loiter on
+    ' the plaza, moving between spots around the well every so often so
+    ' the village keeps bumping into itself without piling onto the well.
     f = orderFailed()
     if orderKind = 0 then
       g = nearestStockedGarden()
       if g >= 0 then
         r = gather(g)
       else
-        if distTo(64, 64) > 6 then
-          r = walkTo(64, 64)
+        spot = (selfSlot + worldTick / 480) mod 8
+        tx = 64 + spotX(spot)
+        ty = 64 + spotY(spot)
+        if distTo(tx, ty) > 1 then
+          r = walkTo(tx, ty)
         end if
       end if
     end if
