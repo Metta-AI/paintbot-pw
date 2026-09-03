@@ -587,6 +587,40 @@ proc texturedPropFrag(
     1.0
   )
 
+proc texturedInstantFrag(
+    fragColor: var Vec4,
+    fragUv: Vec3,
+    fragmentNormal,
+    fragmentPosition: Vec3,
+    shadowPos: Vec3
+) =
+  ## The tree cutout shading with the standalone prop tint folded in, for
+  ## textured props drawn per frame rather than baked.
+  let texel = texture(treeTextures, fragUv)
+  if texel.w < treeAlphaCutoff:
+    discardFragment()
+  let
+    visibilityUv = vec2(
+      (fragmentPosition.x + visibilityOffset) * visibilityScale,
+      (fragmentPosition.z + visibilityOffset) * visibilityScale
+    )
+    visibility = smoothstep(
+      0.05,
+      0.95,
+      texture(visibilityTex, visibilityUv).x
+    )
+    paint = vec3(
+      texel.x * propTint.x, texel.y * propTint.y, texel.z * propTint.z)
+    litColor = envShadeTwoSided(
+      paint, fragmentNormal, sampleSunShadow(shadowPos))
+    gray = dot(litColor, vec3(0.30, 0.59, 0.11)) * 0.32
+  fragColor = vec4(
+    litColor.x * visibility + gray * (1.0 - visibility),
+    litColor.y * visibility + gray * (1.0 - visibility),
+    litColor.z * visibility + gray * (1.0 - visibility),
+    1.0
+  )
+
 proc compileStage(kind: GLenum, source, label: string): GLuint =
   ## Compiles one OpenGL shader stage or terminates with its diagnostic.
   result = glCreateShader(kind)
@@ -726,7 +760,14 @@ var
   propMvpLocation, propVisibilityTexLocation: GLint
   propVisibilityOffsetLocation, propVisibilityScaleLocation: GLint
   propTintLocation: GLint
-  treeProgram, texturedPropProgram: GLuint
+  treeProgram, texturedPropProgram, texturedInstantProgram: GLuint
+  texturedInstantMvpLocation, texturedInstantVisibilityTexLocation: GLint
+  texturedInstantVisibilityOffsetLocation: GLint
+  texturedInstantVisibilityScaleLocation: GLint
+  texturedInstantTexturesLocation, texturedInstantAlphaCutoffLocation: GLint
+  texturedInstantTintLocation: GLint
+  texturedInstantEnv: EnvLocations
+  texturedInstantShadow: ShadowLocations
   texturedPropMvpLocation, texturedPropVisibilityTexLocation: GLint
   texturedPropVisibilityOffsetLocation: GLint
   texturedPropVisibilityScaleLocation: GLint
@@ -759,6 +800,9 @@ type
     vertices: seq[float32]  # x y z r g b nx ny nz; pack-scaled, base at y 0
     uvs: seq[float32]       # u v layer per vertex, into the pack's atlases
     textureArray: GLuint    # the pack's atlas array; 0 draws vertex colors
+    texturedVertexArray: GLuint       # immediate textured draw, on first use
+    texturedVertexBuffer: GLuint
+    texturedDepthVertexArray: GLuint
     vertexArray: GLuint
     vertexBuffer: GLuint
     depthVertexArray: GLuint  # position-only view for the sun depth pass
@@ -1328,6 +1372,117 @@ proc uploadPropModel(model: PropModel) =
     glVertexAttribPointer(location.GLuint, 3, cGL_FLOAT, GL_FALSE, stride, nil)
   glBindVertexArray(0)
 
+proc uploadTexturedPropModel(model: PropModel) =
+  ## Uploads one textured prop for immediate drawing on first use: a
+  ## model-space buffer in the tree layout, with a lit view and a
+  ## position-plus-uv view for the cutout depth pass.
+  if model.texturedVertexArray != 0:
+    return
+  doAssert texturedInstantProgram != 0,
+    "initTerrain must run before drawing props"
+  var mesh: seq[float32]
+  var i = 0
+  while i < model.vertices.len:
+    let uv = i div 9 * 3
+    mesh.add model.vertices[i]
+    mesh.add model.vertices[i + 1]
+    mesh.add model.vertices[i + 2]
+    mesh.add model.uvs[uv]
+    mesh.add model.uvs[uv + 1]
+    mesh.add model.uvs[uv + 2]
+    mesh.add model.vertices[i + 6]
+    mesh.add model.vertices[i + 7]
+    mesh.add model.vertices[i + 8]
+    i += 9
+  const stride = (9 * sizeof(float32)).GLsizei
+  glGenBuffers(1, model.texturedVertexBuffer.addr)
+  glBindBuffer(GL_ARRAY_BUFFER, model.texturedVertexBuffer)
+  glBufferData(
+    GL_ARRAY_BUFFER,
+    mesh.len * sizeof(float32),
+    mesh[0].addr,
+    GL_STATIC_DRAW
+  )
+  glGenVertexArrays(1, model.texturedVertexArray.addr)
+  glBindVertexArray(model.texturedVertexArray)
+  for attribute in [
+    (name: "vertPos", count: 3, offset: 0),
+    (name: "vertUv", count: 3, offset: 3 * sizeof(float32)),
+    (name: "normal", count: 3, offset: 6 * sizeof(float32))
+  ]:
+    let location = glGetAttribLocation(
+      texturedInstantProgram, attribute.name.cstring)
+    doAssert location >= 0
+    glEnableVertexAttribArray(location.GLuint)
+    glVertexAttribPointer(
+      location.GLuint, attribute.count.GLint, cGL_FLOAT, GL_FALSE, stride,
+      cast[pointer](attribute.offset))
+  glGenVertexArrays(1, model.texturedDepthVertexArray.addr)
+  glBindVertexArray(model.texturedDepthVertexArray)
+  glBindBuffer(GL_ARRAY_BUFFER, model.texturedVertexBuffer)
+  for attribute in [
+    (name: "vertPos", count: 3, offset: 0),
+    (name: "vertUv", count: 3, offset: 3 * sizeof(float32))
+  ]:
+    let location = glGetAttribLocation(
+      sunCutoutProgramId(), attribute.name.cstring)
+    doAssert location >= 0
+    glEnableVertexAttribArray(location.GLuint)
+    glVertexAttribPointer(
+      location.GLuint, attribute.count.GLint, cGL_FLOAT, GL_FALSE, stride,
+      cast[pointer](attribute.offset))
+  glBindVertexArray(0)
+  model.vertexCount = (model.vertices.len div 9).GLsizei
+
+proc drawTexturedProp(
+    model: PropModel,
+    position: Vec3,
+    rotation,
+    propScale: float32,
+    viewProjection: Mat4,
+    tint: Vec4
+) =
+  ## Draws one textured prop immediately with the cutout texture program.
+  model.uploadTexturedPropModel()
+  let model3d =
+    translate(position) * rotateY(rotation) *
+    scale(vec3(propScale, propScale, propScale))
+  var
+    transform = viewProjection * model3d
+    shadowTransform0 = sunLightMvp0 * model3d
+    shadowTransform1 = sunLightMvp1 * model3d
+  glDisable(GL_BLEND)
+  glDepthMask(GL_TRUE)
+  glDisable(GL_CULL_FACE)
+  glEnable(GL_DEPTH_TEST)
+  glUseProgram(texturedInstantProgram)
+  setEnvUniforms(texturedInstantEnv)
+  setShadowUniforms(texturedInstantShadow)
+  glUniformMatrix4fv(
+    texturedInstantShadow.mvp0, 1, GL_FALSE,
+    cast[ptr float32](shadowTransform0.addr))
+  glUniformMatrix4fv(
+    texturedInstantShadow.mvp1, 1, GL_FALSE,
+    cast[ptr float32](shadowTransform1.addr))
+  glUniformMatrix4fv(
+    texturedInstantMvpLocation, 1, GL_FALSE,
+    cast[ptr float32](transform.addr))
+  glUniform1f(texturedInstantVisibilityOffsetLocation, HalfGrid)
+  glUniform1f(
+    texturedInstantVisibilityScaleLocation, 1.0'f32 / GridTiles.float32)
+  glUniform1f(texturedInstantAlphaCutoffLocation, TreeAlphaCutoff)
+  glUniform4f(texturedInstantTintLocation, tint.x, tint.y, tint.z, tint.w)
+  glActiveTexture(GL_TEXTURE1)
+  glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+  glUniform1i(texturedInstantVisibilityTexLocation, 1)
+  glActiveTexture(GL_TEXTURE0)
+  glBindTexture(GL_TEXTURE_2D_ARRAY, model.textureArray)
+  glUniform1i(texturedInstantTexturesLocation, 0)
+  glBindVertexArray(model.texturedVertexArray)
+  glDrawArrays(GL_TRIANGLES, 0, model.vertexCount)
+  glBindVertexArray(0)
+  glUseProgram(0)
+
 proc setPropTint(tint: Vec4) =
   ## Uploads the standalone or batched prop color multiply.
   if propTintLocation >= 0:
@@ -1346,6 +1501,10 @@ proc drawProp*(
   if not pack.hasProp(name):
     return
   let model = pack.models[pack.names[name]]
+  if model.textureArray != 0:
+    drawTexturedProp(
+      model, position, rotation, propScale, viewProjection, tint)
+    return
   model.uploadPropModel()
   let model3d =
     translate(position) * rotateY(rotation) *
@@ -2681,6 +2840,26 @@ proc initTerrain*() =
     texturedPropProgram, "treeTextures")
   texturedPropAlphaCutoffLocation = glGetUniformLocation(
     texturedPropProgram, "treeAlphaCutoff")
+  texturedInstantProgram = compileProgram(
+    toShader(treeVert, OpenGlShaderTarget, shaderVertex),
+    toShader(texturedInstantFrag, OpenGlShaderTarget, shaderFragment)
+  )
+  texturedInstantMvpLocation = glGetUniformLocation(
+    texturedInstantProgram, "mvp")
+  texturedInstantEnv = envLocations(texturedInstantProgram)
+  texturedInstantShadow = shadowLocations(texturedInstantProgram)
+  texturedInstantVisibilityTexLocation = glGetUniformLocation(
+    texturedInstantProgram, "visibilityTex")
+  texturedInstantVisibilityOffsetLocation = glGetUniformLocation(
+    texturedInstantProgram, "visibilityOffset")
+  texturedInstantVisibilityScaleLocation = glGetUniformLocation(
+    texturedInstantProgram, "visibilityScale")
+  texturedInstantTexturesLocation = glGetUniformLocation(
+    texturedInstantProgram, "treeTextures")
+  texturedInstantAlphaCutoffLocation = glGetUniformLocation(
+    texturedInstantProgram, "treeAlphaCutoff")
+  texturedInstantTintLocation = glGetUniformLocation(
+    texturedInstantProgram, "propTint")
   treeTexturesLocation = glGetUniformLocation(treeProgram, "treeTextures")
   treeAlphaCutoffLocation = glGetUniformLocation(
     treeProgram,
@@ -3160,12 +3339,21 @@ proc drawPropSunDepth*(
   ## twin of drawProp for props drawn per frame instead of baked.
   if not pack.hasProp(name):
     return
-  let model = pack.models[pack.names[name]]
+  let
+    model = pack.models[pack.names[name]]
+    transform = sunDepthPassMvp() * translate(position) *
+      rotateY(rotation) * scale(vec3(propScale, propScale, propScale))
+  if model.textureArray != 0:
+    model.uploadTexturedPropModel()
+    bindSunCutoutDepth(transform, TreeAlphaCutoff)
+    glActiveTexture(GL_TEXTURE0)
+    glBindTexture(GL_TEXTURE_2D_ARRAY, model.textureArray)
+    glBindVertexArray(model.texturedDepthVertexArray)
+    glDrawArrays(GL_TRIANGLES, 0, model.vertexCount)
+    glBindVertexArray(0)
+    return
   model.uploadPropModel()
-  bindSunDepth(
-    sunDepthPassMvp() * translate(position) * rotateY(rotation) *
-    scale(vec3(propScale, propScale, propScale))
-  )
+  bindSunDepth(transform)
   glBindVertexArray(model.depthVertexArray)
   glDrawArrays(GL_TRIANGLES, 0, model.vertexCount)
   glBindVertexArray(0)

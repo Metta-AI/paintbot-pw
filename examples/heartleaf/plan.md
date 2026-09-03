@@ -119,6 +119,14 @@ plaza tiles bake as grass underneath; the mask owns every stone and dirt
 texel. Roads wear the meadow pack dirt, loaded at startup into the unused
 marsh slot.
 
+## Crops
+
+A stocked plot grows one meadow kit plant, drawn textured per frame so it
+can appear and vanish as villagers gather; a bare plot is just the tilled
+dirt. The kit has no lettuces or corn, so the twenty-four kinds share
+seven plants by silhouette and a tint per kind tells them apart. The old
+village-pack farm building is gone.
+
 ## Decorations
 
 `decor.nim` dresses the village from the map and seed alone, so a replay

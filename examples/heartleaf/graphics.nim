@@ -37,7 +37,6 @@ const
     1, 2, 3, 5, 6, 9, 11, 12, 13]
     ## The modular presets that ship pre-rendered profile portraits.
   HousePropScale = 5.2'f32
-  GardenPropScale = 1.1'f32
   MeadowDirtPath = DataRoot & "/terrain/toon_enchanted_meadow/terrain_dirt_01d.png"
     ## Roads and the plaza apron wear the meadow dirt, loaded into the
     ## marsh slot, which the village never uses.
@@ -45,8 +44,39 @@ const
   PlazaHeightBlend = 2.0'f32
     ## Tighter than the engine defaults so dirt breaks into grass along the
     ## texture instead of feathering across a whole tile.
-  CropProps = ["carrot1", "carrot2", "tomato1", "tomato2"]
-    ## A stocked garden shows one of these; an empty plot is bare dirt.
+  CropHeight = 0.75'f32
+    ## A growing crop stands this many tiles tall, knee high on a villager.
+  CropLooks: array[VeggieKinds, tuple[node: string, tint: Vec3]] = [
+    ("plant_01a", vec3(1.0, 1.05, 0.85)),   # carrot
+    ("plant_03a", vec3(1.15, 0.95, 0.85)),  # tomato
+    ("plant_06a", vec3(1.1, 1.15, 0.9)),    # lettuce
+    ("plant_01a", vec3(0.9, 1.0, 0.85)),    # potato
+    ("plant_04a", vec3(1.15, 1.0, 0.8)),    # pumpkin
+    ("plant_01a", vec3(0.95, 1.0, 1.0)),    # radish
+    ("plant_01a", vec3(1.0, 0.85, 0.95)),   # beet
+    ("plant_02a", vec3(1.05, 1.05, 0.8)),   # corn
+    ("plant_07a", vec3(0.95, 1.1, 0.9)),    # pea
+    ("plant_01a", vec3(0.95, 1.05, 0.9)),   # onion
+    ("plant_01a", vec3(1.0, 1.05, 1.0)),    # garlic
+    ("plant_04a", vec3(0.9, 1.05, 1.0)),    # cabbage
+    ("plant_04a", vec3(1.1, 1.05, 0.8)),    # squash
+    ("plant_01a", vec3(0.95, 1.05, 0.95)),  # turnip
+    ("plant_07a", vec3(0.95, 1.05, 0.95)),  # leek
+    ("plant_05a", vec3(0.8, 1.0, 0.8)),     # spinach
+    ("plant_06a", vec3(0.8, 0.95, 0.85)),   # broccoli
+    ("plant_03a", vec3(1.1, 1.0, 0.8)),     # pepper
+    ("plant_03a", vec3(0.9, 1.05, 0.9)),    # cucumber
+    ("plant_03a", vec3(0.85, 1.0, 0.85)),   # zucchini
+    ("plant_03a", vec3(1.0, 1.1, 0.85)),    # celery
+    ("plant_03a", vec3(1.0, 0.85, 1.05)),   # eggplant
+    ("plant_01a", vec3(1.0, 1.0, 0.85)),    # parsnip
+    ("plant_04a", vec3(0.85, 0.95, 1.0)),   # kale
+  ]
+    ## What a stocked plot grows, in VeggieNames order. The meadow kit has
+    ## no lettuces or corn, so kinds share a plant by silhouette, roots on
+    ## the leafy top, heads on the low wide plants, stalks on the tall
+    ## ones, vines on the middle one, and a tint tells them apart. A bare
+    ## plot is just the tilled dirt the terrain draws.
 
 type
   GraphicsError = object of CatchableError
@@ -264,14 +294,6 @@ proc runGraphics*() =
         tileWorldPoint(house.center),
         housePropYaw(house),
         HousePropScale
-      )
-    for garden in 0 ..< GardenCount:
-      let tile = run.world.map.gardenTiles[garden]
-      villagePack.placeProp(
-        "farm_lvl2",
-        tileWorldPoint(tile),
-        float32(garden) * 1.3'f32,
-        GardenPropScale
       )
     for d in placeDecor(run.world.map, run.mapSeed):
       kits[d.kit].placeProp(
@@ -645,12 +667,14 @@ proc runGraphics*() =
             let veggie = run.world.gardens[garden]
             if veggie < 0:
               continue
-            villagePack.drawProp(
-              CropProps[int(veggie) mod CropProps.len],
+            let look = CropLooks[int(veggie)]
+            kits[MeadowVegetation].drawProp(
+              look.node,
               tileWorldPoint(run.world.map.gardenTiles[garden]),
               float32(garden) * 0.7'f32,
-              0.3'f32,
-              matrix
+              CropHeight,
+              matrix,
+              vec4(look.tint.x, look.tint.y, look.tint.z, 1.0)
             )
 
         proc drawWorldVillagers() =
