@@ -35,7 +35,7 @@ const
     16.0'f32, 72, 127, 183, 238, 293, 349
   ]
   ActionKeys = [
-    "1", "2", "3", "4", "Q", "E"
+    "Q", "W", "E", "R", "F", "G"
   ]
   MenuIcons = [
     "inventory",

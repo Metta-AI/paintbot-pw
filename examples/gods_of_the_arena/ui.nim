@@ -15,7 +15,7 @@ const
   PanelInventory = vec2(379, 322)
   HudClearance = 48.0'f32
   BadgeSmall = 18.0'f32
-  AbilityKeys = ["Q", "W", "E", "R", "D", "F"]
+  AbilityKeys = ["Q", "W", "E", "R", "F", "G"]
   ScoreIcons = ["tower", "kills", "deaths"]
   CooldownFill = rgbx(8, 10, 16, 180)
   IconTint = rgbx(245, 230, 190, 255)

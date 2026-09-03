@@ -137,7 +137,6 @@ var
     else: options.viewMode
   primaryId* = NoEntity
   selectedIds*: seq[int32]
-  rightPressPosition = vec2(0)
   followSelection* = false
   selectionPressPosition = vec2(0)
   selectionStarted = false
@@ -832,19 +831,16 @@ proc runGraphics*() =
         (window.buttonDown[KeyLeftControl] or
           window.buttonDown[KeyRightControl]):
       selectAllUnits()
-    elif window.buttonPressed[KeyA] and playerMode():
-      attackMoveArmed = true
-    if window.mousePressed(MouseLeft) and not overUi:
+    elif window.mousePressed(MouseLeft) and not overUi:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
         window.buttonDown[KeyLeftShift] or
         window.buttonDown[KeyRightShift]
-    if window.mousePressed(MouseRight) and not overUi:
-      rightPressPosition = window.mousePos.vec2
-      if pendingBuild < 0:
-        panning = true
-    if not window.mouseDown(MouseRight):
+    if window.mousePressed(MouseMiddle) and
+        (not overUi or window.buttonPressed[MouseMiddleKey]):
+      panning = true
+    if not window.mouseDown(MouseMiddle):
       panning = false
     let delta = window.mouseDelta.vec2
     if panning:
@@ -1005,11 +1001,9 @@ proc runGraphics*() =
     ## Turns a right-click into move, attack, harvest, or rally.
     if not playerMode():
       return
-    if not window.mouseReleased(MouseRight):
+    if not window.mousePressed(MouseRight):
       return
     if mouseOverUi(window, sk.mousePos):
-      return
-    if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
       return
     if pendingBuild >= 0:
       let origin = buildGhostOrigin(viewProjection)

@@ -762,6 +762,13 @@ proc runGraphics*() =
       scene.toggleShading()
     elif button == KeyF1:
       debugMenuOpen = not debugMenuOpen
+    elif (button == KeyF or button == KeyG) and
+        options.playerSlot > 0 and
+        not run.replayMode:
+      queueUseItem(
+        run.world.heroes[options.playerSlot - 1].id,
+        int32(if button == KeyF: 0 else: 1)
+      )
 
   proc objectTeam(id: int32): int32 =
     ## Returns 1 for red, 2 for blue, or 0 when the id is unknown.
@@ -1311,9 +1318,7 @@ proc runGraphics*() =
         (window.buttonDown[KeyLeftControl] or
           window.buttonDown[KeyRightControl]):
       selectAllHeroes()
-    elif window.buttonPressed[KeyA] and playerMode():
-      attackMoveArmed = true
-    if window.mousePressed(MouseLeft) and not overUi:
+    elif window.mousePressed(MouseLeft) and not overUi:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =

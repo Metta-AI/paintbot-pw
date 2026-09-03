@@ -1159,18 +1159,22 @@ proc runGraphics*() =
     sk.uiScale = hudUiScale(window)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     case button
-    of MouseLeft, KeyV:
-      if not mouseOverUi(window, sk.mousePos):
+    of MouseLeft, MouseLeftKey:
+      if window.buttonDown[KeyLeftControl] or
+          window.buttonDown[KeyRightControl]:
+        if not playerMode():
+          selectAllHeroes()
+      elif not mouseOverUi(window, sk.mousePos):
         selectionPressPosition = window.mousePos.vec2
         selectionStarted = true
         selectionAdditive =
           window.buttonDown[KeyLeftShift] or
           window.buttonDown[KeyRightShift]
-    of MouseRight, KeyN:
+    of MouseRight, MouseRightKey:
       if not mouseOverUi(window, sk.mousePos):
         rightPressPosition = window.mousePos.vec2
         lastMouse = window.mousePos
-    of MouseMiddle, KeyB:
+    of MouseMiddle, MouseMiddleKey:
       if not mouseOverUi(window, sk.mousePos):
         lastMouse = window.mousePos
     of KeySpace:
@@ -1180,28 +1184,24 @@ proc runGraphics*() =
         actionCam.toggle(followSelection)
     of KeyT:
       scene.toggleShading()
-    of KeyF:
-      if not playerMode() and selectedLivingCount() > 0:
-        followSelection = not followSelection
-        if followSelection:
-          actionCam.takeManual()
-    of KeyF1:
-      debugMenuOpen = not debugMenuOpen
-    of KeyQ, KeyE:
+    of KeyF, KeyG:
       if playerMode() and
           playerSlot >= 0 and
           playerSlot < run.world.actors.len:
-        let bag = int32(if button == KeyQ: 0 else: 1)
+        let bag = int32(if button == KeyF: 0 else: 1)
         if window.buttonDown[KeyLeftShift] or
             window.buttonDown[KeyRightShift]:
           queueDropItem(int32(playerSlot), bag)
         else:
           queueUseItem(int32(playerSlot), bag)
-    of KeyA:
-      if not playerMode() and
-          (window.buttonDown[KeyLeftControl] or
-            window.buttonDown[KeyRightControl]):
-        selectAllHeroes()
+      elif button == KeyF and
+          not playerMode() and
+          selectedLivingCount() > 0:
+        followSelection = not followSelection
+        if followSelection:
+          actionCam.takeManual()
+    of KeyF1:
+      debugMenuOpen = not debugMenuOpen
     of KeyEscape:
       when not defined(emscripten):
         window.closeRequested = true
