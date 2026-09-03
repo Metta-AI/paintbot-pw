@@ -210,8 +210,12 @@ proc dressPlaza(p: var Placer) =
       x = centre + cos(mid) * PlazaDressRadius
       y = centre + sin(mid) * PlazaDressRadius
       facing = yawAlong(centre - x, centre - y)
+      sideways = facing + PI / 2
+        ## Long props lie across the sector rather than pointing inward.
       tangentX = -sin(mid)
       tangentY = cos(mid)
+      outwardX = cos(mid)
+      outwardY = sin(mid)
     case i mod 5
     of 0:
       p.add(MeadowProps, "market_stand_01a", PlazaArea, x, y, facing,
@@ -226,25 +230,26 @@ proc dressPlaza(p: var Placer) =
       p.add(MeadowBuildings, "wood_table_01a", PlazaArea, x, y, facing,
         TableHeight)
       p.add(MeadowBuildings, "wood_bench_01a", PlazaArea,
-        x - tangentX * 0.9'f32, y - tangentY * 0.9'f32, facing, BenchHeight)
-    of 2:
-      p.add(MeadowBuildings, "wood_bench_01a", PlazaArea, x, y, facing,
+        x + outwardX * 1.0'f32, y + outwardY * 1.0'f32, sideways,
         BenchHeight)
-      for side in [-1.0'f32, 1.0'f32]:
+    of 2:
+      p.add(MeadowBuildings, "wood_bench_01a", PlazaArea, x, y, sideways,
+        BenchHeight)
+      for side in [-1.8'f32, 1.8'f32]:
         p.add(MeadowProps, "flower_pot_01a", PlazaArea,
           x + tangentX * side, y + tangentY * side, facing, PotHeight)
     of 3:
-      p.add(MeadowProps, "wood_cart_01a", PlazaArea, x, y, facing + PI / 2,
+      p.add(MeadowProps, "wood_cart_01a", PlazaArea, x, y, sideways,
         CartHeight)
       p.add(MeadowProps, "wood_barrel_01a", PlazaArea,
-        x + tangentX * 1.1'f32, y + tangentY * 1.1'f32, 0.0, BarrelHeight)
+        x + outwardX * 1.3'f32, y + outwardY * 1.3'f32, 0.0, BarrelHeight)
       p.add(MeadowProps, "wood_barrel_01a", PlazaArea,
-        x + tangentX * 1.1'f32 + 0.5'f32, y + tangentY * 1.1'f32 - 0.4'f32,
-        0.7, BarrelHeight)
+        x + outwardX * 1.3'f32 + tangentX * 0.7'f32,
+        y + outwardY * 1.3'f32 + tangentY * 0.7'f32, 0.7, BarrelHeight)
     else:
       p.add(MeadowProps, "sack_pile_01a", PlazaArea, x, y, facing, SackHeight)
       p.add(MeadowProps, "wood_crate_01a", PlazaArea,
-        x + tangentX * 0.8'f32, y + tangentY * 0.8'f32, facing, BoxHeight)
+        x + tangentX * 1.1'f32, y + tangentY * 1.1'f32, facing, BoxHeight)
     ## A signpost on the grass beside every third entrance: a fence pole
     ## with the sign board hung on it, turned to face the road.
     if i mod 3 == 1:
