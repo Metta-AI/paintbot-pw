@@ -309,33 +309,52 @@ proc addMaterial(
   base.doc["materials"].add(material)
   base.doc["materials"].len - 1
 
-proc appendModel(
-    base: Glb, source: Glb, nodeName: string, materialIndex: Table[string, int]
+type Piece = object
+  source: Glb
+  world: DMat4
+
+proc appendAssembly(
+    base: Glb, pieces: seq[Piece], nodeName: string,
+    materialIndex: Table[string, int], recentre = true
 ): tuple[index: int, low, high: seq[float]] =
-  ## Adds one converted model as a single flat top-level node.
+  ## Adds one or more converted models as a single flat top-level node.
   ##
-  ## Each model is re-centred on x and z, matching what quadterrain's
-  ## collectPropModels does at load time. Height is left as authored, so a
-  ## fence post still sinks below the ground and a lamp still stands on it.
-  ## Without this a stray like wood_fence_pole_01a, which its FBX places 166
-  ## units out in space, would drag the whole kit's bounds with it.
+  ## A kit prop is one piece with an identity transform. An assembled house
+  ## is many, each carrying the world transform its Unity prefab placed it
+  ## at, merged into one mesh so the building is a single addressable node.
+  ##
+  ## Re-centring on x and z matches what quadterrain's collectPropModels
+  ## does at load time. Height is left as authored, so a fence post still
+  ## sinks below the ground and a lamp still stands on it. Without it a
+  ## stray like wood_fence_pole_01a, which its FBX places 166 units out in
+  ## space, would drag the whole kit's bounds with it.
   var
-    baked: seq[tuple[part: Part, payload: string, count: int, low, high: seq[float]]]
+    baked: seq[tuple[
+      part: Part, source: Glb, payload: string, count: int,
+      low, high: seq[float]]]
     low = @[Inf, Inf, Inf]
     high = @[-Inf, -Inf, -Inf]
-  for part in collectParts(source):
-    let attributes = part.primitive["attributes"]
-    if "POSITION" notin attributes:
-      continue
-    let one = bakedPositions(source, attributes["POSITION"].getInt, part.world)
-    for axis in 0 .. 2:
-      low[axis] = min(low[axis], one.low[axis])
-      high[axis] = max(high[axis], one.high[axis])
-    baked.add((part, one.payload, one.count, one.low, one.high))
+  for piece in pieces:
+    for part in collectParts(piece.source):
+      let attributes = part.primitive["attributes"]
+      if "POSITION" notin attributes:
+        continue
+      let world = piece.world * part.world
+      var placedPart = part
+      placedPart.world = world
+      let one = bakedPositions(
+        piece.source, attributes["POSITION"].getInt, world)
+      for axis in 0 .. 2:
+        low[axis] = min(low[axis], one.low[axis])
+        high[axis] = max(high[axis], one.high[axis])
+      baked.add((placedPart, piece.source, one.payload, one.count,
+                 one.low, one.high))
 
   if baked.len == 0:
     raise newException(ConversionError, nodeName & ": no drawable geometry")
-  let offset = [-(low[0] + high[0]) * 0.5, 0.0, -(low[2] + high[2]) * 0.5]
+  let offset =
+    if recentre: [-(low[0] + high[0]) * 0.5, 0.0, -(low[2] + high[2]) * 0.5]
+    else: [0.0, 0.0, 0.0]
 
   var primitives = newJArray()
   for entry in baked:
@@ -357,18 +376,18 @@ proc appendModel(
     }
     if "NORMAL" in attributes:
       let normals = bakedNormals(
-        source, attributes["NORMAL"].getInt, entry.part.world)
+        entry.source, attributes["NORMAL"].getInt, entry.part.world)
       primitiveJson["attributes"]["NORMAL"] =
         %base.addAccessor(normals, 5126, "VEC3", entry.count)
     if "TEXCOORD_0" in attributes:
       primitiveJson["attributes"]["TEXCOORD_0"] =
-        %base.copyAccessor(source, attributes["TEXCOORD_0"].getInt)
+        %base.copyAccessor(entry.source, attributes["TEXCOORD_0"].getInt)
     # COLOR_0 holds packed shader data here — a wind weight in green and a
     # zero alpha — not colour. Multiplied into base colour it renders the
     # whole pack black, so it is dropped along with the lightmap UVs.
     if "indices" in entry.part.primitive:
       primitiveJson["indices"] = %base.copyAccessor(
-        source, entry.part.primitive["indices"].getInt)
+        entry.source, entry.part.primitive["indices"].getInt)
     if "mode" in entry.part.primitive:
       primitiveJson["mode"] = entry.part.primitive["mode"]
     if entry.part.material in materialIndex:
@@ -385,6 +404,158 @@ proc appendModel(
     centred.add(low[axis] + offset[axis])
     centredHigh.add(high[axis] + offset[axis])
   (index, centred, centredHigh)
+
+proc appendModel(
+    base: Glb, source: Glb, nodeName: string, materialIndex: Table[string, int]
+): tuple[index: int, low, high: seq[float]] =
+  base.appendAssembly(
+    @[Piece(source: source, world: dmat4())], nodeName, materialIndex)
+
+## Unity prefabs
+
+# The packs ship assembled buildings as Unity prefab compositions — a
+# transform list referencing kit pieces — with no FBX of their own. Reading
+# that composition is the only way to get the finished houses out.
+
+type
+  PrefabInstance = object
+    anchor: string
+    sourceGuid: string
+    parent: string      ## fileID of the transform it hangs under
+    translation: DVec3
+    rotation: DVec4
+    scaling: DVec3
+
+proc braceField(line: string, field: string): string =
+  ## The value of `field: <value>` inside a `{...}` map on one line.
+  let at = line.find(field & ": ")
+  if at < 0:
+    return ""
+  var i = at + field.len + 2
+  var value = ""
+  while i < line.len and line[i] notin {',', '}', ' '}:
+    value.add(line[i])
+    inc i
+  value
+
+proc prefabInstances(path: string): seq[PrefabInstance] =
+  ## Every nested prefab placed in this prefab, with its local transform.
+  var
+    found: seq[PrefabInstance]
+    current: PrefabInstance
+    inBlock = false
+    pendingPath = ""
+  proc flush() =
+    if inBlock and current.sourceGuid.len > 0:
+      found.add(current)
+  for line in readFile(path).splitLines:
+    if line.startsWith("--- !u!"):
+      flush()
+      inBlock = line.startsWith("--- !u!1001 ")
+      current = PrefabInstance(
+        anchor: line.rsplit('&', 1)[^1].strip(),
+        parent: "0",
+        rotation: dvec4(0, 0, 0, 1),
+        scaling: dvec3(1, 1, 1))
+      pendingPath = ""
+      continue
+    if not inBlock:
+      continue
+    let trimmed = line.strip
+    if trimmed.startsWith("propertyPath: "):
+      pendingPath = trimmed["propertyPath: ".len .. ^1]
+    elif trimmed.startsWith("value: ") and pendingPath.len > 0:
+      let raw = trimmed["value: ".len .. ^1]
+      var number = 0.0
+      try:
+        number = raw.parseFloat
+      except ValueError:
+        pendingPath = ""
+        continue
+      let axis = pendingPath[^1]
+      let slot = case axis
+        of 'x': 0
+        of 'y': 1
+        of 'z': 2
+        of 'w': 3
+        else: -1
+      if slot >= 0:
+        if pendingPath.startsWith("m_LocalPosition."):
+          current.translation[slot] = number
+        elif pendingPath.startsWith("m_LocalRotation."):
+          current.rotation[slot] = number
+        elif pendingPath.startsWith("m_LocalScale."):
+          current.scaling[slot] = number
+      pendingPath = ""
+    elif trimmed.startsWith("m_TransformParent:"):
+      current.parent = braceField(trimmed, "fileID")
+    elif trimmed.startsWith("m_SourcePrefab:"):
+      current.sourceGuid = braceField(trimmed, "guid")
+  flush()
+  found
+
+proc transformOwners(path: string): Table[string, string] =
+  ## Stripped Transform fileID -> the prefab instance it belongs to, which
+  ## is how a placed piece names its parent.
+  var
+    anchor = ""
+    isTransform = false
+  for line in readFile(path).splitLines:
+    if line.startsWith("--- !u!"):
+      isTransform = line.startsWith("--- !u!4 ")
+      anchor = line.rsplit('&', 1)[^1].strip()
+      continue
+    if isTransform and line.strip.startsWith("m_PrefabInstance:"):
+      result[anchor] = braceField(line.strip, "fileID")
+
+proc instanceMatrix(instance: PrefabInstance): DMat4 =
+  translate(instance.translation) * mat4(instance.rotation) *
+    scale(instance.scaling)
+
+proc flattenPrefab(
+    path: string, guids: Table[string, string], world = dmat4(), depth = 0
+): seq[tuple[model: string, world: DMat4]] =
+  ## Resolves a prefab into the models it places and where it places them.
+  if depth > 6:
+    return
+  let
+    instances = prefabInstances(path)
+    owners = transformOwners(path)
+  var byAnchor = initTable[string, PrefabInstance]()
+  for instance in instances:
+    byAnchor[instance.anchor] = instance
+
+  proc chain(instance: PrefabInstance, seen: int): DMat4 =
+    result = instanceMatrix(instance)
+    if seen > 8:
+      return
+    let owner = owners.getOrDefault(instance.parent, "")
+    if owner.len > 0 and owner != instance.anchor and owner in byAnchor:
+      result = chain(byAnchor[owner], seen + 1) * result
+
+  for instance in instances:
+    let target = guids.getOrDefault(instance.sourceGuid, "")
+    let placed = world * chain(instance, 0)
+    if target.endsWith(".fbx"):
+      result.add((target, placed))
+    elif target.endsWith(".prefab"):
+      result.add(flattenPrefab(target, guids, placed, depth + 1))
+
+proc presetFiles(packDir: string): seq[string] =
+  ## The pack's assembled buildings: a Presets folder when it has one, and
+  ## anything else named like a preset.
+  ##
+  ## Furnished interiors are skipped — they are a room's worth of furniture
+  ## rather than a building, and the shell is what the kit is for.
+  for path in walkDirRec(packDir / "Prefabs"):
+    if not path.endsWith(".prefab"):
+      continue
+    if "Interior" in path.extractFilename:
+      continue
+    let parts = path.split(DirSep)
+    if "Presets" in parts or "Preset" in path.extractFilename:
+      result.add(path)
+  result.sort()
 
 ## Reporting
 
@@ -539,6 +710,39 @@ proc ensureAtlas(cache: AtlasCache, name, source: string): bool =
       &"{getFileSize(target).float / 1e6:.2f} MB"
   hasAlpha
 
+proc layOutGrid(
+    base: Glb, placed: seq[tuple[index: int, low, high: seq[float]]]
+) =
+  ## Spreads a kit over a browsing grid instead of piling every model on the
+  ## origin.
+  ##
+  ## The offset lives on each node's translation, never in its vertices, so a
+  ## consumer reading one model still gets it centred on its own origin while
+  ## a viewer opening the whole file can actually read the kit. quadterrain's
+  ## collectPropModels re-centres on x and z anyway, so this costs nothing at
+  ## runtime.
+  var area = 0.0
+  for entry in placed:
+    area += (entry.high[0] - entry.low[0] + LayoutGap) *
+      (entry.high[2] - entry.low[2] + LayoutGap)
+  let rowLimit = max(sqrt(area) * 1.3, 1.0)
+  var
+    cursorX = 0.0
+    cursorZ = 0.0
+    rowDepth = 0.0
+  for entry in placed:
+    let
+      width = entry.high[0] - entry.low[0]
+      depth = entry.high[2] - entry.low[2]
+    if cursorX > 0 and cursorX + width > rowLimit:
+      cursorX = 0
+      cursorZ += rowDepth + LayoutGap
+      rowDepth = 0
+    base.doc["nodes"][entry.index]["translation"] =
+      %[cursorX + width * 0.5, 0.0, cursorZ + depth * 0.5]
+    cursorX += width + LayoutGap
+    rowDepth = max(rowDepth, depth)
+
 proc buildCategory(
     pack: Pack, resolved: Resolved, category: string, models: seq[string],
     outDir: string, cache: AtlasCache, jobs: int
@@ -604,34 +808,7 @@ proc buildCategory(
       ],
     })
 
-  # Spread the kit over a grid instead of piling every model on the origin.
-  #
-  # The offset lives on each node's translation, never in its vertices, so a
-  # consumer reading one model still gets it centred on its own origin while
-  # a viewer opening the whole file can actually read the kit. quadterrain's
-  # collectPropModels re-centres on x and z anyway, so this costs nothing at
-  # runtime.
-  var area = 0.0
-  for entry in placed:
-    area += (entry.high[0] - entry.low[0] + LayoutGap) *
-      (entry.high[2] - entry.low[2] + LayoutGap)
-  let rowLimit = max(sqrt(area) * 1.3, 1.0)
-  var
-    cursorX = 0.0
-    cursorZ = 0.0
-    rowDepth = 0.0
-  for entry in placed:
-    let
-      width = entry.high[0] - entry.low[0]
-      depth = entry.high[2] - entry.low[2]
-    if cursorX > 0 and cursorX + width > rowLimit:
-      cursorX = 0
-      cursorZ += rowDepth + LayoutGap
-      rowDepth = 0
-    base.doc["nodes"][entry.index]["translation"] =
-      %[cursorX + width * 0.5, 0.0, cursorZ + depth * 0.5]
-    cursorX += width + LayoutGap
-    rowDepth = max(rowDepth, depth)
+  layOutGrid(base, placed)
 
   removeDir(temp)
   let target = outDir / category & ".glb"
@@ -719,6 +896,108 @@ proc verifyPack(outDir: string, packKey: string): seq[string] =
       check(span <= view["byteLength"].getInt,
         "accessor " & $i & " overruns its buffer view")
 
+
+proc buildPresets(
+    pack: Pack, resolved: Resolved, outDir: string, cache: AtlasCache,
+    jobs: int, sourceRoot: string
+): JsonNode =
+  ## Rebuilds the pack's assembled buildings from their Unity prefabs.
+  let packDir = sourceRoot / pack.directory
+  let presets = presetFiles(packDir)
+  if presets.len == 0:
+    return nil
+  let guids = guidMap(packDir)
+
+  # Every distinct model any preset places, converted once and shared.
+  var wanted: OrderedSet[string]
+  var placements: seq[tuple[name: string, pieces: seq[tuple[model: string, world: DMat4]]]]
+  for preset in presets:
+    let pieces = flattenPrefab(preset, guids)
+    # A single-piece preset is just a wrapper around one FBX, which the
+    # category kits already carry — the windmill, for instance.
+    if pieces.len < 2:
+      continue
+    for piece in pieces:
+      wanted.incl(piece.model)
+    placements.add((modelKey(pack, preset), pieces))
+  if placements.len == 0:
+    return nil
+
+  let temp = getTempDir() / "toon_packs" / pack.key / "presets"
+  createDir(temp)
+  var conversions: seq[(string, string)]
+  var order: seq[string]
+  for model in wanted:
+    conversions.add((model, temp / model.extractFilename.changeFileExt("")))
+    order.add(model)
+  let converted = convertAll(fbx2gltfBinary(), conversions, jobs)
+  var sources = initTable[string, Glb]()
+  var materialNames: OrderedSet[string]
+  for i, path in converted:
+    let glb = readGlb(path)
+    sources[order[i]] = glb
+    for part in collectParts(glb):
+      if part.material.len > 0:
+        materialNames.incl(part.material)
+
+  let base = newPackGlb()
+  var textureIndex = initTable[string, int]()
+  var materialIndex = initTable[string, int]()
+  for material in materialNames:
+    let atlas = materialAtlas(pack, resolved, material)
+    if atlas.len > 0 and atlas notin textureIndex:
+      let hasAlpha = cache.ensureAtlas(atlas, resolved.atlases[atlas])
+      textureIndex[atlas] = base.addAtlas(atlas, hasAlpha)
+  for material in materialNames:
+    let atlas = materialAtlas(pack, resolved, material)
+    let cutout = atlas.len > 0 and cache.alpha.getOrDefault(atlas)
+    materialIndex[material] = base.addMaterial(
+      material, textureIndex.getOrDefault(atlas, -1), cutout)
+
+  var nodes = newJArray()
+  var triangles = 0
+  var placed: seq[tuple[index: int, low, high: seq[float]]]
+  for entry in placements:
+    var pieces: seq[Piece]
+    for piece in entry.pieces:
+      if piece.model in sources:
+        pieces.add(Piece(source: sources[piece.model], world: piece.world))
+    if pieces.len == 0:
+      continue
+    placed.add(base.appendAssembly(pieces, entry.name, materialIndex))
+    let mesh = base.doc["meshes"][base.doc["meshes"].len - 1]
+    var presetTriangles = 0
+    for primitive in mesh["primitives"]:
+      if "indices" in primitive:
+        presetTriangles +=
+          base.doc["accessors"][primitive["indices"].getInt]["count"].getInt div 3
+    triangles += presetTriangles
+    nodes.add(%*{
+      "node": entry.name,
+      "pieces": pieces.len,
+      "triangles": presetTriangles,
+      "size": [
+        placed[^1].high[0] - placed[^1].low[0],
+        placed[^1].high[1] - placed[^1].low[1],
+        placed[^1].high[2] - placed[^1].low[2],
+      ],
+    })
+
+  layOutGrid(base, placed)
+  removeDir(temp)
+  let target = outDir / "presets.glb"
+  base.write(target)
+  echo &"  {\"presets.glb\":18s} {placed.len:4d} models {triangles:8d} tris " &
+    &"{base.doc[\"images\"].len} atlas  {getFileSize(target).float / 1e6:6.2f} MB"
+  %*{
+    "category": "presets",
+    "path": pack.key & "/presets.glb",
+    "models": placed.len,
+    "triangles": triangles,
+    "atlases": toSeq(textureIndex.keys).sorted,
+    "nodes": nodes,
+  }
+
 proc buildPack(
     sourceRoot, outRoot: string, pack: Pack, only: string, jobs: int,
     force: bool
@@ -746,6 +1025,11 @@ proc buildPack(
       continue
     categories.add(buildCategory(
       pack, resolved, category, models, outDir, cache, jobs))
+  if only.len == 0 or only == "presets":
+    let presets = buildPresets(
+      pack, resolved, outDir, cache, jobs, sourceRoot)
+    if presets != nil:
+      categories.add(presets)
 
   var atlases = newJArray()
   for name in toSeq(cache.alpha.keys).sorted:
