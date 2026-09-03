@@ -40,9 +40,12 @@ block placementRules:
         &"{d.node} strayed off the plaza"
     elif d.node != "flower_pot_01a" and d.lift == 0:
       let
-        x = int32(d.x)
-        y = int32(d.y)
+        x = d.tile.x
+        y = d.tile.y
         index = tileIndex(x, y)
+      doAssert abs(d.x - float32(x) - 0.5'f32) <= 1.0'f32 and
+        abs(d.y - float32(y) - 0.5'f32) <= 1.0'f32,
+        &"{d.node} strayed more than a tile from its claim at {x},{y}"
       doAssert map.kinds[index] == uint8(GrassTile),
         &"{d.node} sits on tile kind {map.kinds[index]} at {x},{y}"
       doAssert map.passable[index] != 0, &"{d.node} sits on a blocked tile"

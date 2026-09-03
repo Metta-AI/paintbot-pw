@@ -28,6 +28,9 @@ type
     area*: DecorArea
     x*, y*: float32
       ## Tile space; a tile centre is its index plus one half.
+    tile*: Tile2
+      ## The tile this decoration claimed, which a shifted prop may lean
+      ## out of. Plaza props claim nothing and leave it at the centre.
     lift*: float32
       ## Tiles above the ground, for pieces that sit on other pieces.
     yaw*: float32
@@ -101,9 +104,13 @@ const
   RockCobbleMost = 1.0'f32
     ## Every rock is pulled at least halfway, and up to fully, toward the
     ## cobble tint, so they read as the plaza's stone.
-  CobbleTint = vec3(0.78, 0.70, 0.78)
+  CobbleTint = vec3(1.12, 1.0, 1.1)
     ## What the rock paint is multiplied by to land near the cobbles'
-    ## mauve grey.
+    ## mauve grey; the rock atlas is darker than the paving, so this
+    ## lifts as well as shifts.
+  VergeBushSetback = 0.7'f32
+    ## Tiles a verge bush is pushed away from the road, so a big one leans
+    ## over the dirt instead of growing into it.
   MediumRockOneIn = 7'i32
   LargeRockOneIn = 25'i32
 
@@ -194,33 +201,48 @@ proc nearRoad(p: Placer, x, y: int32): bool =
         return true
   false
 
+proc awayFromRoad(p: Placer, x, y: int32): Vec2 =
+  ## Unit direction pointing away from the road tiles around one tile.
+  var pull = vec2(0, 0)
+  for dy in -1'i32 .. 1'i32:
+    for dx in -1'i32 .. 1'i32:
+      if inGrid(x + dx, y + dy) and
+          p.map.kinds[tileIndex(x + dx, y + dy)] == uint8(RoadTile):
+        pull -= vec2(float32(dx), float32(dy))
+  if pull.length < 0.001'f32:
+    return vec2(0, 0)
+  pull.normalize
+
 proc add(
     p: var Placer, kit: DecorKit, node: string, area: DecorArea,
     x, y, yaw, height: float32, lift = 0.0'f32, tint = vec3(1, 1, 1)
 ) =
   ## Records one decoration.
   p.placed.add Decoration(
-    kit: kit, node: node, area: area, x: x, y: y, lift: lift, yaw: yaw,
-    height: height, tint: tint)
+    kit: kit, node: node, area: area, x: x, y: y,
+    tile: tile2(int32(x), int32(y)), lift: lift, yaw: yaw, height: height,
+    tint: tint)
 
 proc claim(
     p: var Placer, kit: DecorKit, node: string, area: DecorArea,
     tileX, tileY: int32, yaw, height: float32, jitter = 0.0'f32,
-    variance = 0.0'f32, tint = vec3(1, 1, 1)
+    variance = 0.0'f32, tint = vec3(1, 1, 1), shift = vec2(0, 0)
 ): bool =
   ## Places one decoration on a free grass tile and marks the tile used.
-  ## Jitter moves it off the tile centre by up to that many tiles;
-  ## variance scales its height by up to that fraction either way.
+  ## Jitter moves it off the tile centre by up to that many tiles, shift
+  ## moves it by exactly that much, and variance scales its height by up
+  ## to that fraction either way.
   if not p.tileFree(tileX, tileY):
     return false
   p.used.incl tileIndex(tileX, tileY)
   let
-    offsetX = (p.rng.unit() - 0.5'f32) * 2.0'f32 * jitter
-    offsetY = (p.rng.unit() - 0.5'f32) * 2.0'f32 * jitter
+    offsetX = (p.rng.unit() - 0.5'f32) * 2.0'f32 * jitter + shift.x
+    offsetY = (p.rng.unit() - 0.5'f32) * 2.0'f32 * jitter + shift.y
     grown = height * (1.0'f32 + (p.rng.unit() - 0.5'f32) * 2.0'f32 * variance)
   p.add(kit, node, area,
     float32(tileX) + 0.5'f32 + offsetX, float32(tileY) + 0.5'f32 + offsetY,
     yaw, grown, 0.0, tint)
+  p.placed[^1].tile = tile2(tileX, tileY)
   true
 
 proc dressPlaza(p: var Placer) =
@@ -406,7 +428,8 @@ proc dressVerges(p: var Placer) =
           yaw, TuftHeight, 0.3, NaturalVariance, p.rng.plantTint())
       of 1:
         discard p.claim(MeadowVegetation, "bush_01a", RoadArea, x, y, yaw,
-          VergeBushHeight, 0.2, NaturalVariance, p.rng.plantTint())
+          VergeBushHeight, 0.2, NaturalVariance, p.rng.plantTint(),
+          p.awayFromRoad(x, y) * VergeBushSetback)
       of 2:
         discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), RoadArea, x, y,
           yaw, SmallRockHeight, 0.3, NaturalVariance, p.rng.rockTint())
