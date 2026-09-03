@@ -107,7 +107,6 @@ proc initGameWindow*(
   loadExtensions()
   let sk = newSilky(window, atlasPath)
   sk.applyThemePatches()
-  window.runeInputEnabled = true
   window.onRune = proc(rune: Rune) =
     sk.inputRunes.add(rune)
   (window, sk)

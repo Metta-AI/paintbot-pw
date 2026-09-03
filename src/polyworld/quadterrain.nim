@@ -38,6 +38,7 @@ var
   shadowTexel: Uniform[float32]
   shadowSoftness: Uniform[float32]
   shadingStrength: Uniform[float32]
+  envLightLevel: Uniform[float32]
 
 const EnvironmentExposure = 1.15'f32
   ## Lifts the palette-graded environment back to the brightness the old
@@ -101,12 +102,13 @@ proc sampleSunShadow(shadowPos: Vec3): float32 =
 proc envShade(albedo, normal: Vec3, sunFactor: float32): Vec3 =
   ## Palette-graded lighting: half-lambert toward the shared light scaled by
   ## the shadow test, softly stepped, choosing between the shadow and
-  ## highlight colours. shadingStrength pulls the intensity toward full
-  ## highlight, so nighttime flattens the scene instead of shading it.
+  ## highlight colours. lightLevel fades only that directional term toward
+  ## the shadow band, so the horizon swap does not flatten or black out.
   let
     halfLambert = dot(normalize(normal), envLightDirection) * 0.5'f + 0.5'f
     intensity =
-      1.0'f - shadingStrength + halfLambert * sunFactor * shadingStrength
+      (1.0'f - shadingStrength + halfLambert * sunFactor * shadingStrength) *
+      envLightLevel
     band = smoothstep(0.45'f, 0.8'f, intensity)
   result = albedo * mix(envShadow, envHighlight, band) * EnvironmentExposure
 
@@ -116,7 +118,8 @@ proc envShadeTwoSided(albedo, normal: Vec3, sunFactor: float32): Vec3 =
     halfLambert =
       abs(dot(normalize(normal), envLightDirection)) * 0.5'f + 0.5'f
     intensity =
-      1.0'f - shadingStrength + halfLambert * sunFactor * shadingStrength
+      (1.0'f - shadingStrength + halfLambert * sunFactor * shadingStrength) *
+      envLightLevel
     band = smoothstep(0.45'f, 0.8'f, intensity)
   result = albedo * mix(envShadow, envHighlight, band) * EnvironmentExposure
 
@@ -410,12 +413,12 @@ proc waterFrag(
       texture(visibilityTex, visibilityUv).x
     )
   let water: Vec3 = vec3(
-    (0.05 + 0.08 * visibility) + specular * visibility,
-    (0.10 + 0.24 * visibility) + specular * visibility,
-    (0.16 + 0.42 * visibility) + specular * visibility
+    (0.05 + 0.08 * visibility) + specular * visibility * envLightLevel,
+    (0.10 + 0.24 * visibility) + specular * visibility * envLightLevel,
+    (0.16 + 0.42 * visibility) + specular * visibility * envLightLevel
   ) * envHighlight
   fragColor = vec4(water.x, water.y, water.z,
-    clamp(0.55 + specular * 0.45, 0.0, 1.0))
+    clamp(0.55 + specular * envLightLevel * 0.45, 0.0, 1.0))
 
 ## Prop shader: baked vertex colors with half-lambert lighting.
 
@@ -631,12 +634,13 @@ var
   environmentLight = ToonLightDirection  # direction the light travels
 
 type EnvLocations = object
-  highlight, shadow, light: GLint
+  highlight, shadow, light, level: GLint
 
 proc envLocations(program: GLuint): EnvLocations =
   result.highlight = glGetUniformLocation(program, "envHighlight")
   result.shadow = glGetUniformLocation(program, "envShadow")
   result.light = glGetUniformLocation(program, "envLightDirection")
+  result.level = glGetUniformLocation(program, "envLightLevel")
 
 proc setEnvUniforms(loc: EnvLocations) =
   ## Uploads the environment palette to the program currently in use.
@@ -647,6 +651,7 @@ proc setEnvUniforms(loc: EnvLocations) =
   glUniform3f(loc.highlight, h.r, h.g, h.b)
   glUniform3f(loc.shadow, s.r, s.g, s.b)
   glUniform3f(loc.light, l.x, l.y, l.z)
+  glUniform1f(loc.level, lightLevel)
 
 proc setEnvironmentPalette*(
     highlight, shadow: Color, lightDirection = ToonLightDirection
@@ -690,7 +695,7 @@ proc setShadowUniforms(loc: ShadowLocations) =
     loc.mvp1, 1, GL_FALSE, cast[ptr float32](lightMatrix1.addr))
   glUniform1f(loc.step, sunShadowBlend)
   glUniform1f(loc.on, if sunShadowsActive(): 1.0 else: 0.0)
-  glUniform1f(loc.strength, sunShadowStrength)
+  glUniform1f(loc.strength, sunShadowStrength * lightLevel)
   glUniform1f(loc.bias, sunShadowBias)
   glUniform1f(loc.texel, SunShadowTexel)
   glUniform1f(loc.softness, sunShadowSoftness)

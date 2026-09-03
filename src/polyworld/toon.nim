@@ -63,6 +63,7 @@ var
   toonShadowTexel: Uniform[float32]
   toonShadowSoftness: Uniform[float32]
   toonShadingStrength: Uniform[float32]
+  toonLightLevel: Uniform[float32]
 
 proc toonLitFraction0(worldPos: Vec3): float32 =
   ## Raw lit fraction from the first shadow step, 0 shadowed .. 1 clear: a
@@ -172,8 +173,9 @@ proc toonFrag(
   # band forever.
   let
     sunFactor = sunShadowFactor(worldPos)
-    intensity = 1.0'f - toonShadingStrength +
-      lightIntensity * sunFactor * toonShadingStrength
+    intensity =
+      (1.0'f - toonShadingStrength +
+        lightIntensity * sunFactor * toonShadingStrength) * toonLightLevel
   var band = texture(toonRamp, vec2(intensity, 0.5'f)).r
   if toonUnlit:
     band = 1.0'f
@@ -359,7 +361,7 @@ type
     highlightColor, shadowColor, rimColor, unlit, tint: GLint
     shadowMvp0, shadowMvp1, shadowMap0, shadowMap1, shadowStep: GLint
     shadowsOn, shadowStrength: GLint
-    shadowBias, shadowTexel, shadowSoftness, shadingStrength: GLint
+    shadowBias, shadowTexel, shadowSoftness, shadingStrength, lightLevel: GLint
 
   ToonDepthUniforms = object
     model, lightMvp, useSkinning, jointMatrices: GLint
@@ -460,6 +462,7 @@ proc newToonContext*(): ToonContext =
   loc(shadowTexel, "toonShadowTexel")
   loc(shadowSoftness, "toonShadowSoftness")
   loc(shadingStrength, "toonShadingStrength")
+  loc(lightLevel, "toonLightLevel")
   result.uploadRamp(rampImage())
 
   result.depthShader = compileShaderFiles(ToonDepthVertSrc, ToonDepthFragSrc)
@@ -630,11 +633,12 @@ proc draw*(ctx: ToonContext, root: Node) =
     u.shadowMvp1, 1, GL_FALSE, cast[ptr float32](lightMatrix1.addr))
   glUniform1f(u.shadowStep, sunShadowBlend)
   glUniform1f(u.shadowsOn, if sunShadowsActive(): 1.0 else: 0.0)
-  glUniform1f(u.shadowStrength, sunShadowStrength)
+  glUniform1f(u.shadowStrength, sunShadowStrength * lightLevel)
   glUniform1f(u.shadowBias, sunShadowBias)
   glUniform1f(u.shadowTexel, SunShadowTexel)
   glUniform1f(u.shadowSoftness, sunShadowSoftness)
   glUniform1f(u.shadingStrength, sunShadingStrength)
+  glUniform1f(u.lightLevel, lightLevel)
   glActiveTexture(GL_TEXTURE3)
   glBindTexture(GL_TEXTURE_2D, sunShadowTextures[0])
   glUniform1i(u.shadowMap0, 3)

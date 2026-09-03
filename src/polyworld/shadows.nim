@@ -1,11 +1,11 @@
-## Sun shadow maps for the polyworld games. One directional sun renders
+## Sun shadow maps for the polyworld games. One directional light renders
 ## every caster (terrain, props, trees, characters) into depth maps with
 ## hardware PCF comparison filtering, and the lit shaders in quadterrain and
-## toon darken whatever the sun cannot see. A day clock drives the whole
-## atmosphere: the sun arcs east to west from 6:00 to 20:00 (the moon rides
-## the same track at night), and one shared strength curve fades cast
-## shadows and directional shading together, so noon is crisp, twilight is
-## soft, and night is nearly flat moonlight.
+## toon darken whatever the light cannot see. A day clock drives the whole
+## atmosphere: the sun arcs east to west from 6:00 to 20:00, the moon rides
+## the same track at night and shades like a darker sun, and a signed
+## horizon band fades the directional light toward the shadow side so the
+## sun-to-moon swap does not pop.
 ##
 ## A continuously rotating light re-rasterizes every caster edge each frame,
 ## which boils shadow edges (and the toon band turns that sampling noise
@@ -45,6 +45,9 @@ var
   sunShadingStrength* = 1.0'f32  ## 1: full directional shading, 0: flat.
   sunShadowBias* = 0.0012'f32    ## Depth offset that hides self-shadow acne.
   sunShadowSoftness* = 1.5'f32   ## PCF spread in shadow-map texels.
+  moonShadowStrength* = 0.4'f32  ## Night moon casts like the sun, darker.
+  lightLevel* = 1.0'f32          ## 1 full sun or moonlight, 0 shadow side.
+  solarElevation* = 53.0'f32     ## Signed: sun positive, moon negative.
   sunDirection* = normalize(vec3(0.45, 0.8, 0.4))  ## Toward the sun (smooth).
   sunLightMvp0*: Mat4            ## Light view-projection at the earlier step.
   sunLightMvp1*: Mat4            ## The same at the next step.
@@ -155,54 +158,90 @@ proc lightMatrixFor(azimuth, elevation: float32): Mat4 =
       sunLightDistance - sunLightRadius, sunLightDistance + sunLightRadius)
   projection * view
 
+const HorizonMapFloor = 8.0'f32
+  ## Keeps the depth-map caster off the ground while the horizon fade
+  ## has already killed the directional light.
+
+proc mapElevation(elevation: float32): float32 =
+  ## Floors elevation so the shadow map stays valid near the horizon.
+  max(elevation, HorizonMapFloor)
+
+proc horizonLight*(signedElev: float32): float32 =
+  ## Moonlight below -20°, no directional light from -10° to +10°,
+  ## full sun above +20°. The scene stays visible; only the light fades.
+  if signedElev <= -20:
+    result = 1.0
+  elif signedElev < -10:
+    result = 1.0 - smoothstep(-20.0'f32, -10.0'f32, signedElev)
+  elif signedElev <= 10:
+    result = 0.0
+  elif signedElev < 20:
+    result = smoothstep(10.0'f32, 20.0'f32, signedElev)
+  else:
+    result = 1.0
+
 proc updateSunMatrix*() =
   ## Recomputes the smooth sun direction and points both shadow steps at it
   ## (blend 0) — the manual path when no day clock drives the rig.
-  sunDirection = sunDirectionFor(sunAzimuth, sunElevation)
-  sunLightMvp0 = lightMatrixFor(sunAzimuth, sunElevation)
+  solarElevation = sunElevation
+  lightLevel = horizonLight(solarElevation)
+  sunDirection = sunDirectionFor(sunAzimuth, mapElevation(sunElevation))
+  sunLightMvp0 = lightMatrixFor(sunAzimuth, mapElevation(sunElevation))
   sunLightMvp1 = sunLightMvp0
   sunShadowBlend = 0
 
 proc sunRigAt(hour: float32): tuple[azimuth, elevation, sunUp: float32] =
   ## The sun's place at an hour: it arcs east to west from 6:00 to 20:00,
-  ## and the moon rides the same track through the night, low and dim.
+  ## and the moon rides the same track through the night. Elevation is
+  ## allowed to fall through the 10-20° fade so the handoff is dark.
   ## sunUp is 0 at night, 1 at noon.
   let h = ((hour mod 24) + 24) mod 24
   if h >= 6 and h <= 20:
     let t = (h - 6) / 14
     result.sunUp = sin(t * PI.float32)
     result.azimuth = 90 + t * 180
-    result.elevation = max(result.sunUp * 70, 12)
+    result.elevation = result.sunUp * 70
   else:
     let sinceSunset = if h > 20: h - 20 else: h + 4
     let t = sinceSunset / 10
     result.sunUp = 0
     result.azimuth = 90 + t * 180
-    result.elevation = max(sin(t * PI.float32) * 45, 12)
+    result.elevation = sin(t * PI.float32) * 45
 
 proc applySunHour*(hour: float32) =
   ## Drives the whole sun rig from a day clock. Lighting and strengths use
   ## the smooth hour; the shadow maps use the two neighbouring SunStepHours
   ## steps with a cross-fade, so shadow edges dissolve toward the next sun
-  ## position instead of re-rasterizing (and shimmering) every frame. One
-  ## strength curve fades cast shadows and directional shading together —
-  ## separate curves pop at sunset.
-  let smooth = sunRigAt(hour)
+  ## position instead of re-rasterizing (and shimmering) every frame. Night
+  ## keeps real moon shading; the horizon band fades only the light.
+  let
+    smooth = sunRigAt(hour)
+    h = ((hour mod 24) + 24) mod 24
+    isDay = h >= 6 and h <= 20
   sunAzimuth = smooth.azimuth
   sunElevation = smooth.elevation
-  sunDirection = sunDirectionFor(smooth.azimuth, smooth.elevation)
-  let strength =
-    0.15'f32 + 0.7'f32 * smoothstep(0.0'f32, 0.3'f32, smooth.sunUp)
-  sunShadowStrength = strength
-  sunShadingStrength = strength
+  solarElevation =
+    if isDay:
+      smooth.elevation
+    else:
+      -smooth.elevation
+  lightLevel = horizonLight(solarElevation)
+  sunDirection = sunDirectionFor(smooth.azimuth, mapElevation(smooth.elevation))
+  if isDay:
+    let strength =
+      0.15'f32 + 0.7'f32 * smoothstep(0.0'f32, 0.3'f32, smooth.sunUp)
+    sunShadowStrength = strength
+    sunShadingStrength = strength
+  else:
+    sunShadowStrength = moonShadowStrength
+    sunShadingStrength = 0.8'f32
   let
-    h = ((hour mod 24) + 24) mod 24
     step0 = floor(h / SunStepHours) * SunStepHours
     rig0 = sunRigAt(step0)
     rig1 = sunRigAt(step0 + SunStepHours)
   sunShadowBlend = clamp((h - step0) / SunStepHours, 0.0'f32, 1.0'f32)
-  sunLightMvp0 = lightMatrixFor(rig0.azimuth, rig0.elevation)
-  sunLightMvp1 = lightMatrixFor(rig1.azimuth, rig1.elevation)
+  sunLightMvp0 = lightMatrixFor(rig0.azimuth, mapElevation(rig0.elevation))
+  sunLightMvp1 = lightMatrixFor(rig1.azimuth, mapElevation(rig1.elevation))
 
 ## Setup
 

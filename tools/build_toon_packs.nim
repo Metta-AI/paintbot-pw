@@ -559,6 +559,10 @@ proc presetFiles(packDir: string): seq[string] =
 
 ## Reporting
 
+var sourceRootValue = ""
+proc sourceRootOf(pack: Pack): string =
+  sourceRootValue / pack.directory
+
 proc modelKey(pack: Pack, path: string): string =
   var stem = path.extractFilename.changeFileExt("")
   if stem.startsWith(pack.prefix):
@@ -897,6 +901,200 @@ proc verifyPack(outDir: string, packKey: string): seq[string] =
         "accessor " & $i & " overruns its buffer view")
 
 
+## Scene extraction
+
+# A Unity scene is the same YAML as a prefab, but its hierarchy runs through
+# real Transform blocks (the grouping GameObjects) rather than only the
+# stripped ones a prefab uses.
+
+type SceneTransform = object
+  translation: DVec3
+  rotation: DVec4
+  scaling: DVec3
+  father: string
+
+proc sceneTransforms(path: string): Table[string, SceneTransform] =
+  ## Real Transform blocks: their own local TRS and their parent.
+  var
+    anchor = ""
+    inBlock = false
+    stripped = false
+    current: SceneTransform
+  proc flush(into: var Table[string, SceneTransform]) =
+    if inBlock and not stripped and anchor.len > 0:
+      into[anchor] = current
+  for line in readFile(path).splitLines:
+    if line.startsWith("--- !u!"):
+      flush(result)
+      inBlock = line.startsWith("--- !u!4 ")
+      stripped = false
+      anchor = line.rsplit('&', 1)[^1].strip
+      current = SceneTransform(
+        rotation: dvec4(0, 0, 0, 1), scaling: dvec3(1, 1, 1), father: "0")
+      continue
+    if not inBlock:
+      continue
+    let trimmed = line.strip
+    if trimmed.startsWith("m_PrefabInstance:"):
+      stripped = true
+    elif trimmed.startsWith("m_Father:"):
+      current.father = braceField(trimmed, "fileID")
+    elif trimmed.startsWith("m_LocalPosition:"):
+      current.translation = dvec3(
+        braceField(trimmed, "x").parseFloat, braceField(trimmed, "y").parseFloat,
+        braceField(trimmed, "z").parseFloat)
+    elif trimmed.startsWith("m_LocalRotation:"):
+      current.rotation = dvec4(
+        braceField(trimmed, "x").parseFloat, braceField(trimmed, "y").parseFloat,
+        braceField(trimmed, "z").parseFloat, braceField(trimmed, "w").parseFloat)
+    elif trimmed.startsWith("m_LocalScale:"):
+      current.scaling = dvec3(
+        braceField(trimmed, "x").parseFloat, braceField(trimmed, "y").parseFloat,
+        braceField(trimmed, "z").parseFloat)
+  flush(result)
+
+proc flattenScene(
+    path: string, guids: Table[string, string]
+): seq[tuple[model: string, world: DMat4]] =
+  ## Every model the scene places, with its world transform.
+  let
+    instances = prefabInstances(path)
+    owners = transformOwners(path)
+    groups = sceneTransforms(path)
+  var byAnchor = initTable[string, PrefabInstance]()
+  for instance in instances:
+    byAnchor[instance.anchor] = instance
+
+  proc parentMatrix(transformId: string, seen: int): DMat4 =
+    ## Walks up the scene hierarchy, through grouping GameObjects and
+    ## through other prefab instances alike.
+    result = dmat4()
+    if seen > 16 or transformId == "0":
+      return
+    let owner = owners.getOrDefault(transformId, "")
+    if owner.len > 0 and owner in byAnchor:
+      let parent = byAnchor[owner]
+      return parentMatrix(parent.parent, seen + 1) * instanceMatrix(parent)
+    if transformId in groups:
+      let group = groups[transformId]
+      return parentMatrix(group.father, seen + 1) *
+        translate(group.translation) * mat4(group.rotation) *
+        scale(group.scaling)
+
+  for instance in instances:
+    let target = guids.getOrDefault(instance.sourceGuid, "")
+    let placed = parentMatrix(instance.parent, 0) * instanceMatrix(instance)
+    if target.endsWith(".fbx"):
+      result.add((target, placed))
+    elif target.endsWith(".prefab"):
+      for piece in flattenPrefab(target, guids, placed, 1):
+        result.add(piece)
+
+proc buildScene(
+    pack: Pack, resolved: Resolved, scenePath, outPath: string,
+    cache: AtlasCache, jobs: int
+) =
+  ## Extracts a whole demo scene, instancing rather than baking.
+  ##
+  ## A dressed level places the same tree or wall thousands of times, so
+  ## every model becomes one mesh and every placement one node carrying its
+  ## world matrix. Baking instead would multiply the geometry by its
+  ## placement count and turn a 20 MB kit into hundreds.
+  let guids = guidMap(sourceRootOf(pack))
+  let placements = flattenScene(scenePath, guids)
+  echo &"  {placements.len} placements in {scenePath.extractFilename}"
+
+  var wanted: OrderedSet[string]
+  for placement in placements:
+    if not skipModel(placement.model):
+      wanted.incl(placement.model)
+  let temp = getTempDir() / "toon_packs" / pack.key / "scene"
+  createDir(temp)
+  var conversions: seq[(string, string)]
+  var order: seq[string]
+  for model in wanted:
+    conversions.add((model, temp / model.extractFilename.changeFileExt("")))
+    order.add(model)
+  let converted = convertAll(fbx2gltfBinary(), conversions, jobs)
+
+  let base = newPackGlb()
+  var sources = initTable[string, Glb]()
+  var materialNames: OrderedSet[string]
+  for i, path in converted:
+    let glb = readGlb(path)
+    sources[order[i]] = glb
+    for part in collectParts(glb):
+      if part.material.len > 0:
+        materialNames.incl(part.material)
+
+  var textureIndex = initTable[string, int]()
+  var materialIndex = initTable[string, int]()
+  for material in materialNames:
+    let atlas = materialAtlas(pack, resolved, material)
+    if atlas.len > 0 and atlas notin textureIndex:
+      let hasAlpha = cache.ensureAtlas(atlas, resolved.atlases[atlas])
+      textureIndex[atlas] = base.addAtlas(atlas, hasAlpha)
+  for material in materialNames:
+    let atlas = materialAtlas(pack, resolved, material)
+    let cutout = atlas.len > 0 and cache.alpha.getOrDefault(atlas)
+    materialIndex[material] = base.addMaterial(
+      material, textureIndex.getOrDefault(atlas, -1), cutout)
+
+  # One mesh per distinct model, reused by every placement.
+  var meshIndex = initTable[string, int]()
+  for model in wanted:
+    let source = sources[model]
+    var primitives = newJArray()
+    for part in collectParts(source):
+      let attributes = part.primitive["attributes"]
+      if "POSITION" notin attributes:
+        continue
+      let (payload, count, low, high) =
+        bakedPositions(source, attributes["POSITION"].getInt, part.world)
+      var primitiveJson = %*{
+        "attributes": {
+          "POSITION": base.addAccessor(payload, 5126, "VEC3", count, low, high),
+        },
+      }
+      if "NORMAL" in attributes:
+        primitiveJson["attributes"]["NORMAL"] = %base.addAccessor(
+          bakedNormals(source, attributes["NORMAL"].getInt, part.world),
+          5126, "VEC3", count)
+      if "TEXCOORD_0" in attributes:
+        primitiveJson["attributes"]["TEXCOORD_0"] =
+          %base.copyAccessor(source, attributes["TEXCOORD_0"].getInt)
+      if "indices" in part.primitive:
+        primitiveJson["indices"] =
+          %base.copyAccessor(source, part.primitive["indices"].getInt)
+      if part.material in materialIndex:
+        primitiveJson["material"] = %materialIndex[part.material]
+      primitives.add(primitiveJson)
+    if primitives.len == 0:
+      continue
+    base.doc["meshes"].add(%*{
+      "name": modelKey(pack, model), "primitives": primitives})
+    meshIndex[model] = base.doc["meshes"].len - 1
+
+  var placed = 0
+  for placement in placements:
+    if placement.model notin meshIndex:
+      continue
+    var matrix = newJArray()
+    for column in 0 .. 3:
+      for row in 0 .. 3:
+        matrix.add(%placement.world[column, row])
+    base.doc["nodes"].add(%*{
+      "name": modelKey(pack, placement.model) & "_" & $placed,
+      "mesh": meshIndex[placement.model],
+      "matrix": matrix,
+    })
+    base.doc["scenes"][0]["nodes"].add(%(base.doc["nodes"].len - 1))
+    inc placed
+
+  base.write(outPath)
+  echo &"  wrote {outPath}: {meshIndex.len} meshes, {placed} placements, " &
+    &"{getFileSize(outPath).float / 1e6:.1f} MB"
+
 proc buildPresets(
     pack: Pack, resolved: Resolved, outDir: string, cache: AtlasCache,
     jobs: int, sourceRoot: string
@@ -1066,6 +1264,7 @@ proc main(): int =
     force = false
     wantSelfTest = false
     wantVerify = false
+    scenePath = ""
   for param in commandLineParams():
     if param.startsWith("--source="): sourceRoot = expandTilde(param[9 .. ^1])
     elif param.startsWith("--out="): outRoot = param[6 .. ^1]
@@ -1073,12 +1272,14 @@ proc main(): int =
     elif param.startsWith("--category="): onlyCategory = param[11 .. ^1]
     elif param.startsWith("--jobs="): jobs = param[7 .. ^1].parseInt
     elif param == "--force-textures": force = true
+    elif param.startsWith("--scene="): scenePath = param[8 .. ^1]
     elif param == "--self-test": wantSelfTest = true
     elif param == "--verify": wantVerify = true
     else:
       echo "unknown flag: " & param
       return 2
 
+  sourceRootValue = sourceRoot
   var packs: seq[Pack]
   for pack in Packs:
     if onlyPack.len == 0 or pack.key == onlyPack:
@@ -1086,6 +1287,17 @@ proc main(): int =
   if packs.len == 0:
     echo "unknown pack: " & onlyPack
     return 2
+
+  if scenePath.len > 0:
+    let pack = packs[0]
+    let resolved = resolve(sourceRoot, pack)
+    let outDir = outRoot / pack.key
+    createDir(outDir)
+    let cache = AtlasCache(outDir: outDir, force: force)
+    buildScene(pack, resolved, sourceRoot / pack.directory / scenePath,
+      outDir / scenePath.extractFilename.changeFileExt("").assetKey & ".glb",
+      cache, max(1, jobs))
+    return 0
 
   if wantSelfTest:
     return selfTest(sourceRoot, packs)
