@@ -107,7 +107,7 @@ block maskCoverage:
 
   for garden in map.gardenTiles:
     let (stone, dirt) = tileTexel(garden)
-    doAssert stone == 0 and dirt == 0,
+    doAssert stone == 0 and dirt == 255,
       &"garden {garden.x},{garden.y} carries coverage {stone}/{dirt}"
 
 echo "test_hlf_ground: all checks passed"

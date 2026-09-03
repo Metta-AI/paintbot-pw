@@ -121,11 +121,13 @@ marsh slot.
 
 ## Crops
 
-A stocked plot grows one meadow kit plant, drawn textured per frame so it
-can appear and vanish as villagers gather; a bare plot is just the tilled
-dirt. The kit has no lettuces or corn, so the twenty-four kinds share
-seven plants by silhouette and a tint per kind tells them apart. The old
-village-pack farm building is gone.
+A stocked plot grows one toon kit plant, drawn textured per frame so it
+can appear and vanish as villagers gather; a bare plot is a tilled dirt
+patch that fades into the grass through the ground mask, a shade darker
+than the roads. Neither kit has a literal lettuce or corn, so the
+twenty-four kinds share plants by silhouette, grassy stalks, root tops, a
+bush, seedling leaves, broad leaves, and a wheat clump, and a tint per
+kind tells them apart. The old village-pack farm building is gone.
 
 ## Decorations
 
@@ -141,7 +143,7 @@ into the terrain mesh once with the houses.
   third entrance.
 - Houses: a mailbox beside the door, flower pots flanking it, a run of
   fence along the back, five flower beds and two bushes in the yard.
-- Gardens: a fence piece on one side of every plot, flowers beside some.
+- Gardens: flowers beside some plots.
 - Road verges: lamp posts spaced along the roads, and tufts, bushes,
   small rocks, and flowers on every other grass tile. Everything that
   grew or was left lying varies in size; everything gnomes made does not.

@@ -44,39 +44,43 @@ const
   PlazaHeightBlend = 2.0'f32
     ## Tighter than the engine defaults so dirt breaks into grass along the
     ## texture instead of feathering across a whole tile.
-  CropHeight = 0.75'f32
-    ## A growing crop stands this many tiles tall, knee high on a villager.
-  CropLooks: array[VeggieKinds, tuple[node: string, tint: Vec3]] = [
-    ("plant_01a", vec3(1.0, 1.05, 0.85)),   # carrot
-    ("plant_03a", vec3(1.15, 0.95, 0.85)),  # tomato
-    ("plant_06a", vec3(1.1, 1.15, 0.9)),    # lettuce
-    ("plant_01a", vec3(0.9, 1.0, 0.85)),    # potato
-    ("plant_04a", vec3(1.15, 1.0, 0.8)),    # pumpkin
-    ("plant_01a", vec3(0.95, 1.0, 1.0)),    # radish
-    ("plant_01a", vec3(1.0, 0.85, 0.95)),   # beet
-    ("plant_02a", vec3(1.05, 1.05, 0.8)),   # corn
-    ("plant_07a", vec3(0.95, 1.1, 0.9)),    # pea
-    ("plant_01a", vec3(0.95, 1.05, 0.9)),   # onion
-    ("plant_01a", vec3(1.0, 1.05, 1.0)),    # garlic
-    ("plant_04a", vec3(0.9, 1.05, 1.0)),    # cabbage
-    ("plant_04a", vec3(1.1, 1.05, 0.8)),    # squash
-    ("plant_01a", vec3(0.95, 1.05, 0.95)),  # turnip
-    ("plant_07a", vec3(0.95, 1.05, 0.95)),  # leek
-    ("plant_05a", vec3(0.8, 1.0, 0.8)),     # spinach
-    ("plant_06a", vec3(0.8, 0.95, 0.85)),   # broccoli
-    ("plant_03a", vec3(1.1, 1.0, 0.8)),     # pepper
-    ("plant_03a", vec3(0.9, 1.05, 0.9)),    # cucumber
-    ("plant_03a", vec3(0.85, 1.0, 0.85)),   # zucchini
-    ("plant_03a", vec3(1.0, 1.1, 0.85)),    # celery
-    ("plant_03a", vec3(1.0, 0.85, 1.05)),   # eggplant
-    ("plant_01a", vec3(1.0, 1.0, 0.85)),    # parsnip
-    ("plant_04a", vec3(0.85, 0.95, 1.0)),   # kale
+  CropHeight = 1.0'f32
+    ## A growing crop stands this many tiles tall, waist high on a villager.
+  CropBrightness = 1.3'f32
+    ## The kit plants are painted a deep green; lifted so they read on
+    ## dark soil.
+  CropLooks: array[VeggieKinds, tuple[kit: DecorKit, node: string, tint: Vec3]] = [
+    (ValleyVegetation, "plant_04a", vec3(1.0, 1.05, 0.85)),   # carrot
+    (ValleyVegetation, "plant_06a", vec3(1.15, 0.95, 0.85)),  # tomato
+    (MeadowVegetation, "plant_05a", vec3(1.1, 1.15, 0.9)),    # lettuce
+    (ValleyVegetation, "plant_03a", vec3(0.9, 1.0, 0.85)),    # potato
+    (MeadowVegetation, "plant_06a", vec3(1.15, 1.0, 0.8)),    # pumpkin
+    (ValleyVegetation, "plant_05a", vec3(0.95, 1.0, 1.0)),    # radish
+    (ValleyVegetation, "plant_03a", vec3(1.0, 0.85, 0.95)),   # beet
+    (ValleyVegetation, "wheat_patch_01a", vec3(1.05, 1.05, 0.8)),  # corn
+    (ValleyVegetation, "plant_06a", vec3(0.95, 1.1, 0.9)),    # pea
+    (ValleyVegetation, "plant_02a", vec3(0.95, 1.05, 0.9)),   # onion
+    (ValleyVegetation, "plant_02a", vec3(1.0, 1.05, 1.0)),    # garlic
+    (MeadowVegetation, "plant_05a", vec3(0.9, 1.05, 1.0)),    # cabbage
+    (MeadowVegetation, "plant_06a", vec3(1.1, 1.05, 0.8)),    # squash
+    (ValleyVegetation, "plant_05a", vec3(0.95, 1.05, 0.95)),  # turnip
+    (ValleyVegetation, "plant_01a", vec3(0.95, 1.05, 0.95)),  # leek
+    (MeadowVegetation, "plant_04a", vec3(0.8, 1.0, 0.8)),     # spinach
+    (MeadowVegetation, "plant_04a", vec3(0.8, 0.95, 0.85)),   # broccoli
+    (ValleyVegetation, "plant_06a", vec3(1.1, 1.0, 0.8)),     # pepper
+    (ValleyVegetation, "plant_07a", vec3(0.9, 1.05, 0.9)),    # cucumber
+    (ValleyVegetation, "plant_07a", vec3(0.85, 1.0, 0.85)),   # zucchini
+    (ValleyVegetation, "plant_01a", vec3(1.0, 1.1, 0.85)),    # celery
+    (ValleyVegetation, "plant_06a", vec3(1.0, 0.85, 1.05)),   # eggplant
+    (ValleyVegetation, "plant_04a", vec3(1.0, 1.0, 0.85)),    # parsnip
+    (MeadowVegetation, "plant_04a", vec3(0.85, 0.95, 1.0)),   # kale
   ]
-    ## What a stocked plot grows, in VeggieNames order. The meadow kit has
-    ## no lettuces or corn, so kinds share a plant by silhouette, roots on
-    ## the leafy top, heads on the low wide plants, stalks on the tall
-    ## ones, vines on the middle one, and a tint tells them apart. A bare
-    ## plot is just the tilled dirt the terrain draws.
+    ## What a stocked plot grows, in VeggieNames order. Neither kit has a
+    ## literal lettuce or corn, so kinds share plants by silhouette: grassy
+    ## stalks for the onion family, low feathery tops for roots, a bush for
+    ## tomatoes and peppers, seedling leaves for squashes, broad leaves for
+    ## the cabbage family, and the wheat clump for corn. A tint tells them
+    ## apart. A bare plot is just the tilled dirt the terrain draws.
 
 type
   GraphicsError = object of CatchableError
@@ -246,12 +250,14 @@ proc runGraphics*() =
       int(RoadTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
     setTileMaterial(
       int(StoneTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
-    ## Tilled plots read as dirt; house pads read as stone.
+    ## Tilled plots are dirt through the ground mask like the roads, only
+    ## darker, so the tile itself bakes as grass with a tilled tint; house
+    ## pads read as stone.
     setTileMaterial(
       int(GardenTileKind),
-      DirtMaterial, DirtMaterial,
-      vec3(0.85, 0.72, 0.55), vec3(0.8, 0.7, 0.55),
-      7
+      GrassMaterial, DirtMaterial,
+      vec3(0.72, 0.62, 0.55), vec3(0.8, 0.7, 0.55),
+      1
     )
     setTileMaterial(
       int(HouseTileKind),
@@ -668,13 +674,17 @@ proc runGraphics*() =
             if veggie < 0:
               continue
             let look = CropLooks[int(veggie)]
-            kits[MeadowVegetation].drawProp(
+            kits[look.kit].drawProp(
               look.node,
               tileWorldPoint(run.world.map.gardenTiles[garden]),
               float32(garden) * 0.7'f32,
               CropHeight,
               matrix,
-              vec4(look.tint.x, look.tint.y, look.tint.z, 1.0)
+              vec4(
+                look.tint.x * CropBrightness,
+                look.tint.y * CropBrightness,
+                look.tint.z * CropBrightness,
+                1.0)
             )
 
         proc drawWorldVillagers() =
