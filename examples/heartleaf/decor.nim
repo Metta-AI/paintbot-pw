@@ -108,6 +108,8 @@ const
   VergeBushSetback = 0.7'f32
     ## Tiles a verge bush is pushed away from the road, so a big one leans
     ## over the dirt instead of growing into it.
+  VergeRockSetback = 0.45'f32
+    ## Tiles a verge rock is pushed away from the road.
   TreeRockOneIn = 6'i32
     ## Small rocks beside forest trees, one in this many free tiles that
     ## touch a tree.
@@ -443,7 +445,8 @@ proc dressVerges(p: var Placer) =
           p.awayFromRoad(x, y) * VergeBushSetback)
       of 2:
         discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), RoadArea, x, y,
-          yaw, SmallRockHeight, 0.3, NaturalVariance, p.rng.rockTint())
+          yaw, SmallRockHeight, 0.3, NaturalVariance, p.rng.rockTint(),
+          p.awayFromRoad(x, y) * VergeRockSetback)
       else:
         discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), RoadArea,
           x, y, yaw, FlowerHeight, 0.3, NaturalVariance, p.rng.plantTint())
