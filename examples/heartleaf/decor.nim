@@ -18,7 +18,7 @@ import
 type
   DecorKit* = enum
     MeadowProps, MeadowVegetation, MeadowBuildings, MeadowRocks, ValleyProps,
-    ValleyVegetation
+    ValleyVegetation, ValleyBuildings
 
   DecorArea* = enum
     PlazaArea, HouseArea, GardenArea, RoadArea, OutskirtsArea
@@ -87,7 +87,9 @@ const
   MediumRockHeight = 1.3'f32
   HouseFlowerBeds = 5
   HouseBushes = 2
-  HouseDecorReach = 3'i32
+  HouseDecorReach = 4'i32
+  HouseHalf = 2'i32
+    ## Half the five-tile house footprint; the door sits one past it.
   HouseDecorAttempts = 20
   GardenFlowerOneIn = 2'i32
   RoadDecorOneIn = 2'i32
@@ -123,6 +125,7 @@ const
     "terrain/toon_enchanted_meadow/rocks.glb",
     "terrain/toon_golden_valley/props.glb",
     "terrain/toon_golden_valley/vegetation.glb",
+    "terrain/toon_golden_valley/buildings.glb",
   ]
   DecorNodes: array[DecorKit, seq[string]] = [
     @["market_stand_01a", "canopy_01a", "canopy_02a", "canopy_03a",
@@ -140,6 +143,7 @@ const
     @["well_01a", "wood_sign_01a"],
     @["plant_01a", "plant_02a", "plant_03a", "plant_04a", "plant_05a",
       "plant_06a", "plant_07a", "wheat_patch_01a"],
+    @[],
   ]
   Canopies = ["canopy_01a", "canopy_02a", "canopy_03a", "canopy_04a"]
   Tufts = ["grass_patch_01a", "grass_patch_02a", "grass_patch_03a",
@@ -349,22 +353,25 @@ proc dressHouses(p: var Placer) =
       facing = yawAlong(float32(fx), float32(fy))
       along = yawAlong(float32(px), float32(py))
     discard p.claim(MeadowProps, "mailbox_01a", HouseArea,
-      cx + fx * 2 + px, cy + fy * 2 + py, facing, MailboxHeight)
+      cx + fx * (HouseHalf + 1) + px, cy + fy * (HouseHalf + 1) + py,
+      facing, MailboxHeight)
     for side in [-1.2'f32, 1.2'f32]:
       p.add(MeadowProps, "flower_pot_01a", HouseArea,
-        float32(cx) + 0.5'f32 + float32(fx) * 1.7'f32 + float32(px) * side,
-        float32(cy) + 0.5'f32 + float32(fy) * 1.7'f32 + float32(py) * side,
+        float32(cx) + 0.5'f32 + float32(fx) * (float32(HouseHalf) + 0.7'f32) +
+          float32(px) * side,
+        float32(cy) + 0.5'f32 + float32(fy) * (float32(HouseHalf) + 0.7'f32) +
+          float32(py) * side,
         facing, PotHeight)
     for k in -1'i32 .. 1'i32:
       let
-        tileX = cx - fx * 3 + px * k
-        tileY = cy - fy * 3 + py * k
+        tileX = cx - fx * (HouseHalf + 2) + px * k
+        tileY = cy - fy * (HouseHalf + 2) + py * k
       if p.tileFree(tileX, tileY):
         p.used.incl tileIndex(tileX, tileY)
         p.add(MeadowProps, "wood_fence_01a", HouseArea,
-          float32(cx) + 0.5'f32 - float32(fx) * 3 +
+          float32(cx) + 0.5'f32 - float32(fx) * float32(HouseHalf + 2) +
             float32(px) * float32(k) * FenceSpacing,
-          float32(cy) + 0.5'f32 - float32(fy) * 3 +
+          float32(cy) + 0.5'f32 - float32(fy) * float32(HouseHalf + 2) +
             float32(py) * float32(k) * FenceSpacing,
           along, FenceHeight)
     var beds = 0
@@ -374,7 +381,7 @@ proc dressHouses(p: var Placer) =
       let
         x = cx + p.rng.below(HouseDecorReach * 2 + 1) - HouseDecorReach
         y = cy + p.rng.below(HouseDecorReach * 2 + 1) - HouseDecorReach
-      if max(abs(x - cx), abs(y - cy)) < 2:
+      if max(abs(x - cx), abs(y - cy)) <= HouseHalf:
         continue
       if p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), HouseArea, x, y,
           p.rng.unit() * 2 * PI, FlowerHeight, 0.25, NaturalVariance,
@@ -387,7 +394,7 @@ proc dressHouses(p: var Placer) =
       let
         x = cx + p.rng.below(HouseDecorReach * 2 + 1) - HouseDecorReach
         y = cy + p.rng.below(HouseDecorReach * 2 + 1) - HouseDecorReach
-      if max(abs(x - cx), abs(y - cy)) < 2:
+      if max(abs(x - cx), abs(y - cy)) <= HouseHalf:
         continue
       let bush = if p.rng.below(2) == 0: "flower_bush_01a" else: "bush_01a"
       if p.claim(MeadowVegetation, bush, HouseArea, x, y,

@@ -20,7 +20,9 @@ import
   ui,
   controls,
   ground,
-  decor
+  decor,
+  houses,
+  houseview
 
 const
   WindowTitle = "Heartleaf"
@@ -30,13 +32,11 @@ const
     ## One saved world every ten seconds, so a seek re-simulates at most
     ## that much.
   VillagerHeight = 1.7'f32
-  VillagePropPack = DataRoot & "/terrain/low_poly_village.glb"
   ModularCharacterPath = DataRoot & "/characters/modular_chars/character.glb"
   ModularManifestPath = DataRoot & "/characters/modular_chars/manifest.json"
   VillagerPresetNumbers: array[VillagerCount, int] = [
     1, 2, 3, 5, 6, 9, 11, 12, 13]
     ## The modular presets that ship pre-rendered profile portraits.
-  HousePropScale = 5.2'f32
   MeadowDirtPath = DataRoot & "/terrain/toon_enchanted_meadow/terrain_dirt_01d.png"
     ## Roads and the plaza apron wear the meadow dirt, loaded into the
     ## marsh slot, which the village never uses.
@@ -286,29 +286,32 @@ proc runGraphics*() =
     scatterGrass(800, run.mapSeed)
 
   var
-    villagePack: PropPack
     kits: array[DecorKit, PropPack]
+    housePacks: HousePacks
 
   proc placeVillageProps() =
-    ## Lays out every prop: houses, plots, and decorations. Walkability
-    ## never changes, so the terrain bakes without it.
+    ## Lays out every prop: houses built from their recipes, then the
+    ## decorations. Walkability never changes, so the terrain bakes
+    ## without it.
     clearProps()
     for slot in 0 ..< VillagerCount:
       let house = run.world.map.houses[slot]
-      villagePack.placeProp(
-        "house_lvl" & $(int(house.propKind) + 1),
+      housePacks.placeHouse(
+        buildHouse(
+          run.mapSeed xor int32(slot) * 7919,
+          houseKindFor(run.mapSeed, slot)),
         tileWorldPoint(house.center),
-        housePropYaw(house),
-        HousePropScale
-      )
+        housePropYaw(house))
     for d in placeDecor(run.world.map, run.mapSeed):
       kits[d.kit].placeProp(
         d.node, decorWorldPoint(d), d.yaw, d.height, d.tint)
     bakeTerrain(rebuildWalkability = false)
 
   profileBlock "props":
-    villagePack = loadPropPack(VillagePropPack)
+    housePacks = loadHousePacks()
     for kit in DecorKit:
+      if nodesFor(kit).len == 0:
+        continue
       ## The toon kits are painted, not palette coloured, so they draw
       ## textured rather than through the vertex-colour bake.
       kits[kit] = loadPropPack(

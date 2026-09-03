@@ -97,6 +97,9 @@ nim r experiments/modular_chars/modular_chars.nim
 # Effects
 nim r experiments/particles/particles.nim
 nim r experiments/fxmesh/fxmesh.nim
+
+# Houses
+nim r experiments/houses/houses.nim
 ```
 
 ## Goals

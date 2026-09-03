@@ -46,7 +46,8 @@ puts it back on the doorstep.
 `maps.nim` generates the village with integers from one seed: a gentle
 meadow pressed flat inside the village ring, nine houses on a jittered
 ring of unit-circle points around a round paved plaza with a one-tile
-dirt apron and a blocked three-by-three well footprint at its centre, two-wide dirt roads from every door to the plaza plus a
+dirt apron and a blocked three-by-three well footprint at its centre,
+five-by-five house footprints, two-wide dirt roads from every door to the plaza plus a
 one-wide ring path, three garden plots in the grass near each house, and
 a noise-gated forest thickening to a solid wall at the map edge. A flood fill from the plaza must reach every door and
 every garden or the generator retries the seed deterministically.
@@ -119,6 +120,24 @@ they get rounded edges and join the plaza apron without a seam. Road and
 plaza tiles bake as grass underneath; the mask owns every stone and dirt
 texel. Roads wear the meadow pack dirt, loaded at startup into the unused
 marsh slot.
+
+## Houses
+
+Neither toon kit ships a whole cottage, so `houses.nim` builds every
+house from the parts. The golden valley roofs are steep A-frames close
+to seven metres tall, made to stand on the ground as chalets, and that
+is the shape every house takes: a ring of stone foundation a metre high,
+the A-frame on top with its ridge running front to back, a plank gable
+closing each end, the door in the front gable, either raised on the
+foundation with stairs or at ground level through a gap in it, windows
+by coin flip, a chimney by coin flip, and a per-house paint drift. A
+cottage is two or three roof segments deep under slate, shingle, or reed
+thatch. One house in three is a longhouse: three or four segments under
+straw thatch tinted to turf, with grass along the ridge and down the
+slopes, the viking sod house. The village pack houses are gone and the
+blocked footprint is five tiles square. The house lab,
+`nim r experiments/houses/houses.nim`, shows a grid of houses from
+consecutive seeds with `R` to reroll and `K` to switch kinds.
 
 ## Crops
 

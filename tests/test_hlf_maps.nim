@@ -64,7 +64,7 @@ block housesRingThePlaza:
     let ring = chebyshev(house.center, tile2(GridSide div 2, GridSide div 2))
     doAssert ring >= 15 and ring <= 40,
       &"house {slot} sits {ring} tiles from the plaza"
-    doAssert chebyshev(house.center, house.door) == 2,
+    doAssert chebyshev(house.center, house.door) == HouseFootprint div 2 + 1,
       &"house {slot} has a detached door"
     for other in 0 ..< slot:
       doAssert chebyshev(house.center, map.houses[other].center) > 6,
