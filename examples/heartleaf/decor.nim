@@ -97,10 +97,13 @@ const
     ## Plants drift in brightness and between cool and warm green, so a
     ## row of bushes is not one bush.
   RockShade = 0.15'f32
-  RockCobble = 0.6'f32
-    ## Rocks drift toward the plaza cobble's mauve grey by up to this much.
-  CobbleHue = vec3(1.0, 0.905, 0.952)
-    ## The cobble base colour relative to its red channel.
+  RockCobbleLeast = 0.5'f32
+  RockCobbleMost = 1.0'f32
+    ## Every rock is pulled at least halfway, and up to fully, toward the
+    ## cobble tint, so they read as the plaza's stone.
+  CobbleTint = vec3(0.78, 0.70, 0.78)
+    ## What the rock paint is multiplied by to land near the cobbles'
+    ## mauve grey.
   MediumRockOneIn = 7'i32
   LargeRockOneIn = 25'i32
 
@@ -166,8 +169,8 @@ proc rockTint(rng: var Rng): Vec3 =
   ## A rock shaded a little and pulled toward the cobble colour.
   let
     shade = 1.0'f32 + (rng.unit() - 0.5'f32) * 2.0'f32 * RockShade
-    pull = rng.unit() * RockCobble
-  mix(vec3(1, 1, 1), CobbleHue, pull) * shade
+    pull = RockCobbleLeast + rng.unit() * (RockCobbleMost - RockCobbleLeast)
+  mix(vec3(1, 1, 1), CobbleTint, pull) * shade
 
 proc yawAlong(x, y: float32): float32 =
   ## The yaw that points a prop's forward axis along a tile-space direction,
