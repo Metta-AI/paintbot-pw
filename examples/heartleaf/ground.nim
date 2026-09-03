@@ -58,26 +58,27 @@ const
     ## sheet seam lands on a mortar line.
   CurbFade* = 0.4'f32
     ## Tiles past the curb's outer edge over which its stones drop out.
-  StoneInset = 0.4'f32
+  StoneInset = 0.3'f32
     ## The cobbles reach this far past the plaza radius, under the curb.
 
   MaskTexelsPerTile* = 8
   MaskSize* = GridTiles * MaskTexelsPerTile
   MaskChannels* = 2
     ## R is stone coverage, G is dirt coverage.
-  StoneBand = 1.2'f32
-    ## Tiles over which cobble coverage falls from full to none, ending
-    ## under the curb.
+  StoneBand = 0.1'f32
+    ## Tiles over which cobble coverage falls from full to none. The curb is
+    ## the plaza's hard edge, so this is a step hidden underneath it; the
+    ## ragged dropout is for roads.
   DirtReach = 0.3'f32
     ## Tiles past a road or plaza tile that stay fully dirt.
   DirtBand = 0.9'f32
     ## Tiles over which dirt then fades into grass.
   WobbleTiles = 0.6'f32
-    ## Low-frequency wander added to every distance so nothing is a compass
-    ## circle or a ruler line. It fades in over the first stretch beyond a
-    ## road so road tiles themselves stay fully dirt.
+    ## Low-frequency wander added to the dirt distance so road edges are not
+    ## ruler lines. It fades in over the first stretch beyond a road so road
+    ## tiles themselves stay fully dirt. The plaza stays a true circle; the
+    ## curb is its edge.
   WobbleSpacing = 3 * MaskTexelsPerTile
-  StoneWobbleStream = 0x5A17E5'u64
   DirtWobbleStream = 0xD1A7'u64
 
 type
@@ -316,8 +317,7 @@ proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
         x = (float32(tx) + 0.5'f32) / texelsPerTile
         y = (float32(ty) + 0.5'f32) / texelsPerTile
         plazaDistance = sqrt((x - center) * (x - center) +
-          (y - center) * (y - center)) +
-          wobble(seed, StoneWobbleStream, tx, ty)
+          (y - center) * (y - center))
         stone = clamp(
           (float32(PlazaStoneRadius) + StoneInset - plazaDistance) / StoneBand,
           0.0'f32, 1.0'f32)

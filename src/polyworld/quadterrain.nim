@@ -147,6 +147,12 @@ proc atan(y, x: float32): float32 =
   ## Provides Shady with the two-argument atan builtin.
   arctan2(y, x)
 
+proc textureLod(
+    buffer: Uniform[Sampler2dArray], position: Vec3, lod: float32
+): Vec4 =
+  ## Provides Shady with the explicit-mip texture-array builtin signature.
+  vec4(0)
+
 proc terrainVert(
     gl_Position: var Vec4,
     vertPos: Vec3,
@@ -269,7 +275,10 @@ proc terrainFrag(
         ground = stone.xyz
   # Ground ring: a curb of cut stones sampled around a circle rather than
   # across the world, one stone row spanning the band, dropping out past
-  # the outer edge the same way the cobbles do.
+  # the outer edge the same way the cobbles do. The polar coordinate jumps
+  # at the angle seam and at every row change, which would send automatic
+  # mip selection to the smallest level along those lines, so the mip is
+  # chosen from the ring distance, which is smooth everywhere.
   if groundRingShape.x > 0.5:
     let
       ringDx = tilePos.x - groundRing.x
@@ -289,9 +298,16 @@ proc terrainFrag(
           across = clamp(
             (ringDistance - groundRing.z) / (groundRing.w - groundRing.z),
             0.0, 1.0)
-          curb = texture(
+          tilesPerPixel = length(
+            vec2(dFdx(ringDistance), dFdy(ringDistance)))
+          stoneTiles = 6.2831853 * (groundRing.z + groundRing.w) * 0.5 /
+            groundRingShape.x
+          texelsPerPixel = 1024.0 / cells * tilesPerPixel / stoneTiles
+          lod = max(log2(max(texelsPerPixel, 0.0001)), 0.0)
+          curb = textureLod(
             terrainTextures,
-            vec3(along / cells, (row + across) / cells, groundLayers.w))
+            vec3(along / cells, (row + across) / cells, groundLayers.w),
+            lod)
         if curb.w >= 1.0 - cover:
           ground = curb.xyz
   var color = ground * vertColor * (0.75 + 0.5 * h)
