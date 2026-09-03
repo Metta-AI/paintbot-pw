@@ -14,6 +14,7 @@ import
     actioncam, characters, chrome, clickmarks, common, fixed, inputs, particles,
     particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
+    shapes,
     shadows, tapes, viewers, visions, worldbars
   ],
   content,
@@ -25,7 +26,7 @@ import
 
 const
   WindowTitle = "Light vs Dark"
-  AtlasPath = DataRoot & "/themes/lvd.atlas.png"
+  AtlasPath = TmpRoot & "/lvd.atlas.png"
   LogoPath = DataRoot & "/themes/lvd/lvd_logo.png"
   SeekCheckpointTicks = TickRate * 10
     ## One saved world every ten seconds, so a seek re-simulates at most
@@ -131,13 +132,11 @@ var
   cameraEye = vec3(0, 0, 0)
   panning = false
   minimapPanning* = false
-  showEdges = false
   viewMode* =
     if options.playerSlot > 0: options.playerSlot
     else: options.viewMode
   primaryId* = NoEntity
   selectedIds*: seq[int32]
-  rightPressPosition = vec2(0)
   followSelection* = false
   selectionPressPosition = vec2(0)
   selectionStarted = false
@@ -205,8 +204,7 @@ proc clipIndex(model: CharacterModel, slot: AnimationSlot): int =
   raise newException(GraphicsError, "missing clip for " & $slot)
 
 proc addHudIcons(builder: AtlasBuilder) =
-  ## Packs portraits, resource glyphs, and textured HUD panels.
-  const PanelDir = DataRoot & "/themes/lvd/"
+  ## Packs portraits and the theme logo.
   builder.addThemeLogo(LogoPath)
   for player in 0'i32 ..< PlayerCount:
     for kind in UnitKind:
@@ -229,26 +227,6 @@ proc addHudIcons(builder: AtlasBuilder) =
           GraphicsError,
           "the UI atlas is too small for building portraits"
         )
-  if not builder.addImage(
-        "lvd_leftTop",
-        readImage(PanelDir & "leftTop.png")
-      ) or
-      not builder.addImage(
-        "lvd_leftRight",
-        readImage(PanelDir & "leftRight.png")
-      ) or
-      not builder.addImage(
-        "lvd_bottomLeft",
-        readImage(PanelDir & "bottomLeft.png")
-      ) or
-      not builder.addImage(
-        "lvd_bottomRight",
-        readImage(PanelDir & "bottomRight.png")
-      ):
-    raise newException(
-      GraphicsError,
-      "the UI atlas is too small for HUD panels"
-    )
 
 proc tileCentreXZ(tile: Tile2): Vec2 =
   ## Converts a tile coordinate to the world-space centre of that tile.
@@ -270,6 +248,8 @@ proc unitYaw(unit: Unit): float32 =
 proc renderPoint(unit: Unit): Vec3 =
   ## Interpolates one unit between the latest simulation snapshots.
   let current = unitWorldPoint(unit)
+  if not interpolateVisuals:
+    return current
   mix(
     previousUnitPositions.getOrDefault(unit.id, current),
     current,
@@ -278,6 +258,8 @@ proc renderPoint(unit: Unit): Vec3 =
 
 proc renderFacing(unit: Unit): float32 =
   ## Interpolates yaw the short way so a +pi / -pi flip is not a spin.
+  if not interpolateVisuals:
+    return unitYaw(unit)
   let
     current = unitYaw(unit)
     previous = previousUnitFacings.getOrDefault(unit.id, current)
@@ -336,7 +318,8 @@ proc runGraphics*() =
     (window, sk) = initGameWindow(
       WindowTitle,
       AtlasPath,
-      gameWindowSize(options.windowWidth, options.windowHeight)
+      gameWindowSize(options.windowWidth, options.windowHeight),
+      options.vsync
     )
   if options.playerSlot > 0 and not run.replayMode:
     let player = options.playerSlot - 1
@@ -378,6 +361,7 @@ proc runGraphics*() =
   var
     particles = initParticleSystem()
     clickMarks = initClickMarks()
+    worldShapes = initShapeRenderer()
     worldBarRenderer = initWorldBarRenderer()
     damageTrails: DamageTrailTracker
     selectionOutline = initSelectionOutline()
@@ -847,19 +831,16 @@ proc runGraphics*() =
         (window.buttonDown[KeyLeftControl] or
           window.buttonDown[KeyRightControl]):
       selectAllUnits()
-    elif window.buttonPressed[KeyA] and playerMode():
-      attackMoveArmed = true
-    if window.mousePressed(MouseLeft) and not overUi:
+    elif window.mousePressed(MouseLeft) and not overUi:
       selectionPressPosition = window.mousePos.vec2
       selectionStarted = true
       selectionAdditive =
         window.buttonDown[KeyLeftShift] or
         window.buttonDown[KeyRightShift]
-    if window.mousePressed(MouseRight) and not overUi:
-      rightPressPosition = window.mousePos.vec2
-      if pendingBuild < 0:
-        panning = true
-    if not window.mouseDown(MouseRight):
+    if window.mousePressed(MouseMiddle) and
+        (not overUi or window.buttonPressed[MouseMiddleKey]):
+      panning = true
+    if not window.mouseDown(MouseMiddle):
       panning = false
     let delta = window.mouseDelta.vec2
     if panning:
@@ -1020,11 +1001,9 @@ proc runGraphics*() =
     ## Turns a right-click into move, attack, harvest, or rally.
     if not playerMode():
       return
-    if not window.mouseReleased(MouseRight):
+    if not window.mousePressed(MouseRight):
       return
     if mouseOverUi(window, sk.mousePos):
-      return
-    if (window.mousePos.vec2 - rightPressPosition).length > 6.0'f32:
       return
     if pendingBuild >= 0:
       let origin = buildGhostOrigin(viewProjection)
@@ -1557,7 +1536,7 @@ proc runGraphics*() =
         glClearColor(0.05, 0.06, 0.09, 1.0)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
         updateTerrainVision()
-        drawTerrain(viewProjection, showEdges)
+        drawTerrain(viewProjection, showTiles)
         beginCharacters(scene, window, view, projection, cameraEye)
         drawWorldUnits()
         finishCharacters(scene)
@@ -1571,6 +1550,32 @@ proc runGraphics*() =
           cameraForward
         )
         clickMarks.drawClickMarks(viewProjection)
+        if showPaths:
+          worldShapes.clear()
+          for unit in run.world.units:
+            if unit.id == 0 or unit.state == UnitDying:
+              continue
+            if unit.pathIndex >= int32(unit.path.len):
+              continue
+            let color =
+              if unit.owner == LightPlayer:
+                rgbx(80, 140, 230, 255)
+              else:
+                rgbx(210, 80, 85, 255)
+            var points: seq[Vec3]
+            let now = renderPoint(unit)
+            points.add vec3(now.x, now.y + 0.2'f32, now.z)
+            for i in int(unit.pathIndex) ..< unit.path.len:
+              let tile = unit.path[i]
+              let xz = tileCentreXZ(tile)
+              points.add vec3(
+                xz.x,
+                surfaceHeight(xz.x, xz.y) + 0.2'f32,
+                xz.y
+              )
+            if points.len >= 2:
+              worldShapes.addPolyline(points, color)
+          worldShapes.draw(viewProjection)
         drawWorldBars(
           viewProjection,
           barCameraRight,
@@ -1613,7 +1618,7 @@ proc runGraphics*() =
           "light_vs_dark.png"
         )
       profileBlock "present":
-        window.swapBuffers()
+        window.presentFrame(framePaceHz)
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true
@@ -1623,7 +1628,8 @@ proc runGraphics*() =
     of KeySpace: transport.handleKey(button)
     of KeyC: actionCam.toggle(followSelection)
     of KeyT: scene.toggleShading()
-    of KeyE: showEdges = not showEdges
+    of KeyE: showTiles = not showTiles
+    of KeyF1: debugMenuOpen = not debugMenuOpen
     of KeyV:
       if not playerMode():
         viewMode = (viewMode + 1) mod 3

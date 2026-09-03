@@ -84,6 +84,8 @@ proc currentChrome(window: Window): HudChrome =
 
 proc mouseOverUi*(window: Window, mouse: Vec2): bool =
   ## Returns whether the pointer is over an anchored game UI panel.
+  if mouseOverDebugMenu(mouse):
+    return true
   let chrome = currentChrome(window)
   mouseOverPanels(
     mouse,
@@ -277,11 +279,12 @@ proc drawUi*(
         size: vec2(roster.size.x, RosterRowHeight - 4)
       )
     if int32(slot) == followSlot:
-      sk.drawRoundedRect(
-        row.origin - vec2(4, 2),
-        row.size + vec2(8, 0),
-        rgbx(64, 84, 74, 160),
-        6
+      sk.drawSlot(
+        GameUiPanel(
+          origin: row.origin - vec2(4, 2),
+          size: row.size + vec2(8, 0)
+        ),
+        selected = true
       )
     sk.drawSprite(
       villagerPortraitKey(int32(slot)),
@@ -383,12 +386,7 @@ proc drawUi*(
 
   ## Minimap.
   let area = minimapPanel.minimapMap()
-  sk.drawRoundedRect(
-    area.origin,
-    area.size,
-    rgbx(24, 30, 24, 255),
-    wellRadius(area.size)
-  )
+  sk.drawFrame(area)
   const MapSampleStride = 2'i32
   let cell = area.size.x / float32(GridSide)
   for y in countup(0'i32, GridSide - 1, MapSampleStride):
@@ -478,3 +476,4 @@ proc drawUi*(
       &"REPLAY DIVERGED - {run.hashCheck.mismatches} mismatches, " &
         &"first at tick {run.hashCheck.firstTick}"
     )
+  sk.drawDebugMenu(window)

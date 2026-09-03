@@ -14,7 +14,7 @@ import
 const
   DataDir = "../polyworld_data"
   GreeblePath = DataDir & "/greeble/271_greebles_low_poly_model.glb"
-  FontPath = DataDir & "/themes/editor/IBMPlexSans-Regular.ttf"
+  FontPath = DataDir & "/themes/main/IBMPlexSans-Regular.ttf"
   OutDir = "tmp/tag_shots"
   Cell = 256
   LabelHeight = 26

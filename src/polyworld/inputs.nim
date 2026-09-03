@@ -3,9 +3,9 @@
 import windy
 
 const
-  MouseLeftKey* = KeyV
-  MouseRightKey* = KeyN
-  MouseMiddleKey* = KeyB
+  MouseLeftKey* = KeyA
+  MouseRightKey* = KeyD
+  MouseMiddleKey* = KeyS
 
 proc mouseKey(button: Button): Button =
   ## Returns the keyboard stand-in for a mouse button.

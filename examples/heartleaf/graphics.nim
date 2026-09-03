@@ -8,8 +8,8 @@ import
   std/[json, math, os, strutils, times],
   chroma, opengl, pixie, vmath, windy, silky,
   polyworld/[
-    actioncam, characters, chrome, clickmarks, common, fixed, inputs,
-    pathing, player, profiles, quadterrain, rtscameras, shadows, tapes,
+    actioncam, characters, chrome, clickmarks, common, fixed, gameuis, inputs,
+    pathing, player, profiles, quadterrain, rtscameras, shadows, shapes, tapes,
     viewers
   ],
   content,
@@ -24,7 +24,7 @@ import
 
 const
   WindowTitle = "Heartleaf"
-  AtlasPath = DataRoot & "/themes/heartleaf.atlas.png"
+  AtlasPath = TmpRoot & "/heartleaf.atlas.png"
   LogoPath = DataRoot & "/themes/heartleaf/heartleaf_logo.png"
   SeekCheckpointTicks = TickRate * 10
     ## One saved world every ten seconds, so a seek re-simulates at most
@@ -62,7 +62,6 @@ var
   cameraEye = vec3(0, 0, 0)
   panning = false
   minimapPanning* = false
-  showEdges = false
   followSlot* = -1'i32
   rightPressPosition = vec2(0)
   seekCheckpoints: seq[SeekCheckpoint]
@@ -162,14 +161,14 @@ proc villagerYaw(v: Villager): float32 =
 proc renderPoint(v: Villager): Vec3 =
   ## Interpolates one villager between the latest simulation snapshots.
   let current = villagerWorldPoint(v)
-  if not havePoses:
+  if not interpolateVisuals or not havePoses:
     return current
   mix(previousPositions[v.slot], current, frameAlpha)
 
 proc renderFacing(v: Villager): float32 =
   ## Interpolates yaw the short way so a +pi / -pi flip is not a spin.
   let current = villagerYaw(v)
-  if not havePoses:
+  if not interpolateVisuals or not havePoses:
     return current
   let previous = previousFacings[v.slot]
   previous + shortestTurn(previous, current) * frameAlpha
@@ -202,7 +201,8 @@ proc runGraphics*() =
     (window, sk) = initGameWindow(
       WindowTitle,
       AtlasPath,
-      gameWindowSize(options.windowWidth, options.windowHeight)
+      gameWindowSize(options.windowWidth, options.windowHeight),
+      options.vsync
     )
   let splash = startSplash(sk, window)
 
@@ -312,7 +312,9 @@ proc runGraphics*() =
   let scene = newCharacterScene(window)
   scene.useToonShading()
   setEnvironmentPalette(scene.toon)
-  var clickMarks = initClickMarks()
+  var
+    clickMarks = initClickMarks()
+    worldShapes = initShapeRenderer()
 
   cameraTarget = vec3(0, surfaceHeight(0, 0), 0)
   var actionCam = initActionCam(
@@ -674,12 +676,29 @@ proc runGraphics*() =
           scene.sunDepthPass = false
         glClearColor(0.05, 0.06, 0.09, 1.0)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
-        drawTerrain(viewProjection, showEdges)
+        drawTerrain(viewProjection, showTiles)
         drawCrops(viewProjection)
         beginCharacters(scene, window, view, projection, cameraEye)
         drawWorldVillagers()
         finishCharacters(scene)
         clickMarks.drawClickMarks(viewProjection)
+        if showPaths:
+          worldShapes.clear()
+          for slot in 0 ..< VillagerCount:
+            let v = run.world.villagers[slot]
+            if v.inHouse >= 0:
+              continue
+            if v.pathIndex >= int32(v.path.len):
+              continue
+            var points: seq[Vec3]
+            let now = renderPoint(v)
+            points.add vec3(now.x, now.y + 0.2'f32, now.z)
+            for i in int(v.pathIndex) ..< v.path.len:
+              let p = tileWorldPoint(v.path[i])
+              points.add vec3(p.x, p.y + 0.2'f32, p.z)
+            if points.len >= 2:
+              worldShapes.addPolyline(points, VillagerColors[slot])
+          worldShapes.draw(viewProjection)
       profileBlock "ui":
         glDisable(GL_DEPTH_TEST)
         glDisable(GL_CULL_FACE)
@@ -705,11 +724,11 @@ proc runGraphics*() =
             viewProjection
           ) / sk.uiScale
           let width = float32(inside.len) * 22 - 2
-          sk.drawRoundedRect(
-            anchor - vec2(width * 0.5'f32 + 4, 12),
-            vec2(width + 8, 26),
-            rgbx(18, 22, 20, 190),
-            6
+          sk.drawSlot(
+            GameUiPanel(
+              origin: anchor - vec2(width * 0.5'f32 + 4, 12),
+              size: vec2(width + 8, 26)
+            )
           )
           for index, slot in inside:
             sk.drawSprite(
@@ -753,7 +772,7 @@ proc runGraphics*() =
           "heartleaf.png"
         )
       profileBlock "present":
-        window.swapBuffers()
+        window.presentFrame(framePaceHz)
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true
@@ -767,6 +786,7 @@ proc runGraphics*() =
       if not following:
         followSlot = -1
     of KeyT: scene.toggleShading()
+    of KeyF1: debugMenuOpen = not debugMenuOpen
     of KeyE:
       if playerMode():
         queueExitHouse(options.playerSlot - 1)

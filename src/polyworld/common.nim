@@ -8,3 +8,9 @@ const
       "/polyworld_data"
     else:
       "../polyworld_data"
+  # Generated files that do not belong in polyworld_data.
+  TmpRoot* =
+    when defined(emscripten):
+      "/tmp"
+    else:
+      "tmp"

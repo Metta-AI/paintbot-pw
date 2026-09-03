@@ -26,7 +26,7 @@ import
 const
   DataDir = "../polyworld_data"
   GreeblePath = DataDir & "/greeble/271_greebles_low_poly_model.glb"
-  ThemeDir = DataDir & "/themes/editor/"
+  ThemeDir = DataDir & "/themes/main/"
   TagsPath = "experiments/mech_factory/parts_tags.json"
   PresetsDir = "experiments/mech_factory/presets"
 
@@ -36,7 +36,7 @@ let builder = newAtlasBuilder(1024, 4)
 builder.addDir(ThemeDir, ThemeDir)
 builder.addFont(ThemeDir & "IBMPlexSans-Regular.ttf", "H1", 32.0)
 builder.addFont(ThemeDir & "IBMPlexSans-Regular.ttf", "Default", 18.0)
-builder.write(DataDir & "/themes/editor.atlas.png")
+builder.write("tmp/editor.atlas.png")
 
 ## Window
 
@@ -49,7 +49,7 @@ let window = newWindow(
 makeContextCurrent(window)
 loadExtensions()
 
-let sk = newSilky(window, DataDir & "/themes/editor.atlas.png")
+let sk = newSilky(window, "tmp/editor.atlas.png")
 
 window.runeInputEnabled = true
 window.onRune = proc(rune: Rune) =

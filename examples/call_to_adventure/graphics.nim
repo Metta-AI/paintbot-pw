@@ -12,7 +12,7 @@ import
   chroma, opengl, pixie, silky, vmath, windy,
   polyworld/[actioncam, characters, clickmarks, common, fixed, inputs, particles,
     particleshaders,
-    pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
+    chrome, pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shadows, shapes, tapes, viewers, visions, worldbars],
   content, maps, sim, game, replays, ui, controls
 
@@ -20,7 +20,7 @@ when defined(takeScreenshot):
   import std/[os, strutils]
 
 const
-  AtlasPath = DataRoot & "/themes/cta.atlas.png"
+  AtlasPath = TmpRoot & "/cta.atlas.png"
   LogoPath = DataRoot & "/themes/cta/cta_logo.png"
   SimulationStep = 1.0'f32 / TickRate.float32
   SeekCheckpointTicks = TickRate * 10
@@ -192,36 +192,15 @@ proc makeCircleIcon(size: int, fill: ColorRGBA): Image =
   )
 
 proc addHudIcons(builder: AtlasBuilder) =
-  ## Packs textured HUD plates into the atlas.
-  const PanelDir = DataRoot & "/themes/cta/"
+  ## Packs the theme logo and compact HUD glyphs.
   builder.addThemeLogo(LogoPath)
   if not builder.addImage(
       "cta_badge",
       makeCircleIcon(22, rgba(18, 20, 28, 255))
-    ) or
-      not builder.addImage(
-        "cta_leftTop",
-        readImage(PanelDir & "leftTop.png")
-      ) or
-      not builder.addImage(
-        "cta_leftRight",
-        readImage(PanelDir & "leftRight.png")
-      ) or
-      not builder.addImage(
-        "cta_bottomLeft",
-        readImage(PanelDir & "bottomLeft.png")
-      ) or
-      not builder.addImage(
-        "cta_bottomCenter",
-        readImage(PanelDir & "bottomCenter.png")
-      ) or
-      not builder.addImage(
-        "cta_bottomRight",
-        readImage(PanelDir & "bottomRight.png")
-      ):
+    ):
     raise newException(
       ValueError,
-      "the UI atlas is too small for HUD panels"
+      "the UI atlas is too small for HUD glyphs"
     )
 
 proc addAbilityIcons(builder: AtlasBuilder) =
@@ -259,7 +238,8 @@ proc runGraphics*() =
     (window, sk) = initGameWindow(
       "Call to Adventure",
       AtlasPath,
-      gameWindowSize(options.windowWidth, options.windowHeight)
+      gameWindowSize(options.windowWidth, options.windowHeight),
+      options.vsync
     )
   let splash = startSplash(sk, window)
   # The stack spans about 45 tiles top to bottom; the shading uses amplitude
@@ -1179,18 +1159,22 @@ proc runGraphics*() =
     sk.uiScale = hudUiScale(window)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     case button
-    of MouseLeft, KeyV:
-      if not mouseOverUi(window, sk.mousePos):
+    of MouseLeft, MouseLeftKey:
+      if window.buttonDown[KeyLeftControl] or
+          window.buttonDown[KeyRightControl]:
+        if not playerMode():
+          selectAllHeroes()
+      elif not mouseOverUi(window, sk.mousePos):
         selectionPressPosition = window.mousePos.vec2
         selectionStarted = true
         selectionAdditive =
           window.buttonDown[KeyLeftShift] or
           window.buttonDown[KeyRightShift]
-    of MouseRight, KeyN:
+    of MouseRight, MouseRightKey:
       if not mouseOverUi(window, sk.mousePos):
         rightPressPosition = window.mousePos.vec2
         lastMouse = window.mousePos
-    of MouseMiddle, KeyB:
+    of MouseMiddle, MouseMiddleKey:
       if not mouseOverUi(window, sk.mousePos):
         lastMouse = window.mousePos
     of KeySpace:
@@ -1200,28 +1184,24 @@ proc runGraphics*() =
         actionCam.toggle(followSelection)
     of KeyT:
       scene.toggleShading()
-    of KeyF:
-      if not playerMode() and selectedLivingCount() > 0:
-        followSelection = not followSelection
-        if followSelection:
-          actionCam.takeManual()
-    of KeyF1:
-      debugMenuOpen = not debugMenuOpen
-    of KeyQ, KeyE:
+    of KeyF, KeyG:
       if playerMode() and
           playerSlot >= 0 and
           playerSlot < run.world.actors.len:
-        let bag = int32(if button == KeyQ: 0 else: 1)
+        let bag = int32(if button == KeyF: 0 else: 1)
         if window.buttonDown[KeyLeftShift] or
             window.buttonDown[KeyRightShift]:
           queueDropItem(int32(playerSlot), bag)
         else:
           queueUseItem(int32(playerSlot), bag)
-    of KeyA:
-      if not playerMode() and
-          (window.buttonDown[KeyLeftControl] or
-            window.buttonDown[KeyRightControl]):
-        selectAllHeroes()
+      elif button == KeyF and
+          not playerMode() and
+          selectedLivingCount() > 0:
+        followSelection = not followSelection
+        if followSelection:
+          actionCam.takeManual()
+    of KeyF1:
+      debugMenuOpen = not debugMenuOpen
     of KeyEscape:
       when not defined(emscripten):
         window.closeRequested = true
@@ -1656,7 +1636,7 @@ proc runGraphics*() =
           "examples/call_to_adventure/shot.png"
         )
       profileBlock "present":
-        window.swapBuffers()
+        window.presentFrame(framePaceHz)
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true

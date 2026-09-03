@@ -9,11 +9,10 @@ const
   DefaultWindowSize* = ivec2(1280, 800)
   DefaultFontPath* = DataRoot & "/fonts/Rubik-Regular.ttf"
   BoldFontPath* = DataRoot & "/fonts/Rubik-Bold.ttf"
-  EditorThemeDir* = DataRoot & "/themes/editor/"
+  MonoFontPath* = DataRoot & "/fonts/OverpassMono-Regular.ttf"
+  MainThemeDir* = DataRoot & "/themes/main/"
   UiDir* = DataRoot & "/ui/"
   IconDir* = DataRoot & "/icons/"
-  WindowPatchPath = EditorThemeDir & "window.9patch.png"
-  FramePatchPath = EditorThemeDir & "frame.9patch.png"
   HudIconSize = 64
   SplashName* = "logo"
   SplashSeconds* = 3.0
@@ -49,19 +48,24 @@ proc addDefaultFonts*(builder: AtlasBuilder) =
   ## Adds the shared HUD type ramp used by every graphical client.
   builder.addFont(BoldFontPath, "H1", 32.0)
   builder.addFont(DefaultFontPath, "Default", 18.0)
+  builder.addFont(BoldFontPath, "Bold", 18.0)
   builder.addFont(DefaultFontPath, "Hud", 15.0)
   builder.addFont(DefaultFontPath, "Small", 12.0)
+  builder.addFont(MonoFontPath, "Mono", 18.0)
 
-proc addScaledPatch(builder: AtlasBuilder, path, name: string) =
-  ## Packs a 2x 9-patch so a 32px slice still has a stretchable center.
-  let
-    source = readImage(path)
-    scaled = source.resize(source.width * 2, source.height * 2)
-  if not builder.addImage(name, scaled):
-    raise newException(
-      ValueError,
-      "Failed to allocate space for " & path
-    )
+proc applyThemePatches*(sk: Silky) =
+  ## Uses the measured corner slices of the main theme 9-patches.
+  sk.theme.windowPatch = 7
+  sk.theme.headerPatch = 4
+  sk.theme.framePatch = 5
+  sk.theme.buttonPatch = 5
+  sk.theme.dropdownPatch = 5
+  sk.theme.textboxPatch = 4
+  sk.theme.tooltipPatch = 3
+  sk.theme.scrollbarPatch = 5
+  sk.theme.scrollbarTrackPatch = 3
+  sk.theme.progressBarPatch = 3
+  sk.theme.scrubberPatch = 3
 
 proc addHudGlyphs(builder: AtlasBuilder) =
   ## Packs the shared transport and HUD glyphs every game can draw.
@@ -78,12 +82,10 @@ proc addHudGlyphs(builder: AtlasBuilder) =
       )
 
 proc newHudAtlas*(size = 1024): AtlasBuilder =
-  ## Starts an atlas with the shared editor theme and UI images.
+  ## Starts an atlas with the shared main theme and UI images.
   result = newAtlasBuilder(size, 4)
-  result.addDir(EditorThemeDir, EditorThemeDir)
+  result.addDir(MainThemeDir, MainThemeDir)
   result.addDir(UiDir, UiDir)
-  result.addScaledPatch(WindowPatchPath, "window.9patch")
-  result.addScaledPatch(FramePatchPath, "frame.9patch")
   result.addHudGlyphs()
 
 proc gameWindowSize*(width, height: int32): IVec2 =
@@ -97,13 +99,14 @@ proc initGameWindow*(
     title,
     atlasPath: string,
     size = DefaultWindowSize,
-    vsync = false
+    vsync = true
 ): (Window, Silky) =
   ## Creates the spectator window, GL context, and Silky atlas client.
   let window = newWindow(title, size, vsync = vsync)
   window.makeContextCurrent()
   loadExtensions()
   let sk = newSilky(window, atlasPath)
+  sk.applyThemePatches()
   window.runeInputEnabled = true
   window.onRune = proc(rune: Rune) =
     sk.inputRunes.add(rune)
@@ -161,6 +164,32 @@ proc holdSplash*(
       quit(0)
     drawSplash(sk, window, splash.name)
     sleep(10)
+
+var
+  presentDeadline = 0.0
+  presentPaceHz = 0
+
+proc presentFrame*(window: Window, paceHz = 60) =
+  ## Swaps the back buffer, then waits so presents stay on one cadence.
+  ## ProMotion vsync alone flips between 8.33 ms and 16.67 ms.
+  window.swapBuffers()
+  if paceHz <= 0:
+    presentDeadline = 0
+    presentPaceHz = 0
+    return
+  if paceHz != presentPaceHz:
+    presentDeadline = 0
+    presentPaceHz = paceHz
+  let
+    step = 1.0 / paceHz.float64
+    now = epochTime()
+  if presentDeadline <= 0 or now > presentDeadline + step * 2:
+    presentDeadline = now + step
+    return
+  let remain = presentDeadline - now
+  if remain > 0.001:
+    sleep(int(remain * 1000.0))
+  presentDeadline += step
 
 proc frameDelta*(
     lastFrameTime: var float64,

@@ -70,7 +70,8 @@ echo "Testing CTA HUD scale waits for panel clearance"
 block:
   const
     PanelParty = vec2(316, 434)
-    PanelMinimap = vec2(334, 478)
+    PanelMinimap = vec2(252, 252)
+    PanelQuest = vec2(448, 132)
     PanelChat = vec2(337, 177)
     PanelAbilities = vec2(947, 157)
     PanelMenu = vec2(407, 71)
@@ -82,6 +83,7 @@ block:
       plates = [
         layout.panel(GameUiRegion.TopLeft, PanelParty),
         layout.panel(GameUiRegion.TopRight, PanelMinimap),
+        layout.panel(GameUiRegion.TopCenter, PanelQuest),
         layout.panel(GameUiRegion.BottomLeft, PanelChat),
         layout.panel(GameUiRegion.BottomCenter, PanelAbilities),
         layout.panel(GameUiRegion.BottomRight, PanelMenu)
@@ -95,8 +97,9 @@ block:
 echo "Testing LVD HUD scale waits for panel clearance"
 block:
   const
-    PanelScore = vec2(353, 461)
-    PanelMinimap = vec2(788, 432)
+    PanelScore = vec2(353, 150)
+    PanelResources = vec2(700, 90)
+    PanelMinimap = vec2(320, 372)
     PanelSelection = vec2(488, 250)
     PanelBuild = vec2(642, 283)
     TransportH = TransportHeight
@@ -106,6 +109,7 @@ block:
       layout = initGameUiLayout(layoutSize, TransportH)
       plates = [
         layout.panel(GameUiRegion.TopLeft, PanelScore),
+        layout.panel(GameUiRegion.TopCenter, PanelResources),
         layout.panel(GameUiRegion.TopRight, PanelMinimap),
         layout.panel(GameUiRegion.BottomLeft, PanelSelection),
         layout.panel(GameUiRegion.BottomRight, PanelBuild)

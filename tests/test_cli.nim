@@ -168,6 +168,17 @@ block:
   )
   doAssert equals.playerSlot == 1
 
+echo "Testing --vsync is on by default"
+block:
+  let options = parseCommon(@["--bot:one.bas"])
+  doAssert options.vsync
+  let off = parseCommon(@["--vsync:off", "--bot:one.bas"])
+  doAssert not off.vsync
+  let on = parseCommon(@["--vsync=on", "--bot:one.bas"])
+  doAssert on.vsync
+  let split = parseCommon(@["--vsync", "off", "--bot:one.bas"])
+  doAssert not split.vsync
+
 echo "Testing --windowSize is a shared flag"
 block:
   let options = parseCommon(@["--windowSize:800x400", "--bot:one.bas"])

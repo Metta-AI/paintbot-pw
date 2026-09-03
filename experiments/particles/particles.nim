@@ -1202,18 +1202,18 @@ proc tick(app: var ParticleApp, window: Window) =
 proc main() =
   ## Creates and runs the standalone GPU particle experiment.
   let atlasBuilder = newAtlasBuilder(1024, 4)
-  atlasBuilder.addDir("../polyworld_data/themes/editor/", "../polyworld_data/themes/editor/")
+  atlasBuilder.addDir("../polyworld_data/themes/main/", "../polyworld_data/themes/main/")
   atlasBuilder.addFont(
-    "../polyworld_data/themes/editor/IBMPlexSans-Regular.ttf",
+    "../polyworld_data/themes/main/IBMPlexSans-Regular.ttf",
     "H1",
     32.0'f
   )
   atlasBuilder.addFont(
-    "../polyworld_data/themes/editor/IBMPlexSans-Regular.ttf",
+    "../polyworld_data/themes/main/IBMPlexSans-Regular.ttf",
     "Default",
     18.0'f
   )
-  atlasBuilder.write("../polyworld_data/themes/editor.atlas.png")
+  atlasBuilder.write("tmp/editor.atlas.png")
 
   let maxFrames = maxFramesFromArgs()
   let window = newWindow(
@@ -1224,7 +1224,7 @@ proc main() =
   )
   makeContextCurrent(window)
   loadExtensions()
-  let sk = newSilky(window, "../polyworld_data/themes/editor.atlas.png")
+  let sk = newSilky(window, "tmp/editor.atlas.png")
   window.runeInputEnabled = true
   window.onRune = proc(rune: Rune) =
     sk.inputRunes.add rune
