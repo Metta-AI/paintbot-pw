@@ -288,20 +288,20 @@ proc terrainFrag(
       ringDistance = sqrt(ringDx * ringDx + ringDz * ringDz)
       tilesPerPixel = length(
         vec2(dFdx(ringDistance), dFdy(ringDistance)))
-      turns = atan(ringDz, ringDx) / 6.2831853 + 0.5
-      inner = groundRing.z
-      outer = groundRing.w
-    if ringDistance >= inner:
+    if ringDistance >= groundRing.z:
       let cover = clamp(
-        (outer + groundRingShape.z - ringDistance) / groundRingShape.z,
+        (groundRing.w + groundRingShape.z - ringDistance) / groundRingShape.z,
         0.0, 1.0)
       if cover > 0.0:
         let
+          turns = atan(ringDz, ringDx) / 6.2831853 + 0.5
           along = turns * groundRingShape.x
           cells = groundRingShape.y
           sheetTurn = floor(along / cells)
           row = sheetTurn - cells * floor(sheetTurn / cells)
-          across = clamp((ringDistance - inner) / (outer - inner), 0.0, 1.0)
+          across = clamp(
+            (ringDistance - groundRing.z) / (groundRing.w - groundRing.z),
+            0.0, 1.0)
           stoneTiles = 6.2831853 * (groundRing.z + groundRing.w) * 0.5 /
             groundRingShape.x
           texelsPerPixel = 1024.0 / cells * tilesPerPixel / stoneTiles

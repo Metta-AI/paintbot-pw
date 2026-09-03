@@ -20,9 +20,8 @@ type
     ## How one sheet of stones is cut.
     cells*: int
       ## Stones per sheet side. One sheet spans ten tiles.
-    jitterX*, jitterY*: float32
-      ## Seed offset from the cell centre per axis, as a fraction of a cell.
-      ## Jitter only along x keeps rows straight while widths vary.
+    jitter*: float32
+      ## Seed offset from the cell centre, as a fraction of a cell.
     squareness*: float32
       ## 1 is pure Chebyshev (square cells); lower rounds the corners.
     mortar*: float32
@@ -33,10 +32,6 @@ type
     mortarColor*: Vec3
     heightFloor*: float32
       ## Lowest stone height, so mortar (height 0) always yields first.
-    shadeSpread*: float32
-      ## Per-stone brightness range, centred on one.
-    tintSpread*: float32
-      ## Per-stone colour drift per channel.
     salt*: uint64
 
 const
@@ -44,21 +39,16 @@ const
     ## Terrain material sheets are square at this size.
   GrainAmount = 0.03'f32
   CobbleStyle* = StoneStyle(
-    cells: 20, jitterX: 0.3, jitterY: 0.3, squareness: 0.7,
-    mortar: 5.0, bevel: 6.0,
+    cells: 20, jitter: 0.3, squareness: 0.7, mortar: 5.0, bevel: 6.0,
     stone: vec3(0.42, 0.38, 0.40), mortarColor: vec3(0.30, 0.26, 0.25),
-    heightFloor: 0.35, shadeSpread: 0.2, tintSpread: 0.04,
-    salt: 0xC0BB1E'u64)
+    heightFloor: 0.35, salt: 0xC0BB1E'u64)
     ## Plaza cobbles: a stone every half tile, a little irregular.
   CurbStyle* = StoneStyle(
-    cells: 8, jitterX: 0.35, jitterY: 0.0, squareness: 1.0,
-    mortar: 10.0, bevel: 10.0,
+    cells: 8, jitter: 0.0, squareness: 1.0, mortar: 10.0, bevel: 10.0,
     stone: vec3(0.56, 0.51, 0.50), mortarColor: vec3(0.32, 0.28, 0.26),
-    heightFloor: 0.5, shadeSpread: 0.3, tintSpread: 0.06,
-    salt: 0xC04B'u64)
-    ## The cut-stone curb around the plaza: bigger square stones of uneven
-    ## width in straight rows, lighter, sampled around the ring rather than
-    ## across the world.
+    heightFloor: 0.5, salt: 0xC04B'u64)
+    ## The cut-stone curb around the plaza: a clean square grid, lighter,
+    ## sampled around the ring rather than across the world.
   CurbInner* = float32(PlazaStoneRadius)
     ## Tiles from the plaza centre where the curb starts.
   CurbWidth* = 0.8'f32
@@ -157,17 +147,16 @@ proc buildStoneSheet*(seed: int32, style: StoneStyle): CobbleSheet =
     for cx in 0 ..< style.cells:
       let
         jitterX = (float32(rng.below(2001)) / 1000.0'f32 - 1.0'f32) *
-          style.jitterX
+          style.jitter
         jitterY = (float32(rng.below(2001)) / 1000.0'f32 - 1.0'f32) *
-          style.jitterY
+          style.jitter
         height = style.heightFloor +
           (1.0'f32 - style.heightFloor) * float32(rng.below(1001)) / 1000.0'f32
-        brightness = 1.0'f32 +
-          (float32(rng.below(1001)) / 1000.0'f32 - 0.5'f32) * style.shadeSpread
+        brightness = 0.9'f32 + 0.2'f32 * float32(rng.below(1001)) / 1000.0'f32
         tint = vec3(
-          (float32(rng.below(1001)) / 1000.0'f32 - 0.5'f32) * style.tintSpread,
-          (float32(rng.below(1001)) / 1000.0'f32 - 0.5'f32) * style.tintSpread,
-          (float32(rng.below(1001)) / 1000.0'f32 - 0.5'f32) * style.tintSpread
+          (float32(rng.below(1001)) / 1000.0'f32 - 0.5'f32) * 0.04'f32,
+          (float32(rng.below(1001)) / 1000.0'f32 - 0.5'f32) * 0.04'f32,
+          (float32(rng.below(1001)) / 1000.0'f32 - 0.5'f32) * 0.04'f32
         )
       seeds[cy * style.cells + cx] = CobbleSeed(
         pos: vec2(
