@@ -84,8 +84,7 @@ const
   VergeBushHeight = 1.6'f32
     ## Nobody trims anything; the villagers are busy with the vegetables.
   SmallRockHeight = 0.7'f32
-  MediumRockHeight = 1.7'f32
-  LargeRockHeight = 3.5'f32
+  MediumRockHeight = 1.3'f32
   HouseFlowerBeds = 5
   HouseBushes = 2
   HouseDecorReach = 3'i32
@@ -114,8 +113,6 @@ const
     ## touch a tree.
   MediumRockOneIn = 40'i32
     ## Medium rocks beside forest trees, rarer.
-  LargeRockOneIn = 400'i32
-    ## Boulders anywhere in the meadow ring before the forest wall, rare.
 
   KitFiles: array[DecorKit, string] = [
     "terrain/toon_enchanted_meadow/props.glb",
@@ -135,8 +132,7 @@ const
       "grass_patch_03a", "grass_patch_04a", "grass_patch_05a"],
     @["wood_bench_01a", "wood_table_01a"],
     @["rock_small_01a", "rock_small_02a", "rock_small_03a", "rock_small_04a",
-      "rock_medium_01a", "rock_medium_02a", "rock_medium_03a",
-      "rock_large_01a"],
+      "rock_medium_01a", "rock_medium_02a", "rock_medium_03a"],
     @["well_01a", "wood_sign_01a"],
   ]
   Canopies = ["canopy_01a", "canopy_02a", "canopy_03a", "canopy_04a"]
@@ -453,8 +449,8 @@ proc dressVerges(p: var Placer) =
           x, y, yaw, FlowerHeight, 0.3, NaturalVariance, p.rng.plantTint())
 
 proc dressOutskirts(p: var Placer) =
-  ## A few small rocks at the feet of the forest trees, the odd medium
-  ## one, and a rare boulder in the meadow before the wall.
+  ## A few small rocks at the feet of the forest trees and the odd medium
+  ## one. Nothing house-sized.
   let middle = tile2(GridSide div 2, GridSide div 2)
   for y in 0'i32 ..< GridSide:
     for x in 0'i32 ..< GridSide:
@@ -464,10 +460,7 @@ proc dressOutskirts(p: var Placer) =
       if not p.tileFree(x, y):
         continue
       let yaw = p.rng.unit() * 2 * PI
-      if p.rng.below(LargeRockOneIn) == 0:
-        discard p.claim(MeadowRocks, "rock_large_01a", OutskirtsArea, x, y,
-          yaw, LargeRockHeight, 0.0, NaturalVariance, p.rng.rockTint())
-      elif p.nearTree(x, y):
+      if p.nearTree(x, y):
         if p.rng.below(MediumRockOneIn) == 0:
           discard p.claim(MeadowRocks, p.rng.pick(MediumRocks),
             OutskirtsArea, x, y, yaw, MediumRockHeight, 0.3,
