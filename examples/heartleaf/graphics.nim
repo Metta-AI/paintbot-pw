@@ -19,7 +19,8 @@ import
   replays,
   ui,
   controls,
-  ground
+  ground,
+  decor
 
 const
   WindowTitle = "Heartleaf"
@@ -37,6 +38,9 @@ const
     ## The modular presets that ship pre-rendered profile portraits.
   HousePropScale = 5.2'f32
   GardenPropScale = 1.1'f32
+  DecorBrightness: array[DecorKit, float32] = [1.5, 1.2, 1.3, 1.2, 1.5]
+    ## The toon atlases bake dark through the prop loader; the props kits
+    ## most of all.
   MeadowDirtPath = DataRoot & "/terrain/toon_enchanted_meadow/terrain_dirt_01d.png"
   ForestFloorPath = DataRoot & "/terrain/toon_golden_valley/terrain_forest_floor_01d.png"
   DirtChoices = [
@@ -154,6 +158,13 @@ proc tileWorldPoint(tile: Tile2): Vec3 =
   ## Returns the render centre of one map tile.
   let xz = tileCentreXZ(tile)
   vec3(xz.x, surfaceHeight(xz.x, xz.y), xz.y)
+
+proc decorWorldPoint(d: Decoration): Vec3 =
+  ## Converts a fractional tile-space decoration position to the world.
+  let
+    x = d.x - HalfGrid
+    z = d.y - HalfGrid
+  vec3(x, surfaceHeight(x, z) + d.lift, z)
 
 proc villagerWorldPoint(v: Villager): Vec3 =
   ## Converts a tile-space body into a render position.
@@ -279,12 +290,14 @@ proc runGraphics*() =
         float32(garden) * 1.3'f32,
         GardenPropScale
       )
-    villagePack.placeProp(
-      "stone_ring1",
-      tileWorldPoint(tile2(GridSide div 2, GridSide div 2)),
-      0.0'f32,
-      2.0'f32
-    )
+    var kits: array[DecorKit, PropPack]
+    for kit in DecorKit:
+      kits[kit] = loadPropPack(
+        DataRoot & "/" & kitFile(kit),
+        brightness = DecorBrightness[kit],
+        only = nodesFor(kit))
+    for d in placeDecor(run.world.map, run.mapSeed):
+      kits[d.kit].placeProp(d.node, decorWorldPoint(d), d.yaw, d.height)
     ## The village map never changes, so the terrain bakes exactly once.
     bakeTerrain(rebuildWalkability = false)
 

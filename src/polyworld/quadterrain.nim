@@ -731,12 +731,14 @@ var
 
 proc collectPropModels(
     node: gltf.Node, parent: Mat4, models: var seq[PropModel],
-    skipPrefix = ""
+    skipPrefix = "", only: seq[string] = @[]
 ) =
   ## Flattens renderable glTF nodes into normalized colored triangle models.
+  ## With `only` given, nodes not named in it are skipped.
   let world = parent * (translate(node.pos) * node.rot.mat4 * scale(node.scale))
   if node.mesh != nil and
-      (skipPrefix.len == 0 or not node.name.startsWith(skipPrefix)):
+      (skipPrefix.len == 0 or not node.name.startsWith(skipPrefix)) and
+      (only.len == 0 or node.name in only):
     var
       points: seq[Vec3]
       colors: seq[Vec3]
@@ -825,7 +827,7 @@ proc collectPropModels(
           model.vertices.add normal.z
       models.add model
   for child in node.nodes:
-    collectPropModels(child, world, models, skipPrefix)
+    collectPropModels(child, world, models, skipPrefix, only)
 
 proc scalePack(models: var seq[PropModel], targetTallest: float32) =
   ## Scales a whole pack by one factor (tallest model becomes targetTallest
@@ -1048,14 +1050,18 @@ proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
   glBindTexture(GL_TEXTURE_2D_ARRAY, 0)
 
 proc loadPropPack*(
-    path: string, unitHeight = true, brightness = 1.0'f32
+    path: string, unitHeight = true, brightness = 1.0'f32,
+    only: seq[string] = @[]
 ): PropPack =
   ## Loads named glTF nodes as independently placeable models. Each model is
   ## scaled to unit height unless unitHeight is false, which keeps the
   ## authored units so flat pieces stay flat and relative sizes survive.
-  ## Brightness scales the baked colors for packs authored dark.
+  ## Brightness scales the baked colors for packs authored dark. With `only`
+  ## given, just those nodes are kept, which skips baking a whole kit for a
+  ## handful of props.
   result = PropPack()
-  collectPropModels(readGltfFile(path).root, mat4(), result.models)
+  collectPropModels(
+    readGltfFile(path).root, mat4(), result.models, only = only)
   if unitHeight:
     result.models.normalizeModels()
   if brightness != 1.0'f32:

@@ -121,6 +121,27 @@ layer through meadow dirt, cartoon dirt, the golden valley forest floor,
 and the engine's sand, printing the choice to the terminal. The two toon textures load at startup
 into the unused marsh and volcanic slots.
 
+## Decorations
+
+`decor.nim` dresses the village from the map and seed alone, so a replay
+dresses exactly like the live game, and nothing it places has any bearing
+on the simulation. Everything comes from the two toon kits and is baked
+into the terrain mesh once with the houses.
+
+- Plaza: the golden valley well at the centre; between each pair of road
+  entrances one of a market stand with a canopy and crates, a bench and
+  table, a lamp post, a cart with barrels, or sacks and a crate; lamp posts
+  beside every third entrance and a signpost beside the next.
+- Houses: a mailbox beside the door, flower pots flanking it, a run of
+  fence along the back, three flower beds and a bush in the yard.
+- Gardens: a fence piece on one side of every plot, flowers beside some.
+- Road verges: tufts, bushes, small rocks, and flowers on one grass tile
+  in seven along the roads.
+- Outskirts: boulders in the meadow before the forest wall.
+
+Every height and probability is a const at the top of `decor.nim`. The
+loader keeps only the named nodes from each kit.
+
 ## Commands
 
 ```bash

@@ -41,9 +41,9 @@ const
   HousePadRadius = 2'i32
     ## Corners this close to a house centre sit exactly on the pad.
   HousePadFade = 4'i32
-  ForestEdgeRadius = 44'i32
+  ForestEdgeRadius* = 44'i32
     ## Trees may appear outside this ring.
-  ForestWallRadius = 58'i32
+  ForestWallRadius* = 58'i32
     ## Beyond this the forest is a solid wall framing the map.
   GardenMinReach = 4'i32
   GardenMaxReach = 8'i32
