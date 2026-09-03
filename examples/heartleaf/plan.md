@@ -135,7 +135,8 @@ into the terrain mesh once with the houses.
   fence along the back, three flower beds and a bush in the yard.
 - Gardens: a fence piece on one side of every plot, flowers beside some.
 - Road verges: lamp posts spaced along the roads, and tufts, bushes,
-  small rocks, and flowers on one grass tile in seven.
+  small rocks, and flowers on one grass tile in three. Everything that
+  grew or was left lying varies in size; everything gnomes made does not.
 - Outskirts: boulders in the meadow before the forest wall.
 
 Every height and probability is a const at the top of `decor.nim`. The

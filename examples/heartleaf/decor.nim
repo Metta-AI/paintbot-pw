@@ -84,7 +84,10 @@ const
   HouseDecorReach = 3'i32
   HouseDecorAttempts = 12
   GardenFlowerOneIn = 3'i32
-  RoadDecorOneIn = 7'i32
+  RoadDecorOneIn = 3'i32
+  NaturalVariance = 0.3'f32
+    ## Things that grew or were left lying vary this much in size either
+    ## way. Things gnomes made, signs, lamps, fences, do not.
   MediumRockOneIn = 12'i32
   LargeRockOneIn = 40'i32
 
@@ -169,19 +172,22 @@ proc add(
 
 proc claim(
     p: var Placer, kit: DecorKit, node: string, area: DecorArea,
-    tileX, tileY: int32, yaw, height: float32, jitter = 0.0'f32
+    tileX, tileY: int32, yaw, height: float32, jitter = 0.0'f32,
+    variance = 0.0'f32
 ): bool =
   ## Places one decoration on a free grass tile and marks the tile used.
-  ## Jitter moves it off the tile centre by up to that many tiles.
+  ## Jitter moves it off the tile centre by up to that many tiles;
+  ## variance scales its height by up to that fraction either way.
   if not p.tileFree(tileX, tileY):
     return false
   p.used.incl tileIndex(tileX, tileY)
   let
     offsetX = (p.rng.unit() - 0.5'f32) * 2.0'f32 * jitter
     offsetY = (p.rng.unit() - 0.5'f32) * 2.0'f32 * jitter
+    grown = height * (1.0'f32 + (p.rng.unit() - 0.5'f32) * 2.0'f32 * variance)
   p.add(kit, node, area,
     float32(tileX) + 0.5'f32 + offsetX, float32(tileY) + 0.5'f32 + offsetY,
-    yaw, height)
+    yaw, grown)
   true
 
 proc dressPlaza(p: var Placer) =
@@ -294,7 +300,7 @@ proc dressHouses(p: var Placer) =
       if max(abs(x - cx), abs(y - cy)) < 2:
         continue
       if p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), HouseArea, x, y,
-          p.rng.unit() * 2 * PI, FlowerHeight, 0.25):
+          p.rng.unit() * 2 * PI, FlowerHeight, 0.25, NaturalVariance):
         inc beds
     for attempt in 0 ..< HouseDecorAttempts:
       let
@@ -304,7 +310,7 @@ proc dressHouses(p: var Placer) =
         continue
       let bush = if p.rng.below(2) == 0: "flower_bush_01a" else: "bush_01a"
       if p.claim(MeadowVegetation, bush, HouseArea, x, y,
-          p.rng.unit() * 2 * PI, BushHeight, 0.2):
+          p.rng.unit() * 2 * PI, BushHeight, 0.2, NaturalVariance):
         break
 
 proc dressGardens(p: var Placer) =
@@ -326,7 +332,7 @@ proc dressGardens(p: var Placer) =
           fenced = true
       elif p.rng.below(GardenFlowerOneIn) == 0:
         discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), GardenArea,
-          x, y, p.rng.unit() * 2 * PI, FlowerHeight, 0.25)
+          x, y, p.rng.unit() * 2 * PI, FlowerHeight, 0.25, NaturalVariance)
         break
 
 proc dressVerges(p: var Placer) =
@@ -353,16 +359,16 @@ proc dressVerges(p: var Placer) =
       case p.rng.below(4)
       of 0:
         discard p.claim(MeadowVegetation, p.rng.pick(Tufts), RoadArea, x, y,
-          yaw, TuftHeight, 0.3)
+          yaw, TuftHeight, 0.3, NaturalVariance)
       of 1:
         discard p.claim(MeadowVegetation, "bush_01a", RoadArea, x, y, yaw,
-          VergeBushHeight, 0.2)
+          VergeBushHeight, 0.2, NaturalVariance)
       of 2:
         discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), RoadArea, x, y,
-          yaw, SmallRockHeight, 0.3)
+          yaw, SmallRockHeight, 0.3, NaturalVariance)
       else:
         discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), RoadArea,
-          x, y, yaw, FlowerHeight, 0.3)
+          x, y, yaw, FlowerHeight, 0.3, NaturalVariance)
 
 proc dressOutskirts(p: var Placer) =
   ## Boulders in the meadow between the village and the forest wall.
@@ -377,10 +383,10 @@ proc dressOutskirts(p: var Placer) =
       let yaw = p.rng.unit() * 2 * PI
       if p.rng.below(LargeRockOneIn) == 0:
         discard p.claim(MeadowRocks, "rock_large_01a", OutskirtsArea, x, y,
-          yaw, LargeRockHeight)
+          yaw, LargeRockHeight, 0.0, NaturalVariance)
       elif p.rng.below(MediumRockOneIn) == 0:
         discard p.claim(MeadowRocks, p.rng.pick(MediumRocks), OutskirtsArea,
-          x, y, yaw, MediumRockHeight, 0.3)
+          x, y, yaw, MediumRockHeight, 0.3, NaturalVariance)
 
 proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   ## Every decoration for one map, in a fixed order from one seeded stream.
