@@ -48,6 +48,26 @@ block sheetWraps:
   doAssert fraction > 0.7,
     &"only {fraction * 100:.0f}% of the seam texels share a stone"
 
+block curbSheet:
+  let sheet = buildCurbSheet(Seed)
+  var
+    mortar = 0
+    highest = -1'i32
+  for i, cell in sheet.cells:
+    if cell < 0:
+      mortar += 1
+    else:
+      highest = max(highest, cell)
+      doAssert sheet.height.data[i].r >= 110,
+        &"curb stone texel {i} sits below the curb height floor"
+  doAssert highest == CurbStyle.cells * CurbStyle.cells - 1,
+    &"curb sheet has {highest + 1} stones"
+  let fraction = mortar.float / sheet.cells.len.float
+  doAssert fraction > 0.05 and fraction < 0.35,
+    &"curb mortar covers {fraction * 100:.0f}% of the sheet"
+  doAssert CurbStones mod CurbStyle.cells == 0,
+    "the curb stone count must be a multiple of the sheet's cells"
+
 echo "Testing the ground mask"
 block maskCoverage:
   let

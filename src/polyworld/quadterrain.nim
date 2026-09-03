@@ -134,12 +134,18 @@ var
   visibilityScale: Uniform[float32]
   groundMask: Uniform[Sampler2D]
   groundMaskEnabled: Uniform[float32]
-  groundLayers: Uniform[Vec3]
+  groundLayers: Uniform[Vec4]
+  groundRing: Uniform[Vec4]
+  groundRingShape: Uniform[Vec3]
   propTint: Uniform[Vec4]
 
 proc texture(buffer: Uniform[Sampler2dArray], position: Vec3): Vec4 =
   ## Provides Shady with the texture-array builtin signature.
   vec4(0)
+
+proc atan(y, x: float32): float32 =
+  ## Provides Shady with the two-argument atan builtin.
+  arctan2(y, x)
 
 proc terrainVert(
     gl_Position: var Vec4,
@@ -261,6 +267,33 @@ proc terrainFrag(
       ground = soil
       if stone.w >= 1.0 - mask.x:
         ground = stone.xyz
+  # Ground ring: a curb of cut stones sampled around a circle rather than
+  # across the world, one stone row spanning the band, dropping out past
+  # the outer edge the same way the cobbles do.
+  if groundRingShape.x > 0.5:
+    let
+      ringDx = tilePos.x - groundRing.x
+      ringDz = tilePos.y - groundRing.y
+      ringDistance = sqrt(ringDx * ringDx + ringDz * ringDz)
+    if ringDistance >= groundRing.z:
+      let cover = clamp(
+        (groundRing.w + groundRingShape.z - ringDistance) / groundRingShape.z,
+        0.0, 1.0)
+      if cover > 0.0:
+        let
+          turns = atan(ringDz, ringDx) / 6.2831853 + 0.5
+          along = turns * groundRingShape.x
+          cells = groundRingShape.y
+          sheetTurn = floor(along / cells)
+          row = sheetTurn - cells * floor(sheetTurn / cells)
+          across = clamp(
+            (ringDistance - groundRing.z) / (groundRing.w - groundRing.z),
+            0.0, 1.0)
+          curb = texture(
+            terrainTextures,
+            vec3(along / cells, (row + across) / cells, groundLayers.w))
+        if curb.w >= 1.0 - cover:
+          ground = curb.xyz
   var color = ground * vertColor * (0.75 + 0.5 * h)
   # Passability borders draw on upward faces only (walls sit exactly on
   # integer x/z, so the fract test would classify their every pixel as
@@ -602,10 +635,13 @@ var
   texScaleLocation, blendDepthLocation, heightBlendLocation: GLint
   terrainTexturesLocation, visibilityTexLocation: GLint
   groundMaskLocation, groundMaskEnabledLocation, groundLayersLocation: GLint
+  groundRingLocation, groundRingShapeLocation: GLint
   visibilityOffsetLocation, visibilityScaleLocation: GLint
   terrainTextureArray, visibilityTexture, groundMaskTexture: GLuint
   groundMaskActive = false
-  groundLayerIndices = vec3(4, 5, 0)
+  groundLayerIndices = vec4(4, 5, 0, 0)
+  groundRingValues = vec4(0)
+  groundRingShapeValues = vec3(0)
   waterProgram: GLuint
   waterMvpLocation, waterCameraLocation: GLint
   waterVisibilityTexLocation: GLint
@@ -1418,18 +1454,42 @@ proc clearGroundMask*() =
   ## Returns the terrain to plain corner-material blending.
   groundMaskActive = false
 
-proc setGroundLayers*(stone, dirt, grass: float32) =
-  ## Names the texture-array layers the ground mask path draws with.
-  groundLayerIndices = vec3(stone, dirt, grass)
+proc setGroundLayers*(stone, dirt, grass: float32, curb = 0.0'f32) =
+  ## Names the texture-array layers the ground mask path draws with. The
+  ## curb layer only matters while a ground ring is set.
+  groundLayerIndices = vec4(stone, dirt, grass, curb)
+
+proc setGroundRing*(
+    centerX, centerZ, inner, outer: float32,
+    stones, cells: int, fade: float32
+) =
+  ## Draws a curb of cut stones around a circle in world xz: `stones` around
+  ## the ring from a sheet holding `cells` stones per side, one stone row
+  ## spanning inner .. outer, dropping out over `fade` past the outer edge.
+  groundRingValues = vec4(centerX, centerZ, inner, outer)
+  groundRingShapeValues = vec3(float32(stones), float32(cells), fade)
+
+proc clearGroundRing*() =
+  ## Removes the curb.
+  groundRingShapeValues = vec3(0)
 
 proc bindGroundMask() =
   ## Sets the ground mask uniforms for one terrain draw. Units 2 and 3 are
   ## the sun shadow maps.
   glUniform1f(
     groundMaskEnabledLocation, if groundMaskActive: 1.0 else: 0.0)
-  glUniform3f(
+  glUniform4f(
     groundLayersLocation,
-    groundLayerIndices.x, groundLayerIndices.y, groundLayerIndices.z)
+    groundLayerIndices.x, groundLayerIndices.y, groundLayerIndices.z,
+    groundLayerIndices.w)
+  glUniform4f(
+    groundRingLocation,
+    groundRingValues.x, groundRingValues.y, groundRingValues.z,
+    groundRingValues.w)
+  glUniform3f(
+    groundRingShapeLocation,
+    groundRingShapeValues.x, groundRingShapeValues.y,
+    groundRingShapeValues.z)
   glActiveTexture(GL_TEXTURE4)
   glBindTexture(GL_TEXTURE_2D, groundMaskTexture)
   glUniform1i(groundMaskLocation, 4)
@@ -2218,6 +2278,11 @@ proc initTerrain*() =
     "groundMaskEnabled"
   )
   groundLayersLocation = glGetUniformLocation(terrainProgram, "groundLayers")
+  groundRingLocation = glGetUniformLocation(terrainProgram, "groundRing")
+  groundRingShapeLocation = glGetUniformLocation(
+    terrainProgram,
+    "groundRingShape"
+  )
   visibilityOffsetLocation = glGetUniformLocation(
     terrainProgram,
     "visibilityOffset"

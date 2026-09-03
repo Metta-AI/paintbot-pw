@@ -15,32 +15,59 @@ import
   content,
   maps
 
+type
+  StoneStyle* = object
+    ## How one sheet of stones is cut.
+    cells*: int
+      ## Stones per sheet side. One sheet spans ten tiles.
+    jitter*: float32
+      ## Seed offset from the cell centre, as a fraction of a cell.
+    squareness*: float32
+      ## 1 is pure Chebyshev (square cells); lower rounds the corners.
+    mortar*: float32
+      ## Gap between stones in texels.
+    bevel*: float32
+      ## Stone edge softening in texels.
+    stone*: Vec3
+    mortarColor*: Vec3
+    heightFloor*: float32
+      ## Lowest stone height, so mortar (height 0) always yields first.
+    salt*: uint64
+
 const
   SheetSize* = 1024
     ## Terrain material sheets are square at this size.
-  CobbleCells = 20
-    ## Stones per sheet side. One sheet spans ten tiles, so this is a stone
-    ## every half tile.
-  CellSize = SheetSize.float32 / CobbleCells.float32
-  SeedJitter = 0.3'f32
-    ## Seed offset from the cell centre, as a fraction of a cell.
-  MortarWidth = 5.0'f32
-    ## Gap between stones in texels.
-  BevelWidth = 6.0'f32
-    ## Stone edge softening in texels.
-  StoneBase = (r: 0.42'f32, g: 0.38'f32, b: 0.40'f32)
-  MortarBase = (r: 0.30'f32, g: 0.26'f32, b: 0.25'f32)
-  StoneHeightFloor = 0.35'f32
-    ## Lowest stone height, so mortar (height 0) always yields first.
   GrainAmount = 0.03'f32
+  CobbleStyle* = StoneStyle(
+    cells: 20, jitter: 0.3, squareness: 0.7, mortar: 5.0, bevel: 6.0,
+    stone: vec3(0.42, 0.38, 0.40), mortarColor: vec3(0.30, 0.26, 0.25),
+    heightFloor: 0.35, salt: 0xC0BB1E'u64)
+    ## Plaza cobbles: a stone every half tile, a little irregular.
+  CurbStyle* = StoneStyle(
+    cells: 8, jitter: 0.0, squareness: 1.0, mortar: 10.0, bevel: 10.0,
+    stone: vec3(0.56, 0.51, 0.50), mortarColor: vec3(0.32, 0.28, 0.26),
+    heightFloor: 0.5, salt: 0xC04B'u64)
+    ## The cut-stone curb around the plaza: a clean square grid, lighter,
+    ## sampled around the ring rather than across the world.
+  CurbInner* = float32(PlazaStoneRadius)
+    ## Tiles from the plaza centre where the curb starts.
+  CurbWidth* = 0.8'f32
+    ## Radial width of the curb in tiles; one stone row spans it.
+  CurbStones* = 64
+    ## Stones around the ring. A multiple of the curb style's cells, so the
+    ## sheet seam lands on a mortar line.
+  CurbFade* = 0.4'f32
+    ## Tiles past the curb's outer edge over which its stones drop out.
+  StoneInset = 0.4'f32
+    ## The cobbles reach this far past the plaza radius, under the curb.
 
   MaskTexelsPerTile* = 8
   MaskSize* = GridTiles * MaskTexelsPerTile
   MaskChannels* = 2
     ## R is stone coverage, G is dirt coverage.
-  StoneBand = 1.5'f32
-    ## Tiles over which stone coverage falls from full to none past the
-    ## plaza radius.
+  StoneBand = 1.2'f32
+    ## Tiles over which cobble coverage falls from full to none, ending
+    ## under the curb.
   DirtReach = 0.3'f32
     ## Tiles past a road or plaza tile that stay fully dirt.
   DirtBand = 0.9'f32
@@ -67,9 +94,11 @@ type
     brightness: float32
     tint: Vec3
 
-proc stoneMetric(dx, dy: float32): float32 =
-  ## Mostly Chebyshev with a little Euclid, so cells read as rounded squares.
-  0.7'f32 * max(abs(dx), abs(dy)) + 0.3'f32 * sqrt(dx * dx + dy * dy)
+proc stoneMetric(dx, dy, squareness: float32): float32 =
+  ## Chebyshev blended with Euclid, so cells read as squares with corners
+  ## rounded by however much squareness gives away.
+  squareness * max(abs(dx), abs(dy)) +
+    (1.0'f32 - squareness) * sqrt(dx * dx + dy * dy)
 
 proc grain(x, y: int): float32 =
   ## Deterministic per-texel noise in -1 .. 1.
@@ -106,29 +135,32 @@ proc loadGroundSheet*(path: string): tuple[color, height: Image] =
     height.data[i] = rgbx(value, value, value, 255)
   (color: color, height: height)
 
-proc buildCobbleSheet*(seed: int32): CobbleSheet =
-  ## Generates a tiling sheet of square-ish cobbles: colour in RGB, stone
+proc buildStoneSheet*(seed: int32, style: StoneStyle): CobbleSheet =
+  ## Generates a tiling sheet of stones in one style: colour in RGB, stone
   ## height in the height image, one fixed height per stone.
+  let cellSize = SheetSize.float32 / style.cells.float32
   var
-    rng = initRng(seed, 0xC0BB1E'u64)
-    seeds = newSeq[CobbleSeed](CobbleCells * CobbleCells)
-  for cy in 0 ..< CobbleCells:
-    for cx in 0 ..< CobbleCells:
+    rng = initRng(seed, style.salt)
+    seeds = newSeq[CobbleSeed](style.cells * style.cells)
+  for cy in 0 ..< style.cells:
+    for cx in 0 ..< style.cells:
       let
-        jitterX = (float32(rng.below(2001)) / 1000.0'f32 - 1.0'f32) * SeedJitter
-        jitterY = (float32(rng.below(2001)) / 1000.0'f32 - 1.0'f32) * SeedJitter
-        height = StoneHeightFloor +
-          (1.0'f32 - StoneHeightFloor) * float32(rng.below(1001)) / 1000.0'f32
+        jitterX = (float32(rng.below(2001)) / 1000.0'f32 - 1.0'f32) *
+          style.jitter
+        jitterY = (float32(rng.below(2001)) / 1000.0'f32 - 1.0'f32) *
+          style.jitter
+        height = style.heightFloor +
+          (1.0'f32 - style.heightFloor) * float32(rng.below(1001)) / 1000.0'f32
         brightness = 0.9'f32 + 0.2'f32 * float32(rng.below(1001)) / 1000.0'f32
         tint = vec3(
           (float32(rng.below(1001)) / 1000.0'f32 - 0.5'f32) * 0.04'f32,
           (float32(rng.below(1001)) / 1000.0'f32 - 0.5'f32) * 0.04'f32,
           (float32(rng.below(1001)) / 1000.0'f32 - 0.5'f32) * 0.04'f32
         )
-      seeds[cy * CobbleCells + cx] = CobbleSeed(
+      seeds[cy * style.cells + cx] = CobbleSeed(
         pos: vec2(
-          (float32(cx) + 0.5'f32 + jitterX) * CellSize,
-          (float32(cy) + 0.5'f32 + jitterY) * CellSize),
+          (float32(cx) + 0.5'f32 + jitterX) * cellSize,
+          (float32(cy) + 0.5'f32 + jitterY) * cellSize),
         height: height,
         brightness: brightness,
         tint: tint
@@ -141,8 +173,8 @@ proc buildCobbleSheet*(seed: int32): CobbleSheet =
       let
         px = float32(x) + 0.5'f32
         py = float32(y) + 0.5'f32
-        cellX = int(px / CellSize)
-        cellY = int(py / CellSize)
+        cellX = int(px / cellSize)
+        cellY = int(py / cellSize)
       var
         best = float32.high
         second = float32.high
@@ -152,13 +184,14 @@ proc buildCobbleSheet*(seed: int32): CobbleSheet =
           let
             nx = cellX + dx
             ny = cellY + dy
-            wrappedX = (nx + CobbleCells) mod CobbleCells
-            wrappedY = (ny + CobbleCells) mod CobbleCells
-            index = wrappedY * CobbleCells + wrappedX
-            shiftX = float32(nx - wrappedX) * CellSize
-            shiftY = float32(ny - wrappedY) * CellSize
+            wrappedX = (nx + style.cells) mod style.cells
+            wrappedY = (ny + style.cells) mod style.cells
+            index = wrappedY * style.cells + wrappedX
+            shiftX = float32(nx - wrappedX) * cellSize
+            shiftY = float32(ny - wrappedY) * cellSize
             candidate = seeds[index].pos + vec2(shiftX, shiftY)
-            distance = stoneMetric(px - candidate.x, py - candidate.y)
+            distance = stoneMetric(
+              px - candidate.x, py - candidate.y, style.squareness)
           if distance < best:
             second = best
             best = distance
@@ -169,28 +202,36 @@ proc buildCobbleSheet*(seed: int32): CobbleSheet =
         gap = second - best
         texel = y * SheetSize + x
         noise = grain(x, y) * GrainAmount
-      if gap < MortarWidth:
+      if gap < style.mortar:
         result.cells[texel] = -1
         result.color.data[texel] = rgbx(
-          toByte(MortarBase.r + noise),
-          toByte(MortarBase.g + noise),
-          toByte(MortarBase.b + noise),
+          toByte(style.mortarColor.x + noise),
+          toByte(style.mortarColor.y + noise),
+          toByte(style.mortarColor.z + noise),
           255)
         result.height.data[texel] = rgbx(0, 0, 0, 255)
       else:
         let
           stone = seeds[bestSeed]
-          bevel = clamp((gap - MortarWidth) / BevelWidth, 0.0'f32, 1.0'f32)
+          bevel = clamp((gap - style.mortar) / style.bevel, 0.0'f32, 1.0'f32)
           shade = stone.brightness * (0.85'f32 + 0.15'f32 * bevel) + noise
           height = stone.height * (0.92'f32 + 0.08'f32 * bevel)
         result.cells[texel] = int32(bestSeed)
         result.color.data[texel] = rgbx(
-          toByte((StoneBase.r + stone.tint.x) * shade),
-          toByte((StoneBase.g + stone.tint.y) * shade),
-          toByte((StoneBase.b + stone.tint.z) * shade),
+          toByte((style.stone.x + stone.tint.x) * shade),
+          toByte((style.stone.y + stone.tint.y) * shade),
+          toByte((style.stone.z + stone.tint.z) * shade),
           255)
         let h = toByte(height)
         result.height.data[texel] = rgbx(h, h, h, 255)
+
+proc buildCobbleSheet*(seed: int32): CobbleSheet =
+  ## The plaza cobbles.
+  buildStoneSheet(seed, CobbleStyle)
+
+proc buildCurbSheet*(seed: int32): CobbleSheet =
+  ## The cut stones that ring the plaza.
+  buildStoneSheet(seed, CurbStyle)
 
 proc distanceTransform1d(f: var seq[float32], d: var seq[float32],
     v: var seq[int], z: var seq[float32]) =
@@ -278,7 +319,7 @@ proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
           (y - center) * (y - center)) +
           wobble(seed, StoneWobbleStream, tx, ty)
         stone = clamp(
-          (float32(PlazaStoneRadius) + StoneBand - plazaDistance) / StoneBand,
+          (float32(PlazaStoneRadius) + StoneInset - plazaDistance) / StoneBand,
           0.0'f32, 1.0'f32)
         roadClearance = dirtDistance[ty * MaskSize + tx] / texelsPerTile
         roadDistance = roadClearance +

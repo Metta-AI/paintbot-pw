@@ -100,6 +100,12 @@ two things at startup, on the CPU, from nothing but the seed and the map:
   Both distances carry a little low-frequency wobble. Gardens and house
   pads are left to the ordinary tile materials.
 
+A curb of larger cut stones rings the plaza. It is a second, cleaner
+sheet sampled in polar coordinates around the plaza centre, one stone row
+across the band and sixty-four stones around, so the stones follow the
+circle and the sheet seam lands on a mortar line. It drops out past its
+outer edge like the cobbles do.
+
 The terrain shader keeps a stone only where coverage still beats the
 stone's height, so the rim is ragged whole stones with dirt between them,
 and dirt then height-blends into grass. Roads ride the same dirt field, so

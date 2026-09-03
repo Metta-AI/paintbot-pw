@@ -145,7 +145,9 @@ proc tileCentreXZ(tile: Tile2): Vec2 =
 
 proc applyDirtChoice() =
   ## Points the ground mask's dirt at the chosen texture and says which.
-  setGroundLayers(StoneMaterial, DirtChoices[dirtChoice].layer, GrassMaterial)
+  setGroundLayers(
+    StoneMaterial, DirtChoices[dirtChoice].layer, GrassMaterial,
+    UnderwaterMaterial)
   echo "ground: ", DirtChoices[dirtChoice].name
 
 proc tileWorldPoint(tile: Tile2): Vec3 =
@@ -238,8 +240,16 @@ proc runGraphics*() =
     initTerrain()
     ## The plaza wears procedural cobbles instead of the flagstone, placed
     ## stone by stone through the ground mask.
-    let cobble = buildCobbleSheet(run.mapSeed)
+    let
+      cobble = buildCobbleSheet(run.mapSeed)
+      curb = buildCurbSheet(run.mapSeed)
+      plaza = tileCentreXZ(tile2(GridSide div 2, GridSide div 2))
     setTerrainMaterial(int(StoneMaterial), cobble.color, cobble.height)
+    ## The curb borrows the underwater slot; the village has no water.
+    setTerrainMaterial(int(UnderwaterMaterial), curb.color, curb.height)
+    setGroundRing(
+      plaza.x, plaza.y, CurbInner, CurbInner + CurbWidth,
+      CurbStones, CurbStyle.cells, CurbFade)
     uploadGroundMask(buildGroundMask(run.world.map, run.mapSeed), MaskSize)
     let
       meadowDirt = loadGroundSheet(MeadowDirtPath)
