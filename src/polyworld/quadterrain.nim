@@ -278,12 +278,16 @@ proc terrainFrag(
   # the outer edge the same way the cobbles do. The polar coordinate jumps
   # at the angle seam and at every row change, which would send automatic
   # mip selection to the smallest level along those lines, so the mip is
-  # chosen from the ring distance, which is smooth everywhere.
+  # chosen from the ring distance, which is smooth everywhere. Screen
+  # derivatives are undefined inside a branch some pixels skip, so the
+  # ring's derivative is taken before the band test.
   if groundRingShape.x > 0.5:
     let
       ringDx = tilePos.x - groundRing.x
       ringDz = tilePos.y - groundRing.y
       ringDistance = sqrt(ringDx * ringDx + ringDz * ringDz)
+      tilesPerPixel = length(
+        vec2(dFdx(ringDistance), dFdy(ringDistance)))
     if ringDistance >= groundRing.z:
       let cover = clamp(
         (groundRing.w + groundRingShape.z - ringDistance) / groundRingShape.z,
@@ -298,8 +302,6 @@ proc terrainFrag(
           across = clamp(
             (ringDistance - groundRing.z) / (groundRing.w - groundRing.z),
             0.0, 1.0)
-          tilesPerPixel = length(
-            vec2(dFdx(ringDistance), dFdy(ringDistance)))
           stoneTiles = 6.2831853 * (groundRing.z + groundRing.w) * 0.5 /
             groundRingShape.x
           texelsPerPixel = 1024.0 / cells * tilesPerPixel / stoneTiles
