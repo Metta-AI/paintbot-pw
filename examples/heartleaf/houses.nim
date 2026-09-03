@@ -58,7 +58,8 @@ const
   WindowReach = 0.9'f32
     ## Windows stay this close to the gable centre so they sit under the
     ## slope at their height.
-  ChimneySink = 1.1'f32
+  ChimneySink = 0.45'f32
+    ## How far a chimney sinks into the ridge; the rest stands proud.
   StairsStandOff = 1.0'f32
   SodTint* = vec3(0.34, 0.72, 0.28)
     ## Thatch multiplied hard toward green so it reads as turf, not straw.
@@ -68,9 +69,12 @@ const
   SodGrassRidgeDrop = 0.35'f32
   SodGrassSlopeAt = 1.8'f32
     ## Metres from the ridge, across, where the slope tufts sit.
-  SegmentOverlap = 0.06'f32
-    ## Roof segments nudge into each other so their end caps do not show as
-    ## seams.
+  SegmentOverlap = 0.3'f32
+    ## Roof segments overlap this much so the rolled edge of one hides the
+    ## groove against the next.
+  SegmentStagger = 0.04'f32
+    ## Every other segment sits this much lower, so the overlapping faces
+    ## have a clear winner instead of flickering.
   PaintShade = 0.12'f32
   PaintWarmth = 0.06'f32
   Turn = PI / 2
@@ -157,7 +161,9 @@ proc buildChalet(
     depth = float32(modules) * roof.along
     halfDepth = depth * 0.5'f32
     halfSpan = roof.span * 0.5'f32
-    doorX = (b.rng.unit() - 0.5'f32) * 2.0'f32 * DoorReach
+    doorX = round((b.rng.unit() - 0.5'f32) * 2.0'f32 * DoorReach)
+      ## Snapped to the foundation cube grid so a ground door takes exactly
+      ## one cube out.
     doorZ = halfDepth
   ## Foundation: cubes under the eaves and along both gables.
   var z = -halfDepth + 0.5'f32
@@ -165,20 +171,24 @@ proc buildChalet(
     for x in [-halfSpan + 0.5'f32, halfSpan - 0.5'f32]:
       b.add(MeadowBuildings, b.rng.pick(Cubes), x, 0, z)
     z += 1.0'f32
-  var x = -halfSpan + 1.5'f32
-  while x < halfSpan - 1.0'f32:
+  ## Gable rows: enough cubes to meet the eave cubes, overlapping a little
+  ## rather than leaving a corner open, and one cube out for a ground door.
+  let gableCubes = int(ceil(roof.span - 2.0'f32))
+  for i in 0 ..< gableCubes:
+    let x = (float32(i) - float32(gableCubes - 1) * 0.5'f32)
     for side in [1.0'f32, -1.0'f32]:
-      let gap = side > 0 and not raisedDoor and abs(x - doorX) < 1.0'f32
+      let gap = side > 0 and not raisedDoor and abs(x - doorX) < 0.5'f32
       if not gap:
         b.add(MeadowBuildings, b.rng.pick(Cubes), x, 0, halfDepth * side)
-    x += 1.0'f32
-  ## Roof, ridge along z, segments nudged together.
+  ## Roof, ridge along z, segments overlapping and staggered.
   let pitch = (depth - SegmentOverlap) / float32(modules)
   for i in 0 ..< modules:
-    let segZ = -halfDepth + SegmentOverlap * 0.5'f32 +
-      pitch * (float32(i) + 0.5'f32)
-    b.addTinted(ValleyBuildings, roof.node, 0, FoundationHeight, segZ, Turn,
-      roofTint)
+    let
+      segZ = -halfDepth + SegmentOverlap * 0.5'f32 +
+        pitch * (float32(i) + 0.5'f32)
+      drop = if i mod 2 == 1: SegmentStagger else: 0.0'f32
+    b.addTinted(ValleyBuildings, roof.node, 0, FoundationHeight - drop, segZ,
+      Turn, roofTint)
   ## Gable walls closing each end, the door and windows set into them.
   for side in [1.0'f32, -1.0'f32]:
     b.add(ValleyBuildings, "roof_structure_01a", 0, GableLift,
