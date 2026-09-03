@@ -4,6 +4,7 @@
 ##
 ##   R        reroll every house
 ##   K        cycle mixed, cottages only, longhouses only
+##   P        toggle a magenta ground, so any hole in a house shows
 ##   drag     orbit, wheel zooms
 ##   Escape   quit
 ##
@@ -30,6 +31,7 @@ var
   window = newWindow("House lab", ivec2(1280, 800))
   rerolls = 0'i32
   filter = Mixed
+  magenta = false
   yaw = 0.7'f32
   pitch = 0.8'f32
   distance = 34.0'f32
@@ -55,8 +57,16 @@ proc kindFor(index: int): HouseKind =
   of OnlyLonghouses: Longhouse
   of Mixed: houseKindFor(rerolls, index)
 
+proc paintGround() =
+  ## Grass, or a magenta that no kit piece shares.
+  if magenta:
+    setTileColor(int(GrassTile), vec3(4, 0, 4), vec3(4, 0, 4))
+  else:
+    setTileColor(int(GrassTile), vec3(1, 1, 1), vec3(0.85, 0.85, 0.85))
+
 proc rebuild(packs: HousePacks) =
   ## Places the grid and rebakes.
+  paintGround()
   clearProps()
   for row in 0 ..< GridCount:
     for col in 0 ..< GridCount:
@@ -86,7 +96,7 @@ proc main() =
   applySunHour(LabHour)
   let packs = loadHousePacks()
   rebuild(packs)
-  echo "house lab: R rerolls, K cycles kinds, drag orbits, wheel zooms"
+  echo "house lab: R rerolls, K cycles kinds, P magenta ground, drag orbits, wheel zooms"
 
   window.onButtonPress = proc(button: Button) =
     case button
@@ -97,6 +107,9 @@ proc main() =
       filter = KindFilter((ord(filter) + 1) mod 3)
       rebuild(packs)
       echo "showing ", filter
+    of KeyP:
+      magenta = not magenta
+      rebuild(packs)
     of KeyEscape:
       window.closeRequested = true
     else: discard
@@ -122,7 +135,10 @@ proc main() =
     applySunHour(LabHour)
     sunDepthPasses(window.size):
       drawTerrainSunDepth()
-    glClearColor(0.55, 0.72, 0.9, 1.0)
+    if magenta:
+      glClearColor(1.0, 0.0, 1.0, 1.0)
+    else:
+      glClearColor(0.55, 0.72, 0.9, 1.0)
     glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
     drawTerrain(viewProjection)
     window.swapBuffers()

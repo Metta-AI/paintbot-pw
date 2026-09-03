@@ -32,6 +32,9 @@ type
       ## the door is, +y is up.
     yaw*: float32
     tint*: Vec3
+    scale*: float32
+      ## Uniform scale on top of the viewer's metres-to-tiles; one for as
+      ## authored. The gable walls stretch to the roof span with it.
 
   RoofStyle = object
     node: string
@@ -49,10 +52,15 @@ const
   FoundationHeight = 1.0'f32
   GableWidth = 6.27'f32
     ## The gable end wall piece; a shade narrower than the roofs.
-  GableLift = FoundationHeight
+  GableBeamDrop = 0.89'f32
+    ## The gable wall's side beams hang this far below its planks, and the
+    ## loader stands a piece on its lowest point, so the wall is set down
+    ## by this much to put the planks on the foundation.
   GableProud = 0.35'f32
     ## Doors and windows stand this far outside the gable they sit in.
   DoorReach = 1.4'f32
+  DoorScale = 1.12'f32
+    ## The door leaf is 0.9m wide; scaled to fill the one metre cube gap.
     ## The door slides this far either side of the gable centre.
   WindowLift = 0.9'f32
   WindowReach = 0.9'f32
@@ -139,16 +147,18 @@ type Builder = object
   pieces: seq[HousePiece]
 
 proc add(b: var Builder, kit: DecorKit, node: string, x, y, z: float32,
-    yaw = 0.0'f32) =
+    yaw = 0.0'f32, scale = 1.0'f32) =
   ## Records one piece in the house's paint.
   b.pieces.add HousePiece(
-    kit: kit, node: node, offset: vec3(x, y, z), yaw: yaw, tint: b.tint)
+    kit: kit, node: node, offset: vec3(x, y, z), yaw: yaw, tint: b.tint,
+    scale: scale)
 
 proc addTinted(b: var Builder, kit: DecorKit, node: string,
     x, y, z: float32, yaw: float32, tint: Vec3) =
   ## Records one piece in its own colour.
   b.pieces.add HousePiece(
-    kit: kit, node: node, offset: vec3(x, y, z), yaw: yaw, tint: tint)
+    kit: kit, node: node, offset: vec3(x, y, z), yaw: yaw, tint: tint,
+    scale: 1.0)
 
 proc buildChalet(
     b: var Builder, roof: RoofStyle, modules: int, roofTint: Vec3,
@@ -158,7 +168,8 @@ proc buildChalet(
   ## gable walls, a door in the front gable. A raised door sits on the
   ## foundation with stairs; otherwise the foundation opens for it.
   let
-    depth = float32(modules) * roof.along
+    depth = float32(modules) * roof.along -
+      float32(modules - 1) * SegmentOverlap
     halfDepth = depth * 0.5'f32
     halfSpan = roof.span * 0.5'f32
     gableCubes = int(ceil(roof.span - 2.0'f32))
@@ -182,35 +193,40 @@ proc buildChalet(
       let gap = side > 0 and not raisedDoor and abs(x - doorX) < 0.5'f32
       if not gap:
         b.add(MeadowBuildings, b.rng.pick(Cubes), x, 0, halfDepth * side)
-  ## Roof, ridge along z, segments overlapping and staggered.
-  let pitch = (depth - SegmentOverlap) / float32(modules)
+  ## Roof, ridge along z, each joint overlapping and every other segment
+  ## a little lower.
+  let pitch = roof.along - SegmentOverlap
   for i in 0 ..< modules:
     let
-      segZ = -halfDepth + SegmentOverlap * 0.5'f32 +
-        pitch * (float32(i) + 0.5'f32)
+      segZ = -halfDepth + roof.along * 0.5'f32 + pitch * float32(i)
       drop = if i mod 2 == 1: SegmentStagger else: 0.0'f32
     b.addTinted(ValleyBuildings, roof.node, 0, FoundationHeight - drop, segZ,
       Turn, roofTint)
-  ## Gable walls closing each end, the door and windows set into them.
+  ## Gable walls closing each end, stretched to the roof's span so the
+  ## bottom corners meet the eaves, with the door and windows set in.
+  let
+    gableScale = roof.span / GableWidth
+    gableLift = FoundationHeight - GableBeamDrop * gableScale
   for side in [1.0'f32, -1.0'f32]:
-    b.add(ValleyBuildings, "roof_structure_01a", 0, GableLift,
-      halfDepth * side, Turn)
+    b.add(ValleyBuildings, "roof_structure_01a", 0, gableLift,
+      halfDepth * side, Turn, gableScale)
   ## A raised door stands proud of the gable above the cubes; a ground
   ## door stands proud of the cube faces, in the gap.
   let
     doorLift = if raisedDoor: FoundationHeight else: 0.0'f32
     doorProud = if raisedDoor: GableProud else: 0.5'f32 + GableProud * 0.5'f32
-  b.add(ValleyBuildings, "door_01a", doorX, doorLift, doorZ + doorProud, Turn)
+  b.add(ValleyBuildings, "door_01a", doorX, doorLift, doorZ + doorProud, Turn,
+    DoorScale)
   if raisedDoor:
     b.add(MeadowBuildings, "stairs_03a", doorX, 0, doorZ + StairsStandOff)
   if b.rng.coin():
     let windowX = if doorX < 0: WindowReach else: -WindowReach
-    b.add(ValleyBuildings, "window_01a", windowX, GableLift + WindowLift,
-      doorZ + GableProud, Turn)
+    b.add(ValleyBuildings, "window_01a", windowX,
+      FoundationHeight + WindowLift, doorZ + GableProud, Turn)
   if b.rng.coin():
     b.add(ValleyBuildings, "window_01a",
-      (b.rng.unit() - 0.5'f32) * 2.0'f32 * WindowReach, GableLift + WindowLift,
-      -doorZ - GableProud, Turn)
+      (b.rng.unit() - 0.5'f32) * 2.0'f32 * WindowReach,
+      FoundationHeight + WindowLift, -doorZ - GableProud, Turn)
   (depth: depth, doorX: doorX)
 
 proc buildCottage(b: var Builder) =

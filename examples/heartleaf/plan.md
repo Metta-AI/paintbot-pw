@@ -137,7 +137,8 @@ thatch tinted hard to turf, with grass along the ridge and in rows down
 both slopes, the viking sod house. The village pack houses are gone and the
 blocked footprint is five tiles square. The house lab,
 `nim r experiments/houses/houses.nim`, shows a grid of houses from
-consecutive seeds with `R` to reroll and `K` to switch kinds.
+consecutive seeds with `R` to reroll, `K` to switch kinds, and `P` for a
+magenta ground that shows any hole in a house.
 
 ## Crops
 

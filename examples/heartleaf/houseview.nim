@@ -39,4 +39,5 @@ proc placeHouse*(
         centre.y + piece.offset.y * TilesPerMeter,
         centre.z + spun.z * TilesPerMeter)
     packs[piece.kit].placeProp(
-      piece.node, position, yaw + piece.yaw, TilesPerMeter, piece.tint)
+      piece.node, position, yaw + piece.yaw, TilesPerMeter * piece.scale,
+      piece.tint)

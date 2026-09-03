@@ -30,7 +30,7 @@ block piecesStayHome:
       for piece in pieces:
         doAssert abs(piece.offset.x) <= HouseExtent.x and
           abs(piece.offset.z) <= HouseExtent.z and
-          piece.offset.y >= 0 and piece.offset.y <= HouseExtent.y,
+          piece.offset.y >= -1.0 and piece.offset.y <= HouseExtent.y,
           &"{kind} seed {seed}: {piece.node} at {piece.offset} is outside"
         doAssert houseNodesFor(piece.kit).contains(piece.node),
           &"{piece.node} is not in the house node list for {piece.kit}"
