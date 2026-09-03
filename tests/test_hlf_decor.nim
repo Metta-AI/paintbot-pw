@@ -49,9 +49,6 @@ block placementRules:
       doAssert index notin claimed, &"two decorations share tile {x},{y}"
       claimed.incl index
   doAssert wellFound, "no well"
-  for piece in CenterPiece:
-    let dressed = placeDecor(map, Seed, piece)
-    doAssert dressed.len >= placed.len, &"{centerName(piece)} lost props"
 
 echo "Testing that every node exists in its kit"
 block nodesExist:

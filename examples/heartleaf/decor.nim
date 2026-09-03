@@ -16,13 +16,7 @@ import
 
 type
   DecorKit* = enum
-    MeadowProps, MeadowVegetation, MeadowBuildings, MeadowRocks, ValleyProps,
-    ValleyVegetation
-
-  CenterPiece* = enum
-    ## What stands in the middle of the plaza. Cycled in the viewer to
-    ## compare candidates.
-    WellPiece, PlinthWellPiece, HeroTreePiece, ColumnPiece, IdolPiece
+    MeadowProps, MeadowVegetation, MeadowBuildings, MeadowRocks, ValleyProps
 
   DecorArea* = enum
     PlazaArea, HouseArea, GardenArea, RoadArea, OutskirtsArea
@@ -54,13 +48,6 @@ const
     ## Everything placed on the plaza sits within this many tiles of its
     ## centre; the curb starts at eight.
   WellHeight = 2.6'f32
-  PlinthHeight = 0.5'f32
-  PlinthWellHeight = 3.2'f32
-  HeroTreeHeight = 6.5'f32
-  ColumnHeight = 3.5'f32
-  IdolHeight = 2.8'f32
-  CenterNames: array[CenterPiece, string] = [
-    "well", "well on a plinth", "hero tree", "ruined column", "rock idol"]
   StallHeight = 1.6'f32
   CanopyLift = 1.45'f32
   CanopyHeight = 0.6'f32
@@ -106,7 +93,6 @@ const
     "terrain/toon_enchanted_meadow/buildings.glb",
     "terrain/toon_enchanted_meadow/rocks.glb",
     "terrain/toon_golden_valley/props.glb",
-    "terrain/toon_golden_valley/vegetation.glb",
   ]
   DecorNodes: array[DecorKit, seq[string]] = [
     @["market_stand_01a", "canopy_01a", "canopy_02a", "canopy_03a",
@@ -117,13 +103,11 @@ const
     @["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a",
       "flower_bush_01a", "bush_01a", "grass_patch_01a", "grass_patch_02a",
       "grass_patch_03a", "grass_patch_04a", "grass_patch_05a"],
-    @["wood_bench_01a", "wood_table_01a", "column_01a", "stone_slab_02a",
-      "rock_idol_01a", "rock_idol_eyes_01a"],
+    @["wood_bench_01a", "wood_table_01a"],
     @["rock_small_01a", "rock_small_02a", "rock_small_03a", "rock_small_04a",
       "rock_medium_01a", "rock_medium_02a", "rock_medium_03a",
       "rock_large_01a"],
     @["well_01a", "wood_sign_01a"],
-    @["hero_tree_01a"],
   ]
   Canopies = ["canopy_01a", "canopy_02a", "canopy_03a", "canopy_04a"]
   Tufts = ["grass_patch_01a", "grass_patch_02a", "grass_patch_03a",
@@ -133,10 +117,6 @@ const
   MediumRocks = ["rock_medium_01a", "rock_medium_02a", "rock_medium_03a"]
   FlowerBeds = ["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a"]
   Sides = [(1'i32, 0'i32), (0'i32, 1'i32), (-1'i32, 0'i32), (0'i32, -1'i32)]
-
-proc centerName*(piece: CenterPiece): string =
-  ## What to call one centrepiece candidate.
-  CenterNames[piece]
 
 proc kitFile*(kit: DecorKit): string =
   ## Path of one kit's glb under the art repo.
@@ -203,34 +183,10 @@ proc claim(
     yaw, height)
   true
 
-proc dressCenter(p: var Placer, piece: CenterPiece) =
-  ## The plaza centrepiece.
+proc dressPlaza(p: var Placer) =
+  ## The well, and one dressing in each sector between road entrances.
   let centre = float32(GridSide div 2) + 0.5'f32
-  case piece
-  of WellPiece:
-    p.add(ValleyProps, "well_01a", PlazaArea, centre, centre, 0.0, WellHeight)
-  of PlinthWellPiece:
-    p.add(MeadowBuildings, "stone_slab_02a", PlazaArea, centre, centre, 0.0,
-      PlinthHeight)
-    p.add(ValleyProps, "well_01a", PlazaArea, centre, centre, 0.0,
-      PlinthWellHeight, PlinthHeight)
-  of HeroTreePiece:
-    p.add(ValleyVegetation, "hero_tree_01a", PlazaArea, centre, centre, 0.0,
-      HeroTreeHeight)
-  of ColumnPiece:
-    p.add(MeadowBuildings, "column_01a", PlazaArea, centre, centre, 0.0,
-      ColumnHeight)
-  of IdolPiece:
-    p.add(MeadowBuildings, "rock_idol_01a", PlazaArea, centre, centre, 0.0,
-      IdolHeight)
-    p.add(MeadowBuildings, "rock_idol_eyes_01a", PlazaArea, centre, centre,
-      0.0, IdolHeight)
-
-proc dressPlaza(p: var Placer, piece: CenterPiece) =
-  ## The centrepiece, and one dressing in each sector between road
-  ## entrances.
-  let centre = float32(GridSide div 2) + 0.5'f32
-  p.dressCenter(piece)
+  p.add(ValleyProps, "well_01a", PlazaArea, centre, centre, 0.0, WellHeight)
   var angles: seq[float32]
   for house in p.map.houses:
     angles.add arctan2(
@@ -425,12 +381,10 @@ proc dressOutskirts(p: var Placer) =
         discard p.claim(MeadowRocks, p.rng.pick(MediumRocks), OutskirtsArea,
           x, y, yaw, MediumRockHeight, 0.3)
 
-proc placeDecor*(
-    map: MapData, seed: int32, piece = WellPiece
-): seq[Decoration] =
+proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   ## Every decoration for one map, in a fixed order from one seeded stream.
   var p = Placer(map: map, rng: initRng(seed, DecorSalt))
-  p.dressPlaza(piece)
+  p.dressPlaza()
   p.dressHouses()
   p.dressGardens()
   p.dressVerges()

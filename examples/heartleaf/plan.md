@@ -139,10 +139,10 @@ into the terrain mesh once with the houses.
 - Outskirts: boulders in the meadow before the forest wall.
 
 Every height and probability is a const at the top of `decor.nim`. The
-loader keeps only the named nodes from each kit. In the viewer, `D` cycles
-the plaza centrepiece through the well, the well on a stone plinth, the
-golden valley hero tree, a ruined column, and the carved rock idol,
-re-placing the props and rebaking, and prints the choice.
+loader keeps only the named nodes from each kit and draws them textured,
+through the same cutout path as the trees, because the toon kits are
+painted rather than palette coloured and a per-vertex colour bake turns
+their detail to blotches and their foliage cards to gradients.
 
 ## Commands
 

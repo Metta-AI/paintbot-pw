@@ -38,9 +38,6 @@ const
     ## The modular presets that ship pre-rendered profile portraits.
   HousePropScale = 5.2'f32
   GardenPropScale = 1.1'f32
-  DecorBrightness: array[DecorKit, float32] = [1.5, 1.2, 1.3, 1.2, 1.5, 1.2]
-    ## The toon atlases bake dark through the prop loader; the props kits
-    ## most of all.
   MeadowDirtPath = DataRoot & "/terrain/toon_enchanted_meadow/terrain_dirt_01d.png"
     ## Roads and the plaza apron wear the meadow dirt, loaded into the
     ## marsh slot, which the village never uses.
@@ -66,7 +63,6 @@ var
   panning = false
   minimapPanning* = false
   showEdges = false
-  centerPiece = WellPiece
   followSlot* = -1'i32
   rightPressPosition = vec2(0)
   seekCheckpoints: seq[SeekCheckpoint]
@@ -258,9 +254,8 @@ proc runGraphics*() =
     kits: array[DecorKit, PropPack]
 
   proc placeVillageProps() =
-    ## Lays out every prop from scratch: houses, plots, and decorations
-    ## around the current centrepiece. Walkability never changes, so the
-    ## terrain rebakes without it.
+    ## Lays out every prop: houses, plots, and decorations. Walkability
+    ## never changes, so the terrain bakes without it.
     clearProps()
     for slot in 0 ..< VillagerCount:
       let house = run.world.map.houses[slot]
@@ -278,17 +273,17 @@ proc runGraphics*() =
         float32(garden) * 1.3'f32,
         GardenPropScale
       )
-    for d in placeDecor(run.world.map, run.mapSeed, centerPiece):
+    for d in placeDecor(run.world.map, run.mapSeed):
       kits[d.kit].placeProp(d.node, decorWorldPoint(d), d.yaw, d.height)
     bakeTerrain(rebuildWalkability = false)
 
   profileBlock "props":
     villagePack = loadPropPack(VillagePropPack)
     for kit in DecorKit:
+      ## The toon kits are painted, not palette coloured, so they draw
+      ## textured rather than through the vertex-colour bake.
       kits[kit] = loadPropPack(
-        DataRoot & "/" & kitFile(kit),
-        brightness = DecorBrightness[kit],
-        only = nodesFor(kit))
+        DataRoot & "/" & kitFile(kit), only = nodesFor(kit), textured = true)
     placeVillageProps()
 
   ## Everything is always visible; there is no fog in a village.
@@ -771,11 +766,6 @@ proc runGraphics*() =
       if not following:
         followSlot = -1
     of KeyT: scene.toggleShading()
-    of KeyD:
-      centerPiece = CenterPiece((ord(centerPiece) + 1) mod
-        (ord(high(CenterPiece)) + 1))
-      placeVillageProps()
-      echo "centre: ", centerName(centerPiece)
     of KeyE:
       if playerMode():
         queueExitHouse(options.playerSlot - 1)

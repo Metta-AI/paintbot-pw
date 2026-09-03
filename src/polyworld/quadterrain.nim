@@ -693,6 +693,8 @@ type
     name: string
     height: float32         # model height before pack scaling
     vertices: seq[float32]  # x y z r g b nx ny nz; pack-scaled, base at y 0
+    uvs: seq[float32]       # u v layer per vertex, into the pack's atlases
+    textureArray: GLuint    # the pack's atlas array; 0 draws vertex colors
     vertexArray: GLuint
     vertexBuffer: GLuint
     depthVertexArray: GLuint  # position-only view for the sun depth pass
@@ -706,6 +708,13 @@ type
   PropPack* = ref object
     models: seq[PropModel]
     names: OrderedTable[string, int]
+    textureArray: GLuint    # set when the pack was loaded textured
+
+  TexturedBatch = object
+    ## Every baked placement of one textured pack, drawn like the trees.
+    textureArray: GLuint
+    mesh: seq[float32]      # x y z u v layer nx ny nz
+    vertexArray, vertexBuffer, depthVertexArray: GLuint
 
   PropPlacement = object
     model: PropModel
@@ -728,6 +737,7 @@ var
   grassPlacements: seq[TreePlacement]
   rockPlacements: seq[TreePlacement]
   propPlacements: seq[PropPlacement]
+  texturedBatches: seq[TexturedBatch]
 
 proc bakedTexel(image: Image, x, y: int): ColorRGBX =
   ## The colour to bake for one uv sample. Cutout foliage atlases are mostly
@@ -753,12 +763,22 @@ proc bakedTexel(image: Image, x, y: int): ColorRGBX =
             255)
   rgbx(128, 128, 128, 255)
 
+proc atlasLayer(images: var seq[Image], image: Image): float32 =
+  ## The layer one material image will occupy in a pack's texture array.
+  for i, known in images:
+    if known == image:
+      return float32(i)
+  images.add image
+  float32(images.len - 1)
+
 proc collectPropModels(
     node: gltf.Node, parent: Mat4, models: var seq[PropModel],
-    skipPrefix = "", only: seq[string] = @[]
+    skipPrefix = "", only: seq[string] = @[], images: ptr seq[Image] = nil
 ) =
   ## Flattens renderable glTF nodes into normalized colored triangle models.
-  ## With `only` given, nodes not named in it are skipped.
+  ## With `only` given, nodes not named in it are skipped. With `images`
+  ## given, every material image is gathered there and each vertex keeps
+  ## its uv and image layer, for packs drawn textured.
   let world = parent * (translate(node.pos) * node.rot.mat4 * scale(node.scale))
   if node.mesh != nil and
       (skipPrefix.len == 0 or not node.name.startsWith(skipPrefix)) and
@@ -766,6 +786,7 @@ proc collectPropModels(
     var
       points: seq[Vec3]
       colors: seq[Vec3]
+      uvs: seq[Vec3]
       sourceNormals: seq[Vec3]
       low = vec3(float32.high, float32.high, float32.high)
       high = vec3(float32.low, float32.low, float32.low)
@@ -773,13 +794,21 @@ proc collectPropModels(
     # non-uniform (the rock pack), which distorts rotated normals.
     let normalMatrix = world.inverse.transpose
     for primitive in node.mesh.primitives:
-      let image =
-        if primitive.material != nil: primitive.material.baseColor else: nil
+      let
+        image =
+          if primitive.material != nil: primitive.material.baseColor else: nil
+        layer =
+          if images != nil and image != nil: atlasLayer(images[], image)
+          else: 0.0'f32
       template addCorner(index: int) =
         let point = world * primitive.points[index]
         low = min(low, point)
         high = max(high, point)
         points.add point
+        if index < primitive.uvs.len:
+          uvs.add vec3(primitive.uvs[index].x, primitive.uvs[index].y, layer)
+        else:
+          uvs.add vec3(0, 0, layer)
         if index < primitive.normals.len:
           let transformed = normalMatrix * vec4(
             primitive.normals[index].x,
@@ -849,9 +878,12 @@ proc collectPropModels(
           model.vertices.add normal.x
           model.vertices.add normal.y
           model.vertices.add normal.z
+          model.uvs.add uvs[i].x
+          model.uvs.add uvs[i].y
+          model.uvs.add uvs[i].z
       models.add model
   for child in node.nodes:
-    collectPropModels(child, world, models, skipPrefix, only)
+    collectPropModels(child, world, models, skipPrefix, only, images)
 
 proc scalePack(models: var seq[PropModel], targetTallest: float32) =
   ## Scales a whole pack by one factor (tallest model becomes targetTallest
@@ -1075,17 +1107,35 @@ proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
 
 proc loadPropPack*(
     path: string, unitHeight = true, brightness = 1.0'f32,
-    only: seq[string] = @[]
+    only: seq[string] = @[], textured = false
 ): PropPack =
   ## Loads named glTF nodes as independently placeable models. Each model is
   ## scaled to unit height unless unitHeight is false, which keeps the
   ## authored units so flat pieces stay flat and relative sizes survive.
   ## Brightness scales the baked colors for packs authored dark. With `only`
   ## given, just those nodes are kept, which skips baking a whole kit for a
-  ## handful of props.
+  ## handful of props. A textured pack keeps its material images as one
+  ## texture array and its placements draw through the cutout texture path
+  ## the trees use, so painted detail and foliage cutouts survive; needs a
+  ## GL context.
   result = PropPack()
+  var images: seq[Image]
   collectPropModels(
-    readGltfFile(path).root, mat4(), result.models, only = only)
+    readGltfFile(path).root, mat4(), result.models, only = only,
+    images = if textured: images.addr else: nil)
+  if textured and images.len > 0:
+    var size = 1
+    for image in images:
+      size = max(size, max(image.width, image.height))
+    var chains: seq[seq[Image]]
+    for image in images:
+      let square =
+        if image.width == size and image.height == size: image
+        else: image.resize(size, size)
+      chains.add mipChain(square)
+    result.textureArray = buildTextureArray(chains, GL_CLAMP_TO_EDGE.GLint)
+    for model in result.models:
+      model.textureArray = result.textureArray
   if unitHeight:
     result.models.normalizeModels()
   if brightness != 1.0'f32:
@@ -1759,7 +1809,106 @@ proc propMeshFloatCount(): int =
   for placement in rockPlacements:
     result += rockModels[placement.model].vertices.len
   for placement in propPlacements:
-    result += placement.model.vertices.len
+    if placement.model.textureArray == 0:
+      result += placement.model.vertices.len
+
+proc bakeTexturedInstance(
+    model: PropModel,
+    position: Vec3,
+    rotation,
+    instanceScale: float32,
+    mesh: var seq[float32]
+) =
+  ## Appends one transformed textured prop to a batch mesh.
+  let
+    cosine = cos(rotation)
+    sine = sin(rotation)
+  var i = 0
+  while i < model.vertices.len:
+    let
+      x = model.vertices[i] * instanceScale
+      y = model.vertices[i + 1] * instanceScale
+      z = model.vertices[i + 2] * instanceScale
+      normalX = model.vertices[i + 6]
+      normalZ = model.vertices[i + 8]
+      uv = i div 9 * 3
+    mesh.add position.x + cosine * x - sine * z
+    mesh.add position.y + y
+    mesh.add position.z + sine * x + cosine * z
+    mesh.add model.uvs[uv]
+    mesh.add model.uvs[uv + 1]
+    mesh.add model.uvs[uv + 2]
+    mesh.add cosine * normalX - sine * normalZ
+    mesh.add model.vertices[i + 7]
+    mesh.add sine * normalX + cosine * normalZ
+    i += 9
+
+proc initTexturedVertexArrays(batch: var TexturedBatch) =
+  ## Creates the tree-layout vertex arrays for one textured batch: the lit
+  ## draw and the position-plus-uv view for the cutout depth pass.
+  const stride = (9 * sizeof(float32)).GLsizei
+  glGenBuffers(1, batch.vertexBuffer.addr)
+  glGenVertexArrays(1, batch.vertexArray.addr)
+  glBindVertexArray(batch.vertexArray)
+  glBindBuffer(GL_ARRAY_BUFFER, batch.vertexBuffer)
+  for attribute in [
+    (name: "vertPos", count: 3, offset: 0),
+    (name: "vertUv", count: 3, offset: 3 * sizeof(float32)),
+    (name: "normal", count: 3, offset: 6 * sizeof(float32))
+  ]:
+    let location = glGetAttribLocation(treeProgram, attribute.name.cstring)
+    doAssert location >= 0
+    glEnableVertexAttribArray(location.GLuint)
+    glVertexAttribPointer(
+      location.GLuint, attribute.count.GLint, cGL_FLOAT, GL_FALSE, stride,
+      cast[pointer](attribute.offset))
+  glGenVertexArrays(1, batch.depthVertexArray.addr)
+  glBindVertexArray(batch.depthVertexArray)
+  glBindBuffer(GL_ARRAY_BUFFER, batch.vertexBuffer)
+  for attribute in [
+    (name: "vertPos", count: 3, offset: 0),
+    (name: "vertUv", count: 3, offset: 3 * sizeof(float32))
+  ]:
+    let location = glGetAttribLocation(
+      sunCutoutProgramId(), attribute.name.cstring)
+    doAssert location >= 0
+    glEnableVertexAttribArray(location.GLuint)
+    glVertexAttribPointer(
+      location.GLuint, attribute.count.GLint, cGL_FLOAT, GL_FALSE, stride,
+      cast[pointer](attribute.offset))
+  glBindVertexArray(0)
+
+proc rebuildTexturedBatches() =
+  ## Bakes every textured placement into its pack's batch and uploads it.
+  for batch in texturedBatches.mitems:
+    batch.mesh.setLen(0)
+  for placement in propPlacements:
+    let textureArray = placement.model.textureArray
+    if textureArray == 0:
+      continue
+    var found = -1
+    for i, batch in texturedBatches:
+      if batch.textureArray == textureArray:
+        found = i
+        break
+    if found < 0:
+      texturedBatches.add TexturedBatch(textureArray: textureArray)
+      found = texturedBatches.high
+    bakeTexturedInstance(
+      placement.model, placement.position, placement.rotation,
+      placement.scale, texturedBatches[found].mesh)
+  for batch in texturedBatches.mitems:
+    if batch.mesh.len == 0:
+      continue
+    if batch.vertexBuffer == 0:
+      initTexturedVertexArrays(batch)
+    glBindBuffer(GL_ARRAY_BUFFER, batch.vertexBuffer)
+    glBufferData(
+      GL_ARRAY_BUFFER,
+      batch.mesh.len * sizeof(float32),
+      batch.mesh[0].addr,
+      GL_STATIC_DRAW
+    )
 
 proc bakeTreeTiles(writeIndex: var int) =
   ## Tree tiles carry their tree in the tile data.
@@ -1809,6 +1958,8 @@ proc rebuildTreeMesh() =
   bakePlacements(grassModels, grassPlacements, writeIndex)
   bakePlacements(rockModels, rockPlacements, writeIndex)
   for placement in propPlacements:
+    if placement.model.textureArray != 0:
+      continue
     bakeInstance(
       placement.model,
       placement.position,
@@ -1817,6 +1968,7 @@ proc rebuildTreeMesh() =
       writeIndex
     )
   doAssert writeIndex == propMesh.len
+  rebuildTexturedBatches()
   if propMesh.len > 0:
     glBindBuffer(GL_ARRAY_BUFFER, propVertexBuffer)
     glBufferData(
@@ -2725,6 +2877,36 @@ proc drawTerrainRange*(
   glBindVertexArray(0)
   glUseProgram(0)
 
+proc drawTexturedMesh(
+    vertexArray, textureArray: GLuint, vertexCount: int, mvp: Mat4
+) =
+  ## Draws one tree-layout mesh with the cutout texture program.
+  var matrix = mvp
+  glUseProgram(treeProgram)
+  setEnvUniforms(treeEnv)
+  setShadowUniforms(treeShadow)
+  glUniformMatrix4fv(
+    treeMvpLocation,
+    1,
+    GL_FALSE,
+    cast[ptr float32](matrix.addr)
+  )
+  glUniform1f(treeVisibilityOffsetLocation, HalfGrid)
+  glUniform1f(
+    treeVisibilityScaleLocation,
+    1.0'f32 / GridTiles.float32
+  )
+  glUniform1f(treeAlphaCutoffLocation, TreeAlphaCutoff)
+  glActiveTexture(GL_TEXTURE1)
+  glBindTexture(GL_TEXTURE_2D, visibilityTexture)
+  glUniform1i(treeVisibilityTexLocation, 1)
+  glActiveTexture(GL_TEXTURE0)
+  glBindTexture(GL_TEXTURE_2D_ARRAY, textureArray)
+  glUniform1i(treeTexturesLocation, 0)
+  glBindVertexArray(vertexArray)
+  glDrawArrays(GL_TRIANGLES, 0, vertexCount.GLsizei)
+  glBindVertexArray(0)
+
 proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
   ## Opaque terrain and prop passes. Disables back-face culling itself (the
   ## gltf PBR renderer's beginFrame leaves culling on and the terrain mesh
@@ -2780,30 +2962,12 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
     glActiveTexture(GL_TEXTURE0)
 
   if treeMesh.len > 0:
-    glUseProgram(treeProgram)
-    setEnvUniforms(treeEnv)
-    setShadowUniforms(treeShadow)
-    glUniformMatrix4fv(
-      treeMvpLocation,
-      1,
-      GL_FALSE,
-      cast[ptr float32](mvp.addr)
-    )
-    glUniform1f(treeVisibilityOffsetLocation, HalfGrid)
-    glUniform1f(
-      treeVisibilityScaleLocation,
-      1.0'f32 / GridTiles.float32
-    )
-    glUniform1f(treeAlphaCutoffLocation, TreeAlphaCutoff)
-    glActiveTexture(GL_TEXTURE1)
-    glBindTexture(GL_TEXTURE_2D, visibilityTexture)
-    glUniform1i(treeVisibilityTexLocation, 1)
-    glActiveTexture(GL_TEXTURE0)
-    glBindTexture(GL_TEXTURE_2D_ARRAY, treeTextureArray)
-    glUniform1i(treeTexturesLocation, 0)
-    glBindVertexArray(treeVertexArray)
-    glDrawArrays(GL_TRIANGLES, 0, (treeMesh.len div 9).GLsizei)
-    glBindVertexArray(0)
+    drawTexturedMesh(
+      treeVertexArray, treeTextureArray, treeMesh.len div 9, mvp)
+  for batch in texturedBatches:
+    if batch.mesh.len > 0:
+      drawTexturedMesh(
+        batch.vertexArray, batch.textureArray, batch.mesh.len div 9, mvp)
   glUseProgram(0)
 
 proc drawWater*(viewProjection: Mat4, cameraEye: Vec3) =
@@ -2856,6 +3020,14 @@ proc drawTerrainSunDepth*(firstVertex = 0, vertexCount = -1) =
     glBindTexture(GL_TEXTURE_2D_ARRAY, treeTextureArray)
     glBindVertexArray(treeDepthVertexArray)
     glDrawArrays(GL_TRIANGLES, 0, (treeMesh.len div 9).GLsizei)
+  for batch in texturedBatches:
+    if batch.mesh.len == 0:
+      continue
+    bindSunCutoutDepth(sunDepthPassMvp(), TreeAlphaCutoff)
+    glActiveTexture(GL_TEXTURE0)
+    glBindTexture(GL_TEXTURE_2D_ARRAY, batch.textureArray)
+    glBindVertexArray(batch.depthVertexArray)
+    glDrawArrays(GL_TRIANGLES, 0, (batch.mesh.len div 9).GLsizei)
   glBindVertexArray(0)
 
 proc drawPropSunDepth*(
