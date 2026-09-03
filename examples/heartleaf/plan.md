@@ -68,7 +68,8 @@ props bake exactly once.
 ## The scripted villager
 
 `players/base.bas` plays the known-strong plan from the original game:
-gather all day, then loiter between spots around the well; three villagers are due to host each night by rotation
+gather all day, then loiter on the plaza, wandering to random spots and
+pausing for random spells like a village square; three villagers are due to host each night by rotation
 (`(day + slot) mod 3 == 0`); hosts wave invitations at anyone passing
 within three tiles; guests walk to the nearest due host; everyone budgets
 about two game minutes per tile plus a half-hour margin and never stands

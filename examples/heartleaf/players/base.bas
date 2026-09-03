@@ -39,26 +39,17 @@
 ' by rotation; guests walk to the nearest due host; never be alone at six.
 
 dim invitedMark(8)
-dim spotX(7)
-dim spotY(7)
 
-' Eight loitering spots around the well, five tiles out.
-spotX(0) = 5
-spotY(0) = 0
-spotX(1) = 4
-spotY(1) = 4
-spotX(2) = 0
-spotY(2) = 5
-spotX(3) = -4
-spotY(3) = 4
-spotX(4) = -5
-spotY(4) = 0
-spotX(5) = -4
-spotY(5) = -4
-spotX(6) = 0
-spotY(6) = -5
-spotX(7) = 4
-spotY(7) = -4
+' A small counter generator of our own, seeded by slot, so each villager
+' wanders and pauses on their own rhythm. call rnd(n) leaves the next
+' draw, 0..n-1, in rndOut.
+if rngState = 0 then
+  rngState = selfSlot * 7919 + 17
+end if
+sub rnd(n)
+  rngState = (rngState * 75 + 74) mod 65537
+  rndOut = rngState mod n
+end sub
 
 ' New-day reset.
 if dayMark <> day then
@@ -170,19 +161,47 @@ else
     end if
 
     ' Gather whatever still grows; when the gardens are bare, loiter on
-    ' the plaza, moving between spots around the well every so often so
-    ' the village keeps bumping into itself without piling onto the well.
+    ' the plaza like it is a village square: walk to some random spot
+    ' inside the ring, stand about for a while, pick another.
     f = orderFailed()
     if orderKind = 0 then
       g = nearestStockedGarden()
       if g >= 0 then
         r = gather(g)
+        wandering = 0
       else
-        spot = (selfSlot + worldTick / 480) mod 8
-        tx = 64 + spotX(spot)
-        ty = 64 + spotY(spot)
-        if distTo(tx, ty) > 1 then
-          r = walkTo(tx, ty)
+        if wandering = 1 then
+          ' Just arrived. Stand here for five to thirty seconds.
+          wandering = 0
+          call rnd(600)
+          pauseUntil = worldTick + 120 + rndOut
+        else
+          if worldTick >= pauseUntil then
+            tries = 0
+            while tries < 6
+              call rnd(15)
+              dx = rndOut - 7
+              call rnd(15)
+              dy = rndOut - 7
+              ok = 1
+              if dx * dx + dy * dy > 49 then
+                ok = 0
+              end if
+              if dx >= -2 and dx <= 2 and dy >= -2 and dy <= 2 then
+                ok = 0
+              end if
+              if ok = 1 then
+                if tilePassable(64 + dx, 64 + dy) = 1 then
+                  r = walkTo(64 + dx, 64 + dy)
+                  if r = 1 then
+                    wandering = 1
+                    tries = 6
+                  end if
+                end if
+              end if
+              tries = tries + 1
+            wend
+          end if
         end if
       end if
     end if
