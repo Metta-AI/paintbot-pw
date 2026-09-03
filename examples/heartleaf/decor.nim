@@ -100,14 +100,15 @@ const
     ## Plants drift in brightness and between cool and warm green, so a
     ## row of bushes is not one bush.
   RockShade = 0.15'f32
-  RockCobbleLeast = 0.5'f32
+  RockCobbleLeast = 0.8'f32
   RockCobbleMost = 1.0'f32
-    ## Every rock is pulled at least halfway, and up to fully, toward the
+    ## Every rock is pulled most of the way, and up to fully, toward the
     ## cobble tint, so they read as the plaza's stone.
-  CobbleTint = vec3(1.12, 1.0, 1.1)
-    ## What the rock paint is multiplied by to land near the cobbles'
-    ## mauve grey; the rock atlas is darker than the paving, so this
-    ## lifts as well as shifts.
+  CobbleTint = vec3(1.35, 1.05, 1.32)
+    ## What the rock paint is multiplied by. The rock atlas averages a
+    ## neutral grey a shade darker than the paving, and the paving is lit
+    ## flatter than props are, so matching by the numbers alone still
+    ## reads grey; this overshoots into the paving's mauve on purpose.
   VergeBushSetback = 0.7'f32
     ## Tiles a verge bush is pushed away from the road, so a big one leans
     ## over the dirt instead of growing into it.
