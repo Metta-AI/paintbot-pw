@@ -2,7 +2,7 @@
 ## one door, differ from seed to seed, and only name nodes that exist.
 
 import
-  std/[json, os, sets, strformat],
+  std/[json, os, sets, strformat, strutils],
   vmath,
   ../examples/heartleaf/[decor, houses]
 
@@ -10,8 +10,12 @@ const DataRoot = "../polyworld_data"
 
 proc isDoor(piece: HousePiece): bool =
   ## Whether one piece is a doorway.
-  piece.node == "door_01a" or piece.node == "entrance_02a" or
-    piece.node == "entrance_03a"
+  piece.node == "door_01a"
+
+proc isCourse(piece: HousePiece): bool =
+  ## Whether one piece belongs to the base course.
+  piece.node.startsWith("wall_base_01") or
+    piece.node.startsWith("foundation_block")
 
 echo "Testing house determinism"
 block sameSeedSameHouse:
@@ -27,7 +31,12 @@ block piecesStayHome:
       doAssert pieces.len > 8, &"{kind} seed {seed} has {pieces.len} pieces"
       var doors = 0
       var thatch = 0
+      var frontCourse = 0
+      var backCourse = 0
       for piece in pieces:
+        if piece.isCourse and piece.yaw != 0:
+          ## Gable runs are the turned course pieces; eave runs lie along z.
+          if piece.offset.z > 0: inc frontCourse else: inc backCourse
         doAssert abs(piece.offset.x) <= HouseExtent.x and
           abs(piece.offset.z) <= HouseExtent.z and
           piece.offset.y >= -1.0 and piece.offset.y <= HouseExtent.y,
@@ -37,6 +46,8 @@ block piecesStayHome:
         if piece.isDoor: inc doors
         if piece.node == "roof_01a": inc thatch
       doAssert doors == 1, &"{kind} seed {seed} has {doors} doors"
+      doAssert backCourse >= 4 and frontCourse == backCourse - 1,
+        &"{kind} seed {seed}: gable course {frontCourse} front, {backCourse} back"
       if kind == Longhouse:
         doAssert thatch >= 3, "a longhouse needs its thatch"
       else:

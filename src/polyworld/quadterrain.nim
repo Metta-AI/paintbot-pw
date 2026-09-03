@@ -830,6 +830,7 @@ type
     position: Vec3
     rotation: float32
     scale: float32
+    stretch: Vec3           # per-axis scale in model space, before turning
     tint: Vec3              # multiplies the texture of textured models
 
   TreeModel = object
@@ -1304,10 +1305,13 @@ proc placeProp*(
     position: Vec3,
     rotation = 0.0'f32,
     scale = 1.0'f32,
-    tint = vec3(1, 1, 1)
+    tint = vec3(1, 1, 1),
+    stretch = vec3(1, 1, 1)
 ) =
   ## Adds one named prop to the next baked terrain mesh. The tint multiplies
   ## the paint of textured models and is ignored by vertex-coloured ones.
+  ## Stretch scales each model axis on its own, before the turn, for pieces
+  ## that must fit an opening the kit did not size them for.
   if not pack.hasProp(name):
     raise newException(
       QuadTerrainError,
@@ -1318,6 +1322,7 @@ proc placeProp*(
     position: position,
     rotation: rotation,
     scale: scale,
+    stretch: stretch,
     tint: tint
   )
 
@@ -1925,7 +1930,8 @@ proc bakeInstance(
     position: Vec3,
     rotation,
     instanceScale: float32,
-    writeIndex: var int
+    writeIndex: var int,
+    stretch = vec3(1, 1, 1)
 ) =
   ## Writes one transformed prop instance into the shared baked prop mesh.
   let
@@ -1934,9 +1940,9 @@ proc bakeInstance(
   var i = 0
   while i < model.vertices.len:
     let
-      x = model.vertices[i] * instanceScale
-      y = model.vertices[i + 1] * instanceScale
-      z = model.vertices[i + 2] * instanceScale
+      x = model.vertices[i] * instanceScale * stretch.x
+      y = model.vertices[i + 1] * instanceScale * stretch.y
+      z = model.vertices[i + 2] * instanceScale * stretch.z
       normalX = model.vertices[i + 6]
       normalZ = model.vertices[i + 8]
     propMesh[writeIndex] = position.x + cosine * x - sine * z
@@ -2046,6 +2052,7 @@ proc bakeTexturedInstance(
     rotation,
     instanceScale: float32,
     tint: Vec3,
+    stretch: Vec3,
     mesh: var seq[float32]
 ) =
   ## Appends one transformed textured prop to a batch mesh.
@@ -2055,9 +2062,9 @@ proc bakeTexturedInstance(
   var i = 0
   while i < model.vertices.len:
     let
-      x = model.vertices[i] * instanceScale
-      y = model.vertices[i + 1] * instanceScale
-      z = model.vertices[i + 2] * instanceScale
+      x = model.vertices[i] * instanceScale * stretch.x
+      y = model.vertices[i + 1] * instanceScale * stretch.y
+      z = model.vertices[i + 2] * instanceScale * stretch.z
       normalX = model.vertices[i + 6]
       normalZ = model.vertices[i + 8]
       uv = i div 9 * 3
@@ -2130,7 +2137,8 @@ proc rebuildTexturedBatches() =
       found = texturedBatches.high
     bakeTexturedInstance(
       placement.model, placement.position, placement.rotation,
-      placement.scale, placement.tint, texturedBatches[found].mesh)
+      placement.scale, placement.tint, placement.stretch,
+      texturedBatches[found].mesh)
   for batch in texturedBatches.mitems:
     if batch.mesh.len == 0:
       continue
@@ -2199,7 +2207,8 @@ proc rebuildTreeMesh() =
       placement.position,
       placement.rotation,
       placement.scale,
-      writeIndex
+      writeIndex,
+      placement.stretch
     )
   doAssert writeIndex == propMesh.len
   rebuildTexturedBatches()

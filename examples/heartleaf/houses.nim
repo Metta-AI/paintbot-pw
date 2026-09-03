@@ -1,18 +1,17 @@
-## Heartleaf houses: recipes that turn a seed into a list of kit pieces.
-## Neither toon kit ships a whole cottage, only the parts the store
-## cottages were assembled from, so every house is built here. Pure CPU,
+## Heartleaf houses: recipes that turn a seed into a list of kit pieces,
+## built the way golden valley's own prefab houses are built. Pure CPU,
 ## in metres, so headless tests can check every piece; the viewer scales
 ## and rotates the result.
 ##
-## The golden valley roofs are steep A-frames, close to seven metres tall
-## for a seven metre span, made to stand on the ground as chalets, and
-## that is the shape every house here takes: a ring of stone foundation a
-## metre high, the A-frame on top with its ridge running front to back,
-## a plank gable closing each end, the door in the front gable, windows by
-## coin flip, a chimney by coin flip. A cottage is two or three roof
-## segments deep under slate, shingle, or reed. A longhouse is three or
-## four under straw thatch tinted to turf with grass along the ridge, the
-## viking sod house.
+## The prefabs, measured: a base course of small bricks about a metre
+## tall with a timber sill on top, the steep A-frame roof standing on
+## that at a metre and a half with its ridge running the long way, the
+## plank gable piece stretched to the roof's triangle closing each end,
+## and the door and windows standing in that end face from the ground up.
+## A chimney or a timber crest rides the ridge. A cottage is three or four segments
+## of reed, slate, or shingle on a brick course. A longhouse is four
+## segments of straw thatch tinted to turf with grass along the ridge, on
+## a stone course, the viking sod house.
 
 import
   std/math,
@@ -34,7 +33,10 @@ type
     tint*: Vec3
     scale*: float32
       ## Uniform scale on top of the viewer's metres-to-tiles; one for as
-      ## authored. The gable walls stretch to the roof span with it.
+      ## authored.
+    stretch*: Vec3
+      ## Per-axis scale in the piece's own frame, before its turn; one for
+      ## as authored. The gable wall is stretched to the roof's triangle.
 
   RoofStyle = object
     node: string
@@ -50,54 +52,63 @@ type
 const
   HouseSalt = 0x40053'u64
   KindSalt = 0x1D'u64
-  HouseExtent* = vec3(4.0, 12.0, 6.5)
+  HouseExtent* = vec3(4.0, 12.0, 5.6)
     ## Every piece's centre stays within this box around the house centre.
-  FoundationHeight = 1.0'f32
-  WallHeight = 3.0'f32
-    ## One row of kit wall panels, which cottages stand on top of the
-    ## foundation and under the roof.
-  WallThickness = 0.5'f32
-  DoorPanelWidth = 2.0'f32
-  GableWidth = 6.27'f32
-    ## The gable end wall piece; a shade narrower than the roofs.
-  GableBeamDrop = 0.89'f32
-    ## The gable wall's side beams hang this far below its planks, and the
-    ## loader stands a piece on its lowest point, so the wall is set down
-    ## by this much to put the planks on the foundation.
-  GableProud = 0.35'f32
-  WindowProud = 0.3'f32
-    ## A window stands this far outside the wall it sits in.
-    ## Doors and windows stand this far outside the gable they sit in.
-  DoorReach = 1.4'f32
+  RoofLift = 1.5'f32
+    ## Where the eave tips stand, as in the prefabs: on the sill over the
+    ## base course.
+  CourseHeight = 0.98'f32
+  BrickLength = 1.11'f32
+  BrickThickness = 0.63'f32
+  CornerSize = 0.87'f32
+  CubeLength = 1.0'f32
+  SillLength = 5.0'f32
+  MaxDepth = 10.0'f32
+    ## The prefab length, and exactly the five-tile house pad.
+  DoorProud = 0.35'f32
+    ## Doors and windows stand this far outside the end face they sit in.
   DoorScale = 1.12'f32
-    ## The door leaf is 0.9m wide; scaled to fill the one metre cube gap.
+    ## The door leaf is 0.9m wide; scaled to fill a brick-sized gap.
+  DoorReach = 1.5'f32
     ## The door slides this far either side of the gable centre.
-  WindowLift = 0.9'f32
-  WindowReach = 0.9'f32
-    ## Windows stay this close to the gable centre so they sit under the
-    ## slope at their height.
+  WindowLift = 1.2'f32
+  WindowBeside = 1.7'f32
+    ## A front window stands this far to the side of the door.
+  WindowReach = 1.6'f32
   ChimneySink = 0.45'f32
-    ## How far a chimney sinks into the ridge; the rest stands proud.
-  StairsStandOff = 1.0'f32
+  CrestLegs = 1.87'f32
+    ## Half the crest's leg spread across the ridge; the legs rest on the
+    ## slopes there.
+  GableWidth = 6.27'f32
+  GablePlankHeight = 4.82'f32
+    ## The gable wall piece's planks, above its beams, as authored.
+  GableBeamDrop = 0.89'f32
+    ## Its side beams hang this far below the planks; they end up under the
+    ## ground once the planks start on the course.
+  GableInset = 0.15'f32
+    ## The gable wall stands this far inside the roof's end.
   SodTint* = vec3(0.34, 0.72, 0.28)
     ## Thatch multiplied hard toward green so it reads as turf, not straw.
-  SodTuftsPerSlope = 2
-    ## Grass tufts down each slope per roof segment, besides the ridge one.
   SodGrassTint = vec3(0.95, 1.05, 0.85)
   SodGrassRidgeDrop = 0.35'f32
   SodGrassSlopeAt = 1.8'f32
     ## Metres from the ridge, across, where the slope tufts sit.
+  SodTuftsPerSlope = 2
   SegmentStagger = 0.04'f32
     ## Every other segment sits this much lower, so the overlapping faces
     ## have a clear winner instead of flickering.
   PaintShade = 0.12'f32
   PaintWarmth = 0.06'f32
   Turn = PI / 2
-    ## Roofs and gables are authored with the ridge along x; the house
+    ## Roofs and the crest are authored with the ridge along x; the house
     ## runs its ridge along z, so those pieces turn a quarter.
 
+  Bricks = ["wall_base_01a", "wall_base_01b"]
+  Corner = "wall_base_02a"
   Cubes = ["foundation_block_01a", "foundation_block_02a"]
+  Sill = "beam_01a"
   Chimneys = ["chimney_01a", "chimney_02a"]
+  Crest = "roof_structure_02a"
   CottageRoofs = [
     RoofStyle(node: "roof_02a", along: 2.0, span: 7.12, height: 6.84,
       overlap: 0.5),
@@ -108,26 +119,19 @@ const
   ]
   ThatchRoof = RoofStyle(node: "roof_01a", along: 2.5, span: 7.12,
     height: 6.82, overlap: 0.55)
-  WallPanels = ["wall_02a", "wall_06a"]
-    ## Two metre panels, three metres tall, planks and plaster. The kit's
-    ## other panel has a door moulded into it and reads as a second door.
-  WallFiller = "wall_01a"
-    ## The one metre panel that finishes a run.
-  DoorPanels = ["entrance_02a", "entrance_03a"]
-    ## Meadow wall panels with a door in them, the size of a wall panel.
   SodGrass = ["grass_patch_01a", "grass_patch_02a", "grass_patch_03a"]
 
   HouseNodes: array[DecorKit, seq[string]] = [
     @[],
     @["grass_patch_01a", "grass_patch_02a", "grass_patch_03a"],
-    @["foundation_block_01a", "foundation_block_02a", "stairs_03a",
-      "entrance_02a", "entrance_03a", "wood_pillar_corner_01a"],
+    @["foundation_block_01a", "foundation_block_02a"],
     @[],
     @[],
     @[],
-    @["door_01a", "window_01a", "roof_01a", "roof_02a", "roof_03a",
-      "roof_04a", "roof_structure_01a", "chimney_01a", "chimney_02a",
-      "chimney_03a", "wall_01a", "wall_02a", "wall_06a"],
+    @["wall_base_01a", "wall_base_01b", "wall_base_02a", "beam_01a",
+      "door_01a", "window_01a", "roof_01a", "roof_02a", "roof_03a",
+      "roof_04a", "roof_structure_01a", "roof_structure_02a", "chimney_01a",
+      "chimney_02a", "chimney_03a"],
   ]
     ## What the house packs load from each kit; empty kits are not loaded
     ## for houses at all.
@@ -166,104 +170,83 @@ type Builder = object
   pieces: seq[HousePiece]
 
 proc add(b: var Builder, kit: DecorKit, node: string, x, y, z: float32,
-    yaw = 0.0'f32, scale = 1.0'f32) =
+    yaw = 0.0'f32, scale = 1.0'f32, stretch = vec3(1, 1, 1)) =
   ## Records one piece in the house's paint.
   b.pieces.add HousePiece(
     kit: kit, node: node, offset: vec3(x, y, z), yaw: yaw, tint: b.tint,
-    scale: scale)
+    scale: scale, stretch: stretch)
 
 proc addTinted(b: var Builder, kit: DecorKit, node: string,
     x, y, z: float32, yaw: float32, tint: Vec3) =
   ## Records one piece in its own colour.
   b.pieces.add HousePiece(
     kit: kit, node: node, offset: vec3(x, y, z), yaw: yaw, tint: tint,
-    scale: 1.0)
+    scale: 1.0, stretch: vec3(1, 1, 1))
 
-proc wallRun(
-    b: var Builder, length: float32, panel: proc(b: var Builder, along: float32,
-    width: float32)
-) =
-  ## Fills a run of `length` metres centred on zero with two metre panels
-  ## and a one metre filler at each end when the run is odd, calling
-  ## `panel` with the centre of each along the run.
-  let
-    twos = int(length / 2.0'f32)
-    rest = length - float32(twos) * 2.0'f32
-  var along = -length * 0.5'f32
-  if rest > 0.5'f32:
-    b.panel(along + rest * 0.25'f32, 1.0)
-    along += rest * 0.5'f32
-  for i in 0 ..< twos:
-    b.panel(along + 1.0'f32, 2.0)
-    along += 2.0'f32
-  if rest > 0.5'f32:
-    b.panel(along + rest * 0.25'f32, 1.0)
+proc coursePiece(b: var Builder, stone: bool): tuple[kit: DecorKit,
+    node: string] =
+  ## One base course piece: a golden valley brick, or a meadow stone cube.
+  if stone: (MeadowBuildings, b.rng.pick(Cubes))
+  else: (ValleyBuildings, b.rng.pick(Bricks))
 
-proc buildChalet(
+proc buildBody(
     b: var Builder, roof: RoofStyle, modules: int, roofTint: Vec3,
-    walled: bool
+    stone: bool
 ): tuple[depth, doorX: float32] =
-  ## The shape both kinds share: a foundation ring, roof segments along z,
-  ## gable walls, a door in the front gable. A walled house adds a row of
-  ## wall panels between foundation and roof and puts the door in that
-  ## row, on the foundation with stairs; a low one opens the foundation
-  ## for the door.
+  ## The shape both kinds share, built like the prefabs: a base course
+  ## with a door gap in the front, sills along the eaves, roof segments
+  ## on the sills, the door and windows in the front end face.
   let
-    depth = float32(modules) * roof.along -
-      float32(modules - 1) * roof.overlap
+    depth = min(
+      float32(modules) * roof.along - float32(modules - 1) * roof.overlap,
+      MaxDepth)
     halfDepth = depth * 0.5'f32
     halfSpan = roof.span * 0.5'f32
-    gableCubes = int(ceil(roof.span - 2.0'f32))
-    cubeShift = float32(gableCubes - 1) * 0.5'f32
-    doorX =
-      if walled: round(b.rng.unit() - 0.5'f32) * DoorPanelWidth
+    unitLength = if stone: CubeLength else: BrickLength
+    thickness = if stone: CubeLength else: BrickThickness
+    cornerSize = if stone: CubeLength else: CornerSize
+    inset = halfSpan - thickness * 0.5'f32
+    endInset = halfDepth - thickness * 0.5'f32
+    cornerX = halfSpan - cornerSize * 0.5'f32
+    cornerZ = halfDepth - cornerSize * 0.5'f32
+    eaveRun = depth - 2.0'f32 * cornerSize
+    eaveCount = max(int(round(eaveRun / unitLength)), 1)
+    eaveStep = eaveRun / float32(eaveCount)
+    gableRun = roof.span - 2.0'f32 * cornerSize
+    gableCount = max(int(round(gableRun / unitLength)), 1)
+    gableStep = gableRun / float32(gableCount)
+    doorSlot = clamp(int(round(
+      (b.rng.unit() - 0.5'f32) * 2.0'f32 * DoorReach / gableStep +
+      float32(gableCount - 1) * 0.5'f32)), 0, gableCount - 1)
+    doorX = -gableRun * 0.5'f32 + gableStep * (float32(doorSlot) + 0.5'f32)
+  ## Base course: along both eaves, along both gables with a gap for the
+  ## door, a corner piece at each corner.
+  for side in [1.0'f32, -1.0'f32]:
+    for i in 0 ..< eaveCount:
+      let piece = b.coursePiece(stone)
+      b.add(piece.kit, piece.node, inset * side, 0,
+        -eaveRun * 0.5'f32 + eaveStep * (float32(i) + 0.5'f32))
+    for i in 0 ..< gableCount:
+      if side > 0 and i == doorSlot:
+        continue
+      let piece = b.coursePiece(stone)
+      b.add(piece.kit, piece.node,
+        -gableRun * 0.5'f32 + gableStep * (float32(i) + 0.5'f32), 0,
+        endInset * side, Turn)
+  for x in [-cornerX, cornerX]:
+    for z in [-cornerZ, cornerZ]:
+      if stone:
+        b.add(MeadowBuildings, b.rng.pick(Cubes), x, 0, z)
       else:
-        round((b.rng.unit() - 0.5'f32) * 2.0'f32 * DoorReach + cubeShift) -
-          cubeShift
-      ## Snapped onto the wall panel grid or the foundation cube grid.
-    doorZ = halfDepth
-    wallTop = if walled: FoundationHeight + WallHeight else: FoundationHeight
-  ## Foundation: cubes under the eaves and along both gables.
-  var z = -halfDepth + 0.5'f32
-  while z < halfDepth:
-    for x in [-halfSpan + 0.5'f32, halfSpan - 0.5'f32]:
-      b.add(MeadowBuildings, b.rng.pick(Cubes), x, 0, z)
-    z += 1.0'f32
-  for i in 0 ..< gableCubes:
-    let x = float32(i) - cubeShift
-    for side in [1.0'f32, -1.0'f32]:
-      let gap = side > 0 and not walled and abs(x - doorX) < 0.5'f32
-      if not gap:
-        b.add(MeadowBuildings, b.rng.pick(Cubes), x, 0, halfDepth * side)
-  if walled:
-    ## Wall row: panels along both eaves and across both gables, the door
-    ## panel in the front gable's run, corner pillars over the seams.
-    let inset = halfSpan - WallThickness * 0.5'f32
-    for side in [1.0'f32, -1.0'f32]:
-      b.wallRun(depth, proc(b: var Builder, along, width: float32) =
-        b.add(ValleyBuildings,
-          if width > 1.5: b.rng.pick(WallPanels) else: WallFiller,
-          inset * side, FoundationHeight, along))
-      b.wallRun(roof.span, proc(b: var Builder, along, width: float32) =
-        let isDoor = side > 0 and width > 1.5 and abs(along - doorX) < 0.5
-        if isDoor:
-          b.add(MeadowBuildings, b.rng.pick(DoorPanels), along,
-            FoundationHeight, (halfDepth - WallThickness * 0.5'f32) * side,
-            Turn)
-        else:
-          b.add(ValleyBuildings,
-            if width > 1.5: b.rng.pick(WallPanels) else: WallFiller,
-            along, FoundationHeight, (halfDepth - WallThickness * 0.5'f32) * side,
-            Turn)
-          if width > 1.5 and b.rng.below(3) == 0:
-            b.add(ValleyBuildings, "window_01a", along,
-              FoundationHeight + WindowLift,
-              (halfDepth + WindowProud) * side, Turn))
-    for x in [-halfSpan, halfSpan]:
-      for zc in [-halfDepth, halfDepth]:
-        b.add(MeadowBuildings, "wood_pillar_corner_01a", x, FoundationHeight,
-          zc)
-    b.add(MeadowBuildings, "stairs_03a", doorX, 0, doorZ + StairsStandOff)
+        b.add(ValleyBuildings, Corner, x, 0, z)
+  ## Sills along the eaves on top of the course.
+  let
+    sillCount = max(int(ceil(depth / SillLength)), 1)
+    sillStep = depth / float32(sillCount)
+  for side in [1.0'f32, -1.0'f32]:
+    for i in 0 ..< sillCount:
+      b.add(ValleyBuildings, Sill, inset * side, CourseHeight,
+        -halfDepth + sillStep * (float32(i) + 0.5'f32))
   ## Roof, ridge along z, each joint overlapping and every other segment
   ## a little lower.
   let pitch = roof.along - roof.overlap
@@ -271,64 +254,73 @@ proc buildChalet(
     let
       segZ = -halfDepth + roof.along * 0.5'f32 + pitch * float32(i)
       drop = if i mod 2 == 1: SegmentStagger else: 0.0'f32
-    b.addTinted(ValleyBuildings, roof.node, 0, wallTop - drop, segZ, Turn,
+    b.addTinted(ValleyBuildings, roof.node, 0, RoofLift - drop, segZ, Turn,
       roofTint)
-  ## Gable walls closing each end under the roof, stretched to the roof's
-  ## span so the bottom corners meet the eaves.
+  ## Gable walls: the plank gable piece stretched to the roof's triangle,
+  ## across to the span and up to the peak, standing just inside each end.
+  ## Its wide axis is authored along z like the roofs, so it turns with
+  ## them and the stretch is in its own frame.
   let
-    gableScale = roof.span / GableWidth
-    gableLift = wallTop - GableBeamDrop * gableScale
+    gableStretch = vec3(
+      1.0,
+      (RoofLift + roof.height - CourseHeight) / GablePlankHeight,
+      roof.span / GableWidth)
+    gableLift = CourseHeight - GableBeamDrop * gableStretch.y
   for side in [1.0'f32, -1.0'f32]:
     b.add(ValleyBuildings, "roof_structure_01a", 0, gableLift,
-      halfDepth * side, Turn, gableScale)
-  if not walled:
-    ## A low house's door stands in the foundation gap, and a window may
-    ## sit in the gable above.
-    b.add(ValleyBuildings, "door_01a", doorX, 0,
-      doorZ + 0.5'f32 + GableProud * 0.5'f32, Turn, DoorScale)
-    if b.rng.coin():
-      let windowX = if doorX < 0: WindowReach else: -WindowReach
-      b.add(ValleyBuildings, "window_01a", windowX,
-        FoundationHeight + WindowLift, doorZ + GableProud, Turn)
+      (halfDepth - GableInset) * side, Turn, 1.0, gableStretch)
+  ## Door and windows in the front end face, a window on the back by
+  ## coin flip.
+  b.add(ValleyBuildings, "door_01a", doorX, 0, halfDepth + DoorProud, Turn,
+    DoorScale)
+  if b.rng.coin():
+    let windowX = if doorX < 0: doorX + WindowBeside else: doorX - WindowBeside
+    b.add(ValleyBuildings, "window_01a", windowX, WindowLift,
+      halfDepth + DoorProud, Turn)
   if b.rng.coin():
     b.add(ValleyBuildings, "window_01a",
-      (b.rng.unit() - 0.5'f32) * 2.0'f32 * WindowReach,
-      wallTop + WindowLift, -doorZ - GableProud, Turn)
+      (b.rng.unit() - 0.5'f32) * 2.0'f32 * WindowReach, WindowLift,
+      -halfDepth - DoorProud, Turn)
   (depth: depth, doorX: doorX)
 
 proc buildCottage(b: var Builder) =
-  ## A walled house: foundation, a row of plank walls with the door and
-  ## windows, and two or three roof segments of slate, shingle, or reed
-  ## on top, with a chimney by coin flip.
+  ## Three or four segments of reed, slate, or shingle on a brick course,
+  ## a chimney by coin flip, a timber crest by coin flip.
   let
     roof = b.rng.pick(CottageRoofs)
-    modules = 2 + int(b.rng.below(2))
-    house = b.buildChalet(roof, modules, b.tint, true)
+    modules = 3 + int(b.rng.below(2))
+    house = b.buildBody(roof, modules, b.tint, false)
   if b.rng.coin():
     b.add(ValleyBuildings, b.rng.pick(Chimneys), 0,
-      FoundationHeight + WallHeight + roof.height - ChimneySink,
+      RoofLift + roof.height - ChimneySink,
       (b.rng.unit() - 0.5'f32) * house.depth * 0.6'f32)
+  if b.rng.coin():
+    let legsAt = RoofLift +
+      roof.height * (1.0'f32 - CrestLegs / (roof.span * 0.5'f32))
+    b.add(ValleyBuildings, Crest, 0, legsAt,
+      (b.rng.unit() - 0.5'f32) * house.depth * 0.4'f32, Turn)
 
 proc buildLonghouse(b: var Builder) =
-  ## Three segments of straw thatch tinted hard to turf, grass along the
-  ## ridge and in rows down both slopes, a squat chimney by coin flip.
-  ## Three segments keep the gables inside the house footprint.
+  ## Four segments of straw thatch tinted hard to turf on a stone course,
+  ## grass along the ridge and in rows down both slopes, a squat chimney
+  ## by coin flip.
   let
     roof = ThatchRoof
-    modules = 3
-    house = b.buildChalet(roof, modules, SodTint * b.tint, false)
-    peak = FoundationHeight + roof.height
+    modules = 4
+    house = b.buildBody(roof, modules, SodTint * b.tint, true)
+    peak = RoofLift + roof.height
     halfDepth = house.depth * 0.5'f32
-    slopeLift = FoundationHeight +
+    pitch = roof.along - roof.overlap
+    slopeLift = RoofLift +
       roof.height * (1.0'f32 - SodGrassSlopeAt / (roof.span * 0.5'f32))
   for i in 0 ..< modules:
-    let z = -halfDepth + roof.along * (float32(i) + 0.5'f32)
+    let z = -halfDepth + roof.along * 0.5'f32 + pitch * float32(i)
     b.addTinted(MeadowVegetation, b.rng.pick(SodGrass), 0,
       peak - SodGrassRidgeDrop, z, b.rng.unit() * 2 * PI, SodGrassTint)
     for side in [1.0'f32, -1.0'f32]:
       for k in 0 ..< SodTuftsPerSlope:
         let along = z + (float32(k) + 0.5'f32) / float32(SodTuftsPerSlope) *
-          roof.along - roof.along * 0.5'f32
+          pitch - pitch * 0.5'f32
         b.addTinted(MeadowVegetation, b.rng.pick(SodGrass),
           SodGrassSlopeAt * side + (b.rng.unit() - 0.5'f32) * 0.6'f32,
           slopeLift, along, b.rng.unit() * 2 * PI, SodGrassTint)
