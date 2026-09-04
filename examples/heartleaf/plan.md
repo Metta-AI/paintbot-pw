@@ -102,8 +102,10 @@ two things at startup, on the CPU, from nothing but the seed and the map:
   lines, blurred so the corners of the tile doglegs round off, then
   thresholded with a band. Dirt coverage comes from a distance transform
   of every road and plaza tile. Both carry a little low-frequency wobble
-  so no edge is a ruler line. Gardens and house
-  pads are left to the ordinary tile materials.
+  so no edge is a ruler line. House pads join that mask as rounded squares:
+  solid cobble beneath each building, then ragged whole-stone dropout over
+  dirt into grass, merging directly into the doorway road. Gardens remain
+  dirt-only mask regions.
 
 A curb of larger cut stones rings the plaza. It is a second, cleaner
 sheet sampled in polar coordinates around the plaza centre, one stone row

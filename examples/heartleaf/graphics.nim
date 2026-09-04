@@ -251,8 +251,7 @@ proc runGraphics*() =
     setTileMaterial(
       int(StoneTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
     ## Tilled plots are dirt through the ground mask like the roads, only
-    ## darker, so the tile itself bakes as grass with a tilled tint; house
-    ## pads read as stone.
+    ## darker, so the tile itself bakes as grass with a tilled tint.
     setTileMaterial(
       int(GardenTileKind),
       GrassMaterial, DirtMaterial,
@@ -261,9 +260,9 @@ proc runGraphics*() =
     )
     setTileMaterial(
       int(HouseTileKind),
-      StoneMaterial, StoneMaterial,
-      vec3(0.95), vec3(0.9),
-      8
+      GrassMaterial, DirtMaterial,
+      vec3(1), vec3(0.85),
+      1
     )
     initTerrain()
     ## The plaza wears procedural cobbles instead of the flagstone, placed

@@ -87,6 +87,8 @@ const
   HouseDecorReach = 4'i32
   HouseHalf = 2'i32
     ## Half the five-tile house footprint; the door sits one past it.
+  HouseBushClearance* = 2'i32
+    ## Bushes stay this many tiles beyond every doorstep.
   HouseDecorAttempts = 20
   GardenFlowerOneIn = 2'i32
   RoadDecorOneIn = 2'i32
@@ -207,6 +209,13 @@ proc nearRoad(p: Placer, x, y: int32): bool =
       if inGrid(x + dx, y + dy) and
           p.map.kinds[tileIndex(x + dx, y + dy)] == uint8(RoadTile):
         return true
+  false
+
+proc nearHouseDoor(p: Placer, x, y: int32): bool =
+  ## Returns whether a tile is inside a house's clear front approach.
+  for house in p.map.houses:
+    if chebyshev(tile2(x, y), house.door) <= HouseBushClearance:
+      return true
   false
 
 proc nearTree(p: Placer, x, y: int32): bool =
@@ -379,6 +388,8 @@ proc dressHouses(p: var Placer) =
         y = cy + p.rng.below(HouseDecorReach * 2 + 1) - HouseDecorReach
       if max(abs(x - cx), abs(y - cy)) <= HouseHalf:
         continue
+      if p.nearHouseDoor(x, y):
+        continue
       let bush = if p.rng.below(2) == 0: "flower_bush_01a" else: "bush_01a"
       if p.claim(MeadowVegetation, bush, HouseArea, x, y,
           p.rng.unit() * 2 * PI, BushHeight, 0.2, NaturalVariance,
@@ -424,9 +435,10 @@ proc dressVerges(p: var Placer) =
         discard p.claim(MeadowVegetation, p.rng.pick(Tufts), RoadArea, x, y,
           yaw, TuftHeight, 0.3, NaturalVariance, p.rng.plantTint())
       of 1:
-        discard p.claim(MeadowVegetation, "bush_01a", RoadArea, x, y, yaw,
-          VergeBushHeight, 0.2, NaturalVariance, p.rng.plantTint(),
-          p.awayFromRoad(x, y) * VergeBushSetback)
+        if not p.nearHouseDoor(x, y):
+          discard p.claim(MeadowVegetation, "bush_01a", RoadArea, x, y, yaw,
+            VergeBushHeight, 0.2, NaturalVariance, p.rng.plantTint(),
+            p.awayFromRoad(x, y) * VergeBushSetback)
       of 2:
         discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), RoadArea, x, y,
           yaw, SmallRockHeight, 0.3, NaturalVariance, p.rng.rockTint(),

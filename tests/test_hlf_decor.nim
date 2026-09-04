@@ -53,6 +53,16 @@ block placementRules:
       claimed.incl index
   doAssert wellFound, "no well"
 
+block bushesClearHouseDoors:
+  for seed in 1'i32 .. 40:
+    let map = generateMap(seed)
+    for decoration in placeDecor(map, seed):
+      if decoration.node notin ["bush_01a", "flower_bush_01a"]:
+        continue
+      for house in map.houses:
+        doAssert chebyshev(decoration.tile, house.door) > HouseBushClearance,
+          &"seed {seed}: {decoration.node} blocks door {house.door}"
+
 echo "Testing that every node exists in its kit"
 block nodesExist:
   for kit in DecorKit:

@@ -72,6 +72,9 @@ const
     ## Where the blurred field crosses RoadStoneEdge the cobbles start to
     ## drop out, and they are gone RoadStoneBand later.
   RoadStoneWobbleStream = 0x5A17E5'u64
+  HouseStoneReach = float32(HouseFootprint) * 0.5'f32 + 0.3'f32
+  HouseStoneBand = 0.8'f32
+  HouseStoneSquareness = 0.75'f32
 
   MaskTexelsPerTile* = 8
   MaskSize* = GridTiles * MaskTexelsPerTile
@@ -344,7 +347,7 @@ proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
         int32(tx div MaskTexelsPerTile), int32(ty div MaskTexelsPerTile))]
       sources[ty * MaskSize + tx] =
         kind == uint8(RoadTile) or kind == uint8(StoneTile) or
-        kind == uint8(GardenTileKind)
+        kind == uint8(GardenTileKind) or kind == uint8(HouseTileKind)
       centres[ty * MaskSize + tx] = kind == uint8(RoadTile) and
         tx mod MaskTexelsPerTile == MaskTexelsPerTile div 2 and
         ty mod MaskTexelsPerTile == MaskTexelsPerTile div 2
@@ -367,8 +370,6 @@ proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
         kind = map.kinds[tileIndex(
           int32(tx div MaskTexelsPerTile), int32(ty div MaskTexelsPerTile))]
         texel = (ty * MaskSize + tx) * MaskChannels
-      if kind == uint8(HouseTileKind):
-        continue
       let
         x = (float32(tx) + 0.5'f32) / texelsPerTile
         y = (float32(ty) + 0.5'f32) / texelsPerTile
@@ -379,15 +380,25 @@ proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
           0.0'f32, 1.0'f32)
         roadEdge = RoadStoneEdge +
           wobble(seed, RoadStoneWobbleStream, tx, ty) * 0.25'f32
-        stone = max(plazaStone, clamp(
+        roadCoverage = clamp(
           (roadStone[ty * MaskSize + tx] - roadEdge) / RoadStoneBand,
-          0.0'f32, 1.0'f32))
+          0.0'f32, 1.0'f32)
         roadClearance = dirtDistance[ty * MaskSize + tx] / texelsPerTile
         roadDistance = roadClearance +
           wobble(seed, DirtWobbleStream, tx, ty) *
           min(roadClearance / DirtReach, 1.0'f32)
         dirt = clamp(
           1.0'f32 - (roadDistance - DirtReach) / DirtBand, 0.0'f32, 1.0'f32)
+      var houseCoverage = 0.0'f32
+      for house in map.houses:
+        let distance = stoneMetric(
+          abs(x - (float32(house.center.x) + 0.5'f32)),
+          abs(y - (float32(house.center.y) + 0.5'f32)),
+          HouseStoneSquareness)
+        houseCoverage = max(houseCoverage, clamp(
+          (HouseStoneReach - distance) / HouseStoneBand,
+          0.0'f32, 1.0'f32))
+      let stone = max(plazaStone, max(roadCoverage, houseCoverage))
       if kind == uint8(GardenTileKind):
         ## A tilled bed is dirt alone; a road's cobbles stop at its edge.
         result[texel + 1] = 255

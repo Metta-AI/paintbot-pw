@@ -110,4 +110,23 @@ block maskCoverage:
     doAssert stone == 0 and dirt == 255,
       &"garden {garden.x},{garden.y} carries coverage {stone}/{dirt}"
 
+  for house in map.houses:
+    let (stone, dirt) = tileTexel(house.center)
+    doAssert stone == 255 and dirt == 255,
+      &"house {house.center.x},{house.center.y} carries coverage {stone}/{dirt}"
+    var feathered = false
+    let
+      centerX = int(house.center.x) * MaskTexelsPerTile +
+        MaskTexelsPerTile div 2
+      centerY = int(house.center.y) * MaskTexelsPerTile +
+        MaskTexelsPerTile div 2
+      reach = 4 * MaskTexelsPerTile
+    for y in max(centerY - reach, 0) .. min(centerY + reach, MaskSize - 1):
+      for x in max(centerX - reach, 0) .. min(centerX + reach, MaskSize - 1):
+        let (coverage, _) = texelAt(x, y)
+        if coverage > 0 and coverage < 255:
+          feathered = true
+    doAssert feathered,
+      &"house {house.center.x},{house.center.y} has a hard cobble edge"
+
 echo "test_hlf_ground: all checks passed"
