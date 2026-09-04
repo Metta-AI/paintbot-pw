@@ -823,7 +823,8 @@ proc runGraphics*() =
       if not following:
         followSlot = -1
     of KeyT: scene.toggleShading()
-    of KeyF1: debugMenuOpen = not debugMenuOpen
+    of KeyF1, KeyF2:
+      discard handleChromeKey(button)
     of KeyE:
       if playerMode():
         queueExitHouse(options.playerSlot - 1)

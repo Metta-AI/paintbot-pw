@@ -38,6 +38,7 @@ var
   shadowTexel: Uniform[float32]
   shadowSoftness: Uniform[float32]
   shadingStrength: Uniform[float32]
+  envLightLevel: Uniform[float32]
 
 const EnvironmentExposure = 1.15'f32
   ## Lifts the palette-graded environment back to the brightness the old
@@ -101,12 +102,13 @@ proc sampleSunShadow(shadowPos: Vec3): float32 =
 proc envShade(albedo, normal: Vec3, sunFactor: float32): Vec3 =
   ## Palette-graded lighting: half-lambert toward the shared light scaled by
   ## the shadow test, softly stepped, choosing between the shadow and
-  ## highlight colours. shadingStrength pulls the intensity toward full
-  ## highlight, so nighttime flattens the scene instead of shading it.
+  ## highlight colours. lightLevel fades only that directional term toward
+  ## the shadow band, so the horizon swap does not flatten or black out.
   let
     halfLambert = dot(normalize(normal), envLightDirection) * 0.5'f + 0.5'f
     intensity =
-      1.0'f - shadingStrength + halfLambert * sunFactor * shadingStrength
+      (1.0'f - shadingStrength + halfLambert * sunFactor * shadingStrength) *
+      envLightLevel
     band = smoothstep(0.45'f, 0.8'f, intensity)
   result = albedo * mix(envShadow, envHighlight, band) * EnvironmentExposure
 
@@ -116,7 +118,8 @@ proc envShadeTwoSided(albedo, normal: Vec3, sunFactor: float32): Vec3 =
     halfLambert =
       abs(dot(normalize(normal), envLightDirection)) * 0.5'f + 0.5'f
     intensity =
-      1.0'f - shadingStrength + halfLambert * sunFactor * shadingStrength
+      (1.0'f - shadingStrength + halfLambert * sunFactor * shadingStrength) *
+      envLightLevel
     band = smoothstep(0.45'f, 0.8'f, intensity)
   result = albedo * mix(envShadow, envHighlight, band) * EnvironmentExposure
 
@@ -373,7 +376,9 @@ proc terrainFrag(
 
 ## Water shader: transparent blue with a Blinn-Phong specular highlight.
 
-var cameraPos: Uniform[Vec3]
+var
+  cameraPos: Uniform[Vec3]
+  waterNormals: Uniform[Sampler2dArray]
 
 proc waterVert(
     gl_Position: var Vec4,
@@ -394,9 +399,23 @@ proc waterFrag(
 ) =
   ## Shades transparent water with a view-dependent highlight.
   let
+    normalA: Vec3 = texture(waterNormals, vec3(
+      worldPos.x * 0.08, worldPos.z * 0.08, 0.0)).xyz * 2.0 - vec3(1.0)
+    normalB: Vec3 = texture(waterNormals, vec3(
+      worldPos.z * -0.13, worldPos.x * 0.13, 1.0)).xyz * 2.0 - vec3(1.0)
+    detailNormal: Vec3 = normalize(vec3(
+      normalA.x + normalB.x,
+      normalA.z + normalB.z,
+      normalA.y + normalB.y
+    ))
+    surfaceNormal: Vec3 = normalize(mix(
+      normalize(waterNormal),
+      detailNormal,
+      clamp(waterNormal.y, 0.0, 1.0) * 0.38
+    ))
     specular = pow(
     max(dot(
-      normalize(waterNormal),
+      surfaceNormal,
       normalize(normalize(cameraPos - worldPos) + envLightDirection)
     ), 0.0),
     48.0)
@@ -410,12 +429,12 @@ proc waterFrag(
       texture(visibilityTex, visibilityUv).x
     )
   let water: Vec3 = vec3(
-    (0.05 + 0.08 * visibility) + specular * visibility,
-    (0.10 + 0.24 * visibility) + specular * visibility,
-    (0.16 + 0.42 * visibility) + specular * visibility
+    (0.05 + 0.08 * visibility) + specular * visibility * envLightLevel,
+    (0.10 + 0.24 * visibility) + specular * visibility * envLightLevel,
+    (0.16 + 0.42 * visibility) + specular * visibility * envLightLevel
   ) * envHighlight
   fragColor = vec4(water.x, water.y, water.z,
-    clamp(0.55 + specular * 0.45, 0.0, 1.0))
+    clamp(0.55 + specular * envLightLevel * 0.45, 0.0, 1.0))
 
 ## Prop shader: baked vertex colors with half-lambert lighting.
 
@@ -665,12 +684,13 @@ var
   environmentLight = ToonLightDirection  # direction the light travels
 
 type EnvLocations = object
-  highlight, shadow, light: GLint
+  highlight, shadow, light, level: GLint
 
 proc envLocations(program: GLuint): EnvLocations =
   result.highlight = glGetUniformLocation(program, "envHighlight")
   result.shadow = glGetUniformLocation(program, "envShadow")
   result.light = glGetUniformLocation(program, "envLightDirection")
+  result.level = glGetUniformLocation(program, "envLightLevel")
 
 proc setEnvUniforms(loc: EnvLocations) =
   ## Uploads the environment palette to the program currently in use.
@@ -681,6 +701,7 @@ proc setEnvUniforms(loc: EnvLocations) =
   glUniform3f(loc.highlight, h.r, h.g, h.b)
   glUniform3f(loc.shadow, s.r, s.g, s.b)
   glUniform3f(loc.light, l.x, l.y, l.z)
+  glUniform1f(loc.level, lightLevel)
 
 proc setEnvironmentPalette*(
     highlight, shadow: Color, lightDirection = ToonLightDirection
@@ -724,7 +745,7 @@ proc setShadowUniforms(loc: ShadowLocations) =
     loc.mvp1, 1, GL_FALSE, cast[ptr float32](lightMatrix1.addr))
   glUniform1f(loc.step, sunShadowBlend)
   glUniform1f(loc.on, if sunShadowsActive(): 1.0 else: 0.0)
-  glUniform1f(loc.strength, sunShadowStrength)
+  glUniform1f(loc.strength, sunShadowStrength * lightLevel)
   glUniform1f(loc.bias, sunShadowBias)
   glUniform1f(loc.texel, SunShadowTexel)
   glUniform1f(loc.softness, sunShadowSoftness)
@@ -753,9 +774,10 @@ var
   groundRingValues = vec4(0)
   groundRingShapeValues = vec3(0)
   waterProgram: GLuint
-  waterMvpLocation, waterCameraLocation: GLint
+  waterMvpLocation, waterCameraLocation, waterNormalsLocation: GLint
   waterVisibilityTexLocation: GLint
   waterVisibilityOffsetLocation, waterVisibilityScaleLocation: GLint
+  waterNormalTextureArray: GLuint
   propProgram: GLuint
   propMvpLocation, propVisibilityTexLocation: GLint
   propVisibilityOffsetLocation, propVisibilityScaleLocation: GLint
@@ -1554,6 +1576,7 @@ proc drawProp*(
 
 const
   TerrainTextureSize = 1024
+  WaterNormalTextures = ["water_1_normal", "water_2_normal"]
   TerrainMaterials = [
     "grass",
     "sand",
@@ -1690,6 +1713,13 @@ proc loadTerrainMaterials(): seq[seq[Image]] =
         colors[level].data[i].a = heights[level].data[i].r
     result.add colors
 
+proc loadWaterNormals(): seq[seq[Image]] =
+  ## Water detail uses the same mipmapped texture-array path as terrain and
+  ## trees, with one shared-data image per layer.
+  for name in WaterNormalTextures:
+    result.add mipChain(readImage(
+      &"{DataRoot}/terrain/water_normals/{name}.jpg"))
+
 proc setTerrainMaterial*(index: int, color, height: Image) =
   ## Replaces one material layer with a generated basecolor and height map,
   ## packed the same way as the shipped materials. Needs the texture array
@@ -1821,6 +1851,18 @@ proc bindGroundMask() =
     groundRingShapeLocation,
     groundRingShapeValues.x, groundRingShapeValues.y,
     groundRingShapeValues.z)
+  if groundMaskTexture == 0:
+    glGenTextures(1, groundMaskTexture.addr)
+    glBindTexture(GL_TEXTURE_2D, groundMaskTexture)
+    var pixel = [0'u8, 0]
+    glTexImage2D(
+      GL_TEXTURE_2D, 0, GL_RG8.GLint, 1, 1, 0,
+      GL_RG, GL_UNSIGNED_BYTE, pixel[0].addr
+    )
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
   glActiveTexture(GL_TEXTURE4)
   glBindTexture(GL_TEXTURE_2D, groundMaskTexture)
   glUniform1i(groundMaskLocation, 4)
@@ -2736,6 +2778,7 @@ proc initTerrain*() =
   )
   terrainTextureArray = buildTextureArray(loadTerrainMaterials(), GL_REPEAT.GLint)
   treeTextureArray = buildTextureArray(loadTreeTextures(), GL_CLAMP_TO_EDGE.GLint)
+  waterNormalTextureArray = buildTextureArray(loadWaterNormals(), GL_REPEAT.GLint)
   glGenTextures(1, visibilityTexture.addr)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glTexImage2D(
@@ -2779,6 +2822,7 @@ proc initTerrain*() =
   waterMvpLocation = glGetUniformLocation(waterProgram, "mvp")
   waterEnv = envLocations(waterProgram)
   waterCameraLocation = glGetUniformLocation(waterProgram, "cameraPos")
+  waterNormalsLocation = glGetUniformLocation(waterProgram, "waterNormals")
   waterVisibilityTexLocation = glGetUniformLocation(
     waterProgram,
     "visibilityTex"
@@ -3292,6 +3336,9 @@ proc drawWater*(viewProjection: Mat4, cameraEye: Vec3) =
     waterVisibilityScaleLocation,
     1.0'f32 / GridTiles.float32
   )
+  glActiveTexture(GL_TEXTURE0)
+  glBindTexture(GL_TEXTURE_2D_ARRAY, waterNormalTextureArray)
+  glUniform1i(waterNormalsLocation, 0)
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(waterVisibilityTexLocation, 1)

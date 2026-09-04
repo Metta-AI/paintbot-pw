@@ -152,8 +152,8 @@ proc toggleShading*(scene: CharacterScene) =
 proc setToonHour*(scene: CharacterScene, hour: float32) =
   ## Follows a game's clock: the toon palette blends through the day, and
   ## the sun rig (polyworld/shadows) tracks the same hour — where the light
-  ## comes from, how strong cast shadows are, and how flat the shading goes
-  ## at night — so one clock drives the whole atmosphere.
+  ## comes from, how strong the sun or moon casts, and the horizon fade
+  ## that hides the swap — so one clock drives the whole atmosphere.
   ## TOON_HOUR=<h> pins it for tuning and captures.
   var h = hour
   if existsEnv("TOON_HOUR"):

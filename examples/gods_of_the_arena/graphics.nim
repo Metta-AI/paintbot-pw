@@ -754,14 +754,14 @@ proc runGraphics*() =
     )
 
   window.onButtonPress = proc(button: Button) =
+    if handleChromeKey(button):
+      return
     if button == KeySpace:
       transport.handleKey(button)
     elif button == KeyC:
       actionCam.toggle(followSelection)
     elif button == KeyT:
       scene.toggleShading()
-    elif button == KeyF1:
-      debugMenuOpen = not debugMenuOpen
     elif (button == KeyF or button == KeyG) and
         options.playerSlot > 0 and
         not run.replayMode:

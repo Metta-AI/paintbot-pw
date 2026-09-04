@@ -14,9 +14,10 @@
 ## wherever a fragment is hidden from the sun. Lighting uses the games'
 ## toon (cel) shading from src/polyworld/toon.nim: Lambert intensity times
 ## the shadow test, through the ramp, then a day-cycle palette; the games'
-## gradient background replaces the void. The Shadow tab moves the sun
+## gradient background replaces the void. A second, fainter moonlight
+## shadow runs exactly opposite the sun. The Shadow tab moves the sun
 ## (azimuth and elevation), picks the palette hour, controls shadow
-## strength, softness, and bias, and toggles the sun's frustum wire box
+## strength, moonlight, softness, and bias, and toggles the sun's frustum wire box
 ## and a debug view of the depth map. A time-of-day clock can drive the
 ## whole atmosphere at once: sun path (moon at night), palette, cast-shadow
 ## strength, and how flat or directional the shading is.
@@ -217,16 +218,21 @@ var
   # tap bilinearly filtered); the debug view reads the same texture as a
   # plain sampler with the compare mode temporarily off.
   lightMvp: Uniform[Mat4]
+  moonLightMvp: Uniform[Mat4]
   shadowMap: Uniform[Sampler2D]
   shadowMapPcf: Uniform[Sampler2dShadow]
+  moonShadowMapPcf: Uniform[Sampler2dShadow]
   shadowsEnabled: Uniform[float32]
   shadowStrength: Uniform[float32]
+  moonShadowStrength: Uniform[float32]
   shadowBias: Uniform[float32]
   shadowTexel: Uniform[float32]
   shadowSoftness: Uniform[float32]
   # How much directional light shapes the surface at all: 1 is full sun
   # shading, 0 is a flat overcast/night look with no lit or shadow side.
   shadingStrength: Uniform[float32]
+  # 1 full sun or moonlight, 0 no directional light (shadow side only).
+  lightLevel: Uniform[float32]
   sunDir: Uniform[Vec3]
   # Toon banding, the technique from src/polyworld/toon.nim: Lambert
   # intensity through a ramp texture, then palette highlight/shadow colors.
@@ -238,6 +244,56 @@ var
 proc texture(buffer: Uniform[Sampler2dArray], pos: Vec3): Vec4 =
   ## CPU stub; shady passes texture() through to GLSL as a builtin.
   vec4(0, 0, 0, 0)
+
+proc pcfLitSun(coord: Vec4): float32 =
+  ## Returns 0 fully shadowed .. 1 fully lit from the sun map.
+  result = 1.0
+  let
+    su = coord.x * 0.5 + 0.5
+    sv = coord.y * 0.5 + 0.5
+    sd = coord.z * 0.5 + 0.5 - shadowBias
+  if su > 0.0 and su < 1.0 and sv > 0.0 and sv < 1.0 and sd < 1.0:
+    let spread = shadowTexel * shadowSoftness
+    var lit = 0.0'f32
+    lit = lit + texture(shadowMapPcf, vec3(su - spread, sv - spread, sd))
+    lit = lit + texture(shadowMapPcf, vec3(su, sv - spread, sd))
+    lit = lit + texture(shadowMapPcf, vec3(su + spread, sv - spread, sd))
+    lit = lit + texture(shadowMapPcf, vec3(su - spread, sv, sd))
+    lit = lit + texture(shadowMapPcf, vec3(su, sv, sd))
+    lit = lit + texture(shadowMapPcf, vec3(su + spread, sv, sd))
+    lit = lit + texture(shadowMapPcf, vec3(su - spread, sv + spread, sd))
+    lit = lit + texture(shadowMapPcf, vec3(su, sv + spread, sd))
+    lit = lit + texture(shadowMapPcf, vec3(su + spread, sv + spread, sd))
+    result = lit / 9.0
+
+proc pcfLitMoon(coord: Vec4): float32 =
+  ## Returns 0 fully shadowed .. 1 fully lit from the moonlight map.
+  result = 1.0
+  let
+    su = coord.x * 0.5 + 0.5
+    sv = coord.y * 0.5 + 0.5
+    sd = coord.z * 0.5 + 0.5 - shadowBias
+  if su > 0.0 and su < 1.0 and sv > 0.0 and sv < 1.0 and sd < 1.0:
+    let spread = shadowTexel * shadowSoftness
+    var lit = 0.0'f32
+    lit = lit + texture(moonShadowMapPcf, vec3(su - spread, sv - spread, sd))
+    lit = lit + texture(moonShadowMapPcf, vec3(su, sv - spread, sd))
+    lit = lit + texture(moonShadowMapPcf, vec3(su + spread, sv - spread, sd))
+    lit = lit + texture(moonShadowMapPcf, vec3(su - spread, sv, sd))
+    lit = lit + texture(moonShadowMapPcf, vec3(su, sv, sd))
+    lit = lit + texture(moonShadowMapPcf, vec3(su + spread, sv, sd))
+    lit = lit + texture(moonShadowMapPcf, vec3(su - spread, sv + spread, sd))
+    lit = lit + texture(moonShadowMapPcf, vec3(su, sv + spread, sd))
+    lit = lit + texture(moonShadowMapPcf, vec3(su + spread, sv + spread, sd))
+    result = lit / 9.0
+
+proc combinedShadow(sunCoord, moonCoord: Vec4): float32 =
+  ## Sun shadows times a much fainter opposite moonlight shadow.
+  result = 1.0
+  if shadowsEnabled > 0.5:
+    result =
+      (1.0 - (1.0 - pcfLitSun(sunCoord)) * shadowStrength) *
+      (1.0 - (1.0 - pcfLitMoon(moonCoord)) * moonShadowStrength)
 
 proc terrainVert(
     gl_Position: var Vec4,
@@ -253,17 +309,19 @@ proc terrainVert(
     vertColor: var Vec3,
     vertMaterials: var Vec4,
     vertWeights: var Vec4,
-    shadowCoord: var Vec4
+    shadowCoord: var Vec4,
+    moonShadowCoord: var Vec4
 ) =
   gl_Position = mvp * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)
   # Normal-offset shadows: sample the map slightly off the surface along
   # its normal, which suppresses self-shadow acne better than depth bias.
-  shadowCoord = lightMvp * vec4(
+  let offsetPos = vec3(
     vertPos.x + normal.x * 0.08,
     vertPos.y + normal.y * 0.08,
-    vertPos.z + normal.z * 0.08,
-    1.0
+    vertPos.z + normal.z * 0.08
   )
+  shadowCoord = lightMvp * vec4(offsetPos, 1.0)
+  moonShadowCoord = moonLightMvp * vec4(offsetPos, 1.0)
   worldPos = vertPos
   vertEdgeMask = edgeMask
   vertNormal = normal
@@ -279,7 +337,8 @@ proc terrainFrag(
     vertColor: Vec3,
     vertMaterials: Vec4,
     vertWeights: Vec4,
-    shadowCoord: Vec4
+    shadowCoord: Vec4,
+    moonShadowCoord: Vec4
 ) =
   let tilePos = vec2(worldPos.x, worldPos.z)
   let h = clamp(worldPos.y / max(heightScale, 0.001) * 0.5 + 0.5, 0.0, 1.0)
@@ -359,30 +418,9 @@ proc terrainFrag(
         color = vec3(0.10, 0.72, 0.22)
       else:
         color = vec3(0.88, 0.10, 0.08)
-  # Shadow map test: project into the sun's depth map and take five taps
-  # for a slightly soft edge. Shadow scales the directional term only, so
-  # shadowed ground keeps the ambient floor.
-  var shadow = 1.0'f32
-  if shadowsEnabled > 0.5:
-    let
-      su = shadowCoord.x * 0.5 + 0.5
-      sv = shadowCoord.y * 0.5 + 0.5
-      sd = shadowCoord.z * 0.5 + 0.5 - shadowBias
-    if su > 0.0 and su < 1.0 and sv > 0.0 and sv < 1.0 and sd < 1.0:
-      # 3x3 grid of hardware-PCF taps, each bilinearly filtered by the
-      # comparison sampler; spread widens the penumbra.
-      let spread = shadowTexel * shadowSoftness
-      var lit = 0.0'f32
-      lit = lit + texture(shadowMapPcf, vec3(su - spread, sv - spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su, sv - spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su + spread, sv - spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su - spread, sv, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su, sv, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su + spread, sv, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su - spread, sv + spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su, sv + spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su + spread, sv + spread, sd))
-      shadow = 1.0 - (1.0 - lit / 9.0) * shadowStrength
+  # Sun shadow times a faint opposite moonlight shadow. Both scale the
+  # directional term only, so occluded ground keeps the ambient floor.
+  let shadow = combinedShadow(shadowCoord, moonShadowCoord)
   if toonEnabled > 0.5:
     # Toon banding: one-light Lambert scaled by the shadow test, pushed
     # through the ramp, then the palette's highlight/shadow colors.
@@ -390,7 +428,8 @@ proc terrainFrag(
     # sun or nighttime flattens the surface instead of shading it.
     let
       lambert = max(dot(normalize(vertNormal), sunDir), 0.0) * shadow
-      intensity = 1.0 - shadingStrength + lambert * shadingStrength
+      intensity =
+        (1.0 - shadingStrength + lambert * shadingStrength) * lightLevel
       band = texture(toonRampTex, vec2(intensity, 0.5)).x
     color = color * (toonShadow * (1.0 - band) + toonHighlight * band)
   else:
@@ -402,7 +441,8 @@ proc terrainFrag(
         dot(normalize(vertNormal), sunDir) * 0.5 + 0.5,
         0.0, 1.0)
       lighting = (0.45 + 0.7 * light) * shadow
-    color = color * (1.0 - shadingStrength + lighting * shadingStrength)
+      lit = 1.0 - shadingStrength + lighting * shadingStrength
+    color = color * ((1.0 - shadingStrength) * (1.0 - lightLevel) + lit * lightLevel)
   # Line-of-sight fade: terrain hidden from the start marker drains to a
   # dark monochrome. The visibility texture holds one value per tile,
   # blurred on the CPU and bilinearly sampled here, so the boundary rolls
@@ -464,13 +504,20 @@ let visibilityTexLocation = glGetUniformLocation(terrainProgram, "visibilityTex"
 let visOffsetLocation = glGetUniformLocation(terrainProgram, "visOffset")
 let visScaleLocation = glGetUniformLocation(terrainProgram, "visScale")
 let terrainLightMvpLocation = glGetUniformLocation(terrainProgram, "lightMvp")
+let terrainMoonLightMvpLocation = glGetUniformLocation(
+  terrainProgram, "moonLightMvp")
 let terrainShadowMapLocation = glGetUniformLocation(terrainProgram, "shadowMapPcf")
+let terrainMoonShadowMapLocation = glGetUniformLocation(
+  terrainProgram, "moonShadowMapPcf")
 let terrainShadowsEnabledLocation = glGetUniformLocation(terrainProgram, "shadowsEnabled")
 let terrainShadowStrengthLocation = glGetUniformLocation(terrainProgram, "shadowStrength")
+let terrainMoonShadowStrengthLocation = glGetUniformLocation(
+  terrainProgram, "moonShadowStrength")
 let terrainShadowBiasLocation = glGetUniformLocation(terrainProgram, "shadowBias")
 let terrainShadowTexelLocation = glGetUniformLocation(terrainProgram, "shadowTexel")
 let terrainShadowSoftnessLocation = glGetUniformLocation(terrainProgram, "shadowSoftness")
 let terrainShadingStrengthLocation = glGetUniformLocation(terrainProgram, "shadingStrength")
+let terrainLightLevelLocation = glGetUniformLocation(terrainProgram, "lightLevel")
 let terrainSunDirLocation = glGetUniformLocation(terrainProgram, "sunDir")
 let terrainToonEnabledLocation = glGetUniformLocation(terrainProgram, "toonEnabled")
 let terrainToonRampLocation = glGetUniformLocation(terrainProgram, "toonRampTex")
@@ -522,10 +569,10 @@ proc waterFrag(
     ), 0.0),
     48.0)
   fragColor = vec4(
-    0.13 + specular,
-    0.34 + specular,
-    0.58 + specular,
-    clamp(0.55 + specular * 0.45, 0.0, 1.0)
+    0.13 + specular * lightLevel,
+    0.34 + specular * lightLevel,
+    0.58 + specular * lightLevel,
+    clamp(0.55 + specular * lightLevel * 0.45, 0.0, 1.0)
   )
 
 let waterProgram = compileProgram(
@@ -535,6 +582,7 @@ let waterProgram = compileProgram(
 let waterMvpLocation = glGetUniformLocation(waterProgram, "mvp")
 let waterCameraLocation = glGetUniformLocation(waterProgram, "cameraPos")
 let waterSunDirLocation = glGetUniformLocation(waterProgram, "sunDir")
+let waterLightLevelLocation = glGetUniformLocation(waterProgram, "lightLevel")
 
 ## Low-poly props (grass puffs, boulders): loaded with the gltf library, the
 ## palette texture baked into per-vertex colors, each model normalized with
@@ -547,17 +595,19 @@ proc propVert(
     normal: Vec3,
     fragmentColor: var Vec3,
     fragmentNormal: var Vec3,
-    shadowCoord: var Vec4
+    shadowCoord: var Vec4,
+    moonShadowCoord: var Vec4
 ) =
   gl_Position = mvp * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)
   # Normal-offset shadows: sample the map slightly off the surface along
   # its normal, which suppresses self-shadow acne better than depth bias.
-  shadowCoord = lightMvp * vec4(
+  let offsetPos = vec3(
     vertPos.x + normal.x * 0.08,
     vertPos.y + normal.y * 0.08,
-    vertPos.z + normal.z * 0.08,
-    1.0
+    vertPos.z + normal.z * 0.08
   )
+  shadowCoord = lightMvp * vec4(offsetPos, 1.0)
+  moonShadowCoord = moonLightMvp * vec4(offsetPos, 1.0)
   fragmentColor = vertColor
   fragmentNormal = normal
 
@@ -565,34 +615,16 @@ proc propFrag(
     fragColor: var Vec4,
     fragmentColor: Vec3,
     fragmentNormal: Vec3,
-    shadowCoord: Vec4
+    shadowCoord: Vec4,
+    moonShadowCoord: Vec4
 ) =
-  var shadow = 1.0'f32
-  if shadowsEnabled > 0.5:
-    let
-      su = shadowCoord.x * 0.5 + 0.5
-      sv = shadowCoord.y * 0.5 + 0.5
-      sd = shadowCoord.z * 0.5 + 0.5 - shadowBias
-    if su > 0.0 and su < 1.0 and sv > 0.0 and sv < 1.0 and sd < 1.0:
-      # 3x3 grid of hardware-PCF taps, each bilinearly filtered by the
-      # comparison sampler; spread widens the penumbra.
-      let spread = shadowTexel * shadowSoftness
-      var lit = 0.0'f32
-      lit = lit + texture(shadowMapPcf, vec3(su - spread, sv - spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su, sv - spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su + spread, sv - spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su - spread, sv, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su, sv, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su + spread, sv, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su - spread, sv + spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su, sv + spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su + spread, sv + spread, sd))
-      shadow = 1.0 - (1.0 - lit / 9.0) * shadowStrength
+  let shadow = combinedShadow(shadowCoord, moonShadowCoord)
   var shaded = vec3(0.0, 0.0, 0.0)
   if toonEnabled > 0.5:
     let
       lambert = max(dot(normalize(fragmentNormal), sunDir), 0.0) * shadow
-      intensity = 1.0 - shadingStrength + lambert * shadingStrength
+      intensity =
+        (1.0 - shadingStrength + lambert * shadingStrength) * lightLevel
       band = texture(toonRampTex, vec2(intensity, 0.5)).x
     shaded = fragmentColor * (toonShadow * (1.0 - band) + toonHighlight * band)
   else:
@@ -601,7 +633,8 @@ proc propFrag(
         dot(normalize(fragmentNormal), sunDir) * 0.5 + 0.5,
         0.0, 1.0)
       lighting = (0.45 + 0.7 * light) * shadow
-    shaded = fragmentColor * (1.0 - shadingStrength + lighting * shadingStrength)
+      lit = 1.0 - shadingStrength + lighting * shadingStrength
+    shaded = fragmentColor * ((1.0 - shadingStrength) * (1.0 - lightLevel) + lit * lightLevel)
   fragColor = vec4(shaded.x, shaded.y, shaded.z, 1.0)
 
 let propProgram = compileProgram(
@@ -610,13 +643,19 @@ let propProgram = compileProgram(
 )
 let propMvpLocation = glGetUniformLocation(propProgram, "mvp")
 let propLightMvpLocation = glGetUniformLocation(propProgram, "lightMvp")
+let propMoonLightMvpLocation = glGetUniformLocation(propProgram, "moonLightMvp")
 let propShadowMapLocation = glGetUniformLocation(propProgram, "shadowMapPcf")
+let propMoonShadowMapLocation = glGetUniformLocation(
+  propProgram, "moonShadowMapPcf")
 let propShadowsEnabledLocation = glGetUniformLocation(propProgram, "shadowsEnabled")
 let propShadowStrengthLocation = glGetUniformLocation(propProgram, "shadowStrength")
+let propMoonShadowStrengthLocation = glGetUniformLocation(
+  propProgram, "moonShadowStrength")
 let propShadowBiasLocation = glGetUniformLocation(propProgram, "shadowBias")
 let propShadowTexelLocation = glGetUniformLocation(propProgram, "shadowTexel")
 let propShadowSoftnessLocation = glGetUniformLocation(propProgram, "shadowSoftness")
 let propShadingStrengthLocation = glGetUniformLocation(propProgram, "shadingStrength")
+let propLightLevelLocation = glGetUniformLocation(propProgram, "lightLevel")
 let propSunDirLocation = glGetUniformLocation(propProgram, "sunDir")
 let propToonEnabledLocation = glGetUniformLocation(propProgram, "toonEnabled")
 let propToonRampLocation = glGetUniformLocation(propProgram, "toonRampTex")
@@ -640,17 +679,19 @@ proc treeVert(
     fragUv: var Vec3,
     fragmentNormal: var Vec3,
     fragWorld: var Vec3,
-    shadowCoord: var Vec4
+    shadowCoord: var Vec4,
+    moonShadowCoord: var Vec4
 ) =
   gl_Position = mvp * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)
   # Normal-offset shadows: sample the map slightly off the surface along
   # its normal, which suppresses self-shadow acne better than depth bias.
-  shadowCoord = lightMvp * vec4(
+  let offsetPos = vec3(
     vertPos.x + normal.x * 0.08,
     vertPos.y + normal.y * 0.08,
-    vertPos.z + normal.z * 0.08,
-    1.0
+    vertPos.z + normal.z * 0.08
   )
+  shadowCoord = lightMvp * vec4(offsetPos, 1.0)
+  moonShadowCoord = moonLightMvp * vec4(offsetPos, 1.0)
   fragUv = vertUv
   fragmentNormal = normal
   fragWorld = vertPos
@@ -660,39 +701,21 @@ proc treeFrag(
     fragUv: Vec3,
     fragmentNormal: Vec3,
     fragWorld: Vec3,
-    shadowCoord: Vec4
+    shadowCoord: Vec4,
+    moonShadowCoord: Vec4
 ) =
   let texel = texture(treeTextures, fragUv)
   if texel.w < treeAlphaCutoff:
     discardFragment()
-  var shadow = 1.0'f32
-  if shadowsEnabled > 0.5:
-    let
-      su = shadowCoord.x * 0.5 + 0.5
-      sv = shadowCoord.y * 0.5 + 0.5
-      sd = shadowCoord.z * 0.5 + 0.5 - shadowBias
-    if su > 0.0 and su < 1.0 and sv > 0.0 and sv < 1.0 and sd < 1.0:
-      # 3x3 grid of hardware-PCF taps, each bilinearly filtered by the
-      # comparison sampler; spread widens the penumbra.
-      let spread = shadowTexel * shadowSoftness
-      var lit = 0.0'f32
-      lit = lit + texture(shadowMapPcf, vec3(su - spread, sv - spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su, sv - spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su + spread, sv - spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su - spread, sv, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su, sv, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su + spread, sv, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su - spread, sv + spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su, sv + spread, sd))
-      lit = lit + texture(shadowMapPcf, vec3(su + spread, sv + spread, sd))
-      shadow = 1.0 - (1.0 - lit / 9.0) * shadowStrength
+  let shadow = combinedShadow(shadowCoord, moonShadowCoord)
   # Cards are seen from both sides; light by the unsigned normal so the
   # back of a leaf cluster isn't black.
   var color = vec3(0.0, 0.0, 0.0)
   if toonEnabled > 0.5:
     let
       lambert = abs(dot(normalize(fragmentNormal), sunDir)) * shadow
-      intensity = 1.0 - shadingStrength + lambert * shadingStrength
+      intensity =
+        (1.0 - shadingStrength + lambert * shadingStrength) * lightLevel
       band = texture(toonRampTex, vec2(intensity, 0.5)).x
     color = texel.xyz * (toonShadow * (1.0 - band) + toonHighlight * band)
   else:
@@ -701,7 +724,8 @@ proc treeFrag(
         abs(dot(normalize(fragmentNormal), sunDir)) * 0.5 + 0.5,
         0.0, 1.0)
       lighting = (0.5 + 0.65 * light) * shadow
-    color = texel.xyz * (1.0 - shadingStrength + lighting * shadingStrength)
+      lit = 1.0 - shadingStrength + lighting * shadingStrength
+    color = texel.xyz * ((1.0 - shadingStrength) * (1.0 - lightLevel) + lit * lightLevel)
   let
     visUv = vec2(
       (fragWorld.x + visOffset) * visScale,
@@ -722,13 +746,19 @@ let treeVisibilityTexLocation = glGetUniformLocation(treeProgram, "visibilityTex
 let treeVisOffsetLocation = glGetUniformLocation(treeProgram, "visOffset")
 let treeVisScaleLocation = glGetUniformLocation(treeProgram, "visScale")
 let treeLightMvpLocation = glGetUniformLocation(treeProgram, "lightMvp")
+let treeMoonLightMvpLocation = glGetUniformLocation(treeProgram, "moonLightMvp")
 let treeShadowMapLocation = glGetUniformLocation(treeProgram, "shadowMapPcf")
+let treeMoonShadowMapLocation = glGetUniformLocation(
+  treeProgram, "moonShadowMapPcf")
 let treeShadowsEnabledLocation = glGetUniformLocation(treeProgram, "shadowsEnabled")
 let treeShadowStrengthLocation = glGetUniformLocation(treeProgram, "shadowStrength")
+let treeMoonShadowStrengthLocation = glGetUniformLocation(
+  treeProgram, "moonShadowStrength")
 let treeShadowBiasLocation = glGetUniformLocation(treeProgram, "shadowBias")
 let treeShadowTexelLocation = glGetUniformLocation(treeProgram, "shadowTexel")
 let treeShadowSoftnessLocation = glGetUniformLocation(treeProgram, "shadowSoftness")
 let treeShadingStrengthLocation = glGetUniformLocation(treeProgram, "shadingStrength")
+let treeLightLevelLocation = glGetUniformLocation(treeProgram, "lightLevel")
 let treeSunDirLocation = glGetUniformLocation(treeProgram, "sunDir")
 let treeToonEnabledLocation = glGetUniformLocation(treeProgram, "toonEnabled")
 let treeToonRampLocation = glGetUniformLocation(treeProgram, "toonRampTex")
@@ -1091,6 +1121,8 @@ var textureSize = 10.0'f32  # world tiles one texture repeat spans
 blendDepth = 0.12    # blend band width; smaller is more abrupt
 heightBlend = 1.2    # how strongly material height maps steer the blend
 shadowStrength = 0.75  # how dark shadows get; 1 goes to pure black
+moonShadowStrength = 0.4  # moon casts like the sun, just darker
+lightLevel = 1.0  # 1 full sun or moonlight, 0 shadow side only
 shadowBias = 0.0012    # depth offset that hides self-shadow acne
 shadowSoftness = 1.5   # PCF spread in shadow-map texels
 shadingStrength = 1.0  # 1 full directional shading, 0 flat
@@ -2215,26 +2247,35 @@ var
   frustumMesh: seq[float32]
   frustumVertexArray, frustumVertexBuffer: GLuint
 
-proc updateSun() =
-  ## Recomputes the sun direction (shared by all lighting shaders), the
-  ## light's view-projection, and the frustum wire box.
+proc lightViewProj(direction: Vec3): Mat4 =
+  ## Orthographic view-projection for one directional light over the map.
   const
     LightRadius = 52.0'f32
     LightDistance = 90.0'f32
   let
+    view = lookAt(direction * LightDistance, vec3(0, 0, 0), vec3(0, 1, 0))
+    proj = ortho(
+      -LightRadius, LightRadius, -LightRadius, LightRadius,
+      LightDistance - LightRadius, LightDistance + LightRadius)
+  proj * view
+
+proc updateSun() =
+  ## Recomputes the sun direction (shared by all lighting shaders), the
+  ## light's view-projection, the opposite moonlight projection, and the
+  ## frustum wire box. Elevation is floored a little so the depth map
+  ## stays valid while the horizon fade has already killed the light.
+  let
     azimuth = sunAzimuth * PI.float32 / 180.0
-    elevation = sunElevation * PI.float32 / 180.0
+    elevation = max(sunElevation, 8.0'f32) * PI.float32 / 180.0
   sunDir = vec3(
     cos(elevation) * sin(azimuth),
     sin(elevation),
     cos(elevation) * cos(azimuth)
   )
-  let
-    view = lookAt(sunDir * LightDistance, vec3(0, 0, 0), vec3(0, 1, 0))
-    proj = ortho(
-      -LightRadius, LightRadius, -LightRadius, LightRadius,
-      LightDistance - LightRadius, LightDistance + LightRadius)
-  lightMvp = proj * view
+  lightMvp = lightViewProj(sunDir)
+  # Moon sits exactly opposite on the compass, same elevation, so its
+  # shadows run the other way.
+  moonLightMvp = lightViewProj(vec3(-sunDir.x, sunDir.y, -sunDir.z))
   # The frustum's ortho box corners come from unprojecting the NDC cube
   # through the inverse light matrix.
   frustumMesh.setLen(0)
@@ -2290,6 +2331,31 @@ glGenFramebuffers(1, shadowFramebuffer.addr)
 glBindFramebuffer(GL_FRAMEBUFFER, shadowFramebuffer)
 glFramebufferTexture2D(
   GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, shadowTexture, 0)
+glDrawBuffer(GL_NONE)
+glReadBuffer(GL_NONE)
+doAssert glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
+glBindFramebuffer(GL_FRAMEBUFFER, 0)
+
+var moonShadowTexture, moonShadowFramebuffer: GLuint
+glGenTextures(1, moonShadowTexture.addr)
+glBindTexture(GL_TEXTURE_2D, moonShadowTexture)
+glTexImage2D(
+  GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24.GLint,
+  ShadowMapSize, ShadowMapSize, 0,
+  GL_DEPTH_COMPONENT, cGL_FLOAT, nil
+)
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR.GLint)
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
+glTexParameteri(
+  GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE.GLint)
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL.GLint)
+glBindTexture(GL_TEXTURE_2D, 0)
+glGenFramebuffers(1, moonShadowFramebuffer.addr)
+glBindFramebuffer(GL_FRAMEBUFFER, moonShadowFramebuffer)
+glFramebufferTexture2D(
+  GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, moonShadowTexture, 0)
 glDrawBuffer(GL_NONE)
 glReadBuffer(GL_NONE)
 doAssert glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE
@@ -2438,34 +2504,59 @@ var
 ## Atmosphere: one clock that drives everything. With the tie enabled, the
 ## hour positions the sun (or the moon at night), picks the toon palette,
 ## and scales both cast shadows and directional shading, so noon is crisp,
-## twilight goes soft, and night is nearly flat moonlight.
+## twilight drops the sun or moon light from -20° to +20°, and night
+## is a darker moon.
 
 var
   timeOfDay = 12.0'f32
   tieToTime = true
+  moonFillStrength = 0.16'f32
+    ## Opposite-sun moonlight uploaded this frame. Zero at night, when
+    ## the primary caster already is the moon.
+  solarElevation = 53.0'f32
+    ## Signed: sun above the horizon is positive, moon is negative.
+
+proc horizonLight(signedElev: float32): float32 =
+  ## Moonlight below -20°, no directional light from -10° to +10°,
+  ## full sun above +20°. The scene stays visible; only the light fades.
+  if signedElev <= -20:
+    result = 1.0
+  elif signedElev < -10:
+    result = 1.0 - smoothstep(-20.0'f32, -10.0'f32, signedElev)
+  elif signedElev <= 10:
+    result = 0.0
+  elif signedElev < 20:
+    result = smoothstep(10.0'f32, 20.0'f32, signedElev)
+  else:
+    result = 1.0
 
 proc applyTimeOfDay() =
   ## Sun 6:00-20:00 arcing east to west; the moon rides the same track
-  ## through the night, low and dim. sunUp is 0 at night, 1 at noon.
+  ## through the night. Signed elevation drives the black horizon band.
   let hour = ((timeOfDay mod 24) + 24) mod 24
   var sunUp = 0.0'f32
   if hour >= 6 and hour <= 20:
     let t = (hour - 6) / 14
     sunUp = sin(t * PI.float32)
     sunAzimuth = 90 + t * 180
-    sunElevation = max(sunUp * 70, 12)
+    sunElevation = sunUp * 70
+    solarElevation = sunElevation
+    let strength = 0.15'f32 + 0.7'f32 * smoothstep(0.0'f32, 0.3'f32, sunUp)
+    shadowStrength = strength
+    shadingStrength = strength
+    moonFillStrength = moonShadowStrength * 0.4'f32
   else:
     let sinceSunset = if hour > 20: hour - 20 else: hour + 4
     let t = sinceSunset / 10
     sunAzimuth = 90 + t * 180
-    sunElevation = max(sin(t * PI.float32) * 45, 12)
+    sunElevation = sin(t * PI.float32) * 45
+    solarElevation = -sunElevation
+    # Night: the clock already pointed the primary light at the moon.
+    # Use the same shading and cast as day, just darker.
+    shadowStrength = moonShadowStrength
+    shadingStrength = 0.8'f32
+    moonFillStrength = 0
   toonHour = timeOfDay
-  # One strength for both cast shadows and directional shading: they fade
-  # out together through twilight to faint flat moonlight. Two separate
-  # curves made the shading pop visibly right at sunset.
-  let strength = 0.15'f32 + 0.7'f32 * smoothstep(0.0'f32, 0.3'f32, sunUp)
-  shadowStrength = strength
-  shadingStrength = strength
 
 proc mouseOverUi(): bool =
   for state in subWindowStates.values:
@@ -3152,20 +3243,24 @@ window.onFrame = proc() =
     recomputePath()
   if tieToTime:
     applyTimeOfDay()
+  else:
+    moonFillStrength = moonShadowStrength
+    solarElevation = sunElevation
+  let dusk = horizonLight(solarElevation)
+  lightLevel = dusk
   if (sunAzimuth, sunElevation) != lastSunParams:
     lastSunParams = (sunAzimuth, sunElevation)
     updateSun()
 
-  # Shadow depth pass: the sun's view of every caster, rendered before the
-  # main pass so the surface shaders can sample the finished depth map.
-  if showShadows or showShadowMap:
-    glBindFramebuffer(GL_FRAMEBUFFER, shadowFramebuffer)
+  proc drawShadowCasters(target: GLuint, mvpAddr: pointer) =
+    ## Renders every caster into one directional light's depth map.
+    glBindFramebuffer(GL_FRAMEBUFFER, target)
     glViewport(0, 0, ShadowMapSize, ShadowMapSize)
     glClear(GL_DEPTH_BUFFER_BIT)
     glEnable(GL_DEPTH_TEST)
     glUseProgram(depthProgram)
     glUniformMatrix4fv(
-      depthLightMvpLocation, 1, GL_FALSE, cast[ptr float32](lightMvp.addr))
+      depthLightMvpLocation, 1, GL_FALSE, cast[ptr float32](mvpAddr))
     glBindVertexArray(terrainDepthVertexArray)
     glDrawArrays(GL_TRIANGLES, 0, meshVertexCount.GLsizei)
     if propMesh.len > 0:
@@ -3174,7 +3269,11 @@ window.onFrame = proc() =
     if treeMesh.len > 0:
       glUseProgram(treeDepthProgram)
       glUniformMatrix4fv(
-        treeDepthLightMvpLocation, 1, GL_FALSE, cast[ptr float32](lightMvp.addr))
+        treeDepthLightMvpLocation,
+        1,
+        GL_FALSE,
+        cast[ptr float32](mvpAddr)
+      )
       glActiveTexture(GL_TEXTURE0)
       glBindTexture(GL_TEXTURE_2D_ARRAY, treeTextureArray)
       glUniform1i(treeDepthTexturesLocation, 0)
@@ -3184,6 +3283,12 @@ window.onFrame = proc() =
     glBindVertexArray(0)
     glUseProgram(0)
     glBindFramebuffer(GL_FRAMEBUFFER, 0)
+
+  # Shadow depth pass: sun, then the opposite moonlight, so the surface
+  # shaders can sample both finished maps.
+  if showShadows or showShadowMap:
+    drawShadowCasters(shadowFramebuffer, lightMvp.addr)
+    drawShadowCasters(moonShadowFramebuffer, moonLightMvp.addr)
     glViewport(0, 0, window.size.x, window.size.y)
 
   sk.beginUi(window, window.size)
@@ -3234,14 +3339,25 @@ window.onFrame = proc() =
   glActiveTexture(GL_TEXTURE2)
   glBindTexture(GL_TEXTURE_2D, shadowTexture)
   glUniform1i(terrainShadowMapLocation, 2)
+  glActiveTexture(GL_TEXTURE4)
+  glBindTexture(GL_TEXTURE_2D, moonShadowTexture)
+  glUniform1i(terrainMoonShadowMapLocation, 4)
   glUniformMatrix4fv(
     terrainLightMvpLocation, 1, GL_FALSE, cast[ptr float32](lightMvp.addr))
+  glUniformMatrix4fv(
+    terrainMoonLightMvpLocation,
+    1,
+    GL_FALSE,
+    cast[ptr float32](moonLightMvp.addr)
+  )
   glUniform1f(terrainShadowsEnabledLocation, if showShadows: 1.0 else: 0.0)
-  glUniform1f(terrainShadowStrengthLocation, shadowStrength)
+  glUniform1f(terrainShadowStrengthLocation, shadowStrength * dusk)
+  glUniform1f(terrainMoonShadowStrengthLocation, moonFillStrength * dusk)
   glUniform1f(terrainShadowBiasLocation, shadowBias)
   glUniform1f(terrainShadowTexelLocation, shadowTexel)
   glUniform1f(terrainShadowSoftnessLocation, shadowSoftness)
   glUniform1f(terrainShadingStrengthLocation, shadingStrength)
+  glUniform1f(terrainLightLevelLocation, lightLevel)
   glUniform3f(terrainSunDirLocation, sunDir.x, sunDir.y, sunDir.z)
   glUniform1f(terrainToonEnabledLocation, if showToon: 1.0 else: 0.0)
   glUniform3f(
@@ -3266,12 +3382,20 @@ window.onFrame = proc() =
     glUniformMatrix4fv(propMvpLocation, 1, GL_FALSE, cast[ptr float32](mvp.addr))
     glUniformMatrix4fv(
       propLightMvpLocation, 1, GL_FALSE, cast[ptr float32](lightMvp.addr))
+    glUniformMatrix4fv(
+      propMoonLightMvpLocation,
+      1,
+      GL_FALSE,
+      cast[ptr float32](moonLightMvp.addr)
+    )
     glUniform1f(propShadowsEnabledLocation, if showShadows: 1.0 else: 0.0)
-    glUniform1f(propShadowStrengthLocation, shadowStrength)
+    glUniform1f(propShadowStrengthLocation, shadowStrength * dusk)
+    glUniform1f(propMoonShadowStrengthLocation, moonFillStrength * dusk)
     glUniform1f(propShadowBiasLocation, shadowBias)
     glUniform1f(propShadowTexelLocation, shadowTexel)
     glUniform1f(propShadowSoftnessLocation, shadowSoftness)
     glUniform1f(propShadingStrengthLocation, shadingStrength)
+    glUniform1f(propLightLevelLocation, lightLevel)
     glUniform3f(propSunDirLocation, sunDir.x, sunDir.y, sunDir.z)
     glUniform1f(propToonEnabledLocation, if showToon: 1.0 else: 0.0)
     glUniform3f(
@@ -3283,6 +3407,9 @@ window.onFrame = proc() =
     glActiveTexture(GL_TEXTURE2)
     glBindTexture(GL_TEXTURE_2D, shadowTexture)
     glUniform1i(propShadowMapLocation, 2)
+    glActiveTexture(GL_TEXTURE4)
+    glBindTexture(GL_TEXTURE_2D, moonShadowTexture)
+    glUniform1i(propMoonShadowMapLocation, 4)
     glActiveTexture(GL_TEXTURE3)
     glBindTexture(GL_TEXTURE_2D, toonRampTexture)
     glUniform1i(propToonRampLocation, 3)
@@ -3303,14 +3430,25 @@ window.onFrame = proc() =
     glActiveTexture(GL_TEXTURE2)
     glBindTexture(GL_TEXTURE_2D, shadowTexture)
     glUniform1i(treeShadowMapLocation, 2)
+    glActiveTexture(GL_TEXTURE4)
+    glBindTexture(GL_TEXTURE_2D, moonShadowTexture)
+    glUniform1i(treeMoonShadowMapLocation, 4)
     glUniformMatrix4fv(
       treeLightMvpLocation, 1, GL_FALSE, cast[ptr float32](lightMvp.addr))
+    glUniformMatrix4fv(
+      treeMoonLightMvpLocation,
+      1,
+      GL_FALSE,
+      cast[ptr float32](moonLightMvp.addr)
+    )
     glUniform1f(treeShadowsEnabledLocation, if showShadows: 1.0 else: 0.0)
-    glUniform1f(treeShadowStrengthLocation, shadowStrength)
+    glUniform1f(treeShadowStrengthLocation, shadowStrength * dusk)
+    glUniform1f(treeMoonShadowStrengthLocation, moonFillStrength * dusk)
     glUniform1f(treeShadowBiasLocation, shadowBias)
     glUniform1f(treeShadowTexelLocation, shadowTexel)
     glUniform1f(treeShadowSoftnessLocation, shadowSoftness)
     glUniform1f(treeShadingStrengthLocation, shadingStrength)
+    glUniform1f(treeLightLevelLocation, lightLevel)
     glUniform3f(treeSunDirLocation, sunDir.x, sunDir.y, sunDir.z)
     glUniform1f(treeToonEnabledLocation, if showToon: 1.0 else: 0.0)
     glUniform3f(
@@ -3375,6 +3513,7 @@ window.onFrame = proc() =
     glUniformMatrix4fv(waterMvpLocation, 1, GL_FALSE, cast[ptr float32](mvp.addr))
     glUniform3f(waterCameraLocation, cameraEye.x, cameraEye.y, cameraEye.z)
     glUniform3f(waterSunDirLocation, sunDir.x, sunDir.y, sunDir.z)
+    glUniform1f(waterLightLevelLocation, lightLevel)
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
     glDepthMask(GL_FALSE)
@@ -3516,10 +3655,10 @@ window.onFrame = proc() =
         text "sun azimuth hint":
           characters "Swings shadows around the map"
         text "sun elevation label":
-          characters &"Elevation: {int(round(sunElevation))} deg"
-        scrubber "sunElevation", sunElevation, 10.0'f32, 85.0'f32, ""
+          characters &"Elevation: {int(round(solarElevation))} deg"
+        scrubber "sunElevation", sunElevation, 0.0'f32, 85.0'f32, ""
         text "sun elevation hint":
-          characters "Time of day; low is long shadows"
+          characters "Light fades -20 to -10 and 10 to 20"
         text "toon title":
           characters "Toon"
         checkBox "Toon shading", showToon
@@ -3536,6 +3675,11 @@ window.onFrame = proc() =
         scrubber "shadowStrength", shadowStrength, 0.0'f32, 1.0'f32, ""
         text "shadow strength hint":
           characters "1: shadows go pure black"
+        text "moon strength label":
+          characters &"Moonlight: {moonShadowStrength:0.2f}"
+        scrubber "moonShadowStrength", moonShadowStrength, 0.0'f32, 0.6'f32, ""
+        text "moon strength hint":
+          characters "Night moon casts; faint opposite by day"
         text "shading label":
           characters &"Shading: {shadingStrength:0.2f}"
         scrubber "shadingStrength", shadingStrength, 0.0'f32, 1.0'f32, ""

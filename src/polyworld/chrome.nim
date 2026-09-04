@@ -3,7 +3,7 @@
 import
   std/[math, times],
   chroma, pixie, silky, vmath, windy,
-  gameuis, inputs, rtscameras
+  gameuis, inputs, profiles, rtscameras
 
 const
   PanelAccent* = rgbx(83, 91, 108, 255)
@@ -682,3 +682,16 @@ proc drawDebugMenu*(sk: Silky, window: Window) =
       checkBox "Show tiles", showTiles
   finally:
     sk.endDsl()
+
+proc handleChromeKey*(button: Button): bool =
+  ## Handles shared debug keys. F1 toggles this menu, F2 starts or writes
+  ## a Fluffy trace.
+  case button
+  of KeyF1:
+    debugMenuOpen = not debugMenuOpen
+    true
+  of KeyF2:
+    toggleRuntimeTrace()
+    true
+  else:
+    false

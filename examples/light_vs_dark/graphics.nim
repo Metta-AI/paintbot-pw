@@ -1629,7 +1629,8 @@ proc runGraphics*() =
     of KeyC: actionCam.toggle(followSelection)
     of KeyT: scene.toggleShading()
     of KeyE: showTiles = not showTiles
-    of KeyF1: debugMenuOpen = not debugMenuOpen
+    of KeyF1, KeyF2:
+      discard handleChromeKey(button)
     of KeyV:
       if not playerMode():
         viewMode = (viewMode + 1) mod 3
