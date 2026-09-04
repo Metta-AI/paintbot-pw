@@ -123,22 +123,19 @@ marsh slot.
 
 ## Houses
 
-Neither toon kit ships a whole cottage, so `houses.nim` builds every
-house from the parts, the way golden valley's own prefab houses are
-built: a box of the kit's three metre wall panels standing on the ground
-with a post at each corner, plain, windowed, and one carrying the door;
-a plinth around the outside of that box, a course of small bricks sunk a
-little or a ring of heavy timber sills; the steep A-frame roof standing
-with its eave tips at shoulder height so the top of the walls hides
-inside it, ridge running front to back; and the plank gable piece above
-each end wall, stretched up so its rafters run parallel to the roof and
-its edge tucks under the roof, closing the triangle. A cottage is four
-or five segments of reed, slate, or shingle, with a chimney and a timber
-ridge crest each by coin flip and a per-house paint drift. One house in
-three is a longhouse: walls of meadow stone cubes three high with the
-door in a gap in the stone, under four segments of straw thatch tinted
-hard to turf with grass along the ridge and down both slopes, the viking
-sod house.
+Neither toon kit ships a whole cottage, so `houses.nim` builds them from
+the golden valley parts. A cottage first chooses one coherent style:
+thatch on one brick course, blue shingles on a timber sill, or the framed
+roof on the other brick course. Foundations never mix materials within a
+house. Their front runs leave an opening for the kit's complete framed-door
+wall module; plain and windowed panels fill the remaining walls, with each
+side and corner turned so its finished face points outside. The roof eaves
+overlap only the top of the three-metre walls. Length, window placement,
+paint drift, and compatible roof furniture provide the variation.
+
+One house in three is a longhouse: three coherent courses of meadow stone
+with a grounded door in their opening, under four joined segments of straw
+thatch tinted to turf with grass along the ridge and slopes.
 Every recipe is checked over a magenta ground for holes. The village
 pack houses are gone and the blocked footprint is five tiles square,
 which a ten metre house fills. The house lab,
