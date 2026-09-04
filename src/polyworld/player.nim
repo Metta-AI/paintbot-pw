@@ -157,7 +157,7 @@ proc reachedEnd(player: Player): bool =
     return true
   if player.live:
     return player.tick >= player.durationTicks
-  player.recordedTicks > 0 and player.tick >= player.recordedTicks
+  player.tick >= player.recordedTicks
 
 proc takeRestore*(player: var Player): int32 =
   ## Returns the tick to land on after a checkpoint restore, or -1.

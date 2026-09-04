@@ -184,7 +184,7 @@ invalid.rejects("players out of canonical order")
 
 invalid = decoded
 invalid.hashes.setLen(invalid.hashes.len - 1)
-invalid.rejects("a replay without one hash per tick")
+invalid.rejects("an action after the last recorded tick")
 
 invalid = decoded
 invalid.actions[0].tick = 13

@@ -842,4 +842,5 @@ proc runGraphics*() =
 
   while not window.closeRequested:
     pollEvents()
+  saveRecording()
   finishProfileTrace()

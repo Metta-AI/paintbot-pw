@@ -124,4 +124,12 @@ block:
   doAssert speedIndexOf(16) == 3
   doAssert speedIndexOf(64) == 3
 
+echo "Testing empty replay playback stays at tick zero"
+block:
+  var p = initPlayer(live = false, durationTicks = 100)
+  p.sync(0, 0, false)
+  p.startFrame(1.0, 24)
+  doAssert not p.shouldTick(epochTime())
+  doAssert not p.playing
+
 echo "Player tests passed"

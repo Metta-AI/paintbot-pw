@@ -746,7 +746,7 @@ proc runGraphics*() =
       live = not run.replayMode,
       durationTicks =
         if run.replayMode:
-          int32(run.replayData.header.setup.maximumTicks)
+          int32(run.replayData.hashes.len)
         else:
           options.maximumTicks,
       playing = not options.pauseOnStart,

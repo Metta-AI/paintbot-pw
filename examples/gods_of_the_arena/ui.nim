@@ -24,7 +24,7 @@ const
   ShopIcon = 32.0'f32
   WellPad = 4.0'f32
   WellSmall = IconSmall + WellPad * 2
-  ShopWell = ShopIcon + WellPad * 2
+  ShopWell = ShopIcon + 4
   BadgeSmall = 18.0'f32
   BadgeLarge = 64.0'f32
   ScoreHeaderXs = [14.0'f32, 115, 205]
@@ -83,7 +83,7 @@ const
   InventoryGoldY = 200.0'f32
   ShopColumns = 5
   ShopOrigin = vec2(14, 48)
-  ShopPitch = vec2(44, 37)
+  ShopPitch = vec2(44, ShopWell + 1)
 
 var shopOpen = false
 

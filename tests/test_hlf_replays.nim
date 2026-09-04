@@ -70,8 +70,8 @@ block rejections:
     data.header.setup.maximumTicks += 1),
     "a duration that disagrees with the day count was accepted"
   doAssert rejects(proc(data: var ReplayData) =
-    data.hashes.setLen(data.hashes.len - 1)),
-    "a missing tick hash was accepted"
+    data.hashes.setLen(data.hashes.len + 1)),
+    "hashes past the configured duration were accepted"
   doAssert rejects(proc(data: var ReplayData) =
     data.actions[0].playerId = uint8(VillagerCount)),
     "an unknown villager was accepted"

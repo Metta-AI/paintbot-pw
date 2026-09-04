@@ -47,8 +47,8 @@ proc parseGameOptions(): GameOptions =
     maximumTicks: DefaultDurationTicks,
     seed: DefaultSeed,
     speed: 1,
-    windowWidth: 1024,
-    windowHeight: 576
+    windowWidth: 1920,
+    windowHeight: 1080
   )
   let arguments = commandLineParams()
   var index = 0
@@ -102,6 +102,7 @@ block:
       raise newException(ReplayError,
         "this replay was recorded against different game tuning")
     run = newGame(gameMap, maximumTicks)
+    run.maximumTicks = int32(replayData.hashes.len)
     run.replayMode = true
     run.replayData = replayData
     run.replayPlayer = initReplayPlayer(replayData)
@@ -173,20 +174,15 @@ proc advanceGame*() =
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
 
-proc saveRecording*() =
-  ## Writes the recorded match, trimmed to the tick it actually ended on.
-  ##
-  ## Creates the destination directory first. Recording happens after the
-  ## whole match has run, so a missing directory would otherwise throw away
-  ## ten minutes of simulation at the very last step.
-  if run.recorder == nil or options.recordPath.len == 0:
+proc saveRecording*(path = options.recordPath) =
+  ## Saves every recorded tick, keeping the original match setup.
+  ## Creates the destination directory before writing the tape.
+  if run.recorder == nil or path.len == 0:
     return
-  run.recorder.data.header.setup.maximumTicks = uint32(run.world.tick)
-  run.recorder.data.hashes.setLen(run.world.tick)
-  let directory = options.recordPath.parentDir
+  let directory = path.parentDir
   if directory.len > 0:
     createDir(directory)
-  saveReplay(options.recordPath, run.recorder.data)
+  saveReplay(path, run.recorder.data)
 
 proc describeResult*(): string =
   ## One line naming the outcome and the score behind it.
@@ -241,11 +237,10 @@ proc runHeadless*() =
     if not run.replayPlayer.finished:
       echo "error: the replay still had commands left to run"
       quit(1)
-    if run.hashCheck.mismatches > 0:
-      echo &"error: {run.hashCheck.mismatches} state hash mismatches, " &
-        &"first at tick {run.hashCheck.firstTick} " &
-        &"(reproduce with --seed {run.mapSeed})"
-      quit(1)
+    run.hashCheck.requireReplayComplete(
+      uint32(run.world.tick),
+      run.replayData.hashes.len
+    )
     echo "  replay verified: every tick matched its recorded hash"
   else:
     saveRecording()

@@ -125,4 +125,22 @@ block:
   player.syncCursor(0)
   doAssert not player.finished
 
+echo "Testing replay completion rejects divergence and missing ticks"
+block:
+  var check: ReplayHashCheck
+  check.requireReplayComplete(0, 0)
+  check.requireReplayComplete(2, 2)
+  for tick in [1'u32, 3'u32]:
+    try:
+      check.requireReplayComplete(tick, 2)
+      doAssert false, "playback must consume exactly the recorded ticks"
+    except ReplayError:
+      discard
+  check = ReplayHashCheck(mismatches: 1, firstTick: 2)
+  try:
+    check.requireReplayComplete(2, 2)
+    doAssert false, "a hash mismatch must fail replay verification"
+  except ReplayError as error:
+    doAssert error.msg.contains("first at tick 2")
+
 echo "Tape tests passed"

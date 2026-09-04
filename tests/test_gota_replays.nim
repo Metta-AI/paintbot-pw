@@ -134,10 +134,10 @@ except ReplayError:
   discard
 
 invalid = decoded
-invalid.hashes.setLen(invalid.hashes.len - 1)
+invalid.hashes.setLen(18)
 try:
   discard invalid.encodeReplay()
-  doAssert false, "a replay without one hash per tick should fail"
+  doAssert false, "an action after the last recorded tick should fail"
 except ReplayError:
   discard
 

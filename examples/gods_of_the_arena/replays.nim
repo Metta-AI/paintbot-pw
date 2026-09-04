@@ -183,8 +183,8 @@ proc validate*(data: ReplayData) =
     fail("replay action limit exceeded")
   if data.hashes.len > MaxReplayHashes:
     fail("replay hash limit exceeded")
-  if data.hashes.len != int(setup.maximumTicks):
-    fail("replay must contain exactly one hash per simulation tick")
+  if data.hashes.len > int(setup.maximumTicks):
+    fail("replay hashes exceed the configured duration")
   for i, hero in setup.heroes:
     if hero.team > 1 or hero.lane > 2 or
         hero.class > uint8(HeroClass.high.ord):
@@ -194,6 +194,8 @@ proc validate*(data: ReplayData) =
         fail("replay setup contains a duplicate hero ID")
   var lastTick = 0'u32
   for i, action in data.actions:
+    if action.tick > uint32(data.hashes.len):
+      fail("replay action exceeds the recorded duration")
     if i > 0 and action.tick < lastTick:
       fail("replay actions move backward in time")
     if setup.maximumTicks > 0 and action.tick > setup.maximumTicks:

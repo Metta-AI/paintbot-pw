@@ -303,4 +303,34 @@ block:
     doAssert not (tile.x == 2 and tile.z == 1),
       "a cheap detour must beat a taxed centre tile"
 
+echo "Testing custom edge costs keep the cheapest route"
+block:
+  proc taxMiddle(layer, x, z: int): int32 {.nimcall.} =
+    ## Adds a small surcharge that a two-step detour can avoid.
+    if x == 2 and z == 1:
+      10
+    else:
+      0
+
+  layers = @[flatLayer(0, 0, 5, 3, 0)]
+  computeWalkable()
+  for stepCost in [1'i32, 2'i32, 32'i32]:
+    let found = findTilePath(PathQuery(
+      startLayer: 0,
+      startX: 0,
+      startZ: 1,
+      finishLayer: 0,
+      finishX: 4,
+      finishZ: 1,
+      orthogonalCost: stepCost,
+      enterCost: taxMiddle
+    ))
+    doAssert found.complete
+    var cost = 0'i32
+    for i in 1 ..< found.tiles.len:
+      let tile = found.tiles[i]
+      cost += stepCost + taxMiddle(tile.layer, tile.x, tile.z)
+    doAssert cost == min(stepCost * 6, stepCost * 4 + 10),
+      "custom edge costs returned a more expensive route"
+
 echo "Tile path tests passed"

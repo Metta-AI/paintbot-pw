@@ -677,9 +677,15 @@ proc searchEdges(query: PathQuery): PathKeys =
     goalPathY = int64(nodePathYs[goalKey])
     goalPathZ = int64(nodePathZs[goalKey])
   template distanceToGoal(node: int): int64 =
-    abs(int64(nodePathXs[node]) - goalPathX) +
-      abs(int64(nodePathYs[node]) - goalPathY) +
-      abs(int64(nodePathZs[node]) - goalPathZ)
+    block:
+      let
+        key = node
+        planar = abs(int64(nodePathXs[key]) - goalPathX) +
+          abs(int64(nodePathZs[key]) - goalPathZ)
+      if query.orthogonalCost > 0:
+        planar div int64(PathUnitsPerTile) * int64(query.orthogonalCost)
+      else:
+        planar + abs(int64(nodePathYs[key]) - goalPathY)
   beginSearch()
   let generation = pathGeneration
   clearFrontier(pathFrontierEdges)

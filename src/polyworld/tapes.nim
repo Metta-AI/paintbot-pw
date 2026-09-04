@@ -174,7 +174,8 @@ type
     setup*: Setup
 
   ActionTape*[Setup, Action] = object
-    ## Commands plus one hash per tick. `Setup` must have `maximumTicks`.
+    ## Hash count is the recorded duration, up to `setup.maximumTicks`.
+    ## Setup stays unchanged when a match ends early or playback rewinds.
     header*: TapeHeader[Setup]
     actions*: seq[Action]
     hashes*: seq[uint64]
@@ -279,6 +280,20 @@ proc checkReplayHash*(
     "replay hash mismatch at tick " & $tick & ": expected " &
     expected.toHex(16) & ", got " & actual.toHex(16)
   echo "error: ", check.error
+
+proc requireReplayComplete*(
+    check: ReplayHashCheck,
+    tick: uint32,
+    recordedTicks: int
+) =
+  ## Rejects incomplete playback or any recorded hash divergence.
+  if uint64(tick) != uint64(recordedTicks):
+    fail("replay simulation ended at a different tick")
+  if check.mismatches > 0:
+    fail(
+      $check.mismatches & " replay hash mismatches, first at tick " &
+      $check.firstTick
+    )
 
 proc initActionTape*[Setup, Action](
     setup: Setup,

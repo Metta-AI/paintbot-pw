@@ -24,6 +24,10 @@ jobs:
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
       - run: nim r tests/tests.nim
       - run: nim r tests/test_gota_sim.nim -- --bot:examples/gods_of_the_arena/players/base.bas:10
+      - run: nim r -d:headless tests/test_recordings.nim --bot examples/call_to_adventure/players/base.bas:4
+      - run: nim r -d:headless -d:recordGota tests/test_recordings.nim --bot examples/gods_of_the_arena/players/base.bas:10
+      - run: nim r -d:headless -d:recordHlf tests/test_recordings.nim --bot examples/heartleaf/players/base.bas:9
+      - run: nim r -d:headless -d:recordLvd tests/test_recordings.nim --bot examples/light_vs_dark/players/base.bas:2
       - run: nim c -d:headless examples/gods_of_the_arena/gota.nim
       - run: nim c -d:headless examples/call_to_adventure/cta.nim
       - run: nim c -d:headless examples/light_vs_dark/lvd.nim

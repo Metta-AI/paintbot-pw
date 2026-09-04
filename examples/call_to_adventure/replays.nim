@@ -132,10 +132,12 @@ proc validate*(data: ReplayData) =
   data.header.setup.validateSetup()
   if data.actions.len > MaxReplayActions:
     fail("replay action limit exceeded")
-  if data.hashes.len != int(data.header.setup.maximumTicks):
-    fail("replay must contain exactly one hash per simulation tick")
+  if data.hashes.len > int(data.header.setup.maximumTicks):
+    fail("replay hashes exceed the configured duration")
   var lastTick = 0'u32
   for index, action in data.actions:
+    if action.tick > uint32(data.hashes.len):
+      fail("replay action exceeds the recorded duration")
     if index > 0 and action.tick < lastTick:
       fail("replay actions move backward in time")
     action.validateAction(data.header.setup)

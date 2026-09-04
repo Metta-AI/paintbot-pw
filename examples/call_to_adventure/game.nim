@@ -43,8 +43,8 @@ proc parseGameOptions(): GameOptions =
     seconds: DefaultMinutes * 60,
     maximumTicks: DefaultDurationTicks,
     speed: 1,
-    windowWidth: 1024,
-    windowHeight: 576
+    windowWidth: 1920,
+    windowHeight: 1080
   )
   let arguments = commandLineParams()
   var index = 0
@@ -115,13 +115,12 @@ proc advanceGame*() =
   elif run.recorder != nil:
     run.recorder.recordHash(run.stateHash())
 
-proc saveRecording*() =
+proc saveRecording*(path = options.recordPath) =
   ## Finalizes and writes a requested action replay.
-  if run.recorder == nil or options.recordPath.len == 0:
+  if run.recorder == nil or path.len == 0:
     return
-  run.recorder.data.header.setup.maximumTicks = uint32(run.world.tick)
-  saveReplay(options.recordPath, run.recorder.data)
-  echo &"replay saved: {options.recordPath} " &
+  saveReplay(path, run.recorder.data)
+  echo &"replay saved: {path} " &
     &"({run.recorder.data.actions.len} actions)"
 
 proc summarize*(game: Game) =
@@ -195,11 +194,11 @@ proc runHeadless*() =
         ReplayError,
         "replay simulation did not consume every action"
       )
-    if run.hashCheck.mismatches > 0:
-      echo &"error: {run.hashCheck.mismatches} replay hash mismatches, " &
-        &"first at tick {run.hashCheck.firstTick}"
-    else:
-      echo "replay verified: every tick matched"
+    run.hashCheck.requireReplayComplete(
+      uint32(run.world.tick),
+      run.replayData.hashes.len
+    )
+    echo "replay verified: every tick matched"
   else:
     saveRecording()
     for slot in 0 ..< PartySize:
@@ -213,9 +212,12 @@ if options.replayPath.len > 0:
   profileBlock "replay":
     replayData = loadReplay(options.replayPath)
   options.seed = replayData.header.setup.seed
-  options.maximumTicks = int32(replayData.header.setup.maximumTicks)
+  options.maximumTicks = int32(replayData.hashes.len)
   profileBlock "map":
-    run = newGame(options.seed, options.maximumTicks)
+    run = newGame(
+      options.seed,
+      int32(replayData.header.setup.maximumTicks)
+    )
   run.replayMode = true
   run.replayData = replayData
   run.replayPlayer = initReplayPlayer(replayData)

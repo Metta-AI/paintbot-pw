@@ -2439,7 +2439,7 @@ proc tickWorld*(game: Game, onHeroTurn: proc() {.closure.}) {.measure.} =
   if world.gameOver:
     return
   if game.replayMode and
-      uint32(world.tick) >= game.replayData.header.setup.maximumTicks:
+      world.tick >= game.replayData.hashes.len:
     return
 
   dec world.spawnTimerTicks
