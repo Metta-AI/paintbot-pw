@@ -376,7 +376,9 @@ proc terrainFrag(
 
 ## Water shader: transparent blue with a Blinn-Phong specular highlight.
 
-var cameraPos: Uniform[Vec3]
+var
+  cameraPos: Uniform[Vec3]
+  waterNormals: Uniform[Sampler2dArray]
 
 proc waterVert(
     gl_Position: var Vec4,
@@ -397,9 +399,23 @@ proc waterFrag(
 ) =
   ## Shades transparent water with a view-dependent highlight.
   let
+    normalA: Vec3 = texture(waterNormals, vec3(
+      worldPos.x * 0.08, worldPos.z * 0.08, 0.0)).xyz * 2.0 - vec3(1.0)
+    normalB: Vec3 = texture(waterNormals, vec3(
+      worldPos.z * -0.13, worldPos.x * 0.13, 1.0)).xyz * 2.0 - vec3(1.0)
+    detailNormal: Vec3 = normalize(vec3(
+      normalA.x + normalB.x,
+      normalA.z + normalB.z,
+      normalA.y + normalB.y
+    ))
+    surfaceNormal: Vec3 = normalize(mix(
+      normalize(waterNormal),
+      detailNormal,
+      clamp(waterNormal.y, 0.0, 1.0) * 0.38
+    ))
     specular = pow(
     max(dot(
-      normalize(waterNormal),
+      surfaceNormal,
       normalize(normalize(cameraPos - worldPos) + envLightDirection)
     ), 0.0),
     48.0)
@@ -724,9 +740,10 @@ var
   groundRingValues = vec4(0)
   groundRingShapeValues = vec3(0)
   waterProgram: GLuint
-  waterMvpLocation, waterCameraLocation: GLint
+  waterMvpLocation, waterCameraLocation, waterNormalsLocation: GLint
   waterVisibilityTexLocation: GLint
   waterVisibilityOffsetLocation, waterVisibilityScaleLocation: GLint
+  waterNormalTextureArray: GLuint
   propProgram: GLuint
   propMvpLocation, propVisibilityTexLocation: GLint
   propVisibilityOffsetLocation, propVisibilityScaleLocation: GLint
@@ -1395,6 +1412,7 @@ proc drawProp*(
 
 const
   TerrainTextureSize = 1024
+  WaterNormalTextures = ["water_1_normal", "water_2_normal"]
   TerrainMaterials = [
     "grass",
     "sand",
@@ -1530,6 +1548,13 @@ proc loadTerrainMaterials(): seq[seq[Image]] =
       for i in 0 ..< colors[level].data.len:
         colors[level].data[i].a = heights[level].data[i].r
     result.add colors
+
+proc loadWaterNormals(): seq[seq[Image]] =
+  ## Water detail uses the same mipmapped texture-array path as terrain and
+  ## trees, with one shared-data image per layer.
+  for name in WaterNormalTextures:
+    result.add mipChain(readImage(
+      &"{DataRoot}/terrain/water_normals/{name}.jpg"))
 
 proc setTerrainMaterial*(index: int, color, height: Image) =
   ## Replaces one material layer with a generated basecolor and height map,
@@ -2585,6 +2610,7 @@ proc initTerrain*() =
   )
   terrainTextureArray = buildTextureArray(loadTerrainMaterials(), GL_REPEAT.GLint)
   treeTextureArray = buildTextureArray(loadTreeTextures(), GL_CLAMP_TO_EDGE.GLint)
+  waterNormalTextureArray = buildTextureArray(loadWaterNormals(), GL_REPEAT.GLint)
   glGenTextures(1, visibilityTexture.addr)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glTexImage2D(
@@ -2628,6 +2654,7 @@ proc initTerrain*() =
   waterMvpLocation = glGetUniformLocation(waterProgram, "mvp")
   waterEnv = envLocations(waterProgram)
   waterCameraLocation = glGetUniformLocation(waterProgram, "cameraPos")
+  waterNormalsLocation = glGetUniformLocation(waterProgram, "waterNormals")
   waterVisibilityTexLocation = glGetUniformLocation(
     waterProgram,
     "visibilityTex"
@@ -3121,6 +3148,9 @@ proc drawWater*(viewProjection: Mat4, cameraEye: Vec3) =
     waterVisibilityScaleLocation,
     1.0'f32 / GridTiles.float32
   )
+  glActiveTexture(GL_TEXTURE0)
+  glBindTexture(GL_TEXTURE_2D_ARRAY, waterNormalTextureArray)
+  glUniform1i(waterNormalsLocation, 0)
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(waterVisibilityTexLocation, 1)
