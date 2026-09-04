@@ -7,38 +7,74 @@ import
   content, sim, game, controls
 
 const
-  PanelScore = vec2(353, 150)
-  PanelResources = vec2(700, 90)
-  PanelMinimap = vec2(320, 372)
-  PanelSelection = vec2(488, 250)
-  PanelBuild = vec2(642, 283)
+  ## Plate sizes and inner offsets are laid out for a 1920 wide layout at
+  ## UI scale 1.
+  PanelScore = vec2(298, 104)
+  PanelResources = vec2(432, 56)
+  PanelMinimap = vec2(282, 320)
+  PanelSelection = vec2(364, 225)
+  PanelBuild = vec2(358, 226)
   ResourceColors = [
     rgbx(232, 196, 86, 255),
     rgbx(196, 168, 120, 255),
     rgbx(160, 200, 160, 255)
   ]
   HudClearance = 48.0'f32
+  ## Icons draw at power-of-two sizes so the 128 and 256 px source art
+  ## lands on exact mip levels and stays crisp.
+  IconTiny = 16.0'f32
+  IconSmall = 64.0'f32
+  IconLarge = 128.0'f32
+  WellPad = 4.0'f32
+  WellSmall = IconSmall + WellPad * 2
+  WellLarge = IconLarge + WellPad * 2
+  IconTint = rgbx(245, 230, 190, 255)
+  ScoreIcons = ["tower", "kills", "deaths"]
+  ScoreHeaderXs = [14.0'f32, 115, 205]
+  ScoreHeaderY = 11.0'f32
+  ScoreValueXs = [43.0'f32, 133, 223]
+  ScoreValueW = 40.0'f32
+  ScoreRowYs = [31.0'f32, 61]
+  ScoreRowH = 25.0'f32
+  ScoreIconLift = 4.0'f32
   CommandTabs = ["BUILD", "UNITS", "UPGRADES"]
-  ViewLabels = ["A", "L", "D", "*"]
+  ViewLabels = ["A", "L", "D"]
   ResourceIcons = ["gold", "wood", "food"]
   CommandTabIcons = ["build", "units", "research"]
+  ResourceCellXs = [12.0'f32, 151, 290]
+  ResourceCellY = 14.0'f32
+  ResourceCell = vec2(130, 28)
+  MinimapMap = vec2(14, 12)
+  MinimapMapSize = 256.0'f32
+  MinimapRowY = 274.0'f32
+  MinimapClockX = 60.0'f32
+  ViewButtonXs = [152.0'f32, 195, 238]
+  ViewButtonSize = 32.0'f32
+  SelectionPortrait = vec2(14, 15)
+  SelectionBarY = 159.0'f32
+  SelectionNameY = 185.0'f32
+  SelectionIcon = 48.0'f32
+  SelectionWell = SelectionIcon + WellPad * 2
   SelectionGrid = [
-    vec2(214, 34), vec2(280, 34), vec2(345, 34), vec2(410, 34),
-    vec2(214, 101), vec2(280, 101), vec2(345, 101), vec2(410, 101),
-    vec2(214, 167), vec2(280, 167), vec2(345, 167), vec2(410, 167)
+    vec2(162, 14), vec2(228, 14), vec2(294, 14),
+    vec2(162, 78), vec2(228, 78), vec2(294, 78),
+    vec2(162, 142), vec2(228, 142), vec2(294, 142)
   ]
-  SelectionSlotSize = vec2(56, 56)
+  GridBarH = 12.0'f32
+  HealthColor = rgbx(70, 190, 95, 255)
   BuildGrid = [
-    vec2(25, 66), vec2(133, 66), vec2(240, 66), vec2(349, 66),
-    vec2(457, 66),
-    vec2(25, 172), vec2(133, 172), vec2(240, 172), vec2(349, 172),
-    vec2(457, 172)
+    vec2(20, 54), vec2(102, 54), vec2(184, 54), vec2(266, 54),
+    vec2(20, 136), vec2(102, 136), vec2(184, 136), vec2(266, 136)
   ]
-  BuildSlotSize = vec2(91, 91)
+  CostFill = rgbx(12, 14, 20, 200)
+  CostIconX = 7.0'f32
+  CostLabelX = 23.0'f32
+  CostLabelW = 41.0'f32
+  CostRowYs = [27.0'f32, 48]
   CommandTabX = 20.0'f32
-  CommandTabY = 16.0'f32
-  CommandTabW = 196.0'f32
-  CommandTabH = 34.0'f32
+  CommandTabY = 12.0'f32
+  CommandTabW = 102.0'f32
+  CommandTabH = 28.0'f32
   CommandTabGap = 4.0'f32
   CommandTabLift = 4.0'f32
 
@@ -75,20 +111,15 @@ proc buildingPortraitKey*(player: int32, kind: BuildingKind): string =
   ## Returns the atlas name packed from one building's profile PNG.
   buildingPortraitKeys[max(player, 0)][kind]
 
-proc coverSquare(well: GameUiPanel, pad = 4.0'f32): GameUiPanel =
-  ## Returns a centered square inset inside a portrait well.
-  let side = min(well.size.x, well.size.y) - pad * 2
-  result.size = vec2(max(side, 1))
-  result.origin = well.origin + (well.size - result.size) * 0.5'f32
-
 proc drawPortrait(
     sk: Silky,
     well: GameUiPanel,
     key: string,
+    iconSize: float32,
     color = rgbx(255, 255, 255, 255)
 ) =
-  ## Draws a profile sprite inside a well after the plate.
-  sk.drawWellImage(well, key, color)
+  ## Draws a profile sprite at a fixed size centered in a well.
+  sk.drawWellImage(well, key, color, iconSize = iconSize)
 
 proc commandPlayer(viewMode: int32): int32 =
   ## Returns the side whose build and train locks the HUD should show.
@@ -193,22 +224,6 @@ proc playerColor(player: int32): ColorRGBX =
     rgbx(80, 140, 230, 255)
   else:
     rgbx(210, 80, 85, 255)
-
-const
-  UnitStateNames: array[UnitState, string] = [
-    "UnitIdle", "UnitMoving", "UnitChasing", "UnitAttacking",
-    "UnitToMine", "UnitInMine", "UnitToDropGold", "UnitDepositGold",
-    "UnitToTree", "UnitChopping", "UnitToDropWood", "UnitDepositWood",
-    "UnitToBuild", "UnitBuilding", "UnitDying"
-  ]
-  BuildingStateNames: array[BuildingState, string] = [
-    "BuildingUnderConstruction", "BuildingComplete", "BuildingDying"
-  ]
-
-proc gatherRate(gathered: int64): int32 =
-  ## Estimates one resource's gather rate in units per game minute.
-  let ticks = max(run.world.tick, TickRate)
-  int32(gathered * 60'i64 * int64(TickRate) div int64(ticks))
 
 proc clockHour*(): float32 =
   ## The accelerated spectator clock in hours, 0 ..< 24 with a fraction:
@@ -343,13 +358,11 @@ proc shownBuilding(structure: Building, viewMode: int32): bool =
     return true
   run.world.buildingVisible(viewMode - 1, structure)
 
-proc minimapWell(panel: GameUiPanel): GameUiPanel =
-  ## Returns the chrome well that holds the minimap.
-  panel.imageSlot(12, 12, panel.size.x - 24, panel.size.y - 80)
-
 proc minimapMap(panel: GameUiPanel): GameUiPanel =
-  ## Returns the square map centered in the minimap well.
-  coverSquare(panel.minimapWell(), 0)
+  ## Returns the 256 px square map inside the minimap plate.
+  panel.imageSlot(
+    MinimapMap.x, MinimapMap.y, MinimapMapSize, MinimapMapSize
+  )
 
 proc minimapPoint(tile: Tile2, area: GameUiPanel): Vec2 =
   ## Converts one map tile into a point on the minimap.
@@ -432,56 +445,49 @@ proc drawScoreRow(
       int(run.world.players[enemy].unitsLost),
       int(run.world.players[player].unitsLost)
     ]
-  sk.drawRect(origin + vec2(0, y + 4), vec2(12, 12), color)
-  var x = 18.0'f32
-  for i, label in ["TOWERS", "KILLS", "DEATHS"]:
-    sk.drawLabel(
-      label,
-      origin + vec2(x, y),
-      vec2(48, 20),
-      rgbx(166, 174, 190, 255),
-      "Small"
-    )
+  sk.drawSprite(
+    if player == LightPlayer: "alliance" else: "hostile",
+    origin + vec2(ScoreHeaderXs[0], y + ScoreIconLift),
+    vec2(IconTiny),
+    color
+  )
+  for i, x in ScoreValueXs:
     writeInt(hudScratch, values[i])
     sk.drawLabel(
       hudScratch,
-      origin + vec2(x + 48, y),
-      vec2(22, 20),
-      color
+      origin + vec2(x, y),
+      vec2(ScoreValueW, ScoreRowH),
+      color,
+      "Default",
+      CenterAlign
     )
-    x += 72
 
 proc drawSlotCosts(
     sk: Silky,
-    origin,
-    size: Vec2,
+    slot: GameUiPanel,
     gold,
     wood: int32
 ) =
-  ## Draws gold and lumber costs on one command portrait.
-  sk.drawRect(
-    origin + vec2(0, size.y - 36),
-    vec2(size.x, 36),
-    rgbx(12, 14, 20, 200)
-  )
-  sk.drawSprite("gold", origin + vec2(6, size.y - 34), vec2(14))
-  writeInt(hudScratch, gold.int)
-  sk.drawLabel(
-    hudScratch,
-    origin + vec2(22, size.y - 36),
-    vec2(size.x - 28, 18),
-    rgbx(232, 196, 86, 255),
-    "Small"
-  )
-  sk.drawSprite("wood", origin + vec2(6, size.y - 18), vec2(14))
-  writeInt(hudScratch, wood.int)
-  sk.drawLabel(
-    hudScratch,
-    origin + vec2(22, size.y - 18),
-    vec2(size.x - 28, 18),
-    rgbx(196, 168, 120, 255),
-    "Small"
-  )
+  ## Draws gold and lumber costs over one hovered command portrait.
+  if not sk.hovered(slot):
+    return
+  let inner = slot.inset(WellPad)
+  sk.drawRect(inner.origin, inner.size, CostFill)
+  for i, value in [gold, wood]:
+    sk.drawSprite(
+      ResourceIcons[i],
+      slot.origin + vec2(CostIconX, CostRowYs[i] + 1),
+      vec2(IconTiny)
+    )
+    writeInt(hudScratch, value.int)
+    sk.drawLabel(
+      hudScratch,
+      slot.origin + vec2(CostLabelX, CostRowYs[i]),
+      vec2(CostLabelW, 18),
+      ResourceColors[i],
+      "Small",
+      RightAlign
+    )
 
 proc drawUi*(
     sk: Silky,
@@ -505,39 +511,43 @@ proc drawUi*(
     buildPanel = sk.beginFrame(chrome.build)
     light = run.world.players[LightPlayer]
 
-  sk.drawLabel(
-    "WHO IS WINNING NOW?",
-    scorePanel.origin + vec2(16, 8),
-    vec2(320, 28),
-    rgbx(224, 80, 83, 255),
-    "Small"
-  )
-  sk.drawScoreRow(scorePanel.origin + vec2(16, 0), LightPlayer, 48)
-  sk.drawScoreRow(scorePanel.origin + vec2(16, 0), DarkPlayer, 96)
+  for i, label in ["TOWERS", "KILLS", "DEATHS"]:
+    let pos = scorePanel.origin + vec2(ScoreHeaderXs[i], ScoreHeaderY)
+    sk.drawSprite(
+      ScoreIcons[i], pos + vec2(0, 1), vec2(IconTiny), IconTint
+    )
+    sk.drawLabel(
+      label,
+      pos + vec2(IconTiny + 4, 0),
+      vec2(68, 20),
+      rgbx(166, 174, 190, 255),
+      "Hud"
+    )
+  sk.drawScoreRow(scorePanel.origin, LightPlayer, ScoreRowYs[0])
+  sk.drawScoreRow(scorePanel.origin, DarkPlayer, ScoreRowYs[1])
 
   let resourceRows = [
-    ("GOLD", light.gold, gatherRate(light.goldGathered)),
-    ("WOOD", light.wood, gatherRate(light.woodGathered)),
-    ("FOOD", light.foodUsed, 0'i32)
+    ("GOLD", light.gold),
+    ("WOOD", light.wood),
+    ("FOOD", light.foodUsed)
   ]
-  const ResourceCell = vec2(216, 62)
   for i, row in resourceRows:
     let
       cell = resourcePanel.imageSlot(
-        12 + i.float32 * (ResourceCell.x + 10),
-        14,
+        ResourceCellXs[i],
+        ResourceCellY,
         ResourceCell.x,
         ResourceCell.y
       )
     sk.drawFaintFrame(cell)
     sk.drawSprite(
       ResourceIcons[i],
-      cell.origin + vec2(10, 22),
-      vec2(18)
+      cell.origin + vec2(7, 6),
+      vec2(IconTiny)
     )
     sk.drawLabel(
       row[0],
-      cell.origin + vec2(34, 8),
+      cell.origin + vec2(32, 5),
       vec2(70, 20),
       rgbx(166, 174, 190, 255),
       "Small"
@@ -548,44 +558,30 @@ proc drawUi*(
       writeAmount(hudScratch, row[1].int)
     sk.drawLabel(
       hudScratch,
-      cell.origin + vec2(34, 30),
-      vec2(90, 24),
+      cell.origin + vec2(65, 2),
+      vec2(60, 24),
       ResourceColors[i],
-      "Hud"
+      "Hud",
+      RightAlign
     )
-    if i < 2:
-      hudScratch.setLen(0)
-      hudScratch.add '+'
-      hudScratch.addHudInt(row[2].int)
-      hudScratch.add " /m"
-      sk.drawLabel(
-        hudScratch,
-        cell.origin + vec2(128, 30),
-        vec2(76, 24),
-        rgbx(120, 196, 90, 255),
-        "Small"
-      )
 
   let hudTime = currentHudTime()
   sk.drawSprite(
     if hudTime.hour < 6 or hudTime.hour >= 18: "night" else: "day",
-    minimapPanel.origin + vec2(16, minimapPanel.size.y - 60),
-    vec2(16)
+    minimapPanel.origin + vec2(12, MinimapRowY + 2),
+    vec2(ViewButtonSize)
   )
   writeClock(hudScratch, hudTime.hour, hudTime.minute)
   sk.drawLabel(
     hudScratch,
-    minimapPanel.origin + vec2(38, minimapPanel.size.y - 64),
+    minimapPanel.origin + vec2(MinimapClockX, MinimapRowY + 6),
     vec2(80, 24),
     rgbx(247, 221, 143, 255),
     "Small"
   )
-  let
-    well = minimapPanel.minimapWell()
-    area = minimapPanel.minimapMap()
+  let area = minimapPanel.minimapMap()
   const MapSampleStride = 2'i32
   let cell = area.size.x / float32(GridSide)
-  sk.drawFrame(well)
   sk.drawFrame(area)
   for y in countup(0'i32, GridSide - 1, MapSampleStride):
     for x in countup(0'i32, GridSide - 1, MapSampleStride):
@@ -628,21 +624,13 @@ proc drawUi*(
       playerColor(unit.owner)
     )
   sk.drawMinimapCamera(window, area, cameraTarget, cameraDistance)
-  for index in 0 .. 3:
+  for index, x in ViewButtonXs:
     let
       button = minimapPanel.imageSlot(
-        128 + index.float32 * 46,
-        minimapPanel.size.y - 64,
-        42,
-        52
+        x, MinimapRowY, ViewButtonSize, ViewButtonSize
       )
       hot = viewMode == int32(index)
-    if hot:
-      sk.drawRect(
-        button.origin + vec2(4),
-        button.size - vec2(8),
-        rgbx(64, 84, 122, 180)
-      )
+    sk.drawSlot(button, selected = hot)
     sk.drawLabel(
       ViewLabels[index],
       button.origin,
@@ -651,7 +639,7 @@ proc drawUi*(
       "Small",
       CenterAlign
     )
-    if index < 3 and window.clicked(sk, button):
+    if window.clicked(sk, button):
       if options.playerSlot == 0:
         viewMode = int32(index)
 
@@ -659,31 +647,25 @@ proc drawUi*(
       (not run.world.hasUnit(primaryId) and
         not run.world.hasBuilding(primaryId)):
     primaryId = NoEntity
+  # The first selection fills the main portrait; the rest fill the grid.
   var
     portraitKey = ""
     portraitHp = 0'i32
     portraitMax = 1'i32
     portraitId = primaryId
     portraitName = "NO SELECTION"
-    portraitStatus = ""
-  for id in selectedIds:
-    if id.isUnitId and run.world.hasUnit(id):
-      portraitId = id
-      break
+  if portraitId == NoEntity:
+    for id in selectedIds:
+      if (id.isUnitId and run.world.hasUnit(id)) or
+          (id.isBuildingId and run.world.hasBuilding(id)):
+        portraitId = id
+        break
   if portraitId.isUnitId and run.world.hasUnit(portraitId):
     let unit = run.world.units[run.world.unitIndex(portraitId)]
     portraitKey = unitPortraitKey(unit.owner, unit.kind)
     portraitHp = unit.hp
     portraitMax = UnitTable[unit.owner][unit.kind].hp
     portraitName = unit.kind.unitName(unit.owner)
-    hudScratch.setLen(0)
-    hudScratch.add UnitStateNames[unit.state]
-    hudScratch.add "  "
-    hudScratch.addAmount(unit.carryGold.int)
-    hudScratch.add "g "
-    hudScratch.addAmount(unit.carryWood.int)
-    hudScratch.add 'w'
-    portraitStatus = hudScratch
   elif portraitId != NoEntity and run.world.hasBuilding(portraitId):
     let structure = run.world.buildings[
       run.world.buildingIndex(portraitId)
@@ -695,30 +677,25 @@ proc drawUi*(
     portraitHp = structure.hp
     portraitMax = max(structure.maxHp, 1)
     portraitName = structure.kind.buildingName(structure.owner)
-    if structure.kind == GoldMineBuilding:
-      hudScratch.setLen(0)
-      hudScratch.add "Gold left "
-      hudScratch.addAmount(structure.goldLeft.int)
-      portraitStatus = hudScratch
-    elif structure.state == BuildingUnderConstruction:
-      portraitStatus = "Building"
-    elif structure.queueLength > 0:
-      portraitStatus = "Training"
-    else:
-      portraitStatus = BuildingStateNames[structure.state]
   let
-    selectPortrait = selectionPanel.imageSlot(18, 15, 169, 136)
-    selectBar = selectionPanel.imageSlot(18, 160, 169, 23)
-    selectName = selectionPanel.imageSlot(18, 186, 169, 22)
-    selectStatus = selectionPanel.imageSlot(18, 208, 169, 32)
-  sk.drawPortrait(selectPortrait, portraitKey)
+    selectPortrait = selectionPanel.imageSlot(
+      SelectionPortrait.x, SelectionPortrait.y, WellLarge, WellLarge
+    )
+    textX = SelectionPortrait.x + WellPad
+    selectBar = selectionPanel.imageSlot(
+      textX, SelectionBarY, IconLarge, 23
+    )
+    selectName = selectionPanel.imageSlot(
+      textX, SelectionNameY, IconLarge, 22
+    )
+  sk.drawPortrait(selectPortrait, portraitKey, IconLarge)
   writeRatio(hudScratch, portraitHp.int, portraitMax.int)
   sk.drawValueBar(
     selectBar.origin,
     selectBar.size,
     portraitHp.float32,
     portraitMax.float32,
-    rgbx(70, 190, 95, 255),
+    HealthColor,
     hudScratch
   )
   sk.drawLabel(
@@ -728,40 +705,34 @@ proc drawUi*(
     rgbx(226, 230, 239, 255),
     "Small"
   )
-  if portraitStatus.len > 0:
-    sk.drawLabel(
-      portraitStatus,
-      selectStatus.origin,
-      selectStatus.size,
-      rgbx(166, 174, 190, 255),
-      "Small"
-    )
   var
     shown = 0
     clickedId = NoEntity
   for id in selectedIds:
-    if shown >= 10:
+    if shown >= SelectionGrid.len:
       break
-    if not id.isUnitId or not run.world.hasUnit(id):
+    if id == portraitId or not id.isUnitId or not run.world.hasUnit(id):
       continue
     let
       unit = run.world.units[run.world.unitIndex(id)]
       slot = selectionPanel.imageSlot(
         SelectionGrid[shown].x,
         SelectionGrid[shown].y,
-        SelectionSlotSize.x,
-        SelectionSlotSize.y
+        SelectionWell,
+        SelectionWell
       )
     sk.drawPortrait(
       slot,
-      unitPortraitKey(unit.owner, unit.kind)
+      unitPortraitKey(unit.owner, unit.kind),
+      SelectionIcon
     )
-    if id == primaryId:
-      sk.drawRect(
-        slot.origin,
-        vec2(slot.size.x, 3),
-        rgbx(238, 216, 120, 255)
-      )
+    sk.drawBar(
+      slot.origin + vec2(WellPad, slot.size.y - GridBarH),
+      vec2(SelectionIcon, GridBarH),
+      unit.hp.float32,
+      UnitTable[unit.owner][unit.kind].hp.float32,
+      HealthColor
+    )
     if window.clicked(sk, slot):
       clickedId = id
     inc shown
@@ -779,20 +750,21 @@ proc drawUi*(
     let structure = run.world.buildings[
       run.world.buildingIndex(primaryId)
     ]
-    for slot in 0 ..< min(QueueSlots, 10):
+    for slot in 0 ..< min(QueueSlots, SelectionGrid.len):
       let
         well = selectionPanel.imageSlot(
           SelectionGrid[slot].x,
           SelectionGrid[slot].y,
-          SelectionSlotSize.x,
-          SelectionSlotSize.y
+          SelectionWell,
+          SelectionWell
         )
         filled = slot < structure.queueLength
       if filled:
         let kind = UnitKind(structure.queue[slot] - 1)
         sk.drawPortrait(
           well,
-          unitPortraitKey(max(structure.owner, 0), kind)
+          unitPortraitKey(max(structure.owner, 0), kind),
+          SelectionIcon
         )
       if filled and slot == 0:
         sk.drawRect(
@@ -824,27 +796,24 @@ proc drawUi*(
     sk.drawTab(tab, selected, over)
     sk.drawSprite(
       CommandTabIcons[i],
-      tab.origin + vec2(12, (tab.size.y - 20) * 0.5'f32),
-      vec2(20),
+      tab.origin + vec2(5, tab.size.y - CommandTabH + 6),
+      vec2(IconTiny),
       tint
     )
     sk.drawLabel(
       label,
-      tab.origin + vec2(36, 0),
-      tab.size - vec2(44, 0),
+      tab.origin + vec2(22, 0),
+      tab.size - vec2(24, 0),
       tint,
-      if selected: "Bold" else: "Small",
+      "Hud",
       CenterAlign
     )
     if window.clicked(sk, tab):
       commandTab = i
   if commandTab == 0:
-    for index in 0 .. 9:
+    for index in 0 ..< BuildGrid.len:
       let slot = buildPanel.imageSlot(
-        BuildGrid[index].x,
-        BuildGrid[index].y,
-        BuildSlotSize.x,
-        BuildSlotSize.y
+        BuildGrid[index].x, BuildGrid[index].y, WellSmall, WellSmall
       )
       if index <= BuildableHigh.ord:
         let
@@ -854,14 +823,10 @@ proc drawUi*(
         sk.drawPortrait(
           slot,
           buildingPortraitKey(LightPlayer, kind),
+          IconSmall,
           commandPortraitColor(run.world.canBuild(player, kind))
         )
-        sk.drawSlotCosts(
-          slot.origin,
-          slot.size,
-          stats.gold,
-          stats.wood
-        )
+        sk.drawSlotCosts(slot, stats.gold, stats.wood)
         if options.playerSlot > 0 and
             not run.replayMode and
             window.clicked(sk, slot):
@@ -870,26 +835,19 @@ proc drawUi*(
     for kind in UnitKind:
       let
         slot = buildPanel.imageSlot(
-          BuildGrid[kind.ord].x,
-          BuildGrid[kind.ord].y,
-          BuildSlotSize.x,
-          BuildSlotSize.y
+          BuildGrid[kind.ord].x, BuildGrid[kind.ord].y, WellSmall, WellSmall
         )
         stats = UnitTable[LightPlayer][kind]
         player = commandPlayer(viewMode)
       sk.drawPortrait(
         slot,
         unitPortraitKey(LightPlayer, kind),
+        IconSmall,
         commandPortraitColor(
           canShowTrain(player, primaryId, kind)
         )
       )
-      sk.drawSlotCosts(
-        slot.origin,
-        slot.size,
-        stats.gold,
-        stats.wood
-      )
+      sk.drawSlotCosts(slot, stats.gold, stats.wood)
       if options.playerSlot > 0 and
           not run.replayMode and
           window.clicked(sk, slot):
@@ -900,8 +858,8 @@ proc drawUi*(
   else:
     sk.drawLabel(
       "No upgrades",
-      buildPanel.origin + vec2(25, 66),
-      vec2(523, 28),
+      buildPanel.origin + vec2(BuildGrid[0].x, BuildGrid[0].y),
+      vec2(buildPanel.size.x - BuildGrid[0].x * 2, 28),
       rgbx(150, 160, 178, 255),
       "Small",
       CenterAlign
