@@ -106,6 +106,16 @@ type
     complete: bool
     expansions: int
 
+  PathingContext = object
+    ready: bool
+    layers: seq[QuadLayer]
+    layerWalkable: seq[seq[bool]]
+    layerNodeOffsets: seq[int]
+    nodeLayers, nodeXs, nodeZs: seq[int]
+    nodePathXs, nodePathYs, nodePathZs: seq[int32]
+    edgeLinks: seq[array[4, EdgeLink]]
+    edgeKnown: seq[array[4, bool]]
+
 proc setFlag(tile: var Tile, flag: uint32, on: bool) =
   ## Sets or clears one bit in a tile's flags.
   if on:
@@ -164,32 +174,15 @@ var
   pathResultKeys: seq[int]
   pathFrontierEdges: HeapQueue[(int64, int64, int)]
   pathFrontierEight: HeapQueue[(int32, int32)]
+  dormantPathingContext: PathingContext
 
 ## Walkability
 
-proc isSteep(
-    ax, az: int32,
-    ah: int16,
-    bx, bz: int32,
-    bh: int16,
-    cx, cz: int32,
-    ch: int16
-): bool =
-  ## Tests the fixed 55-degree limit with an exact integer normal.
-  let
-    firstX = int64(bx - ax)
-    firstY = int64(bh) - int64(ah)
-    firstZ = int64(bz - az)
-    secondX = int64(cx - ax)
-    secondY = int64(ch) - int64(ah)
-    secondZ = int64(cz - az)
-    normalX = firstY * secondZ - firstZ * secondY
-    normalY = firstZ * secondX - firstX * secondZ
-    normalZ = firstX * secondY - firstY * secondX
-    horizontalSquared = normalX * normalX + normalZ * normalZ
-    verticalSquared = normalY * normalY
-  horizontalSquared * MaximumSlopeTangentSquaredDenominator >
-    verticalSquared * MaximumSlopeTangentSquaredNumerator
+proc isSteep(firstDelta, secondDelta: int64): bool {.inline.} =
+  ## Tests the fixed 55-degree limit for one eight-step tile triangle.
+  (firstDelta * firstDelta + secondDelta * secondDelta) *
+    MaximumSlopeTangentSquaredDenominator >
+    64'i64 * MaximumSlopeTangentSquaredNumerator
 
 proc computeWalkable(layer: QuadLayer): seq[bool] =
   ## A tile is walkable when it exists, isn't force-marked impassable, and
@@ -200,11 +193,14 @@ proc computeWalkable(layer: QuadLayer): seq[bool] =
   for i, t in layer.tiles:
     if not t.exists or t.impassable:
       continue
-    let h = t.tops
-    let steep = isSteep(
-        0, 0, h[0], 8, 0, h[1], 0, 8, h[2]
+    let
+      h = t.tops
+      steep = isSteep(
+        int64(h[1]) - int64(h[0]),
+        int64(h[2]) - int64(h[0])
       ) or isSteep(
-        8, 0, h[1], 8, 8, h[3], 0, 8, h[2]
+        int64(h[3]) - int64(h[2]),
+        int64(h[3]) - int64(h[1])
       )
     result[i] = not steep
 
@@ -253,6 +249,53 @@ proc computeWalkable*() {.measure.} =
         nodePathZs[index] =
           int32(layer.originZ + z - GridTiles div 2) *
           PathUnitsPerTile + PathUnitsPerTile div 2
+
+proc sameLayers(contextLayers: openArray[QuadLayer]): bool =
+  if layers.len != contextLayers.len or
+      layerWalkable.len != contextLayers.len:
+    return false
+  for index, layer in contextLayers:
+    if cast[pointer](layers[index]) != cast[pointer](layer):
+      return false
+  true
+
+proc swapPathingContext(context: var PathingContext) =
+  swap(layers, context.layers)
+  swap(layerWalkable, context.layerWalkable)
+  swap(layerNodeOffsets, context.layerNodeOffsets)
+  swap(nodeLayers, context.nodeLayers)
+  swap(nodeXs, context.nodeXs)
+  swap(nodeZs, context.nodeZs)
+  swap(nodePathXs, context.nodePathXs)
+  swap(nodePathYs, context.nodePathYs)
+  swap(nodePathZs, context.nodePathZs)
+  swap(edgeLinks, context.edgeLinks)
+  swap(edgeKnown, context.edgeKnown)
+  if pathCosts.len < nodeLayers.len:
+    pathCosts.setLen(nodeLayers.len)
+    pathCameFrom.setLen(nodeLayers.len)
+    pathSeen.setLen(nodeLayers.len)
+
+proc installImmutableLayers*(nextLayers: seq[QuadLayer]) =
+  ## Installs immutable geometry while retaining one displaced pathing context.
+  ## Games that alternate between two maps avoid rebuilding either topology.
+  if sameLayers(nextLayers):
+    return
+  if dormantPathingContext.ready and
+      dormantPathingContext.layers.len == nextLayers.len:
+    var matches = true
+    for index, layer in nextLayers:
+      if cast[pointer](dormantPathingContext.layers[index]) !=
+          cast[pointer](layer):
+        matches = false
+        break
+    if matches:
+      swapPathingContext(dormantPathingContext)
+      return
+  dormantPathingContext = PathingContext(ready: true)
+  swapPathingContext(dormantPathingContext)
+  layers = nextLayers
+  computeWalkable()
 
 proc inLayer(layerIndex, x, z: int): bool {.inline.} =
   ## Returns whether a layer-local tile coordinate exists.
@@ -575,12 +618,6 @@ const
     ## Clockwise from north, matching the eight-neighbour scan games use
     ## for movement so equal-cost ties break the same way.
 
-proc pathDistance(first, second: int): int64 {.inline.} =
-  ## Returns a deterministic Manhattan cost in 1/32-tile units.
-  abs(int64(nodePathXs[first]) - int64(nodePathXs[second])) +
-    abs(int64(nodePathYs[first]) - int64(nodePathYs[second])) +
-    abs(int64(nodePathZs[first]) - int64(nodePathZs[second]))
-
 proc octileCost(
     dx, dz, orthogonalCost, diagonalCost: int64
 ): int64 {.inline.} =
@@ -636,6 +673,13 @@ proc searchEdges(query: PathQuery): PathKeys =
     goalKey = nodeIndex(
       query.finishLayer, query.finishX, query.finishZ
     )
+    goalPathX = int64(nodePathXs[goalKey])
+    goalPathY = int64(nodePathYs[goalKey])
+    goalPathZ = int64(nodePathZs[goalKey])
+  template distanceToGoal(node: int): int64 =
+    abs(int64(nodePathXs[node]) - goalPathX) +
+      abs(int64(nodePathYs[node]) - goalPathY) +
+      abs(int64(nodePathZs[node]) - goalPathZ)
   beginSearch()
   let generation = pathGeneration
   clearFrontier(pathFrontierEdges)
@@ -643,7 +687,7 @@ proc searchEdges(query: PathQuery): PathKeys =
     expansions = 0
     found = false
     bestKey = startKey
-    bestHeuristic = pathDistance(startKey, goalKey)
+    bestHeuristic = distanceToGoal(startKey)
   pathFrontierEdges.push((0'i64, 0'i64, startKey))
   pathSeen[startKey] = generation
   pathCosts[startKey] = 0
@@ -662,6 +706,8 @@ proc searchEdges(query: PathQuery): PathKeys =
       li = nodeLayers[key]
       x = nodeXs[key]
       z = nodeZs[key]
+      currentCost = pathCosts[key]
+      currentPathY = int64(nodePathYs[key])
     for direction in 0 .. 3:
       let link = edgeLink(li, x, z, direction)
       if not link.open:
@@ -675,18 +721,20 @@ proc searchEdges(query: PathQuery): PathKeys =
           if query.orthogonalCost > 0:
             int64(query.orthogonalCost)
           else:
-            pathDistance(key, nextKey)
+            # Every edge crosses one world tile; only height varies.
+            int64(PathUnitsPerTile) +
+              abs(currentPathY - int64(nodePathYs[nextKey]))
         extra =
           if query.enterCost.isNil: 0'i64
           else: int64(query.enterCost(link.layer, link.x, link.z))
-        newCost = pathCosts[key] + stepCost + extra
+        newCost = currentCost + stepCost + extra
       if pathSeen[nextKey] == generation and
           newCost >= pathCosts[nextKey]:
         continue
       pathSeen[nextKey] = generation
       pathCosts[nextKey] = newCost
       pathCameFrom[nextKey] = key
-      let guess = pathDistance(nextKey, goalKey)
+      let guess = distanceToGoal(nextKey)
       if query.partial and (
           guess < bestHeuristic or
           (guess == bestHeuristic and nextKey < bestKey)):

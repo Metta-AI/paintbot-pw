@@ -9,6 +9,34 @@ proc openTile(): Tile =
     flags: TileExists or TileConnectedEast or TileConnectedSouth
   )
 
+echo "Testing immutable layer context reuse"
+block:
+  proc flatLayer(width: int; height: int16): QuadLayer =
+    result = QuadLayer(
+      originX: 0,
+      originZ: 0,
+      width: width,
+      depth: 1,
+      tiles: newSeq[Tile](width)
+    )
+    for tile in result.tiles.mitems:
+      tile = openTile()
+      tile.tops = [height, height, height, height]
+
+  let
+    first = flatLayer(1, 0)
+    second = flatLayer(2, 8)
+  installImmutableLayers(@[first])
+  let firstWalkable = cast[pointer](unsafeAddr layerWalkable[0][0])
+  installImmutableLayers(@[second])
+  let secondWalkable = cast[pointer](unsafeAddr layerWalkable[0][0])
+  doAssert firstWalkable != secondWalkable
+  installImmutableLayers(@[first])
+  doAssert cast[pointer](unsafeAddr layerWalkable[0][0]) == firstWalkable
+  installImmutableLayers(@[second])
+  doAssert cast[pointer](unsafeAddr layerWalkable[0][0]) == secondWalkable
+  doAssert findPathPoints(0, 0, 0, 0, 1, 0).len == 2
+
 echo "Testing deterministic integer A* tie breaking"
 let layer = QuadLayer(
   originX: 0,
