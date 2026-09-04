@@ -390,11 +390,22 @@ proc drawWellImage*(
     name: string,
     color = rgbx(255, 255, 255, 255),
     pad = 4.0'f32,
-    selected = false
+    selected = false,
+    iconSize = 0.0'f32
 ) =
-  ## Draws one atlas image inside a theme slot.
+  ## Draws one atlas image inside a theme slot. A positive iconSize draws
+  ## the image at that fixed size centered in the well; power-of-two sizes
+  ## land on exact mip levels of the 128 and 256 px art and stay crisp.
   sk.drawSlot(well, selected)
   if name.len == 0:
+    return
+  if iconSize > 0:
+    sk.drawSprite(
+      name,
+      well.origin + (well.size - vec2(iconSize)) * 0.5'f32,
+      vec2(iconSize),
+      color
+    )
     return
   let inner = well.inset(min(pad, min(well.size.x, well.size.y) * 0.08'f32))
   sk.drawSprite(name, inner.origin, inner.size, color)
@@ -432,7 +443,8 @@ proc drawBadge*(
     pos,
     size: Vec2,
     text: string,
-    image = "badge"
+    image = "badge",
+    font = "Small"
 ) =
   ## Draws a circular level badge with a centered number.
   sk.drawSprite(
@@ -446,7 +458,7 @@ proc drawBadge*(
     pos,
     size,
     rgbx(255, 255, 255, 255),
-    "Small",
+    font,
     CenterAlign
   )
 

@@ -1,6 +1,6 @@
 ## Shared screen anchoring and replay transport state for Polyworld games.
 
-import vmath
+import std/math, vmath
 
 type
   GameUiRegion* {.pure.} = enum
@@ -52,10 +52,11 @@ proc panel*(
     area = layout.gameAreaSize
     panelSize = max(size, vec2(0))
     left = layout.margin
-    centerX = (area.x - panelSize.x) * 0.5'f32
+    # Centered plates snap to whole pixels so icons stay crisp.
+    centerX = floor((area.x - panelSize.x) * 0.5'f32)
     right = area.x - layout.margin - panelSize.x
     top = layout.margin
-    centerY = (area.y - panelSize.y) * 0.5'f32
+    centerY = floor((area.y - panelSize.y) * 0.5'f32)
     bottom = area.y - layout.margin - panelSize.y
   result.size = panelSize
   result.origin =
