@@ -20,7 +20,9 @@ import
   ui,
   controls,
   ground,
-  decor
+  decor,
+  houses,
+  houseview
 
 const
   WindowTitle = "Heartleaf"
@@ -30,14 +32,11 @@ const
     ## One saved world every ten seconds, so a seek re-simulates at most
     ## that much.
   VillagerHeight = 1.7'f32
-  VillagePropPack = DataRoot & "/terrain/low_poly_village.glb"
   ModularCharacterPath = DataRoot & "/characters/modular_chars/character.glb"
   ModularManifestPath = DataRoot & "/characters/modular_chars/manifest.json"
   VillagerPresetNumbers: array[VillagerCount, int] = [
     1, 2, 3, 5, 6, 9, 11, 12, 13]
     ## The modular presets that ship pre-rendered profile portraits.
-  HousePropScale = 5.2'f32
-  GardenPropScale = 1.1'f32
   MeadowDirtPath = DataRoot & "/terrain/toon_enchanted_meadow/terrain_dirt_01d.png"
     ## Roads and the plaza apron wear the meadow dirt, loaded into the
     ## marsh slot, which the village never uses.
@@ -45,8 +44,43 @@ const
   PlazaHeightBlend = 2.0'f32
     ## Tighter than the engine defaults so dirt breaks into grass along the
     ## texture instead of feathering across a whole tile.
-  CropProps = ["carrot1", "carrot2", "tomato1", "tomato2"]
-    ## A stocked garden shows one of these; an empty plot is bare dirt.
+  CropHeight = 1.0'f32
+    ## A growing crop stands this many tiles tall, waist high on a villager.
+  CropBrightness = 1.3'f32
+    ## The kit plants are painted a deep green; lifted so they read on
+    ## dark soil.
+  CropLooks: array[VeggieKinds, tuple[kit: DecorKit, node: string, tint: Vec3]] = [
+    (ValleyVegetation, "plant_04a", vec3(1.0, 1.05, 0.85)),   # carrot
+    (ValleyVegetation, "plant_06a", vec3(1.15, 0.95, 0.85)),  # tomato
+    (MeadowVegetation, "plant_05a", vec3(1.1, 1.15, 0.9)),    # lettuce
+    (ValleyVegetation, "plant_03a", vec3(0.9, 1.0, 0.85)),    # potato
+    (MeadowVegetation, "plant_06a", vec3(1.15, 1.0, 0.8)),    # pumpkin
+    (ValleyVegetation, "plant_05a", vec3(0.95, 1.0, 1.0)),    # radish
+    (ValleyVegetation, "plant_03a", vec3(1.0, 0.85, 0.95)),   # beet
+    (ValleyVegetation, "wheat_patch_01a", vec3(1.05, 1.05, 0.8)),  # corn
+    (ValleyVegetation, "plant_06a", vec3(0.95, 1.1, 0.9)),    # pea
+    (ValleyVegetation, "plant_02a", vec3(0.95, 1.05, 0.9)),   # onion
+    (ValleyVegetation, "plant_02a", vec3(1.0, 1.05, 1.0)),    # garlic
+    (MeadowVegetation, "plant_05a", vec3(0.9, 1.05, 1.0)),    # cabbage
+    (MeadowVegetation, "plant_06a", vec3(1.1, 1.05, 0.8)),    # squash
+    (ValleyVegetation, "plant_05a", vec3(0.95, 1.05, 0.95)),  # turnip
+    (ValleyVegetation, "plant_01a", vec3(0.95, 1.05, 0.95)),  # leek
+    (MeadowVegetation, "plant_04a", vec3(0.8, 1.0, 0.8)),     # spinach
+    (MeadowVegetation, "plant_04a", vec3(0.8, 0.95, 0.85)),   # broccoli
+    (ValleyVegetation, "plant_06a", vec3(1.1, 1.0, 0.8)),     # pepper
+    (ValleyVegetation, "plant_07a", vec3(0.9, 1.05, 0.9)),    # cucumber
+    (ValleyVegetation, "plant_07a", vec3(0.85, 1.0, 0.85)),   # zucchini
+    (ValleyVegetation, "plant_01a", vec3(1.0, 1.1, 0.85)),    # celery
+    (ValleyVegetation, "plant_06a", vec3(1.0, 0.85, 1.05)),   # eggplant
+    (ValleyVegetation, "plant_04a", vec3(1.0, 1.0, 0.85)),    # parsnip
+    (MeadowVegetation, "plant_04a", vec3(0.85, 0.95, 1.0)),   # kale
+  ]
+    ## What a stocked plot grows, in VeggieNames order. Neither kit has a
+    ## literal lettuce or corn, so kinds share plants by silhouette: grassy
+    ## stalks for the onion family, low feathery tops for roots, a bush for
+    ## tomatoes and peppers, seedling leaves for squashes, broad leaves for
+    ## the cabbage family, and the wheat clump for corn. A tint tells them
+    ## apart. A bare plot is just the tilled dirt the terrain draws.
 
 type
   GraphicsError = object of CatchableError
@@ -216,12 +250,14 @@ proc runGraphics*() =
       int(RoadTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
     setTileMaterial(
       int(StoneTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
-    ## Tilled plots read as dirt; house pads read as stone.
+    ## Tilled plots are dirt through the ground mask like the roads, only
+    ## darker, so the tile itself bakes as grass with a tilled tint; house
+    ## pads read as stone.
     setTileMaterial(
       int(GardenTileKind),
-      DirtMaterial, DirtMaterial,
-      vec3(0.85, 0.72, 0.55), vec3(0.8, 0.7, 0.55),
-      7
+      GrassMaterial, DirtMaterial,
+      vec3(0.72, 0.62, 0.55), vec3(0.8, 0.7, 0.55),
+      1
     )
     setTileMaterial(
       int(HouseTileKind),
@@ -250,37 +286,32 @@ proc runGraphics*() =
     scatterGrass(800, run.mapSeed)
 
   var
-    villagePack: PropPack
     kits: array[DecorKit, PropPack]
+    housePacks: HousePacks
 
   proc placeVillageProps() =
-    ## Lays out every prop: houses, plots, and decorations. Walkability
-    ## never changes, so the terrain bakes without it.
+    ## Lays out every prop: houses built from their recipes, then the
+    ## decorations. Walkability never changes, so the terrain bakes
+    ## without it.
     clearProps()
     for slot in 0 ..< VillagerCount:
       let house = run.world.map.houses[slot]
-      villagePack.placeProp(
-        "house_lvl" & $(int(house.propKind) + 1),
+      housePacks.placeHouse(
+        buildHouse(
+          run.mapSeed xor int32(slot) * 7919,
+          houseKindFor(run.mapSeed, slot)),
         tileWorldPoint(house.center),
-        housePropYaw(house),
-        HousePropScale
-      )
-    for garden in 0 ..< GardenCount:
-      let tile = run.world.map.gardenTiles[garden]
-      villagePack.placeProp(
-        "farm_lvl2",
-        tileWorldPoint(tile),
-        float32(garden) * 1.3'f32,
-        GardenPropScale
-      )
+        housePropYaw(house))
     for d in placeDecor(run.world.map, run.mapSeed):
       kits[d.kit].placeProp(
         d.node, decorWorldPoint(d), d.yaw, d.height, d.tint)
     bakeTerrain(rebuildWalkability = false)
 
   profileBlock "props":
-    villagePack = loadPropPack(VillagePropPack)
+    housePacks = loadHousePacks()
     for kit in DecorKit:
+      if nodesFor(kit).len == 0:
+        continue
       ## The toon kits are painted, not palette coloured, so they draw
       ## textured rather than through the vertex-colour bake.
       kits[kit] = loadPropPack(
@@ -645,12 +676,18 @@ proc runGraphics*() =
             let veggie = run.world.gardens[garden]
             if veggie < 0:
               continue
-            villagePack.drawProp(
-              CropProps[int(veggie) mod CropProps.len],
+            let look = CropLooks[int(veggie)]
+            kits[look.kit].drawProp(
+              look.node,
               tileWorldPoint(run.world.map.gardenTiles[garden]),
               float32(garden) * 0.7'f32,
-              0.3'f32,
-              matrix
+              CropHeight,
+              matrix,
+              vec4(
+                look.tint.x * CropBrightness,
+                look.tint.y * CropBrightness,
+                look.tint.z * CropBrightness,
+                1.0)
             )
 
         proc drawWorldVillagers() =

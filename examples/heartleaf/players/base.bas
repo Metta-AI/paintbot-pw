@@ -40,6 +40,17 @@
 
 dim invitedMark(8)
 
+' A small counter generator of our own, seeded by slot, so each villager
+' wanders and pauses on their own rhythm. call rnd(n) leaves the next
+' draw, 0..n-1, in rndOut.
+if rngState = 0 then
+  rngState = selfSlot * 7919 + 17
+end if
+sub rnd(n)
+  rngState = (rngState * 75 + 74) mod 65537
+  rndOut = rngState mod n
+end sub
+
 ' New-day reset.
 if dayMark <> day then
   dayMark = day
@@ -149,16 +160,48 @@ else
       wend
     end if
 
-    ' Gather whatever still grows; drift toward the plaza when the gardens
-    ' are bare so the village keeps bumping into itself.
+    ' Gather whatever still grows; when the gardens are bare, loiter on
+    ' the plaza like it is a village square: walk to some random spot
+    ' inside the ring, stand about for a while, pick another.
     f = orderFailed()
     if orderKind = 0 then
       g = nearestStockedGarden()
       if g >= 0 then
         r = gather(g)
+        wandering = 0
       else
-        if distTo(64, 64) > 6 then
-          r = walkTo(64, 64)
+        if wandering = 1 then
+          ' Just arrived. Stand here for five to thirty seconds.
+          wandering = 0
+          call rnd(600)
+          pauseUntil = worldTick + 120 + rndOut
+        else
+          if worldTick >= pauseUntil then
+            tries = 0
+            while tries < 6
+              call rnd(15)
+              dx = rndOut - 7
+              call rnd(15)
+              dy = rndOut - 7
+              ok = 1
+              if dx * dx + dy * dy > 49 then
+                ok = 0
+              end if
+              if dx >= -2 and dx <= 2 and dy >= -2 and dy <= 2 then
+                ok = 0
+              end if
+              if ok = 1 then
+                if tilePassable(64 + dx, 64 + dy) = 1 then
+                  r = walkTo(64 + dx, 64 + dy)
+                  if r = 1 then
+                    wandering = 1
+                    tries = 6
+                  end if
+                end if
+              end if
+              tries = tries + 1
+            wend
+          end if
         end if
       end if
     end if

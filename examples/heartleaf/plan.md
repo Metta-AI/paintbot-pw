@@ -46,7 +46,8 @@ puts it back on the doorstep.
 `maps.nim` generates the village with integers from one seed: a gentle
 meadow pressed flat inside the village ring, nine houses on a jittered
 ring of unit-circle points around a round paved plaza with a one-tile
-dirt apron, two-wide dirt roads from every door to the plaza plus a
+dirt apron and a blocked three-by-three well footprint at its centre,
+five-by-five house footprints, two-wide dirt roads from every door to the plaza plus a
 one-wide ring path, three garden plots in the grass near each house, and
 a noise-gated forest thickening to a solid wall at the map edge. A flood fill from the plaza must reach every door and
 every garden or the generator retries the seed deterministically.
@@ -68,7 +69,8 @@ props bake exactly once.
 ## The scripted villager
 
 `players/base.bas` plays the known-strong plan from the original game:
-gather all day; three villagers are due to host each night by rotation
+gather all day, then loiter on the plaza, wandering to random spots and
+pausing for random spells like a village square; three villagers are due to host each night by rotation
 (`(day + slot) mod 3 == 0`); hosts wave invitations at anyone passing
 within three tiles; guests walk to the nearest due host; everyone budgets
 about two game minutes per tile plus a half-hour margin and never stands
@@ -119,6 +121,38 @@ plaza tiles bake as grass underneath; the mask owns every stone and dirt
 texel. Roads wear the meadow pack dirt, loaded at startup into the unused
 marsh slot.
 
+## Houses
+
+Neither toon kit ships a whole cottage, so `houses.nim` builds them from
+the golden valley parts. A cottage first chooses one coherent style:
+thatch on one brick course, blue shingles on a timber sill, or the framed
+roof on the other brick course. Foundations never mix materials within a
+house. Their front runs leave an opening for the kit's complete framed-door
+wall module; plain and windowed panels fill the remaining walls, with each
+side and corner turned so its finished face points outside. The roof eaves
+overlap only the top of the three-metre walls. Length, window placement,
+paint drift, and compatible roof furniture provide the variation.
+
+One house in three is a longhouse: three coherent courses of meadow stone
+with a grounded door in their opening, under four joined segments of straw
+thatch tinted to turf with grass along the ridge and slopes.
+Every recipe is checked over a magenta ground for holes. The village
+pack houses are gone and the blocked footprint is five tiles square,
+which a ten metre house fills. The house lab,
+`nim r experiments/houses/houses.nim`, shows a grid of houses from
+consecutive seeds with `R` to reroll, `K` to switch kinds, and `P` for a
+magenta ground that shows any hole in a house.
+
+## Crops
+
+A stocked plot grows one toon kit plant, drawn textured per frame so it
+can appear and vanish as villagers gather; a bare plot is a tilled dirt
+patch that fades into the grass through the ground mask, a shade darker
+than the roads. Neither kit has a literal lettuce or corn, so the
+twenty-four kinds share plants by silhouette, grassy stalks, root tops, a
+bush, seedling leaves, broad leaves, and a wheat clump, and a tint per
+kind tells them apart. The old village-pack farm building is gone.
+
 ## Decorations
 
 `decor.nim` dresses the village from the map and seed alone, so a replay
@@ -131,9 +165,9 @@ into the terrain mesh once with the houses.
   table, a bench with pots, a cart with barrels, or sacks and a crate; a
   signpost, a fence pole with the sign board hung on it, beside every
   third entrance.
-- Houses: a mailbox beside the door, flower pots flanking it, a run of
-  fence along the back, five flower beds and two bushes in the yard.
-- Gardens: a fence piece on one side of every plot, flowers beside some.
+- Houses: a mailbox beside the door, flower pots flanking it, five
+  flower beds and two bushes in the yard.
+- Gardens: flowers beside some plots.
 - Road verges: lamp posts spaced along the roads, and tufts, bushes,
   small rocks, and flowers on every other grass tile. Everything that
   grew or was left lying varies in size; everything gnomes made does not.
