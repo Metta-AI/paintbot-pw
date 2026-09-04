@@ -664,15 +664,8 @@ proc drawAbilityKey(
     slot: GameUiPanel,
     key: string
 ) =
-  ## Draws one hotkey along the bottom of a framed art slot.
-  sk.drawLabel(
-    key,
-    slot.origin + vec2(0, slot.size.y - 18),
-    vec2(slot.size.x, 16),
-    rgbx(226, 230, 239, 255),
-    "Small",
-    CenterAlign
-  )
+  ## Draws one hotkey pip in the corner of a framed art slot.
+  sk.drawKeyPip(slot, key)
 
 proc drawUi*(
     sk: Silky,

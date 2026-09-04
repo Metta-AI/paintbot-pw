@@ -20,6 +20,9 @@ const
   BarTrackPatch = 7
   BarFillPatch = 5
   BarInset = 3.0'f32
+  KeyPipName = "pip.medium"
+  KeyPipSize = 28.0'f32
+  KeyPipInset = 2.0'f32
   UiScaleSteps* = [
     0.25'f32, 0.5'f32, 1.0'f32, 1.25'f32, 2.0'f32, 2.5'f32, 4.0'f32
   ]
@@ -461,6 +464,15 @@ proc drawBadge*(
     font,
     CenterAlign
   )
+
+proc drawKeyPip*(
+    sk: Silky,
+    well: GameUiPanel,
+    key: string
+) =
+  ## Draws one hotkey letter on a ringed pip in a well's bottom-right corner.
+  let pos = well.origin + well.size - vec2(KeyPipSize + KeyPipInset)
+  sk.drawBadge(pos, vec2(KeyPipSize), key, KeyPipName, "Hud")
 
 proc clicked*(
     window: Window,

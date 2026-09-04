@@ -741,14 +741,7 @@ proc drawUi*(
         elif window.buttonReleased[MouseRight] and
             slotPanel.contains(sk.mousePos):
           queueDropItem(int32(primaryId), int32(bag))
-    sk.drawLabel(
-      ActionKeys[index],
-      slotPanel.origin + vec2(0, slotPanel.size.y - 16),
-      vec2(slotPanel.size.x, 16),
-      rgbx(186, 192, 205, 255),
-      "Small",
-      CenterAlign
-    )
+    sk.drawKeyPip(slotPanel, ActionKeys[index])
   let xpBar = detailsPanel.imageSlot(
     AbilitySlotXs[0],
     AbilityBarY,
