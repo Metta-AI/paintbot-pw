@@ -1,21 +1,15 @@
-## Fluffy profiling for Polyworld.
-##
-## `{.measure.}` and `profileBlock` always record while a trace is active.
-## Compile-time capture: `-d:profileTracePath=tmp/x.json -d:profileFrames=100`.
-## Runtime capture: F2 starts a trace, F2 again writes tmp/fluffy.json and
-## opens the Fluffy viewer.
+## Silky profiling with Polyworld's capture budget and Fluffy viewer shortcut.
 
 import
   std/os,
-  fluffy/measure
+  silky/profiles
 
 when not defined(emscripten):
   import std/osproc
 
-export measure
+export profiles
 
 const
-  ProfileTracePath* {.strdefine.} = ""
   MapProfileTracePath* {.strdefine.} = ""
   ProfileFrames* {.intdefine.} = 0
   RuntimeTracePath* = "tmp/fluffy.json"
@@ -26,59 +20,36 @@ const
       MapProfileTracePath
 
 var
-  profileStarted = false
-  profileDumped = false
-  profileFrameCount = 0
-  runtimeTracing = false
+  gameCapture = false
+  presentedFrames = 0
 
-proc ensureProfileDir(path: string) =
-  ## Creates the parent directory for the profile trace.
-  let dir = path.parentDir()
-  if dir.len > 0:
-    createDir(dir)
-
-proc startProfileTrace*() =
-  ## Starts the compile-time Fluffy capture once.
-  if profileStarted:
-    return
+proc startGameProfile*() =
+  ## Starts Silky's recorder using the existing game capture flags.
   when ActiveTracePath.len > 0:
-    profileStarted = true
-    ensureProfileDir(ActiveTracePath)
-    echo "Profile trace enabled: ", ActiveTracePath
-    echo "Profile frames: ", ProfileFrames
-    startTrace()
-
-proc finishProfileTrace*() =
-  ## Stops and writes the compile-time Fluffy capture once.
-  when ActiveTracePath.len > 0:
-    if not profileStarted or profileDumped:
+    if profileTraceActive():
       return
-    profileDumped = true
-    endTrace()
-    ensureProfileDir(ActiveTracePath)
-    dumpMeasures(ActiveTracePath)
+    gameCapture = true
+    presentedFrames = 0
+    startRuntimeProfileTrace(ActiveTracePath)
+
+proc finishGameProfile*() =
+  ## Writes the shared Silky trace and clears the game frame budget.
+  discard finishProfileTrace()
+  gameCapture = false
 
 proc profileShouldDump*(frames: int): bool =
-  ## Returns true when the compile-time frame budget has elapsed.
-  ProfileFrames > 0 and frames >= ProfileFrames and not profileDumped
+  ## Applies the legacy frame or tick budget to an active game capture.
+  gameCapture and profileTraceActive() and
+    ProfileFrames > 0 and frames >= ProfileFrames
 
 proc noteProfileFrame*(): bool =
-  ## Counts one presented frame. True when the compile-time budget finished.
-  if not profileStarted or profileDumped:
+  ## Counts presented game frames, excluding loading splashes and UI passes.
+  if not gameCapture or not profileTraceActive():
     return false
-  inc profileFrameCount
-  if ProfileFrames > 0 and profileFrameCount >= ProfileFrames:
-    finishProfileTrace()
+  inc presentedFrames
+  if profileShouldDump(presentedFrames):
+    finishGameProfile()
     return true
-  false
-
-template profileBlock*(name: string, body: untyped) =
-  ## Measures a named block while a Fluffy trace is active.
-  measurePush(name)
-  try:
-    body
-  finally:
-    measurePop()
 
 proc fluffyNimPath(): string =
   ## Finds the Fluffy viewer next to this repo.
@@ -112,18 +83,9 @@ proc openFluffy(path: string) =
     )
 
 proc toggleRuntimeTrace*() =
-  ## F2: start a runtime capture, or write it and open Fluffy.
-  when defined(emscripten):
-    discard
-  else:
-    if runtimeTracing:
-      endTrace()
-      ensureProfileDir(RuntimeTracePath)
-      dumpMeasures(RuntimeTracePath)
-      runtimeTracing = false
-      if fileExists(RuntimeTracePath):
-        openFluffy(RuntimeTracePath)
-    else:
-      startTrace()
-      runtimeTracing = true
-      echo "Runtime Fluffy trace started; F2 writes ", RuntimeTracePath
+  ## Toggles Silky's recorder with F2 and opens the completed trace in Fluffy.
+  when not defined(emscripten):
+    gameCapture = false
+    let path = toggleRuntimeProfileTrace(RuntimeTracePath)
+    if path.len > 0:
+      openFluffy(path)

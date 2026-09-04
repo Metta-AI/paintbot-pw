@@ -218,7 +218,7 @@ proc addAbilityIcons(builder: AtlasBuilder) =
 
 proc runGraphics*() =
   ## Runs the native or Emscripten graphical expedition viewer.
-  startProfileTrace()
+  startGameProfile()
   registerTileColors()
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
@@ -1647,5 +1647,5 @@ proc runGraphics*() =
   if not run.replayMode:
     saveRecording()
   particles.closeParticles()
-  finishProfileTrace()
+  finishGameProfile()
   echo "run ended: ", run.world.phase, " with ", run.world.banked, " gold banked"

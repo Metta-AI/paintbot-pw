@@ -1,5 +1,5 @@
 --path:"src"
---path:"../silky/src"
+switch("path", getEnv("SILKY_PATH", "../silky/src"))
 --path:"../shady/src"
 --path:"../noisy/src"
 --path:"../windy/src"

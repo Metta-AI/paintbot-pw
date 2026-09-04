@@ -81,7 +81,7 @@ let options* = parseGameOptions()
 var run*: Game
 
 block:
-  startProfileTrace()
+  startGameProfile()
   var
     mapSeed = options.seed
     maximumTicks = options.maximumTicks
@@ -198,14 +198,14 @@ proc describeResult*(): string =
 
 proc runHeadless*() =
   ## Runs a whole match with no renderer, as fast as the machine allows.
-  startProfileTrace()
+  startGameProfile()
   defer:
-    finishProfileTrace()
+    finishGameProfile()
   let started = epochTime()
   while run.world.tick < run.maximumTicks and not run.world.over:
     advanceGame()
     if profileShouldDump(run.world.tick):
-      finishProfileTrace()
+      finishGameProfile()
   let
     elapsed = max(epochTime() - started, 0.000001)
     simulated = run.world.tick.float64 / TickRate.float64

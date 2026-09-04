@@ -3,58 +3,20 @@
 import
   std/[strformat, strutils],
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras],
-  content, maps, sim, game, controls
+  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras,
+    stackpanels],
+  content, maps, sim, game, controls, layouts
 
 const
-  ## Plate sizes and inner offsets are laid out for a 1920 wide layout at
-  ## UI scale 1.
-  PanelPartyCard = vec2(293, 92)
-  PartyGap = 9.0'f32
-  PanelParty = vec2(
-    PanelPartyCard.x,
-    PanelPartyCard.y * 4 + PartyGap * 3
-  )
-  PanelMinimap = vec2(252, 252)
-  PanelQuest = vec2(448, 132)
-  PanelChat = vec2(337, 177)
-  PanelAbilities = vec2(453, 115)
-  PanelInventory = vec2(236, 314)
   HudClearance = 48.0'f32
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
   ## lands on exact mip levels and stays crisp.
   IconTiny = 16.0'f32
   IconSmall = 64.0'f32
-  WellPad = 4.0'f32
-  WellSmall = IconSmall + WellPad * 2
-  PartyPortrait = vec2(10, 10)
-  PartyTextX = 90.0'f32
-  PartyTextW = 193.0'f32
-  PartyNameY = 14.0'f32
-  PartyHpY = 36.0'f32
-  PartyManaY = 58.0'f32
-  PartyBarH = 20.0'f32
-  AbilitySlotXs = [
-    10.0'f32, 82, 154, 226, 307, 379
-  ]
-  AbilitySlotY = 10.0'f32
-  AbilityDividerX = 298.0'f32
-  AbilityBarY = 85.0'f32
-  AbilityBarH = 20.0'f32
   DividerColor = rgbx(94, 80, 56, 255)
   ActionKeys = [
     "Q", "W", "E", "R", "F", "G"
   ]
-  InventoryInset = 10.0'f32
-  InventoryTitleY = 10.0'f32
-  InventoryGrid = [
-    vec2(10, 51), vec2(86, 51), vec2(162, 51),
-    vec2(10, 129), vec2(86, 129), vec2(162, 129),
-    vec2(10, 207), vec2(86, 207), vec2(162, 207)
-  ]
-  InventoryGoldY = 284.0'f32
-  InventoryCounterXs = [10.0'f32, 104]
-  InventoryCounterW = 76.0'f32
   HeroNames: array[HeroClass, string] = [
     "Brom", "Nyra", "Fenn", "Zyra"
   ]
@@ -95,7 +57,7 @@ proc hudLayoutFits(layoutSize: Vec2): bool =
   let
     layout = initGameUiLayout(layoutSize, TransportHeight)
     chrome = placeChrome(layout)
-  layoutFits(
+  layoutSize.x >= TransportMinWidth and layoutFits(
     layout,
     [
       chrome.party,
@@ -127,16 +89,6 @@ proc currentLayout*(window: Window): GameUiLayout =
 proc currentChrome(window: Window): HudChrome =
   ## Places every textured HUD panel for the current window.
   placeChrome(currentLayout(window))
-
-proc partyCard(panel: GameUiPanel, slot: int): GameUiPanel =
-  ## Returns one stacked party portrait plate inside the party column.
-  GameUiPanel(
-    origin: panel.origin + vec2(
-      0,
-      slot.float32 * (PanelPartyCard.y + PartyGap)
-    ),
-    size: PanelPartyCard
-  )
 
 proc minimapMap(panel: GameUiPanel): GameUiPanel =
   ## Returns the square that bounds the circular minimap well.
@@ -421,19 +373,20 @@ proc drawUi*(
     experience = run.progressExperience
     experienceInLevel = experience mod 250
     nextExperience = 250
+    party = chrome.party.partyPanels()
+    chat = chatPanel.chatPanels()
+    quest = questPanel.questPanels()
+    abilities = detailsPanel.abilityPanels()
+    inventory = inventoryPanel.inventoryPanels()
   for slot in 0 ..< PartySize:
     let
       actor = run.world.actors[slot]
       class = actor.heroClass
-      card = chrome.party.partyCard(slot)
-      portrait = card.imageSlot(
-        PartyPortrait.x, PartyPortrait.y, WellSmall, WellSmall
-      )
-      nameBox = card.imageSlot(PartyTextX, PartyNameY, PartyTextW, 20)
-      hpBar = card.imageSlot(PartyTextX, PartyHpY, PartyTextW, PartyBarH)
-      manaBar = card.imageSlot(
-        PartyTextX, PartyManaY, PartyTextW, PartyBarH
-      )
+      card = party[slot].card
+      portrait = party[slot].portrait
+      nameBox = party[slot].name
+      hpBar = party[slot].hp
+      manaBar = party[slot].mana
     discard sk.beginFrame(card)
     sk.drawWellImage(
       portrait,
@@ -527,9 +480,9 @@ proc drawUi*(
           slot == options.playerSlot - 1:
         focusPlayerHero = true
   let
-    generalTab = chatPanel.imageSlot(8, 4, 72, 28)
-    combatTab = chatPanel.imageSlot(88, 4, 128, 28)
-    chatBody = chatPanel.imageSlot(12, 40, 312, 124)
+    generalTab = chat.general
+    combatTab = chat.combat
+    chatBody = chat.body
   sk.drawLabel(
     "General",
     generalTab.origin,
@@ -560,12 +513,13 @@ proc drawUi*(
       if chatTab == 0 or line.isCombatLine:
         shown.add line
   let firstLine = max(shown.len - 6, 0)
+  var logRows = chatBody.stack(TopToBottom)
   for index in firstLine ..< shown.len:
-    let row = index - firstLine
+    let row = logRows.takeRow(18)
     sk.drawLabel(
       shown[index],
-      chatBody.origin + vec2(0, row.float32 * 18),
-      vec2(chatBody.size.x, 18),
+      row.origin,
+      row.size,
       if index == shown.high:
         rgbx(229, 215, 167, 255)
       else:
@@ -643,10 +597,10 @@ proc drawUi*(
     cameraDistance
   )
   let
-    themeName = questPanel.imageSlot(18, 10, 412, 22)
-    questTitleBox = questPanel.imageSlot(18, 56, 412, 22)
-    clockRow = questPanel.imageSlot(18, 80, 412, 20)
-    enemyRow = questPanel.imageSlot(18, 102, 412, 18)
+    themeName = quest.theme
+    questTitleBox = quest.title
+    clockRow = quest.clock
+    enemyRow = quest.enemies
   sk.drawLabel(
     Themes[shownLevel].name,
     themeName.origin,
@@ -657,8 +611,8 @@ proc drawUi*(
   )
   sk.drawLabel(
     "Quests",
-    questPanel.origin + vec2(18, 32),
-    vec2(412, 22),
+    quest.heading.origin,
+    quest.heading.size,
     rgbx(198, 158, 77, 255),
     "Small"
   )
@@ -708,14 +662,11 @@ proc drawUi*(
     "Small"
   )
   sk.drawRect(
-    detailsPanel.origin + vec2(AbilityDividerX, AbilitySlotY + 1),
-    vec2(1, IconSmall - 1),
+    abilities.divider.origin + vec2(0, 1),
+    abilities.divider.size - vec2(0, 1),
     DividerColor
   )
-  for index in 0 .. 5:
-    let slotPanel = detailsPanel.imageSlot(
-      AbilitySlotXs[index], AbilitySlotY, IconSmall, IconSmall
-    )
+  for index, slotPanel in abilities.slots:
     if index < 4:
       sk.drawWellImage(
         slotPanel,
@@ -742,12 +693,7 @@ proc drawUi*(
             slotPanel.contains(sk.mousePos):
           queueDropItem(int32(primaryId), int32(bag))
     sk.drawKeyPip(slotPanel, ActionKeys[index])
-  let xpBar = detailsPanel.imageSlot(
-    AbilitySlotXs[0],
-    AbilityBarY,
-    detailsPanel.size.x - AbilitySlotXs[0] * 2,
-    AbilityBarH
-  )
+  let xpBar = abilities.xp
   sk.drawValueBar(
     xpBar.origin,
     xpBar.size,
@@ -764,13 +710,12 @@ proc drawUi*(
 
   sk.drawLabel(
     "INVENTORY",
-    inventoryPanel.origin + vec2(InventoryInset, InventoryTitleY),
-    vec2(inventoryPanel.size.x - InventoryInset * 2, 28),
+    inventory.title.origin,
+    inventory.title.size,
     rgbx(200, 205, 216, 255),
     "Small"
   )
-  for bag, cell in InventoryGrid:
-    let well = inventoryPanel.imageSlot(cell.x, cell.y, IconSmall, IconSmall)
+  for bag, well in inventory.slots:
     var icon = ""
     if bag < InventorySlots:
       let itemIndex = run.world.itemIndex(selectedActor.inventory[bag])
@@ -794,9 +739,7 @@ proc drawUi*(
     ("crystal", $run.world.collected, rgbx(220, 120, 120, 255))
   ]
   for i, counter in counters:
-    let box = inventoryPanel.imageSlot(
-      InventoryCounterXs[i], InventoryGoldY, InventoryCounterW, 20
-    )
+    let box = inventory.counters[i]
     sk.drawSprite(counter[0], box.origin, vec2(20))
     sk.drawLabel(
       counter[1],

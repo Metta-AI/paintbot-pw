@@ -7,7 +7,7 @@
 import
   std/times,
   chroma, pixie, silky, vmath, windy,
-  actioncam, chrome, gameuis, inputs
+  actioncam, chrome, gameuis, inputs, stackpanels
 
 const
   TransportHeight* = 80.0'f32
@@ -22,28 +22,39 @@ const
   RecordedH = 6.0'f32
   RecordedGap = 4.0'f32
   TickLabelW = 178.0'f32
+  TransportControlsWidth =
+    12 + (IconSize + IconGap) * 10 + (GroupGap - IconGap) * 3
+  TransportMinWidth* =
+    TransportControlsWidth + 80 + GroupGap + IconSize + 16 + TickLabelW
   SpeedIcons = ["speed_1x", "speed_2x", "speed_4x", "speed_16x"]
   GlyphColor = rgbx(226, 230, 239, 255)
   GlyphActive = rgbx(235, 216, 154, 255)
   GlyphDim = rgbx(112, 121, 138, 255)
 
-type Player* = object
-  playing*: bool
-  repeating*: bool
-  speedIndex*: int
-  live*: bool
-  tick*: int32
-  recordedTicks*: int32
-    ## How far the in-memory tape has been simulated.
-  durationTicks*: int32
-    ## Configured match length. Live scrubber uses this until the game ends.
-  over*: bool
-  restoreTick*: int32
-    ## Checkpoint to restore before catching up. -1 means none.
-  targetTick*: int32
-    ## Catch up to this tick at max speed. -1 means none.
-  accumulator*: float32
-  tickRate: int32
+type
+  TransportPanels* = object
+    controls*: array[5, GameUiPanel]
+    loop*: GameUiPanel
+    speeds*: array[4, GameUiPanel]
+    scrub*, recorded*, scrubHit*, camera*, tick*: GameUiPanel
+
+  Player* = object
+    playing*: bool
+    repeating*: bool
+    speedIndex*: int
+    live*: bool
+    tick*: int32
+    recordedTicks*: int32
+      ## How far the in-memory tape has been simulated.
+    durationTicks*: int32
+      ## Configured match length. Live scrubber uses this until the game ends.
+    over*: bool
+    restoreTick*: int32
+      ## Checkpoint to restore before catching up. -1 means none.
+    targetTick*: int32
+      ## Catch up to this tick at max speed. -1 means none.
+    accumulator*: float32
+    tickRate: int32
 
 proc speed*(player: Player): int32 =
   ## Returns the selected realtime multiplier.
@@ -202,17 +213,33 @@ proc shouldTick*(
     return true
   false
 
-proc placeIcon(origin: Vec2, x: var float32): GameUiPanel =
-  ## Places one square icon and advances the row cursor.
-  result = GameUiPanel(
-    origin: origin + vec2(x, IconY),
-    size: vec2(IconSize)
+proc transportPanels*(panel: GameUiPanel): TransportPanels =
+  ## Reserves fixed controls at both ends, then fills the timeline between.
+  var trailing = panel.stack(RightToLeft, vec2(0, IconY))
+  let tick = trailing.takeColumn(TickLabelW, 16)
+  result.camera = trailing.take(vec2(IconSize), GroupGap)
+  var leading = trailing.takeRest().stack(LeftToRight)
+  leading.gap(12)
+  for control in result.controls.mitems:
+    control = leading.take(vec2(IconSize), IconGap)
+  leading.gap(GroupGap - IconGap)
+  result.loop = leading.take(vec2(IconSize), IconGap)
+  leading.gap(GroupGap - IconGap)
+  for control in result.speeds.mitems:
+    control = leading.take(vec2(IconSize), IconGap)
+  leading.gap(GroupGap - IconGap)
+  let clusterH = ScrubH + RecordedGap + RecordedH
+  var timeline = leading.takeRest().stack(TopToBottom)
+  timeline.gap((IconSize - clusterH) * 0.5'f)
+  result.scrub = timeline.takeRow(ScrubH, RecordedGap)
+  result.recorded = timeline.takeRow(RecordedH)
+  result.scrubHit = GameUiPanel(
+    origin: result.scrub.origin - vec2(0, 8),
+    size: result.scrub.size + vec2(0, 24)
   )
-  x += IconSize + IconGap
-
-proc skipGroup(x: var float32) =
-  ## Adds a gap between transport control groups.
-  x += GroupGap - IconGap
+  var label = tick.stack(TopToBottom)
+  label.gap((IconSize - clusterH) * 0.5'f)
+  result.tick = label.take(vec2(TickLabelW - 12, clusterH))
 
 proc drawGlyph(
     sk: Silky,
@@ -268,19 +295,15 @@ proc drawTransport*(
   ## Draws the shared play/replay bar and applies clicks.
   sk.drawRibbon(panel)
   let playing = player.playing or player.targetTick >= 0
-  var x = 12.0'f32
   let
-    skipStart = placeIcon(panel.origin, x)
-    stepBackBtn = placeIcon(panel.origin, x)
-    playBtn = placeIcon(panel.origin, x)
-    stepFwdBtn = placeIcon(panel.origin, x)
-    skipEnd = placeIcon(panel.origin, x)
-  skipGroup(x)
-  let loopBtn = placeIcon(panel.origin, x)
-  skipGroup(x)
-  var speeds: array[4, GameUiPanel]
-  for i in 0 .. 3:
-    speeds[i] = placeIcon(panel.origin, x)
+    slots = panel.transportPanels()
+    skipStart = slots.controls[0]
+    stepBackBtn = slots.controls[1]
+    playBtn = slots.controls[2]
+    stepFwdBtn = slots.controls[3]
+    skipEnd = slots.controls[4]
+    loopBtn = slots.loop
+    speeds = slots.speeds
   sk.drawIcon(skipStart, "skip_to_start")
   sk.drawIcon(stepBackBtn, "previous_frame")
   sk.drawIcon(playBtn, if playing: "pause" else: "play")
@@ -303,16 +326,9 @@ proc drawTransport*(
     sk.drawIcon(button, SpeedIcons[i], player.speedIndex == i)
     if window.clicked(sk, button):
       player.setSpeed(i)
-  skipGroup(x)
   let
-    clusterH = ScrubH + RecordedGap + RecordedH
-    scrubY = IconY + (IconSize - clusterH) * 0.5'f32
-    camReserve = IconSize + GroupGap
-    scrubOrigin = panel.origin + vec2(x, scrubY)
-    scrubSize = vec2(
-      max(panel.size.x - x - TickLabelW - camReserve - 16, 80),
-      ScrubH
-    )
+    scrubOrigin = slots.scrub.origin
+    scrubSize = slots.scrub.size
     endTick = max(player.timelineEnd, 1)
   sk.drawBar(
     scrubOrigin,
@@ -322,27 +338,22 @@ proc drawTransport*(
     rgbx(96, 132, 190, 255)
   )
   sk.drawBar(
-    scrubOrigin + vec2(0, scrubSize.y + RecordedGap),
-    vec2(scrubSize.x, RecordedH),
+    slots.recorded.origin,
+    slots.recorded.size,
     player.recordedTicks.float32,
     endTick.float32,
     rgbx(151, 82, 199, 255)
   )
-  let scrubHit = GameUiPanel(
-    origin: scrubOrigin - vec2(0, 8),
-    size: scrubSize + vec2(0, 24)
-  )
-  if window.mouseDown(MouseLeft) and scrubHit.contains(sk.mousePos):
-    let ratio = clamp(
-      (sk.mousePos.x - scrubOrigin.x) / scrubSize.x,
-      0.0'f32,
-      1.0'f32
-    )
-    player.seekTo(int32(ratio * player.timelineEnd.float32))
-  let actionBtn = GameUiPanel(
-    origin: panel.origin + vec2(x + scrubSize.x + GroupGap, IconY),
-    size: vec2(IconSize)
-  )
+  if scrubSize.x > 0 and
+    window.mouseDown(MouseLeft) and
+    slots.scrubHit.contains(sk.mousePos):
+      let ratio = clamp(
+        (sk.mousePos.x - scrubOrigin.x) / scrubSize.x,
+        0.0'f32,
+        1.0'f32
+      )
+      player.seekTo(int32(ratio * player.timelineEnd.float32))
+  let actionBtn = slots.camera
   sk.drawIcon(actionBtn, "action_cam", actionCam.enabled)
   if window.clicked(sk, actionBtn):
     actionCam.toggle(followSelection)
@@ -354,10 +365,10 @@ proc drawTransport*(
   discard sk.drawText(
     "Hud",
     hudScratch,
-    panel.origin + vec2(panel.size.x - TickLabelW, scrubY),
+    slots.tick.origin,
     rgbx(190, 198, 214, 255),
-    maxWidth = TickLabelW - 12,
-    maxHeight = clusterH,
+    maxWidth = slots.tick.size.x,
+    maxHeight = slots.tick.size.y,
     hAlign = RightAlign,
     vAlign = MiddleAlign
   )

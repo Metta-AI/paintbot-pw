@@ -23,6 +23,12 @@ jobs:
           nimby install "${{ github.event.repository.name }}/${{ github.event.repository.name }}.nimble"
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
       - run: nim r tests/tests.nim
+      - run: >-
+          nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2
+          tests/test_profiles.nim
+      - run: >-
+          nim r -d:mapProfileTracePath=tmp/map-profile-test.json -d:profileFrames=2
+          tests/test_profiles.nim
       - run: nim r tests/test_gota_sim.nim -- --bot:examples/gods_of_the_arena/players/base.bas:10
       - run: nim r -d:headless tests/test_recordings.nim --bot examples/call_to_adventure/players/base.bas:4
       - run: nim r -d:headless -d:recordGota tests/test_recordings.nim --bot examples/gods_of_the_arena/players/base.bas:10

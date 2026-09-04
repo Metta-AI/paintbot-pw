@@ -156,16 +156,16 @@ proc runHeadless*() =
   echo "monsters: ", monsters
   echo "party enters at ", run.dungeon.entrance
 
-  startProfileTrace()
+  startGameProfile()
   defer:
-    finishProfileTrace()
+    finishGameProfile()
   let started = epochTime()
   var reported = 0
   while run.world.tick < options.maximumTicks and
       run.world.phase notin {EscapedPhase, WipedPhase}:
     advanceGame()
     if profileShouldDump(run.world.tick):
-      finishProfileTrace()
+      finishGameProfile()
     if options.verbose:
       while reported < run.log.len:
         echo "[", run.world.tick, "] ", run.log[reported]
@@ -206,7 +206,7 @@ proc runHeadless*() =
         echo &"hero {100 + slot} script FAILED: {run.heroVms[slot].lastError}"
 
 options = parseGameOptions()
-startProfileTrace()
+startGameProfile()
 if options.replayPath.len > 0:
   var replayData: ReplayData
   profileBlock "replay":

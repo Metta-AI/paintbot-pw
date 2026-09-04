@@ -225,7 +225,7 @@ proc housePropYaw(house: House): float32 =
 
 proc runGraphics*() =
   ## Runs the native or Emscripten spectator.
-  startProfileTrace()
+  startGameProfile()
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
     addHudIcons(builder)
@@ -843,4 +843,4 @@ proc runGraphics*() =
   while not window.closeRequested:
     pollEvents()
   saveRecording()
-  finishProfileTrace()
+  finishGameProfile()

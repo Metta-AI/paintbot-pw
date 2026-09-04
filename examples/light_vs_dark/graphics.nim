@@ -308,7 +308,7 @@ proc shownBuilding*(structure: Building): bool =
 
 proc runGraphics*() =
   ## Runs the native or Emscripten spectator.
-  startProfileTrace()
+  startGameProfile()
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
     addHudIcons(builder)
@@ -1655,4 +1655,4 @@ proc runGraphics*() =
     pollEvents()
   saveRecording()
   particles.closeParticles()
-  finishProfileTrace()
+  finishGameProfile()

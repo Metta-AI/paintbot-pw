@@ -3,18 +3,11 @@
 import
   std/[strformat, strutils],
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras],
-  content, sim, game, controls
+  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras,
+    stackpanels],
+  content, sim, game, controls, layouts
 
 const
-  ## Plate sizes and inner offsets are laid out for a 1920 wide layout at
-  ## UI scale 1.
-  PanelScore = vec2(298, 104)
-  PanelHeroes = vec2(1051, 145)
-  PanelClock = vec2(128, 86)
-  PanelMinimap = vec2(256, 256)
-  PanelDetails = vec2(859, 242)
-  PanelInventory = vec2(252, 243)
   HudClearance = 48.0'f32
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
   ## lands on exact mip levels and stays crisp.
@@ -22,18 +15,9 @@ const
   IconSmall = 64.0'f32
   IconLarge = 128.0'f32
   ShopIcon = 32.0'f32
-  WellPad = 4.0'f32
-  WellSmall = IconSmall + WellPad * 2
   ShopWell = ShopIcon + 4
   BadgeSmall = 18.0'f32
   BadgeLarge = 64.0'f32
-  ScoreHeaderXs = [14.0'f32, 115, 205]
-  ScoreHeaderY = 11.0'f32
-  ScoreValueXs = [43.0'f32, 133, 223]
-  ScoreValueW = 40.0'f32
-  ScoreRowYs = [31.0'f32, 61]
-  ScoreRowH = 25.0'f32
-  ScoreIconLift = 4.0'f32
   AbilityKeys = ["Q", "W", "E", "R", "F", "G"]
   ScoreIcons = ["tower", "kills", "deaths"]
   CooldownFill = rgbx(8, 10, 16, 180)
@@ -50,40 +34,7 @@ const
     "gota_warlock",
     "gota_berserker"
   ]
-  HeroSlotXs = [21.0'f32, 116, 212, 307, 401]
-  HeroSlotXsBlue = [570.0'f32, 665, 760, 856, 951]
-  HeroSlotY = 10.0'f32
-  HeroSlotSize = vec2(78, 80)
-  HeroBarInset = (HeroSlotSize.x - IconSmall) * 0.5'f32
-  HeroBarYs = [99.0'f32, 120]
-  HeroBarSize = vec2(IconSmall, 12)
-  AbilitySlotXs = [
-    296.0'f32, 386, 476, 566, 668, 758
-  ]
-  AbilitySlotY = 150.0'f32
-  DetailsPortrait = vec2(32, 32)
-  DetailsPortraitSize = vec2(150, 150)
-  DetailsBadge = vec2(14, 123)
-  DetailsNameX = 194.0'f32
-  DetailsNameW = 96.0'f32
-  DetailsNameY = 36.0'f32
-  DetailsClassY = 64.0'f32
-  DetailsStatY = 86.0'f32
-  DetailsBarX = 300.0'f32
-  DetailsBarW = 526.0'f32
-  DetailsBarYs = [36.0'f32, 74, 112]
-  DetailsBarH = 28.0'f32
-  InventoryTitleY = 10.0'f32
-  InventoryInset = 14.0'f32
-  InventorySlotsPos = [
-    vec2(14, 50), vec2(90, 50), vec2(166, 50),
-    vec2(14, 127), vec2(90, 127), vec2(166, 127)
-  ]
-  InventorySlotSize = vec2(WellSmall, WellSmall)
-  InventoryGoldY = 200.0'f32
   ShopColumns = 5
-  ShopOrigin = vec2(14, 48)
-  ShopPitch = vec2(44, ShopWell + 1)
 
 var shopOpen = false
 
@@ -145,7 +96,7 @@ proc hudLayoutFits(layoutSize: Vec2): bool =
   let
     layout = initGameUiLayout(layoutSize, TransportHeight)
     chrome = placeChrome(layout)
-  layoutFits(
+  layoutSize.x >= TransportMinWidth and layoutFits(
     layout,
     [
       chrome.score,
@@ -496,9 +447,9 @@ proc drawMinimapCamera(
 
 proc drawScoreRow(
     sk: Silky,
-    origin: Vec2,
+    panels: ScorePanels,
     team: Team,
-    y: float32
+    row: int
 ) =
   ## Draws one team's towers, kills, and deaths on a single row.
   let
@@ -510,33 +461,29 @@ proc drawScoreRow(
     ]
   sk.drawSprite(
     if team == RedTeam: "hostile" else: "alliance",
-    origin + vec2(ScoreHeaderXs[0], y + ScoreIconLift),
+    panels.sides[row].origin,
     vec2(IconTiny),
     color
   )
-  for i, x in ScoreValueXs:
+  for i, cell in panels.values[row]:
     writeInt(hudScratch, values[i])
     sk.drawLabel(
       hudScratch,
-      origin + vec2(x, y),
-      vec2(ScoreValueW, ScoreRowH),
+      cell.origin,
+      cell.size,
       color,
       "Default",
       CenterAlign
     )
 
-proc heroCardX(hero: Hero): float32 =
-  ## Returns the plate-local x of one top-bar hero card.
-  let slot = max(min(hero.slot, 4), 0)
-  if hero.team == RedTeam:
-    HeroSlotXs[slot]
-  else:
-    HeroSlotXsBlue[slot]
+proc heroCardIndex(hero: Hero): int =
+  ## Returns one hero's slot in the two stacked team groups.
+  int(clamp(hero.slot, 0, 4)) + (if hero.team == RedTeam: 0 else: 5)
 
 proc drawHeroPortrait(
     sk: Silky,
     window: Window,
-    panel: GameUiPanel,
+    panel: HeroPanels,
     hero: Hero,
     primaryId: var int32,
     selectedIds: var seq[int32],
@@ -546,10 +493,7 @@ proc drawHeroPortrait(
 ) =
   ## Draws one top-bar portrait on the hero plate.
   let
-    x = heroCardX(hero)
-    portrait = panel.imageSlot(
-      x, HeroSlotY, HeroSlotSize.x, HeroSlotSize.y
-    )
+    portrait = panel.portrait
     picked = isPicked(hero.id, selectedIds)
   sk.drawWellImage(
     portrait,
@@ -578,21 +522,14 @@ proc drawHeroPortrait(
 
 proc drawHeroMeters(
     sk: Silky,
-    panel: GameUiPanel,
+    panel: HeroPanels,
     hero: Hero
 ) =
   ## Draws one hero's bars and level on the hero plate.
   let
-    x = heroCardX(hero)
-    portrait = panel.imageSlot(
-      x, HeroSlotY, HeroSlotSize.x, HeroSlotSize.y
-    )
-    hpBar = panel.imageSlot(
-      x + HeroBarInset, HeroBarYs[0], HeroBarSize.x, HeroBarSize.y
-    )
-    manaBar = panel.imageSlot(
-      x + HeroBarInset, HeroBarYs[1], HeroBarSize.x, HeroBarSize.y
-    )
+    portrait = panel.portrait
+    hpBar = panel.hp
+    manaBar = panel.mana
   sk.drawBar(
     hpBar.origin,
     hpBar.size,
@@ -615,21 +552,20 @@ proc drawHeroMeters(
 
 proc drawStat(
     sk: Silky,
-    origin: Vec2,
-    y: float32,
+    panel: GameUiPanel,
     icon: string,
     value: string
 ) =
   ## Draws one compact stat icon and its numeric value.
   sk.drawSprite(
     icon,
-    origin + vec2(0, y + 1),
+    panel.origin + vec2(0, 1),
     vec2(16),
     IconTint
   )
   sk.drawLabel(
     value,
-    origin + vec2(20, y),
+    panel.origin + vec2(20, 0),
     vec2(56, 18),
     rgbx(236, 238, 244, 255),
     "Small"
@@ -684,20 +620,22 @@ proc drawUi*(
   let
     chrome = currentChrome(window)
     scorePanel = sk.beginFrame(chrome.score)
+    scoreSlots = scorePanel.scorePanels()
     heroesPanel = sk.beginFrame(chrome.heroes)
+    heroes = heroesPanel.heroPanels()
     clockPanel = sk.beginFrame(chrome.clock)
+    clock = clockPanel.clockPanels()
     minimapPanel = sk.beginFrame(chrome.minimap)
     inventoryPanel = sk.beginFrame(chrome.inventory)
+    inventory = inventoryPanel.inventoryPanels()
+    details = chrome.details.detailsPanels()
     hudTime = currentHudTime()
   var selection = selectedUnit(primaryId, viewMode)
-  let detailsPanel =
-    if selection != nil:
-      sk.beginFrame(chrome.details)
-    else:
-      chrome.details
+  if selection != nil:
+    discard sk.beginFrame(chrome.details)
 
   for i, label in ["TOWERS", "KILLS", "DEATHS"]:
-    let pos = scorePanel.origin + vec2(ScoreHeaderXs[i], ScoreHeaderY)
+    let pos = scoreSlots.headers[i].origin
     sk.drawSprite(
       ScoreIcons[i], pos + vec2(0, 1), vec2(IconTiny), IconTint
     )
@@ -708,13 +646,13 @@ proc drawUi*(
       rgbx(166, 174, 190, 255),
       "Hud"
     )
-  sk.drawScoreRow(scorePanel.origin, RedTeam, ScoreRowYs[0])
-  sk.drawScoreRow(scorePanel.origin, BlueTeam, ScoreRowYs[1])
+  sk.drawScoreRow(scoreSlots, RedTeam, 0)
+  sk.drawScoreRow(scoreSlots, BlueTeam, 1)
 
   for hero in run.world.heroes:
     sk.drawHeroPortrait(
       window,
-      heroesPanel,
+      heroes[hero.heroCardIndex],
       hero,
       primaryId,
       selectedIds,
@@ -723,25 +661,25 @@ proc drawUi*(
       focusPlayerHero
     )
   for hero in run.world.heroes:
-    sk.drawHeroMeters(heroesPanel, hero)
+    sk.drawHeroMeters(heroes[hero.heroCardIndex], hero)
 
   sk.drawSprite(
     if hudTime.hour < 6 or hudTime.hour >= 18: "night" else: "day",
-    clockPanel.origin + vec2(16, 14),
+    clock.icon.origin + vec2(0, 2),
     vec2(22)
   )
   sk.drawLabel(
     "TIME OF DAY",
-    clockPanel.origin + vec2(42, 12),
-    vec2(clockPanel.size.x - 56, 20),
+    clock.caption.origin,
+    clock.caption.size,
     rgbx(193, 198, 210, 255),
     "Small"
   )
   writeClock(hudScratch, hudTime.hour, hudTime.minute)
   sk.drawLabel(
     hudScratch,
-    clockPanel.origin + vec2(4, 39),
-    vec2(clockPanel.size.x - 8, 40),
+    clock.time.origin,
+    clock.time.size,
     rgbx(247, 221, 143, 255),
     "H1",
     CenterAlign
@@ -819,12 +757,7 @@ proc drawUi*(
   if selection != nil:
     let
       teamColor = teamHudColor(selection.team)
-      portrait = detailsPanel.imageSlot(
-        DetailsPortrait.x,
-        DetailsPortrait.y,
-        DetailsPortraitSize.x,
-        DetailsPortraitSize.y
-      )
+      portrait = details.portrait
     if selection.kind == SelectedHero:
       sk.drawWellImage(
         portrait, selection.portraitKey, iconSize = IconLarge
@@ -852,9 +785,7 @@ proc drawUi*(
       for slot in HeroAbilitySlot:
         let
           i = slot.ord
-          well = detailsPanel.imageSlot(
-            AbilitySlotXs[i], AbilitySlotY, WellSmall, WellSmall
-          )
+          well = details.abilities[i]
           spec = selection.abilities[slot].abilitySpec
           remaining = selection.cooldowns[slot]
         sk.drawAbilityIcon(
@@ -868,9 +799,7 @@ proc drawUi*(
         sk.drawCooldownSweep(well, remaining, spec.cooldownTicks)
       for i in 0 .. 1:
         let
-          well = detailsPanel.imageSlot(
-            AbilitySlotXs[4 + i], AbilitySlotY, WellSmall, WellSmall
-          )
+          well = details.abilities[4 + i]
           item = selection.inventory[i]
         if item != NoItem:
           sk.drawAbilityIcon(well, itemIconKey(item))
@@ -884,26 +813,22 @@ proc drawUi*(
     else:
       0'i32
   if playerHero:
-    let title = GameUiPanel(
-      origin: inventoryPanel.origin + vec2(InventoryInset, InventoryTitleY),
-      size: vec2(inventoryPanel.size.x - InventoryInset * 2, 28)
-    )
+    let title = inventory.title
     if window.clicked(sk, title):
       shopOpen = not shopOpen
   if playerHero and shopOpen:
-    var index = 0
+    var
+      index = 0
+      shopSlots: array[Item.high.ord, GameUiPanel]
+    stackGrid(
+      inventory.contents, vec2(ShopWell), ShopColumns, vec2(8, 1),
+      shopSlots
+    )
     for item in Item:
       if item == NoItem:
         continue
       let
-        col = index mod ShopColumns
-        row = index div ShopColumns
-        slotPanel = inventoryPanel.imageSlot(
-          ShopOrigin.x + col.float32 * ShopPitch.x,
-          ShopOrigin.y + row.float32 * ShopPitch.y,
-          ShopWell,
-          ShopWell
-        )
+        slotPanel = shopSlots[index]
       sk.drawWellImage(slotPanel, itemIconKey(item), iconSize = ShopIcon)
       if window.clicked(sk, slotPanel):
         queueBuyItem(playerHeroId, int32(item.ord))
@@ -911,12 +836,7 @@ proc drawUi*(
   else:
     for slot in 0 ..< InventorySlots:
       let
-        slotPanel = inventoryPanel.imageSlot(
-          InventorySlotsPos[slot].x,
-          InventorySlotsPos[slot].y,
-          InventorySlotSize.x,
-          InventorySlotSize.y
-        )
+        slotPanel = inventory.slots[slot]
         item =
           if selection == nil: NoItem else: selection.inventory[slot]
       if item != NoItem:
@@ -929,41 +849,35 @@ proc drawUi*(
   if selection != nil:
     let
       teamColor = teamHudColor(selection.team)
-      badge = detailsPanel.imageSlot(
-        DetailsBadge.x, DetailsBadge.y, BadgeLarge, BadgeLarge
+      badge = GameUiPanel(
+        origin: details.portrait.origin + vec2(-18, 91),
+        size: vec2(BadgeLarge)
       )
-      namePos = detailsPanel.origin + vec2(DetailsNameX, DetailsNameY)
-      classPos = detailsPanel.origin + vec2(DetailsNameX, DetailsClassY)
-      statPos = detailsPanel.origin + vec2(DetailsNameX, DetailsStatY)
-      hpBar = detailsPanel.imageSlot(
-        DetailsBarX, DetailsBarYs[0], DetailsBarW, DetailsBarH
-      )
-      manaBar = detailsPanel.imageSlot(
-        DetailsBarX, DetailsBarYs[1], DetailsBarW, DetailsBarH
-      )
-      xpBar = detailsPanel.imageSlot(
-        DetailsBarX, DetailsBarYs[2], DetailsBarW, DetailsBarH
-      )
+      namePos = details.name.origin
+      classPos = details.class.origin
+      hpBar = details.hp
+      manaBar = details.mana
+      xpBar = details.xp
     sk.drawBadge(badge.origin, badge.size, $selection.level, font = "Bold")
     sk.drawLabel(
       selection.callsign,
       namePos,
-      vec2(DetailsNameW, 28),
+      details.name.size,
       rgbx(255, 255, 255, 255),
       "Default"
     )
     sk.drawLabel(
       selection.classLabel,
       classPos,
-      vec2(DetailsNameW, 20),
+      details.class.size,
       teamColor,
       "Small"
     )
-    sk.drawStat(statPos, 0, "damage", $selection.damage)
-    sk.drawStat(statPos, 18, "health", $selection.maxHp.int)
+    var stats = details.stats.stack(TopToBottom)
+    sk.drawStat(stats.takeRow(18), "damage", $selection.damage)
+    sk.drawStat(stats.takeRow(18), "health", $selection.maxHp.int)
     sk.drawStat(
-      statPos,
-      36,
+      stats.takeRow(18),
       "movement",
       $(selection.moveSpeed * 100).int
     )
@@ -1012,9 +926,7 @@ proc drawUi*(
         vec2(20)
       )
     for i in 0 .. 5:
-      let well = detailsPanel.imageSlot(
-        AbilitySlotXs[i], AbilitySlotY, WellSmall, WellSmall
-      )
+      let well = details.abilities[i]
       if i < 4 and selection.kind == SelectedHero:
         let remaining = selection.cooldowns[HeroAbilitySlot(i)]
         if remaining > 0:
@@ -1039,15 +951,10 @@ proc drawUi*(
           )
       sk.drawAbilityKey(well, AbilityKeys[i])
 
-  if selection != nil:
+  if selection != nil and not (playerHero and shopOpen):
     for slot in 0 ..< InventorySlots:
       if selection.itemCounts[slot] > 1:
-        let slotPanel = inventoryPanel.imageSlot(
-          InventorySlotsPos[slot].x,
-          InventorySlotsPos[slot].y,
-          InventorySlotSize.x,
-          InventorySlotSize.y
-        )
+        let slotPanel = inventory.slots[slot]
         sk.drawLabel(
           $selection.itemCounts[slot],
           slotPanel.origin,
@@ -1058,17 +965,12 @@ proc drawUi*(
         )
   sk.drawLabel(
     if playerHero and shopOpen: "SHOP" else: "INVENTORY",
-    inventoryPanel.origin + vec2(InventoryInset, InventoryTitleY),
-    vec2(inventoryPanel.size.x - InventoryInset * 2, 28),
+    inventory.title.origin,
+    inventory.title.size,
     rgbx(200, 205, 216, 255),
     "Small"
   )
-  let gold = inventoryPanel.imageSlot(
-    InventoryInset,
-    InventoryGoldY,
-    inventoryPanel.size.x - InventoryInset * 2,
-    31
-  )
+  let gold = inventory.gold
   sk.drawSprite(
     "gold",
     gold.origin + vec2(0, 6),

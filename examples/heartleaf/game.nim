@@ -80,7 +80,7 @@ let
 var run*: Game
 
 block:
-  startProfileTrace()
+  startGameProfile()
   var
     mapSeed = options.seed
     dayCount = optionDays
@@ -191,14 +191,14 @@ proc describeResult*(): string =
 
 proc runHeadless*() =
   ## Runs a whole game with no renderer, as fast as the machine allows.
-  startProfileTrace()
+  startGameProfile()
   defer:
-    finishProfileTrace()
+    finishGameProfile()
   let started = epochTime()
   while run.world.tick < run.maximumTicks and not run.world.over:
     advanceGame()
     if profileShouldDump(run.world.tick):
-      finishProfileTrace()
+      finishGameProfile()
   let
     elapsed = max(epochTime() - started, 0.000001)
     simulated = run.world.tick.float64 / TickRate.float64

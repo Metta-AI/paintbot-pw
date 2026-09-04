@@ -88,7 +88,7 @@ let options* = parseGameOptions()
 var run*: Game
 
 block:
-  startProfileTrace()
+  startGameProfile()
   var
     replayMode = options.replayPath.len > 0
     mapSeed = options.seed
@@ -229,9 +229,9 @@ when defined(headless):
       started = epochTime()
     if not run.replayMode:
       startReplayRecording(uint32(stepLimit))
-    startProfileTrace()
+    startGameProfile()
     defer:
-      finishProfileTrace()
+      finishGameProfile()
     var steps = 0
     while steps < stepLimit and
         (run.replayMode or not run.world.gameOver) and
@@ -239,7 +239,7 @@ when defined(headless):
       advanceGame()
       inc steps
       if profileShouldDump(steps):
-        finishProfileTrace()
+        finishGameProfile()
     if run.recordingError.len > 0:
       raise newException(ReplayError, run.recordingError)
     if run.replayMode:

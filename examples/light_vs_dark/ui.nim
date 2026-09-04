@@ -3,17 +3,11 @@
 import
   std/strformat,
   chroma, pixie, silky, vmath, windy,
-  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras],
-  content, sim, game, controls
+  polyworld/[actioncam, chrome, gameuis, inputs, pathing, player, rtscameras,
+    stackpanels],
+  content, sim, game, controls, layouts
 
 const
-  ## Plate sizes and inner offsets are laid out for a 1920 wide layout at
-  ## UI scale 1.
-  PanelScore = vec2(298, 104)
-  PanelResources = vec2(432, 56)
-  PanelMinimap = vec2(282, 320)
-  PanelSelection = vec2(364, 225)
-  PanelBuild = vec2(358, 226)
   ResourceColors = [
     rgbx(232, 196, 86, 255),
     rgbx(196, 168, 120, 255),
@@ -26,56 +20,18 @@ const
   IconSmall = 64.0'f32
   IconLarge = 128.0'f32
   WellPad = 4.0'f32
-  WellSmall = IconSmall + WellPad * 2
-  WellLarge = IconLarge + WellPad * 2
   IconTint = rgbx(245, 230, 190, 255)
   ScoreIcons = ["tower", "kills", "deaths"]
-  ScoreHeaderXs = [14.0'f32, 115, 205]
-  ScoreHeaderY = 11.0'f32
-  ScoreValueXs = [43.0'f32, 133, 223]
-  ScoreValueW = 40.0'f32
-  ScoreRowYs = [31.0'f32, 61]
-  ScoreRowH = 25.0'f32
-  ScoreIconLift = 4.0'f32
   CommandTabs = ["BUILD", "UNITS", "UPGRADES"]
   ViewLabels = ["A", "L", "D"]
   ResourceIcons = ["gold", "wood", "food"]
   CommandTabIcons = ["build", "units", "research"]
-  ResourceCellXs = [12.0'f32, 151, 290]
-  ResourceCellY = 14.0'f32
-  ResourceCell = vec2(130, 28)
-  MinimapMap = vec2(14, 12)
-  MinimapMapSize = 256.0'f32
-  MinimapRowY = 274.0'f32
-  MinimapClockX = 60.0'f32
-  ViewButtonXs = [152.0'f32, 195, 238]
   ViewButtonSize = 32.0'f32
-  SelectionPortrait = vec2(14, 15)
-  SelectionBarY = 159.0'f32
-  SelectionNameY = 185.0'f32
   SelectionIcon = 48.0'f32
-  SelectionWell = SelectionIcon + WellPad * 2
-  SelectionGrid = [
-    vec2(162, 14), vec2(228, 14), vec2(294, 14),
-    vec2(162, 78), vec2(228, 78), vec2(294, 78),
-    vec2(162, 142), vec2(228, 142), vec2(294, 142)
-  ]
   GridBarH = 12.0'f32
   HealthColor = rgbx(70, 190, 95, 255)
-  BuildGrid = [
-    vec2(20, 54), vec2(102, 54), vec2(184, 54), vec2(266, 54),
-    vec2(20, 136), vec2(102, 136), vec2(184, 136), vec2(266, 136)
-  ]
   CostFill = rgbx(12, 14, 20, 200)
-  CostIconX = 7.0'f32
-  CostLabelX = 23.0'f32
-  CostLabelW = 41.0'f32
-  CostRowYs = [27.0'f32, 48]
-  CommandTabX = 20.0'f32
-  CommandTabY = 12.0'f32
-  CommandTabW = 102.0'f32
   CommandTabH = 28.0'f32
-  CommandTabGap = 4.0'f32
   CommandTabLift = 4.0'f32
 
 var commandTab = 0
@@ -169,7 +125,7 @@ proc hudLayoutFits(layoutSize: Vec2): bool =
   let
     layout = initGameUiLayout(layoutSize, TransportHeight)
     chrome = placeChrome(layout)
-  layoutFits(
+  layoutSize.x >= TransportMinWidth and layoutFits(
     layout,
     [
       chrome.score,
@@ -359,10 +315,8 @@ proc shownBuilding(structure: Building, viewMode: int32): bool =
   run.world.buildingVisible(viewMode - 1, structure)
 
 proc minimapMap(panel: GameUiPanel): GameUiPanel =
-  ## Returns the 256 px square map inside the minimap plate.
-  panel.imageSlot(
-    MinimapMap.x, MinimapMap.y, MinimapMapSize, MinimapMapSize
-  )
+  ## Returns the same stacked map rectangle used for rendering and input.
+  panel.minimapPanels().map
 
 proc minimapPoint(tile: Tile2, area: GameUiPanel): Vec2 =
   ## Converts one map tile into a point on the minimap.
@@ -432,9 +386,9 @@ proc drawMinimapCamera(
 
 proc drawScoreRow(
     sk: Silky,
-    origin: Vec2,
+    panels: ScorePanels,
     player: int32,
-    y: float32
+    row: int
 ) =
   ## Draws one side's towers, kills, and deaths.
   let
@@ -447,16 +401,16 @@ proc drawScoreRow(
     ]
   sk.drawSprite(
     if player == LightPlayer: "alliance" else: "hostile",
-    origin + vec2(ScoreHeaderXs[0], y + ScoreIconLift),
+    panels.sides[row].origin,
     vec2(IconTiny),
     color
   )
-  for i, x in ScoreValueXs:
+  for i, cell in panels.values[row]:
     writeInt(hudScratch, values[i])
     sk.drawLabel(
       hudScratch,
-      origin + vec2(x, y),
-      vec2(ScoreValueW, ScoreRowH),
+      cell.origin,
+      cell.size,
       color,
       "Default",
       CenterAlign
@@ -473,18 +427,22 @@ proc drawSlotCosts(
     return
   let inner = slot.inset(WellPad)
   sk.drawRect(inner.origin, inner.size, CostFill)
-  for i, value in [gold, wood]:
+  var costs = slot.stack(BottomToTop, vec2(7, 6))
+  for i, value in [wood, gold]:
+    let
+      row = costs.takeRow(18, 3)
+      resource = 1 - i
     sk.drawSprite(
-      ResourceIcons[i],
-      slot.origin + vec2(CostIconX, CostRowYs[i] + 1),
+      ResourceIcons[resource],
+      row.origin + vec2(0, 1),
       vec2(IconTiny)
     )
     writeInt(hudScratch, value.int)
     sk.drawLabel(
       hudScratch,
-      slot.origin + vec2(CostLabelX, CostRowYs[i]),
-      vec2(CostLabelW, 18),
-      ResourceColors[i],
+      row.origin + vec2(16, 0),
+      vec2(row.size.x - 16, row.size.y),
+      ResourceColors[resource],
       "Small",
       RightAlign
     )
@@ -505,14 +463,19 @@ proc drawUi*(
   let
     chrome = currentChrome(window)
     scorePanel = sk.beginFrame(chrome.score)
+    scoreSlots = scorePanel.scorePanels()
     resourcePanel = sk.beginFrame(chrome.resources)
     minimapPanel = sk.beginFrame(chrome.minimap)
     selectionPanel = sk.beginFrame(chrome.selection)
     buildPanel = sk.beginFrame(chrome.build)
     light = run.world.players[LightPlayer]
+    resources = resourcePanel.resourcePanels()
+    minimap = minimapPanel.minimapPanels()
+    selection = selectionPanel.selectionPanels()
+    build = buildPanel.buildPanels()
 
   for i, label in ["TOWERS", "KILLS", "DEATHS"]:
-    let pos = scorePanel.origin + vec2(ScoreHeaderXs[i], ScoreHeaderY)
+    let pos = scoreSlots.headers[i].origin
     sk.drawSprite(
       ScoreIcons[i], pos + vec2(0, 1), vec2(IconTiny), IconTint
     )
@@ -523,8 +486,8 @@ proc drawUi*(
       rgbx(166, 174, 190, 255),
       "Hud"
     )
-  sk.drawScoreRow(scorePanel.origin, LightPlayer, ScoreRowYs[0])
-  sk.drawScoreRow(scorePanel.origin, DarkPlayer, ScoreRowYs[1])
+  sk.drawScoreRow(scoreSlots, LightPlayer, 0)
+  sk.drawScoreRow(scoreSlots, DarkPlayer, 1)
 
   let resourceRows = [
     ("GOLD", light.gold),
@@ -533,22 +496,23 @@ proc drawUi*(
   ]
   for i, row in resourceRows:
     let
-      cell = resourcePanel.imageSlot(
-        ResourceCellXs[i],
-        ResourceCellY,
-        ResourceCell.x,
-        ResourceCell.y
-      )
+      cell = resources[i]
+    var contents = cell.stack(LeftToRight, vec2(5, 2))
+    contents.gap(2)
+    let
+      icon = contents.take(vec2(16, 24), 9)
+      caption = contents.take(vec2(33, 24))
+      amount = contents.takeRest()
     sk.drawFaintFrame(cell)
     sk.drawSprite(
       ResourceIcons[i],
-      cell.origin + vec2(7, 6),
+      icon.origin + vec2(0, 4),
       vec2(IconTiny)
     )
     sk.drawLabel(
       row[0],
-      cell.origin + vec2(32, 5),
-      vec2(70, 20),
+      caption.origin + vec2(0, 3),
+      vec2(caption.size.x, 20),
       rgbx(166, 174, 190, 255),
       "Small"
     )
@@ -558,8 +522,8 @@ proc drawUi*(
       writeAmount(hudScratch, row[1].int)
     sk.drawLabel(
       hudScratch,
-      cell.origin + vec2(65, 2),
-      vec2(60, 24),
+      amount.origin,
+      amount.size,
       ResourceColors[i],
       "Hud",
       RightAlign
@@ -568,13 +532,13 @@ proc drawUi*(
   let hudTime = currentHudTime()
   sk.drawSprite(
     if hudTime.hour < 6 or hudTime.hour >= 18: "night" else: "day",
-    minimapPanel.origin + vec2(12, MinimapRowY + 2),
+    minimap.sun.origin + vec2(0, 2),
     vec2(ViewButtonSize)
   )
   writeClock(hudScratch, hudTime.hour, hudTime.minute)
   sk.drawLabel(
     hudScratch,
-    minimapPanel.origin + vec2(MinimapClockX, MinimapRowY + 6),
+    minimap.clock.origin + vec2(0, 6),
     vec2(80, 24),
     rgbx(247, 221, 143, 255),
     "Small"
@@ -624,11 +588,8 @@ proc drawUi*(
       playerColor(unit.owner)
     )
   sk.drawMinimapCamera(window, area, cameraTarget, cameraDistance)
-  for index, x in ViewButtonXs:
+  for index, button in minimap.views:
     let
-      button = minimapPanel.imageSlot(
-        x, MinimapRowY, ViewButtonSize, ViewButtonSize
-      )
       hot = viewMode == int32(index)
     sk.drawSlot(button, selected = hot)
     sk.drawLabel(
@@ -678,16 +639,9 @@ proc drawUi*(
     portraitMax = max(structure.maxHp, 1)
     portraitName = structure.kind.buildingName(structure.owner)
   let
-    selectPortrait = selectionPanel.imageSlot(
-      SelectionPortrait.x, SelectionPortrait.y, WellLarge, WellLarge
-    )
-    textX = SelectionPortrait.x + WellPad
-    selectBar = selectionPanel.imageSlot(
-      textX, SelectionBarY, IconLarge, 23
-    )
-    selectName = selectionPanel.imageSlot(
-      textX, SelectionNameY, IconLarge, 22
-    )
+    selectPortrait = selection.portrait
+    selectBar = selection.hp
+    selectName = selection.name
   sk.drawPortrait(selectPortrait, portraitKey, IconLarge)
   writeRatio(hudScratch, portraitHp.int, portraitMax.int)
   sk.drawValueBar(
@@ -709,18 +663,13 @@ proc drawUi*(
     shown = 0
     clickedId = NoEntity
   for id in selectedIds:
-    if shown >= SelectionGrid.len:
+    if shown >= selection.units.len:
       break
     if id == portraitId or not id.isUnitId or not run.world.hasUnit(id):
       continue
     let
       unit = run.world.units[run.world.unitIndex(id)]
-      slot = selectionPanel.imageSlot(
-        SelectionGrid[shown].x,
-        SelectionGrid[shown].y,
-        SelectionWell,
-        SelectionWell
-      )
+      slot = selection.units[shown]
     sk.drawPortrait(
       slot,
       unitPortraitKey(unit.owner, unit.kind),
@@ -750,14 +699,9 @@ proc drawUi*(
     let structure = run.world.buildings[
       run.world.buildingIndex(primaryId)
     ]
-    for slot in 0 ..< min(QueueSlots, SelectionGrid.len):
+    for slot in 0 ..< min(QueueSlots, selection.units.len):
       let
-        well = selectionPanel.imageSlot(
-          SelectionGrid[slot].x,
-          SelectionGrid[slot].y,
-          SelectionWell,
-          SelectionWell
-        )
+        well = selection.units[slot]
         filled = slot < structure.queueLength
       if filled:
         let kind = UnitKind(structure.queue[slot] - 1)
@@ -776,17 +720,10 @@ proc drawUi*(
   for i, label in CommandTabs:
     let
       selected = commandTab == i
-      tab = buildPanel.imageSlot(
-        CommandTabX + i.float32 * (CommandTabW + CommandTabGap),
-        if selected:
-          CommandTabY - CommandTabLift
-        else:
-          CommandTabY,
-        CommandTabW,
-        if selected:
-          CommandTabH + CommandTabLift
-        else:
-          CommandTabH
+      lift = if selected: CommandTabLift else: 0.0'f
+      tab = GameUiPanel(
+        origin: build.tabs[i].origin - vec2(0, lift),
+        size: build.tabs[i].size + vec2(0, lift)
       )
       over = sk.hovered(tab)
       tint =
@@ -811,10 +748,8 @@ proc drawUi*(
     if window.clicked(sk, tab):
       commandTab = i
   if commandTab == 0:
-    for index in 0 ..< BuildGrid.len:
-      let slot = buildPanel.imageSlot(
-        BuildGrid[index].x, BuildGrid[index].y, WellSmall, WellSmall
-      )
+    for index in 0 ..< build.slots.len:
+      let slot = build.slots[index]
       if index <= BuildableHigh.ord:
         let
           kind = BuildingKind(index)
@@ -834,9 +769,7 @@ proc drawUi*(
   elif commandTab == 1:
     for kind in UnitKind:
       let
-        slot = buildPanel.imageSlot(
-          BuildGrid[kind.ord].x, BuildGrid[kind.ord].y, WellSmall, WellSmall
-        )
+        slot = build.slots[kind.ord]
         stats = UnitTable[LightPlayer][kind]
         player = commandPlayer(viewMode)
       sk.drawPortrait(
@@ -858,8 +791,8 @@ proc drawUi*(
   else:
     sk.drawLabel(
       "No upgrades",
-      buildPanel.origin + vec2(BuildGrid[0].x, BuildGrid[0].y),
-      vec2(buildPanel.size.x - BuildGrid[0].x * 2, 28),
+      build.contents.origin,
+      vec2(build.contents.size.x, 28),
       rgbx(150, 160, 178, 255),
       "Small",
       CenterAlign

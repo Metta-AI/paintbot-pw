@@ -179,7 +179,7 @@ var
 
 proc runGraphics*() =
   ## Runs the native or Emscripten graphical spectator.
-  startProfileTrace()
+  startGameProfile()
   profileBlock "atlas":
     let builder = newHudAtlas(4096)
     for class in HeroClass:
@@ -2002,4 +2002,4 @@ proc runGraphics*() =
   if not run.replayMode:
     saveRecording()
   particles.closeParticles()
-  finishProfileTrace()
+  finishGameProfile()
