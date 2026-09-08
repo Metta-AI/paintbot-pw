@@ -43,14 +43,16 @@ proc buildTerrainMap*(
   patchSize = 24.0'f,
   heightScale = 2.91'f,
   count = 1,
-  chance = 0.4'f
+  chance = 0.4'f,
+  materialCount = SurfaceNames.len
 ): TerrainMap {.raises: [TerrainMapError].} =
   ## Builds visual material and splat buffers without changing game map data.
   if kindMaterials.len == 0 or not (patchSize > 0 and patchSize < Inf) or
-    not (heightScale > 0 and heightScale < Inf):
+    not (heightScale > 0 and heightScale < Inf) or
+    materialCount < SurfaceNames.len:
       raise newException(TerrainMapError, "Invalid terrain material settings.")
   for material in kindMaterials:
-    if material < 0 or material >= SurfaceNames.len:
+    if material < 0 or material >= materialCount:
       raise newException(TerrainMapError, "Unknown generated terrain material.")
   try:
     let regions = initGrassRegions(seed, patchSize)
@@ -88,7 +90,8 @@ proc buildTerrainMap*(
           )
         materials[i] = material
         surfaces[i] = SplatTile(
-          exists: tile.exists,
+          # Extra construction materials have no natural terrain stamps.
+          exists: tile.exists and material < SurfaceNames.len,
           material: material,
           variants: 1,
           tops: tile.tops
@@ -103,7 +106,7 @@ proc buildTerrainMap*(
         count,
         chance,
         textureSize,
-        SurfaceNames.len
+        materialCount
       )
       for i, tile in layer.tiles:
         if not tile.exists:

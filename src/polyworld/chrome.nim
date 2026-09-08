@@ -1,9 +1,9 @@
 ## Shared Silky HUD chrome for Polyworld games.
 
 import
-  std/[math, times],
+  std/[math, strutils, times],
   chroma, pixie, silky, vmath, windy,
-  gameuis, inputs, profiles, rtscameras
+  gameuis, inputs, profiles, quadterrain, rtscameras
 
 const
   PanelAccent* = rgbx(83, 91, 108, 255)
@@ -31,7 +31,7 @@ const
     ## Wall-clock seconds in one in-game day. A 20 minute match is four days.
   DebugWindowTitle* = "Debug"
   DebugWindowOrigin* = vec2(360, 32)
-  DebugWindowSize* = vec2(460, 230)
+  DebugWindowSize* = vec2(460, 380)
   FpsLimitMin* = 15
   FpsLimitMax* = 240
   FpsAvgTau = 1.0'f32
@@ -701,6 +701,17 @@ proc drawDebugMenu*(sk: Silky, window: Window) =
         FpsLimitMax,
         $framePaceHz
       )
+      text "terrainScaleCaption":
+        characters "Terrain texture scale"
+      scrubber(
+        "terrainTextureScale",
+        terrainTextureScale,
+        0.01'f,
+        1.0'f,
+        terrainTextureScale.formatFloat(ffDecimal, 3)
+      )
+      text "terrainScaleHint":
+        characters "Lower values make larger texture patterns."
       checkBox "Interpolation", interpolateVisuals
       checkBox "Show paths", showPaths
       checkBox "Show tiles", showTiles

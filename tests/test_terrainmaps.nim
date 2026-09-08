@@ -77,6 +77,32 @@ block:
   doAssert CobbleSurface.float32 in connected.blends[0 ..< 16]
   doAssert DirtSurface.float32 in connected.blends[16 ..< 32]
 
+echo "Testing extra construction materials keep their texture without stamps"
+block:
+  let layer = flatLayer(3, 1)
+  for i in 0 ..< 3:
+    layer.tiles[i].kind = (i + 1).uint32
+  let
+    materials = [GrassSurface, DirtSurface, SurfaceNames.len, SurfaceNames.len + 1]
+    map = buildTerrainMap(
+      [layer],
+      materials,
+      12,
+      chance = 1,
+      materialCount = SurfaceNames.len + 2
+    )
+  doAssert map.layers[0].materials == @materials[1 .. 3]
+  doAssert map.placements == 1
+  doAssert map.layers[0].ranges[0].y == 1
+  doAssert map.layers[0].ranges[1].y == 0
+  doAssert map.layers[0].ranges[2].y == 0
+  doAssert SurfaceNames.len.float32 in map.blends
+  doAssert (SurfaceNames.len + 1).float32 in map.blends
+  expectTerrainError:
+    discard buildTerrainMap([layer], materials, 12)
+  expectTerrainError:
+    discard buildTerrainMap([layer], Kinds, 12, materialCount = 1)
+
 echo "Testing empty, water, multiple, and malformed layers"
 block:
   let

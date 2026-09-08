@@ -68,6 +68,11 @@ const
   ForestDensityPercent = 90'i64
     ## Chance that a candidate at the forest map's peak passes the gate.
   PlateauTrees = 20
+  ForestPatchRadius = 4'i32
+    ## Solid patches join neighbouring trees into dense woods.
+  BattleRadius = 22'i32
+  BattleLaneHalfWidth = 6'i32
+  FordTreeMargin = 3
 
   FordCorners = [(96, 32), (64, 64), (32, 96)]
     ## Corner coordinates, so the middle ford sits exactly on the axis of
@@ -439,13 +444,34 @@ proc generateMap*(seed: int32): MapData {.measure.} =
   ## Forests. Every planted tile writes its mirror too, so the two players get
   ## identical wood no matter which half the sampler happened to land on.
   proc covers(origin: Tile2, footprint, margin, x, y: int32): bool =
+    ## Tests a structure footprint with an extra border of tiles.
     x >= int32(origin.x) - margin and
       x < int32(origin.x) + footprint + margin and
       y >= int32(origin.y) - margin and
       y < int32(origin.y) + footprint + margin
 
+  proc inBattleClearing(x, y: int32): bool =
+    ## Reserves the centre, diagonal approach, and all three river crossings.
+    let
+      dx = x * 2 + 1 - GridSide
+      dy = y * 2 + 1 - GridSide
+    if dx * dx + dy * dy <= BattleRadius * BattleRadius * 4:
+      return true
+    if abs(x - y) <= BattleLaneHalfWidth and
+      min(x, y) >= BaseCenterTile and
+      max(x, y) < GridSide - BaseCenterTile:
+        return true
+    for i, (fordX, fordY) in FordCorners:
+      let
+        fx = x * 2 + 1 - int32(fordX * 2)
+        fy = y * 2 + 1 - int32(fordY * 2)
+        radius = int32(FordRadius[i] + FordTreeMargin)
+      if fx * fx + fy * fy <= radius * radius * 4:
+        return true
+    false
+
   proc openForTree(x, y: int32): bool =
-    ## Shared tree rules: open grass, not a ramp, clearing, hall, or mine.
+    ## Keeps every planting pass clear of battles, ramps, and resources.
     if not inGrid(x, y):
       return false
     let index = int(tileIndex(x, y))
@@ -454,6 +480,8 @@ proc generateMap*(seed: int32): MapData {.measure.} =
     if map.kinds[index] != uint8(GrassTile):
       return false
     if tileOnRamp(x.int, y.int) or inClearingTile(x.int, y.int):
+      return false
+    if inBattleClearing(x, y):
       return false
     for player in 0 ..< PlayerCount:
       if covers(map.hallOrigin[player], HallFootprint, 3, x, y):
@@ -478,18 +506,28 @@ proc generateMap*(seed: int32): MapData {.measure.} =
       layers[0].tiles[index].kind = TreeTile
     true
 
-  proc plant(x, y: int32): bool =
-    ## Plants one grove or scatter tree and its mirror, or neither.
-    plantOn(x, y, false)
+  # Forest noise chooses patch centres, then each patch fills solidly.
+  # Mirrored patches preserve equal wood and matching paths for both sides.
+  var
+    forestRng = initRng(seed, ForestRollStream)
+    mapRng = initRng(seed)
 
-  ## Trees grow in woods, not at random: a low-frequency forest map (its own
-  ## noise stream) gives each candidate a density. Nothing grows where it is
-  ## negative, and above zero the chance rises with the noise, so the wood
-  ## thickens toward its heart and thins to a ragged forest line at the
-  ## zero crossing. The mirror is planted with its twin, so the woods stay
-  ## symmetric even though the map is sampled from one side.
-  var forestRng = initRng(seed, ForestRollStream)
+  proc plantPatch(x, y: int32, wantPad: bool, limit: int): int =
+    ## Fills a compact patch outwards, counting mirrored pairs toward its cap.
+    let radius = 2 + mapRng.below(ForestPatchRadius - 1)
+    for ring in 0'i32 .. radius:
+      for dy in -ring .. ring:
+        for dx in -ring .. ring:
+          if max(abs(dx), abs(dy)) != ring or
+            dx * dx + dy * dy > radius * radius:
+              continue
+          if result >= limit:
+            return
+          if plantOn(x + dx, y + dy, wantPad):
+            inc result
+
   proc inForest(x, y: int32): bool =
+    ## Samples the forest density with a deterministic planting roll.
     let
       forest = int64(
         valueNoise(seed, ForestNoiseStream, x.int, y.int, 20) * 2 +
@@ -509,9 +547,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
   ## then ungated to reach the count on seeds whose forest map leaves the
   ## grove ring thin.
   let lightCentre = tile2(BaseCenterTile, BaseCenterTile)
-  var
-    mapRng = initRng(seed)
-    planted = 0
+  var planted = 0
   for gated in [true, false]:
     for attempt in 0 ..< GroveTiles * 60:
       if planted >= GroveTiles:
@@ -524,8 +560,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
         continue
       if gated and not inForest(x, y):
         continue
-      if plant(x, y):
-        inc planted
+      planted += plantPatch(x, y, false, GroveTiles - planted)
 
   var
     scattered = 0
@@ -535,17 +570,9 @@ proc generateMap*(seed: int32): MapData {.measure.} =
     let
       x = mapRng.below(GridSide)
       y = mapRng.below(GridSide)
-    ## Keep the fords clear so the chokepoints stay chokepoints.
-    var nearFord = false
-    for (fordX, fordZ) in FordCorners:
-      if chebyshev(tile2(x, y), tile2(int32(fordX), int32(fordZ))) <= 7:
-        nearFord = true
-    if nearFord:
-      continue
     if not inForest(x, y):
       continue
-    if plant(x, y):
-      inc scattered
+    scattered += plantPatch(x, y, false, ScatterTiles - scattered)
 
   var plateauPlanted = 0
   for attempt in 0 ..< PlateauTrees * 40:
@@ -554,8 +581,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
     let
       x = mapRng.below(PadWall + 6)
       y = mapRng.below(PadWall + 6)
-    if plantOn(x, y, true):
-      inc plateauPlanted
+    plateauPlanted += plantPatch(x, y, true, PlateauTrees - plateauPlanted)
 
   ## Fingerprint. Covers the packed terrain, the derived walkability, the
   ## trees, and every structure placement, so a generator change is caught at

@@ -38,7 +38,7 @@ const LaneRoutes: array[3, seq[LaneStop]] = [
     (GroundLayer, 107, 21), (GroundLayer, 107, 32),
     (GroundLayer, 107, 98), (GroundLayer, 107, 104)],
   @[(GroundLayer, 23, 21), (GroundLayer, 29, 21),
-    (GroundLayer, 48, 54), (BridgeLayer, 11, 3),
+    (GroundLayer, 48, 54), (GroundLayer, 65, 61),
     (GroundLayer, 82, 68), (GroundLayer, 98, 106),
     (GroundLayer, 104, 106)],
   @[(GroundLayer, 20, 23), (GroundLayer, 20, 29),
@@ -818,29 +818,14 @@ proc fixedSurfaceHeightNear(
         bestDistance = distance
         found = true
 
-proc onBridgeDeck(x, z: int32): bool =
-  ## Returns whether an integer world position lies above a bridge tile.
-  let
-    tileX = floorWorldTile(x) + GridTiles div 2 -
-      layers[BridgeLayer].originX
-    tileZ = floorWorldTile(z) + GridTiles div 2 -
-      layers[BridgeLayer].originZ
-  tileX >= 0 and tileX < layers[BridgeLayer].width and
-    tileZ >= 0 and tileZ < layers[BridgeLayer].depth and
-    layers[BridgeLayer].tiles[tileZ * layers[BridgeLayer].width + tileX].exists
-
 proc canStand(x, z: int32): bool =
-  ## Keeps units out of deep water, forests, boulders, the fort
-  ## footprints, and off the map edge. The bridge deck overrides the
-  ## blocked riverbed below it.
+  ## Keeps units out of forests, blocked fort tiles, and the map rim.
   const
     Margin = 18_000'i32
     HalfGridUnits = GridTiles div 2 * WorldScale
   if x < -HalfGridUnits + Margin or x > HalfGridUnits - Margin or
       z < -HalfGridUnits + Margin or z > HalfGridUnits - Margin:
     return false
-  if onBridgeDeck(x, z):
-    return true
   let
     tileX = floorWorldTile(x) + GridTiles div 2 -
       layers[GroundLayer].originX

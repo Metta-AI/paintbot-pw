@@ -876,6 +876,7 @@ var
   splatColorArray, splatHeightArray, splatDataTexture, blendDataTexture: GLuint
   splatDimensions, blendDimensions: Vec2
   generatedMap: TerrainMap
+  terrainAverageColors: seq[Vec3]
   generatedTerrain = false
   groundMaskActive = false
   groundLayerIndices = vec4(4, 5, 0, 0)
@@ -976,13 +977,18 @@ type
     MixedTrees, EvergreenTrees, DenseTrees
   TerrainStyle* = enum
     CartoonTerrain, GeneratedTerrain
+  RockStyle* = enum
+    LowPolyRocks, PaintedRocks
 
 var
   treeModels: seq[TreeModel]   # trees; occupy a tile and block it
   grassModels: seq[PropModel]  # grass puffs; walkable decoration
   rockModels: seq[PropModel]   # boulders; half-buried on rock tiles
   grassPlacements: seq[TreePlacement]
+  grassMatchesTerrain = false
   rockPlacements: seq[TreePlacement]
+  rockScaleRange = vec2(0.9, 1.1)
+  rockBurial = 0.45'f
   propPlacements: seq[PropPlacement]
   texturedBatches: seq[TexturedBatch]
 
@@ -1356,17 +1362,12 @@ proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
 
 proc loadPropPack*(
     path: string, unitHeight = true, brightness = 1.0'f32,
-    only: seq[string] = @[], textured = false
+    only: seq[string] = @[], textured = false, repeatTexture = false
 ): PropPack =
-  ## Loads named glTF nodes as independently placeable models. Each model is
-  ## scaled to unit height unless unitHeight is false, which keeps the
-  ## authored units so flat pieces stay flat and relative sizes survive.
-  ## Brightness scales the baked colors for packs authored dark. With `only`
-  ## given, just those nodes are kept, which skips baking a whole kit for a
-  ## handful of props. A textured pack keeps its material images as one
-  ## texture array and its placements draw through the cutout texture path
-  ## the trees use, so painted detail and foliage cutouts survive; needs a
-  ## GL context.
+  ## Loads named glTF props, scaled to unit height unless disabled.
+  ## Brightness adjusts baked colors; textured keeps material images.
+  ## RepeatTexture tiles those images beyond their UV edges.
+  ## Textured packs require a current GL context.
   result = PropPack()
   var images: seq[Image]
   collectPropModels(
@@ -1382,7 +1383,12 @@ proc loadPropPack*(
         if image.width == size and image.height == size: image
         else: image.resize(size, size)
       chains.add mipChain(square)
-    result.textureArray = buildTextureArray(chains, GL_CLAMP_TO_EDGE.GLint)
+    let wrap =
+      if repeatTexture:
+        GL_REPEAT.GLint
+      else:
+        GL_CLAMP_TO_EDGE.GLint
+    result.textureArray = buildTextureArray(chains, wrap)
     for model in result.models:
       model.textureArray = result.textureArray
   if unitHeight:
@@ -1717,9 +1723,8 @@ const
 var
   amplitude* = 2.91'f32   # height scale for shading; also sets the floor
   borderWidth* = 0.05'f32 # width of the passability border strips
-  terrainTextureScale* = 0.1'f32
-    ## Texture repeats per tile: one repeat spans ten tiles, so the painted
-    ## strokes read as broad ground rather than per-tile stamps.
+  terrainTextureScale* = 0.27'f
+    ## Texture repeats per tile, with higher values making smaller patterns.
   terrainBlendDepth* = 0.12'f32  # blend band width; smaller is more abrupt
   terrainHeightBlend* = 1.2'f32  # how strongly height maps steer the blend
   terrainHeightBlending* = true
@@ -1818,10 +1823,24 @@ proc setTileMaterial*(
   tileMaterialTable[kind].skirtMaterial = skirtMaterial
   tileMaterialTable[kind].blendPriority = blendPriority
 
+proc averageColor(image: Image): Vec3 =
+  ## Averages premultiplied texture colors by their coverage, before lighting.
+  var sums: array[4, uint64]
+  for pixel in image.data:
+    sums[0] += pixel.r.uint64
+    sums[1] += pixel.g.uint64
+    sums[2] += pixel.b.uint64
+    sums[3] += pixel.a.uint64
+  if sums[3] == 0:
+    return vec3(0)
+  vec3(sums[0].float32, sums[1].float32, sums[2].float32) /
+    sums[3].float32
+
 proc loadTerrainMaterials(): seq[seq[Image]] =
   ## Each material's basecolor with its height map packed into alpha. The
   ## alpha isn't coverage here, so mips must not premultiply by it: build
   ## the chain from the opaque color and re-pack height per level.
+  terrainAverageColors.setLen(0)
   for name in TerrainMaterials:
     let
       colors = mipChain(readImage(
@@ -1835,6 +1854,7 @@ proc loadTerrainMaterials(): seq[seq[Image]] =
         QuadTerrainError,
         "terrain material has the wrong dimensions: " & name
       )
+    terrainAverageColors.add averageColor(colors[0])
     for level in 0 ..< colors.len:
       for i in 0 ..< colors[level].data.len:
         colors[level].data[i].a = heights[level].data[i].r
@@ -1865,13 +1885,15 @@ proc generatedMaterial(directory, name: string): tuple[color, height: Image] =
       let gray = ((value.r.int * alpha.int + 127) div 255).uint8
       result.height.data[i] = rgbx(gray, gray, gray, alpha)
 
-proc loadGeneratedTiles(): seq[seq[Image]] =
+proc loadGeneratedTiles(extraTiles: openArray[string]): seq[seq[Image]] =
   ## Packs independently filtered color and height into the terrain array.
-  for name in SurfaceNames:
+  terrainAverageColors.setLen(0)
+  for name in @SurfaceNames & @extraTiles:
     let
       pair = generatedMaterial("tiles", name)
       colors = mipChain(pair.color)
       heights = mipChain(pair.height)
+    terrainAverageColors.add averageColor(colors[0])
     for level in 0 ..< colors.len:
       for i in 0 ..< colors[level].data.len:
         colors[level].data[i].a = heights[level].data[i].r
@@ -1921,8 +1943,15 @@ proc rebuildTerrainData() =
     materials.add style.topMaterial.int
   try:
     generatedMap = buildTerrainMap(
-      layers, materials, seed, 1.0'f / terrainTextureScale,
-      terrainGrassPatchSize, amplitude, terrainSplatCount, terrainSplatChance
+      layers,
+      materials,
+      seed,
+      1.0'f / terrainTextureScale,
+      terrainGrassPatchSize,
+      amplitude,
+      terrainSplatCount,
+      terrainSplatChance,
+      terrainAverageColors.len
     )
   except TerrainMapError:
     raise newException(QuadTerrainError, getCurrentExceptionMsg())
@@ -1966,11 +1995,7 @@ proc setTerrainMaterial*(index: int, color, height: Image) =
       "terrain materials can only be replaced after initTerrain"
     )
   let
-    materialCount =
-      if generatedTerrain:
-        SurfaceNames.len
-      else:
-        TerrainMaterials.len
+    materialCount = terrainAverageColors.len
     size =
       if generatedTerrain:
         GeneratedTextureSize
@@ -1991,6 +2016,7 @@ proc setTerrainMaterial*(index: int, color, height: Image) =
   let
     colors = mipChain(color)
     heights = mipChain(height)
+  terrainAverageColors[index] = averageColor(colors[0])
   glBindTexture(GL_TEXTURE_2D_ARRAY, terrainTextureArray)
   for level in 0 ..< colors.len:
     let mip = colors[level]
@@ -2123,11 +2149,12 @@ proc showAllTerrain*() =
 
 ## Prop scattering
 
-proc scatterGrass*(count, randomSeed: int) =
+proc scatterGrass*(count, randomSeed: int, matchTerrain = false) =
   ## Grass puffs: walkable decoration scattered on plain grass tiles only,
-  ## jittered inside the tile so they don't look planted on a grid.
+  ## jittered inside the tile, optionally colored from the terrain beneath.
   ## Call after the ground layer is built and before bakeTerrain.
   grassPlacements.setLen(0)
+  grassMatchesTerrain = matchTerrain
   if grassModels.len == 0 or layers.len == 0:
     return
   template gtile(x, z: int): Tile =
@@ -2166,7 +2193,7 @@ proc scatterRocks*(count, randomSeed: int) =
   rockPlacements.setLen(0)
   if rockModels.len == 0 or layers.len == 0:
     return
-  template gtile(x, z: int): var Tile =
+  template gtile(x, z: int): Tile =
     layers[0].tiles[(z) * layers[0].width + (x)]
   var rockRng = initRand(randomSeed.int64 * 104_729'i64 + 3'i64)
   var attempts = 0
@@ -2181,13 +2208,14 @@ proc scatterRocks*(count, randomSeed: int) =
     let
       h = gtile(x, z).tops.unpack
       model = rockRng.rand(rockModels.len - 1)
-      boulderScale = 0.9'f32 + rockRng.rand(1.1).float32
+      boulderScale = rockScaleRange.x +
+        rockRng.rand(rockScaleRange.y.float).float32
     rockPlacements.add TreePlacement(
       model: model,
       position: vec3(
         (layers[0].originX + x).float32 - HalfGrid + 0.5,
         (h[0] + h[1] + h[2] + h[3]) / 4.0 -
-          rockModels[model].height * boulderScale * 0.45,
+          rockModels[model].height * boulderScale * rockBurial,
         (layers[0].originZ + z).float32 - HalfGrid + 0.5
       ),
       rotation: rockRng.rand(2.0 * PI).float32,
@@ -2253,9 +2281,64 @@ proc bakePlacements(
 ) =
   ## Writes a set of prop placements into the shared baked prop mesh.
   for placement in placements:
+    if models[placement.model].textureArray != 0:
+      continue
     bakeInstance(
       models[placement.model], placement.position,
       placement.rotation, placement.scale, writeIndex)
+
+proc terrainColorAt(position: Vec3): Vec3 =
+  ## Blends texture averages at a grass root using the terrain's neighborhoods.
+  let
+    ground = layers[0]
+    tileX = int(floor(position.x + HalfGrid)) - ground.originX
+    tileZ = int(floor(position.z + HalfGrid)) - ground.originZ
+    tileIndex = tileZ * ground.width + tileX
+    style = tileMaterialTable[ground.tiles[tileIndex].kind.int]
+  result = terrainAverageColors[style.topMaterial.int]
+  if generatedTerrain:
+    let
+      tilePos = vec2(position.x, position.z)
+      tileUv = tilePos - floor(tilePos)
+      quadrant = int(floor(tileUv.x + 0.5'f)) +
+        int(floor(tileUv.y + 0.5'f)) * 2
+      centerUv = tilePos - floor(tilePos + vec2(0.5)) + vec2(0.5)
+      first = (generatedMap.layers[0].ranges[tileIndex].z.int + quadrant) * 4
+      materials = vec4(
+        generatedMap.blends[first],
+        generatedMap.blends[first + 1],
+        generatedMap.blends[first + 2],
+        generatedMap.blends[first + 3]
+      )
+      weights = materialWeights(radialWeights(centerUv), materials)
+    result = vec3(0)
+    for i in 0 .. 3:
+      if materials[i] >= 0:
+        result += terrainAverageColors[materials[i].int] * weights[i]
+  let elevation = clamp(
+    position.y / max(amplitude, 0.001'f) * 0.5'f + 0.5'f,
+    0.0'f,
+    1.0'f
+  )
+  result *= style.top * (0.75'f + 0.5'f * elevation)
+
+proc bakeGrassPlacements(writeIndex: var int) =
+  ## Replaces the grass mesh's green paint with the local terrain color.
+  for placement in grassPlacements:
+    let first = writeIndex
+    bakeInstance(
+      grassModels[placement.model],
+      placement.position,
+      placement.rotation,
+      placement.scale,
+      writeIndex
+    )
+    if grassMatchesTerrain:
+      let color = terrainColorAt(placement.position)
+      for i in countup(first, writeIndex - 9, 9):
+        propMesh[i + 3] = color.x
+        propMesh[i + 4] = color.y
+        propMesh[i + 5] = color.z
 
 proc bakeTree(
     model: TreeModel,
@@ -2345,7 +2428,8 @@ proc propMeshFloatCount(): int =
   for placement in grassPlacements:
     result += grassModels[placement.model].vertices.len
   for placement in rockPlacements:
-    result += rockModels[placement.model].vertices.len
+    if rockModels[placement.model].textureArray == 0:
+      result += rockModels[placement.model].vertices.len
   for placement in propPlacements:
     if placement.model.textureArray == 0:
       result += placement.model.vertices.len
@@ -2423,26 +2507,44 @@ proc initTexturedVertexArrays(batch: var TexturedBatch) =
       cast[pointer](attribute.offset))
   glBindVertexArray(0)
 
+proc bakeTexturedPlacement(placement: PropPlacement) =
+  ## Adds one painted prop to the batch for its material textures.
+  let textureArray = placement.model.textureArray
+  if textureArray == 0:
+    return
+  var found = -1
+  for i, batch in texturedBatches:
+    if batch.textureArray == textureArray:
+      found = i
+      break
+  if found < 0:
+    texturedBatches.add TexturedBatch(textureArray: textureArray)
+    found = texturedBatches.high
+  bakeTexturedInstance(
+    placement.model,
+    placement.position,
+    placement.rotation,
+    placement.scale,
+    placement.tint,
+    placement.stretch,
+    texturedBatches[found].mesh
+  )
+
 proc rebuildTexturedBatches() =
   ## Bakes every textured placement into its pack's batch and uploads it.
   for batch in texturedBatches.mitems:
     batch.mesh.setLen(0)
+  for placement in rockPlacements:
+    bakeTexturedPlacement(PropPlacement(
+      model: rockModels[placement.model],
+      position: placement.position,
+      rotation: placement.rotation,
+      scale: placement.scale,
+      tint: vec3(1),
+      stretch: vec3(1)
+    ))
   for placement in propPlacements:
-    let textureArray = placement.model.textureArray
-    if textureArray == 0:
-      continue
-    var found = -1
-    for i, batch in texturedBatches:
-      if batch.textureArray == textureArray:
-        found = i
-        break
-    if found < 0:
-      texturedBatches.add TexturedBatch(textureArray: textureArray)
-      found = texturedBatches.high
-    bakeTexturedInstance(
-      placement.model, placement.position, placement.rotation,
-      placement.scale, placement.tint, placement.stretch,
-      texturedBatches[found].mesh)
+    bakeTexturedPlacement(placement)
   for batch in texturedBatches.mitems:
     if batch.mesh.len == 0:
       continue
@@ -2484,8 +2586,7 @@ proc bakeTreeTiles(writeIndex: var int) =
       )
 
 proc rebuildTreeMesh() =
-  ## Bakes tree tiles into the textured tree list, and grass puffs,
-  ## boulders, and explicit props into the vertex-colored prop list.
+  ## Bakes trees, grass, rocks, and props into their colored or textured lists.
   if treeVertexBuffer == 0:
     return  # initTerrain hasn't created the buffers yet
   treeMesh = newSeq[float32](treeMeshFloatCount())
@@ -2502,7 +2603,7 @@ proc rebuildTreeMesh() =
     )
   propMesh = newSeq[float32](propMeshFloatCount())
   var writeIndex = 0
-  bakePlacements(grassModels, grassPlacements, writeIndex)
+  bakeGrassPlacements(writeIndex)
   bakePlacements(rockModels, rockPlacements, writeIndex)
   for placement in propPlacements:
     if placement.model.textureArray != 0:
@@ -2688,7 +2789,8 @@ proc cornerMaterial(
 proc emitLayer(
     layerIndex: int,
     layer: QuadLayer,
-    floorY: float32
+    floorY: float32,
+    blockers: openArray[seq[int32]]
 ) =
   ## Emits one solid tile layer with tops, skirts, cliffs, and edge masks.
   let w = layer.width
@@ -2714,17 +2816,7 @@ proc emitLayer(
         v10 = vec3(x1, h[1], z0)
         v01 = vec3(x0, h[2], z1)
         v11 = vec3(x1, h[3], z1)
-        tileWalkable = layerWalkable[layerIndex][i]
-
-      # Edge passability mask for the border shader: an edge is connected
-      # (green) when its neighbor — in this layer or another one — is
-      # walkable, connected, and matches both corner heights exactly.
-      # Bits: east 1, south 2, west 4, north 8.
-      var edgeMask = 0.0'f32
-      if tileWalkable:
-        for direction in 0 .. 3:
-          if edgeLink(layerIndex, x, z, direction).open:
-            edgeMask += float32(1 shl direction)
+        edgeMask = float32(pathing.edgeMask(layerIndex, x, z, blockers))
 
       let
         style = tileMaterial(t.kind)
@@ -3007,12 +3099,15 @@ proc emitWaterLayer(layer: QuadLayer) =
 
 proc initTerrain*(
   treeStyle: TreeStyle = MixedTrees,
-  terrainStyle: TerrainStyle = CartoonTerrain
+  terrainStyle: TerrainStyle = CartoonTerrain,
+  rockStyle: RockStyle = LowPolyRocks,
+  extraTiles: openArray[string] = []
 ) =
-  ## Compiles the shader programs, creates the vertex arrays, and loads the
-  ## prop model packs. Requires a current GL context; call once before
-  ## bakeTerrain. Prop models load from ../polyworld_data/terrain/
-  ## relative to the current directory (run from the repo root).
+  ## Initializes rendering with a current GL context, once before bakeTerrain.
+  ## Extra generated tile names append after SurfaceNames without splat stamps.
+  ## Assets load from ../polyworld_data/terrain/ relative to the repo root.
+  if terrainStyle != GeneratedTerrain and extraTiles.len > 0:
+    raise newException(QuadTerrainError, "Extra tiles need generated terrain.")
   initSunShadows()
   generatedTerrain = terrainStyle == GeneratedTerrain
   if generatedTerrain:
@@ -3083,7 +3178,9 @@ proc initTerrain*(
     "visibilityScale"
   )
   if generatedTerrain:
-    terrainTextureArray = buildTextureArray(loadGeneratedTiles(), GL_REPEAT.GLint)
+    terrainTextureArray = buildTextureArray(
+      loadGeneratedTiles(extraTiles), GL_REPEAT.GLint
+    )
     let stamps = loadGeneratedStamps()
     splatColorArray = buildTextureArray(stamps.colors, GL_CLAMP_TO_EDGE.GLint)
     splatHeightArray = buildTextureArray(stamps.heights, GL_CLAMP_TO_EDGE.GLint)
@@ -3459,16 +3556,34 @@ proc initTerrain*(
   treeModels.scaleTrees(8.4)
   collectPropModels(
     readGltfFile(DataRoot & "/terrain/low_poly_grass.glb").root, mat4(), grassModels)
-  collectPropModels(
-    readGltfFile(DataRoot & "/terrain/low_poly_rocks.glb").root, mat4(), rockModels)
   grassModels.scalePack(0.7)
-  rockModels.normalizeModels()
-  rockModels.brighten(2.4)
+  case rockStyle
+  of LowPolyRocks:
+    collectPropModels(
+      readGltfFile(DataRoot & "/terrain/low_poly_rocks.glb").root,
+      mat4(),
+      rockModels
+    )
+    rockModels.normalizeModels()
+    rockModels.brighten(2.4)
+  of PaintedRocks:
+    let pack = loadPropPack(
+      DataRoot & "/terrain/toon_enchanted_meadow/rocks.glb",
+      only = @["rock_large_02a", "rock_medium_01a"],
+      textured = true,
+      repeatTexture = true
+    )
+    rockModels = pack.models
+    rockScaleRange = vec2(1.1, 1.1) * 0.75'f
+    rockBurial = 0.43'f
 
-proc bakeTerrain*(rebuildWalkability = true) =
-  ## Rebuilds walkability and all meshes from the current layers and prop
-  ## placements, and uploads them. Set rebuildWalkability false only when
-  ## computeWalkable was called after the final tile edit.
+proc bakeTerrain*(
+    rebuildWalkability = true,
+    blockers: openArray[seq[int32]] = []
+) =
+  ## Rebuilds and uploads terrain and props, with optional tile edge blockers.
+  ## Nonzero per-layer blockers affect the overlay only. Omitted grids are open.
+  ## Skip walkability rebuilding only after computing the final terrain edits.
   mesh.setLen(0)
   waterMesh.setLen(0)
   layerVertexRanges.setLen(0)
@@ -3481,7 +3596,7 @@ proc bakeTerrain*(rebuildWalkability = true) =
     if layers[i].water:
       emitWaterLayer(layers[i])
     else:
-      emitLayer(i, layers[i], floorY)
+      emitLayer(i, layers[i], floorY, blockers)
     layerVertexRanges.add first ..< (mesh.len div TerrainVertexSize)
   rebuildTreeMesh()
   if waterVertexBuffer != 0 and waterMesh.len > 0:

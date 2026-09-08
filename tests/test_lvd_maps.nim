@@ -7,7 +7,41 @@ import
   ../examples/light_vs_dark/content,
   ../examples/light_vs_dark/maps
 
-const SeedsUnderTest = 50
+const
+  SeedsUnderTest = 50
+  BattleClearings = [(64, 64, 22), (96, 32, 16), (32, 96, 16)]
+
+proc checkForest(map: MapData) =
+  ## Checks that woods form adjoining patches outside the battle areas.
+  var
+    trees = 0
+    surrounded = 0
+  for y in 0 ..< GridSide:
+    for x in 0 ..< GridSide:
+      if map.treeWood[tileIndex(x, y)] == 0:
+        continue
+      inc trees
+      for (cx, cy, radius) in BattleClearings:
+        let
+          dx = x * 2 + 1 - int32(cx * 2)
+          dy = y * 2 + 1 - int32(cy * 2)
+        doAssert dx * dx + dy * dy > int32(radius * radius * 4),
+          &"seed {map.seed}: a tree crowds the battle at ({x},{y})"
+      if min(x, y) >= 22 and max(x, y) < GridSide - 22:
+        doAssert abs(x - y) > 6,
+          &"seed {map.seed}: a tree blocks the approach at ({x},{y})"
+      var neighbours = 0
+      for (dx, dy) in [(1'i32, 0'i32), (-1'i32, 0'i32),
+        (0'i32, 1'i32), (0'i32, -1'i32)]:
+          let
+            tx = x + dx
+            ty = y + dy
+          if inGrid(tx, ty) and map.treeWood[tileIndex(tx, ty)] > 0:
+            inc neighbours
+      if neighbours >= 2:
+        inc surrounded
+  doAssert surrounded * 100 >= trees * 80,
+    &"seed {map.seed}: only {surrounded}/{trees} trees form dense patches"
 
 echo "Testing map determinism"
 block sameSeedSameMap:
@@ -34,10 +68,12 @@ block everySeedValidates:
   for seed in 1'i32 .. SeedsUnderTest:
     let map = generateMap(seed)
     map.validateMap()
+    map.checkForest()
 
 echo "Testing map invariants"
 block gridsAreWellFormed:
   let map = generateMap(DefaultSeed)
+  map.checkForest()
   doAssert map.passable.len == GridCells
   doAssert map.kinds.len == GridCells
   doAssert map.treeWood.len == GridCells

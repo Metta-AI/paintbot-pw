@@ -11,6 +11,7 @@ import
   polyworld/profiles,
   polyworld/quadterrain,
   polyworld/shadows,
+  polyworld/terrainsurfaces,
   polyworld/[chrome, inputs, rtscameras, selectionoutlines, shapes, viewers,
     visions, worldbars]
 
@@ -20,6 +21,7 @@ when defined(takeScreenshot):
 const
   AtlasPath = TmpRoot & "/gota.atlas.png"
   LogoPath = DataRoot & "/themes/gota/gota_logo.png"
+  FortTextures = ["mossy-building-stone-1", "dry-stacked-stone-1"]
 
 type
   GraphicsError = object of CatchableError
@@ -207,8 +209,18 @@ proc runGraphics*() =
     seed = run.map.seed
     treeHeight = 6.0'f
     treeWidth = 0.0'f
-    initTerrain(DenseTrees, GeneratedTerrain)
-    scatterGrass(800, run.map.seed)
+    initTerrain(DenseTrees, GeneratedTerrain, PaintedRocks, FortTextures)
+    for i, kind in [RedFortKind, BlueFortKind]:
+      let material = (SurfaceNames.len + i).float32
+      setTileMaterial(
+        kind.int,
+        material,
+        material,
+        vec3(1),
+        vec3(0.9),
+        6
+      )
+    scatterGrass(800, run.map.seed, matchTerrain = true)
     scatterRocks(80, run.map.seed)
 
   let scene = newCharacterScene(window)
@@ -941,12 +953,6 @@ proc runGraphics*() =
         dx = target.position.x - center.x
         dz = target.position.z - center.z
       result = max(result, sqrt(dx * dx + dz * dz))
-
-  when defined(takeScreenshot):
-    if existsEnv("SELECT_ID"):
-      selectEntity(getEnv("SELECT_ID").parseInt.int32)
-    if existsEnv("SELECT_ALL"):
-      selectAllHeroes()
 
   proc drawOutlinedObject(
       id: int32,
@@ -1767,6 +1773,14 @@ proc runGraphics*() =
       followSelection = false
       cameraTarget = playerHeroFrame()
 
+    if existsEnv("SELECT_ID"):
+      selectEntity(getEnv("SELECT_ID").parseInt.int32)
+    if existsEnv("SELECT_ALL"):
+      selectAllHeroes()
+    if existsEnv("CAM_X") or existsEnv("CAM_Z"):
+      followSelection = false
+      actionCam.takeManual()
+
   holdSplash(sk, window, splash)
   window.onFrame = proc() =
     profileBlock "frame":
@@ -1924,7 +1938,6 @@ proc runGraphics*() =
         drawWorldCharacters()
         finishCharacters(scene)
 
-        drawWater(viewProjection, cameraEye)
         particles.drawParticles(
           viewProjection,
           barCameraRight,

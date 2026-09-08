@@ -334,11 +334,9 @@ proc runGraphics*() =
     seed = run.mapSeed
     treeHeight = 6.0'f
     treeWidth = 0.0'f
-    initTerrain(DenseTrees, GeneratedTerrain)
-    ## Grass only. `scatterRocks` marks tiles impassable, which would give the
-    ## viewer different walkability from the headless build and desynchronise
-    ## the two at the first tick.
+    initTerrain(DenseTrees, GeneratedTerrain, PaintedRocks)
     scatterGrass(800, run.mapSeed)
+    scatterRocks(80, run.mapSeed)
 
   ## Characters. Locomotion clips are Run, Move, or Walk.
   var
@@ -427,11 +425,15 @@ proc runGraphics*() =
       layers[0].tiles[edit.index].kind = GrassTile
 
   proc rebakeScene() =
+    ## Refreshes terrain, props, and the displayed movement blockers.
     applyTerrainEdits()
     placeSceneProps()
     ## Walkability was computed once at map generation and structures live in
     ## the simulation's own grids, so the renderer must never recompute it.
-    bakeTerrain(rebuildWalkability = false)
+    bakeTerrain(
+      rebuildWalkability = false,
+      blockers = [run.world.blocker]
+    )
     placedEditCount = run.world.terrainEdits.len
     placedBuildingKey = buildingKey()
     terrainDirty = false
@@ -1424,6 +1426,8 @@ proc runGraphics*() =
       cameraTarget.z = getEnv("CAM_Z").parseFloat.float32 - HalfGrid
     if existsEnv("VIEW_MODE"):
       viewMode = int32(getEnv("VIEW_MODE").parseInt)
+    if existsEnv("SHOW_TILES"):
+      showTiles = getEnv("SHOW_TILES").parseBool
     if existsEnv("SIM_SECONDS"):
       let wanted = int32(getEnv("SIM_SECONDS").parseFloat * TickRate.float64)
       while run.world.tick < wanted and
@@ -1490,9 +1494,10 @@ proc runGraphics*() =
       if run.world.terrainEdits.len != placedEditCount or
           buildingKey() != placedBuildingKey:
         terrainDirty = true
-      if terrainDirty and framesSinceRebake >= RebakeFrameGap:
-        profileBlock "rebake":
-          rebakeScene()
+      if terrainDirty and
+        (showTiles or framesSinceRebake >= RebakeFrameGap):
+          profileBlock "rebake":
+            rebakeScene()
       let
         aspect = window.size.x.float32 / max(window.size.y.float32, 1)
         view = cameraView()

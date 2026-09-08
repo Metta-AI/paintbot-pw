@@ -202,4 +202,52 @@ block:
     let hit = pickWalkableTile(origin, dir)
     doAssert not hit.hit, "an impassable tile must not be a walk target"
 
+echo "Testing tile borders include changing tree and building blockers"
+block:
+  let ground = QuadLayer(width: 5, depth: 5, tiles: newSeq[Tile](25))
+  for tile in ground.tiles.mitems:
+    tile = openTile()
+  ground.tiles[0].impassable = true
+  layers = @[ground]
+  computeWalkable()
+  var blockers = @[newSeq[int32](25)]
+  doAssert edgeMask(0, 2, 2, blockers) == 15
+  blockers[0][12] = -1
+  doAssert edgeMask(0, 2, 2, blockers) == 0,
+    "a tree tile must have four red borders"
+  for (x, z, direction) in [(1, 2, 0), (2, 1, 1), (3, 2, 2), (2, 3, 3)]:
+    doAssert (edgeMask(0, x, z, blockers) and uint8(1 shl direction)) == 0,
+      "an open tile must show a red edge facing the tree"
+  doAssert isWalkable(0, 2, 2)
+  doAssert edgeLink(0, 1, 2, 0).open,
+    "the overlay must not change cached terrain connections"
+  blockers[0][12] = 0
+  doAssert edgeMask(0, 2, 2, blockers) == 15,
+    "felling a tree must reopen the displayed edges"
+  for z in 1 .. 2:
+    for x in 1 .. 2:
+      blockers[0][z * 5 + x] = 1000
+      doAssert edgeMask(0, x, z, blockers) == 0,
+        "every tile of a building footprint must be red"
+  doAssert edgeMask(0, 0, 0, blockers) == 0,
+    "terrain blocks must remain red"
+  for blocker in blockers[0].mitems:
+    blocker = 0
+  doAssert edgeMask(0, 2, 2, blockers) == 15,
+    "removing a building must reopen the displayed edges"
+
+echo "Testing tile borders include blockers across layer connections"
+block:
+  let
+    first = QuadLayer(width: 1, depth: 1, tiles: @[openTile()])
+    second = QuadLayer(originX: 1, width: 1, depth: 1, tiles: @[openTile()])
+  layers = @[first, second]
+  computeWalkable()
+  var blockers = @[@[0'i32], @[-1'i32]]
+  doAssert edgeMask(0, 0, 0) == 1
+  doAssert edgeMask(0, 0, 0, blockers) == 0
+  blockers[1][0] = 0
+  doAssert edgeMask(0, 0, 0, blockers) == 1
+  doAssert edgeMask(1, 0, 0, blockers) == 4
+
 echo "Pathing tests passed"

@@ -15,29 +15,24 @@ const
   FortPlateauRadius = 15
   FortOuterRadius* = 12
   FortWallRadius* = 11
-  BridgeOriginX = 54
-  BridgeOriginZ = 58
-  BridgeLength = 22
-  BridgeSpan = 8
   GroundLayer* = 0
-  BridgeLayer* = 1
-  RedFortLayer* = 2
-  BlueFortLayer* = 3
+  RedFortLayer* = 1
+  BlueFortLayer* = 2
+  RedFortKind* = 6'u32
+  BlueFortKind* = 7'u32
   TerrainAmplitudeSteps = 11'i32
-  WaterLevelSteps = -9'i32
   RiverBedSteps = -16'i32
   FordBedSteps = -4'i32
   FortWallHeightSteps = 36'i32
   FortGateClearanceSteps = 24'i32
-  FortRampartHeightSteps = 9'i32
   FortKeepHeightSteps = 11'i32
-  BridgeThicknessSteps = 7'i32
-  BridgeArchSteps = 24'i32
   ForestNoiseStream = 0xD1B54A32D192ED03'u64
   ForestDetailStream = 0x8CB92BA72F3D8DD7'u64
   ForestRollStream = 0x2545F4914F6CDD1D'u64
   ForestDensityPercent = 70'i64
-    ## Chance of a tree at the forest map's peak.
+    ## Chance of a candidate at the forest map's peak.
+  ForestPatchRadius = 4'i32
+    ## Fills neighbouring tiles into compact, solid patches of woods.
 
 type MapData* = object
   seed*: int32
@@ -81,7 +76,7 @@ proc mapFingerprint(): uint64 =
 var battleMapHash*: uint64
 
 proc generateMap*(seed: int32): MapData {.measure.} =
-  ## Builds the ground, bridge, forests, forts, and river layers.
+  ## Builds a marsh channel, rolling ground, forests, and two fort layers.
   proc ground(cx, cz: int): int32 =
     let value =
       valueNoise(seed, 0xA0761D6478BD642F'u64, cx, cz, 24) * 4 +
@@ -97,8 +92,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
     bluePlateau = ground(BlueFortTile, BlueFortTile)
 
   proc riverBlend(cx2, cz2: int): int32 =
-    ## How deep inside the river band a point is, 0 (banks) to 1 (bed).
-    ## Coordinates are doubled so tile centers remain entirely integral.
+    ## Blends from the river banks to the bed using doubled coordinates.
     let
       wiggle2 = int(triangleWave(cx2 - cz2, 168)) * 8 div MapBlendScale
       axisDistance2 = abs(cx2 + cz2 - GridTiles * 2 - wiggle2)
@@ -126,9 +120,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
           (deltaX * deltaX + deltaZ * deltaZ) *
           int64(MapBlendScale) * int64(MapBlendScale)
         )
-        amount = smoothstep(
-          MapBlendScale - int32(distance div 14)
-        )
+        amount = smoothstep(MapBlendScale - int32(distance div 14))
       result = blendHeight(result, FordBedSteps, amount)
     for (fortTile, plateau) in [
       (RedFortTile, redPlateau), (BlueFortTile, bluePlateau)
@@ -163,16 +155,17 @@ proc generateMap*(seed: int32): MapData {.measure.} =
         heightSum = tops[0] + tops[1] + tops[2] + tops[3]
         nearRiver = riverBlend(x * 2 + 1, z * 2 + 1) > 102
         kind =
-          if nearRiver and heightSum < 10: MarshTile
-          elif heightSum > TerrainAmplitudeSteps * 2: RockTile
-          else: GrassTile
+          if nearRiver and heightSum < 10:
+            MarshTile
+          elif heightSum > TerrainAmplitudeSteps * 2:
+            RockTile
+          else:
+            GrassTile
       gtile(x, z) = Tile(
         flags: TileExists or TileConnectedEast or TileConnectedSouth,
         kind: kind,
         tops: packedHeights(tops)
       )
-      if heightSum < WaterLevelSteps * 4:
-        gtile(x, z).impassable = true
 
   for (fortTile, plateau) in [
     (RedFortTile, redPlateau),
@@ -228,70 +221,9 @@ proc generateMap*(seed: int32): MapData {.measure.} =
         max(abs(x - RedFortTile), abs(z - RedFortTile)),
         max(abs(x - BlueFortTile), abs(z - BlueFortTile)))
       if laneMask[z * GridTiles + x] and fortRing > 1 and
-          gtile(x, z).kind != StoneTile and not gtile(x, z).impassable:
-        gtile(x, z).kind = RoadTile
-
-  # Bridge: an arched east-west stone slab carrying the mid lane over the
-  # river. Its ends land exactly on the ground corners, so the pathfinder
-  # walks straight onto the deck.
-  var bridge = QuadLayer(
-    originX: BridgeOriginX, originZ: BridgeOriginZ,
-    width: BridgeLength, depth: BridgeSpan,
-    slab: true,
-    tiles: newSeq[Tile](BridgeLength * BridgeSpan)
-  )
-  let
-    centerCz = BridgeOriginZ + BridgeSpan div 2
-    startHeight = corner(BridgeOriginX, centerCz)
-    endHeight = corner(BridgeOriginX + BridgeLength, centerCz)
-  proc bridgeTop(cx, cz: int): int32 =
-    let
-      amount = int32(cx - BridgeOriginX) * MapBlendScale div BridgeLength
-      base = blendHeight(startHeight, endHeight, amount)
-      archAmount = int32(roundDivision(
-        int64(4 * amount) * int64(MapBlendScale - amount),
-        MapBlendScale
-      ))
-      arch = base + int32(roundDivision(
-        int64(BridgeArchSteps) * archAmount,
-        MapBlendScale
-      ))
-      endWeight = clamp(
-        MapBlendScale - min(amount, MapBlendScale - amount) * 6,
-        0'i32,
-        MapBlendScale
-      )
-    blendHeight(arch, corner(cx, cz), endWeight)
-  for z in 0 ..< BridgeSpan:
-    for x in 0 ..< BridgeLength:
-      let
-        cx = BridgeOriginX + x
-        cz = BridgeOriginZ + z
-        tops = [bridgeTop(cx, cz), bridgeTop(cx + 1, cz),
-                bridgeTop(cx, cz + 1), bridgeTop(cx + 1, cz + 1)]
-      var bottoms: array[4, int32]
-      for i in 0 .. 3:
-        bottoms[i] = tops[i] - BridgeThicknessSteps
-      bridge.tiles[z * BridgeLength + x] = Tile(
-        flags: TileExists or TileConnectedEast or TileConnectedSouth,
-        kind: StoneTile,
-        tops: packedHeights(tops),
-        bottoms: packedHeights(bottoms)
-      )
-
-  # Ground squeezed under the deck becomes impassable; elsewhere (under the
-  # middle of the arch) the riverbed is already blocked by water anyway.
-  for z in 0 ..< BridgeSpan:
-    for x in 0 ..< BridgeLength:
-      let bridgeBottoms = bridge.tiles[z * BridgeLength + x].bottoms
-      let groundTops = gtile(BridgeOriginX + x, BridgeOriginZ + z).tops
-      var groundMax = groundTops[0]
-      var bottomMin = bridgeBottoms[0]
-      for i in 1 .. 3:
-        groundMax = max(groundMax, groundTops[i])
-        bottomMin = min(bottomMin, bridgeBottoms[i])
-      if bottomMin <= groundMax + 1:
-        gtile(BridgeOriginX + x, BridgeOriginZ + z).impassable = true
+        gtile(x, z).kind != StoneTile and gtile(x, z).kind != MarshTile and
+        not gtile(x, z).impassable:
+          gtile(x, z).kind = RoadTile
 
   proc isGate(fortTile, x, z: int, redSide: bool): bool =
     ## Returns whether a wall tile is one of a fort's inward-facing arches.
@@ -324,6 +256,11 @@ proc generateMap*(seed: int32): MapData {.measure.} =
     let
       wallTop = plateau + FortWallHeightSteps
       keepTop = plateau + FortKeepHeightSteps
+      kind =
+        if redSide:
+          RedFortKind
+        else:
+          BlueFortKind
       stoneFlags =
         TileExists or TileConnectedEast or TileConnectedSouth
 
@@ -338,29 +275,16 @@ proc generateMap*(seed: int32): MapData {.measure.} =
               plateau - 1
           ftile(x, z) = Tile(
             flags: stoneFlags,
-            kind: StoneTile,
+            kind: kind,
             tops: packedHeights([wallTop, wallTop, wallTop, wallTop]),
             bottoms: packedHeights([bottom, bottom, bottom, bottom])
           )
           if not isGate(fortTile, x, z, redSide):
             gtile(x, z).impassable = true
-        elif ring == FortOuterRadius and (x + z) mod 2 == 0:
-          let parapetTop = wallTop + FortRampartHeightSteps
-          ftile(x, z) = Tile(
-            flags: stoneFlags,
-            kind: StoneTile,
-            tops: packedHeights([
-              parapetTop,
-              parapetTop,
-              parapetTop,
-              parapetTop
-            ]),
-            bottoms: packedHeights([wallTop, wallTop, wallTop, wallTop])
-          )
         elif ring <= 1:
           ftile(x, z) = Tile(
             flags: stoneFlags,
-            kind: StoneTile,
+            kind: kind,
             tops: packedHeights([keepTop, keepTop, keepTop, keepTop]),
             bottoms: packedHeights([plateau, plateau, plateau, plateau])
           )
@@ -376,7 +300,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
           ))
         ftile(x, rampZ) = Tile(
           flags: stoneFlags,
-          kind: StoneTile,
+          kind: kind,
           tops: packedHeights([
             rampHeight(x),
             rampHeight(x + 1),
@@ -393,7 +317,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
         gtile(x, rampZ).impassable = true
       ftile(fortTile + 2, fortTile) = Tile(
         flags: stoneFlags,
-        kind: StoneTile,
+        kind: kind,
         tops: packedHeights([keepTop, plateau, keepTop, plateau]),
         bottoms: packedHeights([plateau, plateau, plateau, plateau])
       )
@@ -408,7 +332,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
           ))
         ftile(x, rampZ) = Tile(
           flags: stoneFlags,
-          kind: StoneTile,
+          kind: kind,
           tops: packedHeights([
             rampHeight(x),
             rampHeight(x + 1),
@@ -425,7 +349,7 @@ proc generateMap*(seed: int32): MapData {.measure.} =
         gtile(x, rampZ).impassable = true
       ftile(fortTile - 2, fortTile) = Tile(
         flags: stoneFlags,
-        kind: StoneTile,
+        kind: kind,
         tops: packedHeights([plateau, keepTop, plateau, keepTop]),
         bottoms: packedHeights([plateau, plateau, plateau, plateau])
       )
@@ -435,67 +359,67 @@ proc generateMap*(seed: int32): MapData {.measure.} =
     redFort = buildFort(RedFortTile, redPlateau, true)
     blueFort = buildFort(BlueFortTile, bluePlateau, false)
 
-  # Forests: trees grow in woods, not at random. A low-frequency forest map
-  # (its own noise stream) gives each open grass tile a density: nothing
-  # grows where it is negative, and above zero the chance of a tree rises
-  # with the noise, so woods thicken toward their hearts and thin out to a
-  # ragged forest line at the zero crossing. The roll is drawn for every
-  # eligible tile so the pattern stays stable as the map is tuned.
-  var forestRng = initRng(seed, ForestRollStream)
+  proc openForTree(x, z: int): bool =
+    ## Keeps each tree clear of lanes, forts, and blocked terrain.
+    if x < 0 or z < 0 or x >= GridTiles or z >= GridTiles:
+      return false
+    let fortRing = min(
+      max(abs(x - RedFortTile), abs(z - RedFortTile)),
+      max(abs(x - BlueFortTile), abs(z - BlueFortTile))
+    )
+    if gtile(x, z).kind != GrassTile or gtile(x, z).impassable or
+      nearLane[z * GridTiles + x] or fortRing <= FortPlateauRadius + 4:
+        return false
+    true
+
+  # Noise chooses patch centres and the total tree count for each seed.
+  # Each patch fills solidly instead of rolling separately for its trees.
+  var
+    forestRng = initRng(seed, ForestRollStream)
+    forestTiles: seq[tuple[x, z: int]]
   for z in 0 ..< GridTiles:
     for x in 0 ..< GridTiles:
-      let fortRing = min(
-        max(abs(x - RedFortTile), abs(z - RedFortTile)),
-        max(abs(x - BlueFortTile), abs(z - BlueFortTile)))
-      if gtile(x, z).kind != GrassTile or gtile(x, z).impassable or
-          nearLane[z * GridTiles + x] or fortRing <= FortPlateauRadius + 4:
-        continue
-      if x >= BridgeOriginX - 1 and x <= BridgeOriginX + BridgeLength and
-          z >= BridgeOriginZ - 1 and z <= BridgeOriginZ + BridgeSpan:
+      if not openForTree(x, z):
         continue
       let
         forest = int64(
           valueNoise(seed, ForestNoiseStream, x, z, 20) * 2 +
           valueNoise(seed, ForestDetailStream, x, z, 10))
         roll = int64(forestRng.below(int32(MapBlendScale)))
-      # forest ranges over ±3 * MapBlendScale and roll over MapBlendScale,
-      # so a tile at the forest peak sprouts ForestDensityPercent of the
-      # time: plant when roll / 1024 < forest / 3072 * density / 100.
       if forest <= 0 or roll * 300 >= forest * ForestDensityPercent:
         continue
-      gtile(x, z).kind = TreeTile
-      gtile(x, z).impassable = true
+      forestTiles.add((x, z))
 
-  # Water: one flat sheet over every ground tile carved below water level.
-  var water = QuadLayer(
-    originX: 0, originZ: 0,
-    width: GridTiles, depth: GridTiles,
-    slab: true,
-    water: true,
-    tiles: newSeq[Tile](GridTiles * GridTiles)
-  )
-  for z in 0 ..< GridTiles:
-    for x in 0 ..< GridTiles:
-      let tops = gtile(x, z).tops
-      if int32(tops[0]) + int32(tops[1]) + int32(tops[2]) +
-          int32(tops[3]) < WaterLevelSteps * 4:
-        water.tiles[z * GridTiles + x] = Tile(
-          flags: TileExists,
-          tops: packedHeights([
-            WaterLevelSteps,
-            WaterLevelSteps,
-            WaterLevelSteps,
-            WaterLevelSteps
-          ]),
-          bottoms: packedHeights([
-            WaterLevelSteps - 3,
-            WaterLevelSteps - 3,
-            WaterLevelSteps - 3,
-            WaterLevelSteps - 3
-          ])
-        )
+  for i in countdown(forestTiles.high, 1):
+    let j = int(forestRng.below(int32(i + 1)))
+    swap(forestTiles[i], forestTiles[j])
 
-  layers = @[groundLayer, bridge, redFort, blueFort, water]
+  var planted = 0
+  proc plantPatch(x, z: int) =
+    ## Fills outwards from one forest centre until the tree budget is met.
+    let radius = int(2 + forestRng.below(ForestPatchRadius - 1))
+    for ring in 0 .. radius:
+      for dz in -ring .. ring:
+        for dx in -ring .. ring:
+          if max(abs(dx), abs(dz)) != ring or
+            dx * dx + dz * dz > radius * radius:
+              continue
+          if planted >= forestTiles.len:
+            return
+          let
+            tx = x + dx
+            tz = z + dz
+          if openForTree(tx, tz):
+            gtile(tx, tz).kind = TreeTile
+            gtile(tx, tz).impassable = true
+            inc planted
+
+  for (x, z) in forestTiles:
+    if planted >= forestTiles.len:
+      break
+    plantPatch(x, z)
+
+  layers = @[groundLayer, redFort, blueFort]
   computeWalkable()
   result.seed = seed
   result.hash = mapFingerprint()
