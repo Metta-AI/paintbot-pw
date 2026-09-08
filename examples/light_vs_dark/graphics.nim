@@ -332,7 +332,9 @@ proc runGraphics*() =
   let splash = startSplash(sk, window)
   profileBlock "terrain":
     seed = run.mapSeed
-    initTerrain()
+    treeHeight = 6.0'f
+    treeWidth = 0.0'f
+    initTerrain(DenseTrees, GeneratedTerrain)
     ## Grass only. `scatterRocks` marks tiles impassable, which would give the
     ## viewer different walkability from the headless build and desynchronise
     ## the two at the first tick.

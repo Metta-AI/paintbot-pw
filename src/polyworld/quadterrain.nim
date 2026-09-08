@@ -9,7 +9,7 @@
 import
   std/[random, strformat, strutils, tables],
   chroma, gltf, opengl, pixie, pixie/internal, shady, vmath,
-  common, pathing, shadows, toon
+  common, pathing, shadows, terrainblends, terrainmaps, terrainsurfaces, toon
 
 ## Shaders
 ##
@@ -132,6 +132,16 @@ var
   blendDepth: Uniform[float32]
   heightBlend: Uniform[float32]
   terrainTextures: Uniform[Sampler2dArray]
+  generatedEnabled: Uniform[float32]
+  heightBlendEnabled: Uniform[float32]
+  splatsEnabled: Uniform[float32]
+  splatAmount: Uniform[float32]
+  splatColors: Uniform[Sampler2dArray]
+  splatHeights: Uniform[Sampler2dArray]
+  splatData: Uniform[Sampler2D]
+  blendData: Uniform[Sampler2D]
+  splatDataSize: Uniform[Vec2]
+  blendDataSize: Uniform[Vec2]
   visibilityTex: Uniform[Sampler2D]
   visibilityOffset: Uniform[float32]
   visibilityScale: Uniform[float32]
@@ -156,6 +166,34 @@ proc textureLod(
   ## Provides Shady with the explicit-mip texture-array builtin signature.
   vec4(0)
 
+proc blendFetch(index: float32): Vec4 =
+  ## Reads one material neighborhood from a nearest-filtered data texture.
+  let row = floor(index / blendDataSize.x)
+  result = texture(blendData, vec2(
+    (index - row * blendDataSize.x + 0.5) / blendDataSize.x,
+    (row + 0.5) / blendDataSize.y
+  ))
+
+proc splatFetch(index: float32): Vec4 =
+  ## Reads one brush record with the same path on desktop GL and WebGL 2.
+  let row = floor(index / splatDataSize.x)
+  result = texture(splatData, vec2(
+    (index - row * splatDataSize.x + 0.5) / splatDataSize.x,
+    (row + 0.5) / splatDataSize.y
+  ))
+
+proc surfaceAmount(paint, baseHeight, detailHeight: float32): float32 =
+  ## Shifts coverage toward higher details while preserving empty endpoints.
+  result = paint
+  if heightBlendEnabled > 0.5 and paint > 0.0 and paint < 1.0:
+    let
+      difference = 2.0 * paint - 1.0 +
+        (detailHeight - baseHeight) * heightBlend
+      ratio = clamp(difference / max(blendDepth, 0.0001), -1.0, 1.0)
+      a = 1.0 - max(ratio, 0.0)
+      b = 1.0 + min(ratio, 0.0)
+    result = b / (a + b)
+
 proc terrainVert(
     gl_Position: var Vec4,
     vertPos: Vec3,
@@ -164,12 +202,14 @@ proc terrainVert(
     tileColor: Vec3,
     materials: Vec4,
     cornerWeight: Vec4,
+    splatRange: Vec3,
     worldPos: var Vec3,
     vertEdgeMask: var float32,
     vertNormal: var Vec3,
     vertColor: var Vec3,
     vertMaterials: var Vec4,
     vertWeights: var Vec4,
+    vertSplatRange: var Vec3,
     shadowPos: var Vec3
 ) =
   ## Emits terrain vertex outputs for the generated OpenGL shader.
@@ -187,6 +227,7 @@ proc terrainVert(
   vertColor = tileColor
   vertMaterials = materials
   vertWeights = cornerWeight
+  vertSplatRange = splatRange
 
 proc terrainFrag(
     fragColor: var Vec4,
@@ -196,6 +237,7 @@ proc terrainFrag(
     vertColor: Vec3,
     vertMaterials: Vec4,
     vertWeights: Vec4,
+    vertSplatRange: Vec3,
     shadowPos: Vec3
 ) =
   ## Height-blends textured tile materials and applies visibility fog.
@@ -213,22 +255,32 @@ proc terrainFrag(
       uv = vec2(worldPos.z, -worldPos.y) * texScale
     else:
       uv = vec2(worldPos.x, -worldPos.y) * texScale
+  var
+    materials = vertMaterials
+    spatial = vertWeights
+  if generatedEnabled > 0.5 and vertSplatRange.z >= 0:
+    let
+      tileUv = tilePos - floor(tilePos)
+      quadrant = floor(tileUv.x + 0.5) + floor(tileUv.y + 0.5) * 2.0
+      centerUv = tilePos - floor(tilePos + vec2(0.5)) + vec2(0.5)
+    materials = blendFetch(floor(vertSplatRange.z + 0.5) + quadrant)
+    spatial = radialWeights(centerUv)
   let
     sample0 = texture(
       terrainTextures,
-      vec3(uv.x, uv.y, vertMaterials.x)
+      vec3(uv.x, uv.y, max(materials.x, 0.0))
     )
     sample1 = texture(
       terrainTextures,
-      vec3(uv.x, uv.y, vertMaterials.y)
+      vec3(uv.x, uv.y, max(materials.y, 0.0))
     )
     sample2 = texture(
       terrainTextures,
-      vec3(uv.x, uv.y, vertMaterials.z)
+      vec3(uv.x, uv.y, max(materials.z, 0.0))
     )
     sample3 = texture(
       terrainTextures,
-      vec3(uv.x, uv.y, vertMaterials.w)
+      vec3(uv.x, uv.y, max(materials.w, 0.0))
     )
     blend0 = vertWeights.x + sample0.w * heightBlend
     blend1 = vertWeights.y + sample1.w * heightBlend
@@ -254,6 +306,53 @@ proc terrainFrag(
   # rim is ragged whole stones with dirt showing between them, and dirt then
   # height-blends into grass.
   var ground = blended
+  let
+    worldDx = dFdx(tilePos)
+    worldDy = dFdy(tilePos)
+  if generatedEnabled > 0.5:
+    var weights = materialWeights(spatial, materials)
+    if heightBlendEnabled > 0.5:
+      weights = reliefWeights(
+        weights, vec4(sample0.w, sample1.w, sample2.w, sample3.w),
+        heightBlend, blendDepth
+      )
+    var surface = sample0 * weights.x + sample1 * weights.y +
+      sample2 * weights.z + sample3 * weights.w
+    if splatsEnabled > 0.5 and splatAmount > 0.0:
+      var index = int(vertSplatRange.x + 0.5)
+      let finish = index + int(vertSplatRange.y + 0.5)
+      while index < finish:
+        let
+          placement = splatFetch(float32(index * 2))
+          brush = splatFetch(float32(index * 2 + 1))
+          delta = tilePos - placement.xy
+          uvSplat = vec2(
+            delta.x * placement.z + delta.y * placement.w,
+            delta.y * placement.z - delta.x * placement.w
+          ) + vec2(0.5)
+          dx = vec2(
+            worldDx.x * placement.z + worldDx.y * placement.w,
+            worldDx.y * placement.z - worldDx.x * placement.w
+          )
+          dy = vec2(
+            worldDy.x * placement.z + worldDy.y * placement.w,
+            worldDy.y * placement.z - worldDy.x * placement.w
+          )
+        if uvSplat.x >= 0.0 and uvSplat.x <= 1.0 and
+          uvSplat.y >= 0.0 and uvSplat.y <= 1.0:
+            let
+              position = vec3(uvSplat, brush.x)
+              paint = textureGrad(splatColors, position, dx, dy)
+              relief = textureGrad(splatHeights, position, dx, dy)
+              alpha = paint.w
+              detailHeight = relief.x / max(relief.w, 0.00001)
+              amount = min(alpha, surfaceAmount(
+                alpha * brush.y * splatAmount, surface.w, detailHeight
+              ))
+              source = vec4(paint.xyz / max(alpha, 0.00001), detailHeight)
+            surface = surface * (1.0 - amount) + source * amount
+        index += 1
+    ground = surface.xyz
   if groundMaskEnabled > 0.5:
     let
       maskUv = vec2(
@@ -769,6 +868,15 @@ var
   groundRingLocation, groundRingShapeLocation: GLint
   visibilityOffsetLocation, visibilityScaleLocation: GLint
   terrainTextureArray, visibilityTexture, groundMaskTexture: GLuint
+  generatedLocation, heightBlendEnabledLocation: GLint
+  splatsEnabledLocation, splatAmountLocation: GLint
+  splatColorsLocation, splatHeightsLocation: GLint
+  splatDataLocation, blendDataLocation: GLint
+  splatDataSizeLocation, blendDataSizeLocation: GLint
+  splatColorArray, splatHeightArray, splatDataTexture, blendDataTexture: GLuint
+  splatDimensions, blendDimensions: Vec2
+  generatedMap: TerrainMap
+  generatedTerrain = false
   groundMaskActive = false
   groundLayerIndices = vec4(4, 5, 0, 0)
   groundRingValues = vec4(0)
@@ -858,10 +966,16 @@ type
   TreeModel = object
     name: string
     height: float32         # model height before pack scaling
+    width: float32          # Crown diameter around the trunk at any rotation.
     weight: float32         # relative planting frequency
     vertices: seq[float32]  # x y z u v nx ny nz; pack-scaled, base at y 0
     summerLayers: seq[int]  # tree texture array layers this mesh can wear:
     autumnLayers: seq[int]  # greens only, or greens plus reds and yellows
+
+  TreeStyle* = enum
+    MixedTrees, EvergreenTrees, DenseTrees
+  TerrainStyle* = enum
+    CartoonTerrain, GeneratedTerrain
 
 var
   treeModels: seq[TreeModel]   # trees; occupy a tile and block it
@@ -1121,6 +1235,7 @@ proc loadTreeModel(
     summerLayers: summerLayers, autumnLayers: autumnLayers)
   for i, point in points:
     let p = point - vec3(center.x, low.y, center.z)
+    result.width = max(result.width, 2 * sqrt(p.x * p.x + p.z * p.z))
     result.vertices.add p.x
     result.vertices.add p.y
     result.vertices.add p.z
@@ -1138,6 +1253,7 @@ proc scaleTrees(models: var seq[TreeModel], targetTallest: float32) =
   let packScale = targetTallest / tallest
   for model in models.mitems:
     model.height *= packScale
+    model.width *= packScale
     var i = 0
     while i < model.vertices.len:
       model.vertices[i] *= packScale
@@ -1576,6 +1692,8 @@ proc drawProp*(
 
 const
   TerrainTextureSize = 1024
+  GeneratedTextureSize = 256
+  TerrainVertexSize = 21
   WaterNormalTextures = ["water_1_normal", "water_2_normal"]
   TerrainMaterials = [
     "grass",
@@ -1604,7 +1722,16 @@ var
     ## strokes read as broad ground rather than per-tile stamps.
   terrainBlendDepth* = 0.12'f32  # blend band width; smaller is more abrupt
   terrainHeightBlend* = 1.2'f32  # how strongly height maps steer the blend
+  terrainHeightBlending* = true
+  terrainSplats* = true
+  terrainSplatCount* = 1
+  terrainSplatChance* = 0.4'f
+  terrainSplatAmount* = 1.0'f
+  terrainGrassPatchSize* = 24.0'f
+  terrainSplatPlacements*, terrainPeakSplats*: int
   treeHeight* = 6.0'f32   # tallest tree in tiles, before per-tree jitter
+  treeWidth* = 0.0'f
+    ## Maximum crown diameter in tiles, or zero to keep the pack proportions.
   autumnTrees* = false    # leafy trees may also wear red and yellow
   seed* = 1988            # seeds the per-tile tree rng in bakeTreeTiles
   layerVertexRanges*: seq[Slice[int]]
@@ -1713,6 +1840,115 @@ proc loadTerrainMaterials(): seq[seq[Image]] =
         colors[level].data[i].a = heights[level].data[i].r
     result.add colors
 
+proc generatedMaterial(directory, name: string): tuple[color, height: Image] =
+  ## Loads an aligned generated pair and attaches color coverage to relief.
+  try:
+    result.color = readImage(
+      DataRoot & "/terrain/" & directory & "/" & name & ".rgb.png"
+    )
+    result.height = readImage(
+      DataRoot & "/terrain/" & directory & "/" & name & ".height.png"
+    )
+  except PixieError:
+    raise newException(QuadTerrainError, getCurrentExceptionMsg())
+  if result.color.width != GeneratedTextureSize or
+    result.color.height != GeneratedTextureSize or
+    result.height.width != GeneratedTextureSize or
+    result.height.height != GeneratedTextureSize:
+      raise newException(QuadTerrainError, "Expected 256x256 material: " & name)
+  for i, value in result.height.data:
+    let alpha = result.color.data[i].a
+    if value.a != 255 or value.r != value.g or value.g != value.b or
+      (directory == "tiles" and alpha != 255):
+        raise newException(QuadTerrainError, "Invalid terrain channels: " & name)
+    if directory == "stamps":
+      let gray = ((value.r.int * alpha.int + 127) div 255).uint8
+      result.height.data[i] = rgbx(gray, gray, gray, alpha)
+
+proc loadGeneratedTiles(): seq[seq[Image]] =
+  ## Packs independently filtered color and height into the terrain array.
+  for name in SurfaceNames:
+    let
+      pair = generatedMaterial("tiles", name)
+      colors = mipChain(pair.color)
+      heights = mipChain(pair.height)
+    for level in 0 ..< colors.len:
+      for i in 0 ..< colors[level].data.len:
+        colors[level].data[i].a = heights[level].data[i].r
+    result.add colors
+
+proc loadGeneratedStamps(): tuple[colors, heights: seq[seq[Image]]] =
+  ## Keeps splat colors and relief in separate arrays with identical coverage.
+  for name in SurfaceNames:
+    let pair = generatedMaterial("stamps", name)
+    result.colors.add mipChain(pair.color)
+    result.heights.add mipChain(pair.height)
+
+proc uploadTerrainData(texture: var GLuint, values: seq[float32]): Vec2 =
+  ## Uploads flat RGBA records into a portable nearest-filtered float texture.
+  if values.len == 0 or values.len mod 4 != 0:
+    raise newException(QuadTerrainError, "Terrain data needs complete RGBA records.")
+  let count = values.len div 4
+  var maximum: GLint
+  glGetIntegerv(GL_MAX_TEXTURE_SIZE, maximum.addr)
+  let
+    width = min(min(1024, maximum.int), count)
+    height = (count + width - 1) div width
+  if count > 16_777_215 or height > maximum.int:
+    raise newException(QuadTerrainError, "Terrain data exceeds GPU capacity.")
+  var data = newSeq[float32](width * height * 4)
+  copyMem(data[0].addr, unsafeAddr values[0], values.len * sizeof(float32))
+  if texture == 0:
+    glGenTextures(1, texture.addr)
+  glBindTexture(GL_TEXTURE_2D, texture)
+  glTexImage2D(
+    GL_TEXTURE_2D, 0, GL_RGBA32F.GLint, width.GLsizei, height.GLsizei,
+    0, GL_RGBA, cGL_FLOAT, data[0].addr
+  )
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE.GLint)
+  glBindTexture(GL_TEXTURE_2D, 0)
+  vec2(width.float32, height.float32)
+
+proc rebuildTerrainData() =
+  ## Refreshes visual sidecars without altering terrain or simulation flags.
+  if not generatedTerrain:
+    return
+  var materials: seq[int]
+  for style in tileMaterialTable:
+    materials.add style.topMaterial.int
+  try:
+    generatedMap = buildTerrainMap(
+      layers, materials, seed, 1.0'f / terrainTextureScale,
+      terrainGrassPatchSize, amplitude, terrainSplatCount, terrainSplatChance
+    )
+  except TerrainMapError:
+    raise newException(QuadTerrainError, getCurrentExceptionMsg())
+  blendDimensions = uploadTerrainData(blendDataTexture, generatedMap.blends)
+  splatDimensions = uploadTerrainData(splatDataTexture, generatedMap.brushes)
+  terrainSplatPlacements = generatedMap.placements
+  terrainPeakSplats = generatedMap.peak
+
+proc bindTerrainData() =
+  ## Binds generated material controls and brush records for either draw path.
+  glUniform1f(generatedLocation, if generatedTerrain: 1 else: 0)
+  glUniform1f(heightBlendEnabledLocation, if terrainHeightBlending: 1 else: 0)
+  glUniform1f(splatsEnabledLocation, if terrainSplats: 1 else: 0)
+  glUniform1f(splatAmountLocation, clamp(terrainSplatAmount, 0.0'f, 1.0'f))
+  glUniform2f(splatDataSizeLocation, splatDimensions.x, splatDimensions.y)
+  glUniform2f(blendDataSizeLocation, blendDimensions.x, blendDimensions.y)
+  for (unit, target, texture, location) in [
+    (5, GL_TEXTURE_2D_ARRAY, splatColorArray, splatColorsLocation),
+    (6, GL_TEXTURE_2D_ARRAY, splatHeightArray, splatHeightsLocation),
+    (7, GL_TEXTURE_2D, splatDataTexture, splatDataLocation),
+    (8, GL_TEXTURE_2D, blendDataTexture, blendDataLocation)
+  ]:
+    glActiveTexture((GL_TEXTURE0.int + unit).GLenum)
+    glBindTexture(target, texture)
+    glUniform1i(location, unit.GLint)
+
 proc loadWaterNormals(): seq[seq[Image]] =
   ## Water detail uses the same mipmapped texture-array path as terrain and
   ## trees, with one shared-data image per layer.
@@ -1729,13 +1965,24 @@ proc setTerrainMaterial*(index: int, color, height: Image) =
       QuadTerrainError,
       "terrain materials can only be replaced after initTerrain"
     )
-  if index < 0 or index >= TerrainMaterials.len:
+  let
+    materialCount =
+      if generatedTerrain:
+        SurfaceNames.len
+      else:
+        TerrainMaterials.len
+    size =
+      if generatedTerrain:
+        GeneratedTextureSize
+      else:
+        TerrainTextureSize
+  if index < 0 or index >= materialCount:
     raise newException(
       QuadTerrainError,
       "terrain material index out of range: " & $index
     )
-  if color.width != TerrainTextureSize or
-      color.height != TerrainTextureSize or
+  if color.width != size or
+      color.height != size or
       height.width != color.width or height.height != color.height:
     raise newException(
       QuadTerrainError,
@@ -2015,7 +2262,8 @@ proc bakeTree(
     textureLayer: int,
     position: Vec3,
     rotation,
-    instanceScale: float32,
+    instanceScale,
+    widthScale: float32,
     writeIndex: var int
 ) =
   ## Writes one transformed tree instance into the baked tree mesh.
@@ -2025,20 +2273,23 @@ proc bakeTree(
   var i = 0
   while i < model.vertices.len:
     let
-      x = model.vertices[i] * instanceScale
+      x = model.vertices[i] * instanceScale * widthScale
       y = model.vertices[i + 1] * instanceScale
-      z = model.vertices[i + 2] * instanceScale
-      normalX = model.vertices[i + 5]
-      normalZ = model.vertices[i + 7]
+      z = model.vertices[i + 2] * instanceScale * widthScale
+      normal = normalize(vec3(
+        model.vertices[i + 5] / widthScale,
+        model.vertices[i + 6],
+        model.vertices[i + 7] / widthScale
+      ))
     treeMesh[writeIndex] = position.x + cosine * x - sine * z
     treeMesh[writeIndex + 1] = position.y + y
     treeMesh[writeIndex + 2] = position.z + sine * x + cosine * z
     treeMesh[writeIndex + 3] = model.vertices[i + 3]
     treeMesh[writeIndex + 4] = model.vertices[i + 4]
     treeMesh[writeIndex + 5] = textureLayer.float32
-    treeMesh[writeIndex + 6] = cosine * normalX - sine * normalZ
-    treeMesh[writeIndex + 7] = model.vertices[i + 6]
-    treeMesh[writeIndex + 8] = sine * normalX + cosine * normalZ
+    treeMesh[writeIndex + 6] = cosine * normal.x - sine * normal.z
+    treeMesh[writeIndex + 7] = normal.y
+    treeMesh[writeIndex + 8] = sine * normal.x + cosine * normal.z
     writeIndex += 9
     i += 8
 
@@ -2056,8 +2307,10 @@ type TreeChoice = object
   textureLayer: int
   rotation: float32
   scale: float32
+  widthScale: float32
 
 proc chooseTree(x, z: int): TreeChoice =
+  ## Chooses a stable tree appearance within the configured size limits.
   var rng = initRand(treeTileSeed(x, z))
   result.model = pickTreeModel(rng)
   let layers =
@@ -2066,6 +2319,15 @@ proc chooseTree(x, z: int): TreeChoice =
   result.textureLayer = layers[rng.rand(layers.len - 1)]
   result.rotation = rng.rand(2.0 * PI).float32
   result.scale = (0.85'f32 + rng.rand(0.45).float32) * treeHeight / 8.4'f32
+  result.widthScale = 1
+  if treeWidth > 0:
+    result.widthScale = min(
+      1.0'f,
+      treeWidth / max(
+        treeModels[result.model].width * result.scale,
+        0.001'f
+      )
+    )
 
 proc treeMeshFloatCount(): int =
   ## Counts the exact float storage needed by the baked tree mesh.
@@ -2217,6 +2479,7 @@ proc bakeTreeTiles(writeIndex: var int) =
         ),
         choice.rotation,
         choice.scale,
+        choice.widthScale,
         writeIndex
       )
 
@@ -2275,11 +2538,12 @@ proc addTriangle(
     weightA,
     weightB,
     weightC: Vec4,
-    edgeMask = 0.0'f32
+    edgeMask = 0.0'f,
+    splatRange = vec3(0, 0, -1)
 ) =
   ## Appends one textured terrain triangle to the interleaved mesh.
   let start = mesh.len
-  mesh.setLen(start + 54)
+  mesh.setLen(start + TerrainVertexSize * 3)
   template writeVertex(
       offset: int,
       vertex: Vec3,
@@ -2305,9 +2569,12 @@ proc addTriangle(
     mesh[start + offset + 15] = weight.y
     mesh[start + offset + 16] = weight.z
     mesh[start + offset + 17] = weight.w
+    mesh[start + offset + 18] = splatRange.x
+    mesh[start + offset + 19] = splatRange.y
+    mesh[start + offset + 20] = splatRange.z
   writeVertex(0, a, normalA, weightA)
-  writeVertex(18, b, normalB, weightB)
-  writeVertex(36, c, normalC, weightC)
+  writeVertex(TerrainVertexSize, b, normalB, weightB)
+  writeVertex(TerrainVertexSize * 2, c, normalC, weightC)
 
 proc addWall(
     top0,
@@ -2461,12 +2728,21 @@ proc emitLayer(
 
       let
         style = tileMaterial(t.kind)
-        materials = vec4(
-          cornerMaterial(layer, x, z, 0),
-          cornerMaterial(layer, x, z, 1),
-          cornerMaterial(layer, x, z, 2),
-          cornerMaterial(layer, x, z, 3)
-        )
+        materials =
+          if generatedTerrain:
+            vec4(generatedMap.layers[layerIndex].materials[i].float32)
+          else:
+            vec4(
+              cornerMaterial(layer, x, z, 0),
+              cornerMaterial(layer, x, z, 1),
+              cornerMaterial(layer, x, z, 2),
+              cornerMaterial(layer, x, z, 3)
+            )
+        splatRange =
+          if generatedTerrain:
+            generatedMap.layers[layerIndex].ranges[i]
+          else:
+            vec3(0, 0, -1)
         n0 = cornerNormal(layer, faceNormals, x, z, 0)
         n1 = cornerNormal(layer, faceNormals, x, z, 1)
         n2 = cornerNormal(layer, faceNormals, x, z, 2)
@@ -2483,7 +2759,8 @@ proc emitLayer(
         CornerWeights[0],
         CornerWeights[1],
         CornerWeights[2],
-        edgeMask
+        edgeMask,
+        splatRange
       )
       addTriangle(
         v10,
@@ -2497,7 +2774,8 @@ proc emitLayer(
         CornerWeights[1],
         CornerWeights[3],
         CornerWeights[2],
-        edgeMask
+        edgeMask,
+        splatRange
       )
 
       if layer.slab:
@@ -2727,12 +3005,28 @@ proc emitWaterLayer(layer: QuadLayer) =
 
 ## Public API
 
-proc initTerrain*() =
+proc initTerrain*(
+  treeStyle: TreeStyle = MixedTrees,
+  terrainStyle: TerrainStyle = CartoonTerrain
+) =
   ## Compiles the shader programs, creates the vertex arrays, and loads the
   ## prop model packs. Requires a current GL context; call once before
   ## bakeTerrain. Prop models load from ../polyworld_data/terrain/
   ## relative to the current directory (run from the repo root).
   initSunShadows()
+  generatedTerrain = terrainStyle == GeneratedTerrain
+  if generatedTerrain:
+    terrainTextureScale = 1.0'f / 2.5'f
+    terrainBlendDepth = 0.43'f
+    terrainHeightBlend = 1.30'f
+    for kind, material in [
+      GrassSurface, DirtSurface, GravelSurface,
+      MarshSurface, CobbleSurface, ForestSurface
+    ]:
+      setTileMaterial(
+        kind, material.float32, DirtSurface.float32,
+        vec3(1), vec3(0.85), kind.int32
+      )
   terrainProgram = compileProgram(
     toShader(terrainVert, OpenGlShaderTarget, shaderVertex),
     toShader(terrainFrag, OpenGlShaderTarget, shaderFragment)
@@ -2749,6 +3043,18 @@ proc initTerrain*() =
   texScaleLocation = glGetUniformLocation(terrainProgram, "texScale")
   blendDepthLocation = glGetUniformLocation(terrainProgram, "blendDepth")
   heightBlendLocation = glGetUniformLocation(terrainProgram, "heightBlend")
+  generatedLocation = glGetUniformLocation(terrainProgram, "generatedEnabled")
+  heightBlendEnabledLocation = glGetUniformLocation(
+    terrainProgram, "heightBlendEnabled"
+  )
+  splatsEnabledLocation = glGetUniformLocation(terrainProgram, "splatsEnabled")
+  splatAmountLocation = glGetUniformLocation(terrainProgram, "splatAmount")
+  splatColorsLocation = glGetUniformLocation(terrainProgram, "splatColors")
+  splatHeightsLocation = glGetUniformLocation(terrainProgram, "splatHeights")
+  splatDataLocation = glGetUniformLocation(terrainProgram, "splatData")
+  blendDataLocation = glGetUniformLocation(terrainProgram, "blendData")
+  splatDataSizeLocation = glGetUniformLocation(terrainProgram, "splatDataSize")
+  blendDataSizeLocation = glGetUniformLocation(terrainProgram, "blendDataSize")
   terrainTexturesLocation = glGetUniformLocation(
     terrainProgram,
     "terrainTextures"
@@ -2776,7 +3082,21 @@ proc initTerrain*() =
     terrainProgram,
     "visibilityScale"
   )
-  terrainTextureArray = buildTextureArray(loadTerrainMaterials(), GL_REPEAT.GLint)
+  if generatedTerrain:
+    terrainTextureArray = buildTextureArray(loadGeneratedTiles(), GL_REPEAT.GLint)
+    let stamps = loadGeneratedStamps()
+    splatColorArray = buildTextureArray(stamps.colors, GL_CLAMP_TO_EDGE.GLint)
+    splatHeightArray = buildTextureArray(stamps.heights, GL_CLAMP_TO_EDGE.GLint)
+  else:
+    terrainTextureArray = buildTextureArray(
+      loadTerrainMaterials(), GL_REPEAT.GLint
+    )
+    let placeholder = @[@[newImage(1, 1)]]
+    splatColorArray = buildTextureArray(placeholder, GL_CLAMP_TO_EDGE.GLint)
+    splatHeightArray = buildTextureArray(placeholder, GL_CLAMP_TO_EDGE.GLint)
+  let empty = @[0.0'f, 0.0'f, 0.0'f, 0.0'f]
+  splatDimensions = uploadTerrainData(splatDataTexture, empty)
+  blendDimensions = uploadTerrainData(blendDataTexture, empty)
   treeTextureArray = buildTextureArray(loadTreeTextures(), GL_CLAMP_TO_EDGE.GLint)
   waterNormalTextureArray = buildTextureArray(loadWaterNormals(), GL_REPEAT.GLint)
   glGenTextures(1, visibilityTexture.addr)
@@ -2924,7 +3244,7 @@ proc initTerrain*() =
   glGenBuffers(1, vertexBuffer.addr)
   glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer)
   block:
-    const stride = (18 * sizeof(float32)).GLsizei
+    const stride = (TerrainVertexSize * sizeof(float32)).GLsizei
     let positionLocation = glGetAttribLocation(terrainProgram, "vertPos")
     doAssert positionLocation >= 0
     glEnableVertexAttribArray(positionLocation.GLuint)
@@ -2973,6 +3293,13 @@ proc initTerrain*() =
     glVertexAttribPointer(
       cornerWeightLocation.GLuint, 4, cGL_FLOAT, GL_FALSE, stride,
       cast[pointer](14 * sizeof(float32))
+    )
+    let splatRangeLocation = glGetAttribLocation(terrainProgram, "splatRange")
+    doAssert splatRangeLocation >= 0
+    glEnableVertexAttribArray(splatRangeLocation.GLuint)
+    glVertexAttribPointer(
+      splatRangeLocation.GLuint, 3, cGL_FLOAT, GL_FALSE, stride,
+      cast[pointer](18 * sizeof(float32))
     )
 
   glGenVertexArrays(1, propVertexArray.addr)
@@ -3070,7 +3397,7 @@ proc initTerrain*() =
   glBindVertexArray(terrainDepthVertexArray)
   glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer)
   block:
-    const stride = (18 * sizeof(float32)).GLsizei
+    const stride = (TerrainVertexSize * sizeof(float32)).GLsizei
     let positionLocation = glGetAttribLocation(
       sunDepthProgramId(), "vertPos")
     doAssert positionLocation >= 0
@@ -3111,13 +3438,24 @@ proc initTerrain*() =
   # Planting weights and texture array layers per tree model. Fir 03 is a
   # tall old-growth fir with a small crown, planted sparingly; the pack's
   # fir 04 is a bare snag and is left out of the forest entirely.
-  treeModels.add loadTreeModel("tree_fir_01", 25, @[0], @[0])
-  treeModels.add loadTreeModel("tree_fir_02", 20, @[0], @[0])
-  treeModels.add loadTreeModel("tree_fir_03", 6, @[0], @[0])
-  treeModels.add loadTreeModel(
-    "tree_leafy_simple", 24, @[1, 2, 5, 6], @[1, 2, 3, 4, 5, 6])
-  treeModels.add loadTreeModel(
-    "tree_leafy_double", 23, @[7, 8, 11, 12], @[7, 8, 9, 10, 11, 12])
+  case treeStyle
+  of MixedTrees:
+    treeModels.add loadTreeModel("tree_fir_01", 25, @[0], @[0])
+    treeModels.add loadTreeModel("tree_fir_02", 20, @[0], @[0])
+    treeModels.add loadTreeModel("tree_fir_03", 6, @[0], @[0])
+    treeModels.add loadTreeModel(
+      "tree_leafy_simple", 24, @[1, 2, 5, 6], @[1, 2, 3, 4, 5, 6])
+    treeModels.add loadTreeModel(
+      "tree_leafy_double", 23, @[7, 8, 11, 12], @[7, 8, 9, 10, 11, 12])
+  of EvergreenTrees:
+    # Compact layered firs dominate, with a few green broadleaf trees.
+    treeModels.add loadTreeModel("tree_fir_01", 52, @[0], @[0])
+    treeModels.add loadTreeModel("tree_fir_02", 42, @[0], @[0])
+    treeModels.add loadTreeModel(
+      "tree_leafy_simple", 6, @[2, 6], @[2, 6])
+  of DenseTrees:
+    treeModels.add loadTreeModel("tree_fir_01", 25, @[0], @[0])
+    treeModels.add loadTreeModel("tree_fir_02", 20, @[0], @[0])
   treeModels.scaleTrees(8.4)
   collectPropModels(
     readGltfFile(DataRoot & "/terrain/low_poly_grass.glb").root, mat4(), grassModels)
@@ -3137,13 +3475,14 @@ proc bakeTerrain*(rebuildWalkability = true) =
   let floorY = -amplitude - 6
   if rebuildWalkability:
     computeWalkable()
+  rebuildTerrainData()
   for i in 0 ..< layers.len:
-    let first = mesh.len div 18
+    let first = mesh.len div TerrainVertexSize
     if layers[i].water:
       emitWaterLayer(layers[i])
     else:
       emitLayer(i, layers[i], floorY)
-    layerVertexRanges.add first ..< (mesh.len div 18)
+    layerVertexRanges.add first ..< (mesh.len div TerrainVertexSize)
   rebuildTreeMesh()
   if waterVertexBuffer != 0 and waterMesh.len > 0:
     glBindBuffer(GL_ARRAY_BUFFER, waterVertexBuffer)
@@ -3153,7 +3492,7 @@ proc bakeTerrain*(rebuildWalkability = true) =
       waterMesh[0].addr,
       GL_DYNAMIC_DRAW
     )
-  meshVertexCount = mesh.len div 18
+  meshVertexCount = mesh.len div TerrainVertexSize
   if mesh.len > 0:
     glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer)
     glBufferData(
@@ -3193,6 +3532,7 @@ proc drawTerrainRange*(
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(visibilityTexLocation, 1)
   bindGroundMask()
+  bindTerrainData()
   glActiveTexture(GL_TEXTURE0)
   glBindTexture(GL_TEXTURE_2D_ARRAY, terrainTextureArray)
   glUniform1i(terrainTexturesLocation, 0)
@@ -3282,6 +3622,7 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(visibilityTexLocation, 1)
   bindGroundMask()
+  bindTerrainData()
   glActiveTexture(GL_TEXTURE0)
   glBindTexture(GL_TEXTURE_2D_ARRAY, terrainTextureArray)
   glUniform1i(terrainTexturesLocation, 0)

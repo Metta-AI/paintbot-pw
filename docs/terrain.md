@@ -424,6 +424,48 @@ accumulated stamp heights. They are also included in `tests/tests.nim`.
 
 ## Interactive AI terrain experiment
 
+GoTA and LvD use the same generated materials and splat blending through
+`polyworld/quadterrain`. Their graphics setup calls
+`initTerrain(DenseTrees, GeneratedTerrain)`, with tree height 6 and no crown
+width cap. The dense style uses only the two full fir models from the terrain
+demo. Their existing forest placement, lane clearances, and gameplay tree
+grids remain the source of truth.
+
+The generated mode loads the nine 256x256 tile/stamp pairs. Grass tiles choose
+one of four paintings in seeded regions. Road, rocky ground, marsh, stone
+construction, and tree tiles use dirt road, gravel, marsh, cobblestone, and
+forest floor respectively. The defaults match the approved demo: 2.5 world
+tiles per texture repeat, 40% splat placement, paint amount 1.00, blend depth
+0.43, and height influence 1.30. Colors and heights rotate and filter together.
+
+`terrainSplats`, `terrainSplatAmount`, and `terrainHeightBlending` can change
+without rebaking. Changing `terrainSplatCount`, `terrainSplatChance`,
+`terrainTextureScale`, or `terrainGrassPatchSize` requires `bakeTerrain`.
+`terrainSplatPlacements` and `terrainPeakSplats` expose the resulting counts.
+The original `initTerrain()` still selects the earlier material set for
+other games.
+
+Shared code lives in `terrainblends.nim`, `terrainsplats.nim`,
+`terrainsurfaces.nim`, and `terrainmaps.nim` under `src/polyworld`. The experiment
+modules re-export those helpers. `buildTerrainMap` returns flat visual arrays
+alongside the logical map without modifying its tiles, flags, or walkability.
+LvD rebuilds these arrays when a tree is removed, using the same seed so
+unaffected placements remain stable. Material neighborhoods and brushes stay
+within connected surfaces at matching corner heights. Walls receive their own
+projected tile material and no top-surface splats.
+
+The shared renderer stores material neighborhoods and variable-length brush
+records in nearest-filtered RGBA32F 2D textures. This avoids desktop-only texture
+buffers and uses the same sampling path for desktop OpenGL and WebGL 2. Color
+and height remain separate texture arrays for transparent stamps. Terrain,
+layer-range drawing, and the sun depth pass share the updated vertex stride.
+
+`tests/test_terrainmaps.nim` checks deterministic placement, unchanged gameplay
+data, material assignment, disconnected heights, multiple layers, water,
+unbounded-per-tile spans within the global budget, and malformed settings.
+
+### Standalone demo
+
 [`quadterrain_aigen.nim`](../experiments/terrain/quadterrain_aigen.nim) is a
 terrain experiment that loads the nine soft terrain paintings directly at
 256x256. Its grass, fir trees, and rendering settings follow

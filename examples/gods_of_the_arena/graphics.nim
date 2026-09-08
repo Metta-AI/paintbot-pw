@@ -205,7 +205,9 @@ proc runGraphics*() =
   profileBlock "terrain":
     amplitude = 1.4'f32
     seed = run.map.seed
-    initTerrain()
+    treeHeight = 6.0'f
+    treeWidth = 0.0'f
+    initTerrain(DenseTrees, GeneratedTerrain)
     scatterGrass(800, run.map.seed)
     scatterRocks(80, run.map.seed)
 

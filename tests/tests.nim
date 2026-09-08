@@ -37,6 +37,7 @@ import
   test_rtscameras,
   test_tapes,
   test_terrains,
+  test_terrainmaps,
   test_aigen_blends,
   test_aigen_splats,
   test_tile_paths,
