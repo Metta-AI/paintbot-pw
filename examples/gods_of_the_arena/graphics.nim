@@ -1938,6 +1938,7 @@ proc runGraphics*() =
         drawWorldCharacters()
         finishCharacters(scene)
 
+        drawWater(viewProjection, cameraEye)
         particles.drawParticles(
           viewProjection,
           barCameraRight,

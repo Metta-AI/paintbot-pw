@@ -39,17 +39,34 @@ proc checkForest(seed: int32) =
     second = generateMap(seed)
     ground = layers[GroundLayer]
   doAssert first.hash == second.hash, "the same seed changed its forest"
-  doAssert layers.len == 3, "only the ground and two forts should remain"
-  for layer in layers:
-    doAssert not layer.water, "the arena should have no water"
+  doAssert layers.len == 4, "the arena needs ground, two forts, and water"
+  for layerIndex, layer in layers:
+    doAssert layer.water == (layerIndex == WaterLayer)
   var
     trees = 0
     grouped = 0
     marsh = 0
+    waterTiles = 0
   for z in 0 ..< GridTiles:
     for x in 0 ..< GridTiles:
       let tile = ground.tiles[z * GridTiles + x]
       doAssert tile.exists, "the arena should have continuous ground"
+      let water = layers[WaterLayer].tiles[z * GridTiles + x]
+      if water.exists:
+        inc waterTiles
+        doAssert isWalkable(GroundLayer, x, z) and not tile.impassable,
+          "the submerged riverbed must remain walkable"
+        doAssert not isWalkable(WaterLayer, x, z),
+          "units must wade on the bed instead of standing on the water"
+        doAssert tile.kind == MarshTile,
+          "water should stay in the marsh channel"
+        var submerged = false
+        for corner, height in tile.tops:
+          let depth = water.tops[corner].int32 - height.int32
+          doAssert depth <= WaterDepthSteps, "the water is deeper than knees"
+          if depth > 0:
+            submerged = true
+        doAssert submerged, "water should only cover a submerged tile"
       if tile.kind == MarshTile:
         inc marsh
         doAssert not tile.impassable and isWalkable(GroundLayer, x, z),
@@ -78,6 +95,7 @@ proc checkForest(seed: int32) =
         inc grouped
   doAssert trees > 0, "the forest is missing"
   doAssert marsh > GridTiles, "the former river should have marsh terrain"
+  doAssert waterTiles > GridTiles, "the shallow river should span the map"
   doAssert grouped * 100 >= trees * 80,
     "seed " & $seed & ": only " & $grouped & "/" & $trees &
       " trees form dense patches"
@@ -111,6 +129,8 @@ block:
   doAssert isWalkable(GroundLayer, 65, 61),
     "the former bridge centre should be walkable ground"
   let centre = layers[GroundLayer].tiles[61 * GridTiles + 65]
+  doAssert layers[WaterLayer].tiles[61 * GridTiles + 65].exists,
+    "the middle lane should wade through the shallow river"
   doAssert centre.kind == MarshTile,
     "the lane crossing should retain the river's marsh color"
   for height in centre.tops:

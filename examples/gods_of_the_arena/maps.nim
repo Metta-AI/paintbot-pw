@@ -18,10 +18,14 @@ const
   GroundLayer* = 0
   RedFortLayer* = 1
   BlueFortLayer* = 2
+  WaterLayer* = 3
   RedFortKind* = 6'u32
   BlueFortKind* = 7'u32
   TerrainAmplitudeSteps = 11'i32
   RiverBedSteps = -16'i32
+  WaterDepthSteps* = 3'i32
+    ## Caps wading depth at 3/8 of a tile, around a footman's knees.
+  WaterLevelSteps = RiverBedSteps + WaterDepthSteps
   FordBedSteps = -4'i32
   FortWallHeightSteps = 36'i32
   FortGateClearanceSteps = 24'i32
@@ -76,7 +80,7 @@ proc mapFingerprint(): uint64 =
 var battleMapHash*: uint64
 
 proc generateMap*(seed: int32): MapData {.measure.} =
-  ## Builds a marsh channel, rolling ground, forests, and two fort layers.
+  ## Builds a shallow river over walkable marsh, forests, and two forts.
   proc ground(cx, cz: int): int32 =
     let value =
       valueNoise(seed, 0xA0761D6478BD642F'u64, cx, cz, 24) * 4 +
@@ -419,7 +423,34 @@ proc generateMap*(seed: int32): MapData {.measure.} =
       break
     plantPatch(x, z)
 
-  layers = @[groundLayer, redFort, blueFort]
+  let water = QuadLayer(
+    originX: 0,
+    originZ: 0,
+    width: GridTiles,
+    depth: GridTiles,
+    slab: true,
+    water: true,
+    tiles: newSeq[Tile](GridTiles * GridTiles)
+  )
+  for i, tile in groundLayer.tiles:
+    # Cover every submerged corner so the ground clips the shoreline smoothly.
+    var submerged = false
+    for height in tile.tops:
+      if height < WaterLevelSteps:
+        submerged = true
+    if not submerged:
+      continue
+    water.tiles[i] = Tile(
+      flags: TileExists,
+      tops: packedHeights([
+        WaterLevelSteps, WaterLevelSteps, WaterLevelSteps, WaterLevelSteps
+      ]),
+      bottoms: packedHeights([
+        RiverBedSteps, RiverBedSteps, RiverBedSteps, RiverBedSteps
+      ])
+    )
+
+  layers = @[groundLayer, redFort, blueFort, water]
   computeWalkable()
   result.seed = seed
   result.hash = mapFingerprint()
