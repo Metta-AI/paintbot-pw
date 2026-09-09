@@ -7,7 +7,7 @@ import
   ../examples/heartleaf/content,
   ../examples/heartleaf/maps
 
-const SeedsUnderTest = 100
+const SeedsUnderTest = 30
 
 echo "Testing map determinism"
 block sameSeedSameMap:

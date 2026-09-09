@@ -80,63 +80,6 @@ block bushesClearHouseDoors:
         doAssert chebyshev(decoration.tile, house.door) > HouseBushClearance,
           &"seed {seed}: {decoration.node} blocks door {house.door}"
 
-block rocksAreSparse:
-  for seed in 1'i32 .. 20:
-    var roadRocks, forestRocks: int
-    for decoration in placeDecor(generateMap(seed), seed):
-      if decoration.kit != MeadowRocks:
-        continue
-      case decoration.area
-      of RoadArea:
-        inc roadRocks
-        doAssert decoration.height > 0.7
-      of OutskirtsArea:
-        inc forestRocks
-        doAssert decoration.node == "rock_medium_01a"
-      else:
-        doAssert false, "Rocks should not litter the meadow or gardens"
-    doAssert roadRocks <= 4 and forestRocks <= 8
-
-block meadowAndRoadBalance:
-  let map = generateMap(Seed)
-  var
-    trees = 0
-    underplanting = 0
-    innerTrees = 0
-    forestTransition = 0
-    roadsidePlants = 0
-  for decoration in placeDecor(map, Seed):
-    if decoration.area == RoadArea:
-      if decoration.node == "bush_01a":
-        doAssert decoration.height < 1.0
-      if decoration.kit in [MeadowVegetation, MeadowRocks]:
-        inc roadsidePlants
-    if decoration.area == OutskirtsArea and
-        chebyshev(decoration.tile, tile2(GridSide div 2, GridSide div 2)) < ForestEdgeRadius:
-      inc forestTransition
-    if decoration.area == MeadowArea:
-      for garden in map.gardenTiles:
-        doAssert chebyshev(decoration.tile, garden) > 1
-      for house in map.houses:
-        doAssert chebyshev(decoration.tile, house.door) > HouseBushClearance
-      if decoration.node in ["tree_05a", "tree_06a"]:
-        inc trees
-        doAssert decoration.height < 3.7
-        if chebyshev(decoration.tile, tile2(GridSide div 2, GridSide div 2)) < 32:
-          inc innerTrees
-      else:
-        inc underplanting
-      for dy in -1'i32 .. 1'i32:
-        for dx in -1'i32 .. 1'i32:
-          let tile = tile2(int32(decoration.tile.x) + dx, int32(decoration.tile.y) + dy)
-          if inGrid(tile):
-            doAssert map.kinds[tileIndex(tile)] != uint8(RoadTile)
-  doAssert trees >= 15 and trees <= 24
-  doAssert underplanting >= 600
-  doAssert innerTrees >= 3
-  doAssert roadsidePlants >= 80
-  doAssert forestTransition >= 100
-
 echo "Testing that every node exists in its kit"
 block nodesExist:
   for kit in DecorKit:

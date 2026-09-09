@@ -1,6 +1,12 @@
 ## Heartleaf decorations: the props that dress the village. Purely visual
 ## and derived from nothing but the generated map and its seed, so a live
 ## game and its replay dress identically. Nothing here reaches the sim.
+##
+## The plaza gets a well, stalls, a cart, and seating between the road
+## entrances, with signposts outside. Each house gets a mailbox, flower
+## pots, flower beds, and a bush. Some garden plots get
+## flowers beside them. Road verges get lamp posts, tufts, bushes, and
+## small rocks. The outskirts get a few rocks under the trees.
 
 import
   std/[math, sets],
@@ -15,7 +21,7 @@ type
     ValleyVegetation, ValleyBuildings
 
   DecorArea* = enum
-    PlazaArea, HouseArea, GardenArea, RoadArea, MeadowArea, OutskirtsArea
+    PlazaArea, HouseArea, GardenArea, RoadArea, OutskirtsArea
 
   Decoration* = object
     kit*: DecorKit
@@ -75,10 +81,10 @@ const
   FlowerHeight = 0.6'f32
   BushHeight = 1.8'f32
   TuftHeight = 0.55'f32
-  SmallRockHeight = 0.85'f32
-  RoadRockLimit = 4
-  ForestRockLimit = 8
-  ForestRockHeight = 1.1'f32
+  VergeBushHeight = 1.6'f32
+    ## Nobody trims anything; the villagers are busy with the vegetables.
+  SmallRockHeight = 0.7'f32
+  MediumRockHeight = 1.3'f32
   HouseFlowerBeds = 5
   HouseBushes = 2
   HouseDecorReach = 4'i32
@@ -87,7 +93,7 @@ const
   HouseBushClearance* = 2'i32
     ## Bushes stay this many tiles beyond every doorstep.
   HouseDecorAttempts = 20
-  GardenFlowerOneIn = 1'i32
+  GardenFlowerOneIn = 2'i32
   RoadDecorOneIn = 2'i32
   NaturalVariance = 0.45'f32
     ## Things that grew or were left lying vary this much in size either
@@ -103,21 +109,16 @@ const
   CobbleTint = vec3(1.15, 1.03, 1.13)
     ## What the rock paint is multiplied by to land on the cobble sheet's
     ## average colour; the rock atlas is a neutral grey a shade darker.
+  VergeBushSetback = 0.7'f32
+    ## Tiles a verge bush is pushed away from the road, so a big one leans
+    ## over the dirt instead of growing into it.
   VergeRockSetback = 0.45'f32
     ## Tiles a verge rock is pushed away from the road.
-
-  MeadowClusters = 95
-  MeadowAttempts = 4000
-  MeadowSpacing = 5'i32
-  VillagePlantRadius = 32'i32
-  MeadowTreeHeight = 3.2'f32
-  MeadowTreeEvery = 4
-  MeadowBushHeight = 0.8'f32
-  ForestTransitionStart = 36'i32
-  ForestTransitionOneIn = 4'i32
-  MeadowUnderplanting = 14
-  MeadowPlantReach = 3'i32
-  SmallTrees = ["tree_05a", "tree_06a"]
+  TreeRockOneIn = 6'i32
+    ## Small rocks beside forest trees, one in this many free tiles that
+    ## touch a tree.
+  MediumRockOneIn = 40'i32
+    ## Medium rocks beside forest trees, rarer.
 
   KitFiles: array[DecorKit, string] = [
     "terrain/toon_enchanted_meadow/props.glb",
@@ -137,8 +138,7 @@ const
     @["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a",
       "flower_bush_01a", "bush_01a", "grass_patch_01a", "grass_patch_02a",
       "grass_patch_03a", "grass_patch_04a", "grass_patch_05a",
-      "plant_04a", "plant_05a", "plant_06a",
-      "tree_05a", "tree_06a"],
+      "plant_04a", "plant_05a", "plant_06a"],
     @["wood_bench_01a", "wood_table_01a"],
     @["rock_small_01a", "rock_small_02a", "rock_small_03a", "rock_small_04a",
       "rock_medium_01a", "rock_medium_02a", "rock_medium_03a"],
@@ -152,6 +152,7 @@ const
     "grass_patch_04a", "grass_patch_05a"]
   SmallRocks = ["rock_small_01a", "rock_small_02a", "rock_small_03a",
     "rock_small_04a"]
+  MediumRocks = ["rock_medium_01a", "rock_medium_02a", "rock_medium_03a"]
   FlowerBeds = ["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a"]
   Sides = [(1'i32, 0'i32), (0'i32, 1'i32), (-1'i32, 0'i32), (0'i32, -1'i32)]
 
@@ -418,9 +419,7 @@ proc dressGardens(p: var Placer) =
 proc dressVerges(p: var Placer) =
   ## Lamp posts, tufts, bushes, small rocks, and flowers along the road
   ## edges.
-  var
-    lamps: seq[Tile2]
-    rocks = 0
+  var lamps: seq[Tile2]
   for y in 0'i32 ..< GridSide:
     for x in 0'i32 ..< GridSide:
       if not p.tileFree(x, y) or not p.nearRoad(x, y):
@@ -443,108 +442,39 @@ proc dressVerges(p: var Placer) =
         discard p.claim(MeadowVegetation, p.rng.pick(Tufts), RoadArea, x, y,
           yaw, TuftHeight, 0.3, NaturalVariance, p.rng.plantTint())
       of 1:
-        if rocks < RoadRockLimit and p.rng.below(8) == 0:
-          if p.claim(MeadowRocks, p.rng.pick(SmallRocks), RoadArea, x, y,
-              yaw, SmallRockHeight, 0.2, 0.1, p.rng.rockTint(),
-              p.awayFromRoad(x, y) * VergeRockSetback):
-            inc rocks
-      of 2:
         if not p.nearHouseDoor(x, y):
-          discard p.claim(MeadowVegetation, "bush_01a", RoadArea, x, y,
-            yaw, MeadowBushHeight, 0.15, 0.15, p.rng.plantTint())
+          discard p.claim(MeadowVegetation, "bush_01a", RoadArea, x, y, yaw,
+            VergeBushHeight, 0.2, NaturalVariance, p.rng.plantTint(),
+            p.awayFromRoad(x, y) * VergeBushSetback)
+      of 2:
+        discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), RoadArea, x, y,
+          yaw, SmallRockHeight, 0.3, NaturalVariance, p.rng.rockTint(),
+          p.awayFromRoad(x, y) * VergeRockSetback)
       else:
         discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), RoadArea,
           x, y, yaw, FlowerHeight, 0.3, NaturalVariance, p.rng.plantTint())
 
-proc meadowFree(p: Placer, x, y: int32): bool =
-  ## Keeps substantial vegetation off paths and away from doors and crops.
-  if not p.tileFree(x, y) or p.nearHouseDoor(x, y) or p.nearRoad(x, y):
-    return false
-  for garden in p.map.gardenTiles:
-    if chebyshev(tile2(x, y), garden) <= 1:
-      return false
-  true
-
-proc dressMeadow(p: var Placer) =
-  ## Broad planted patches fill the meadow between the village paths.
-  var centres: seq[Tile2]
-  for attempt in 0 ..< MeadowAttempts:
-    if centres.len >= MeadowClusters:
-      break
-    let
-      reach = if attempt < MeadowAttempts div 2: VillagePlantRadius else: ForestEdgeRadius
-      x = GridSide div 2 + p.rng.below(reach * 2) - reach
-      y = GridSide div 2 + p.rng.below(reach * 2) - reach
-      tile = tile2(x, y)
-    if chebyshev(tile, tile2(GridSide div 2, GridSide div 2)) < 12:
-      continue
-    var clear = true
-    for centre in centres:
-      if chebyshev(tile, centre) < MeadowSpacing:
-        clear = false
-    if not clear:
-      continue
-    for dy in -2'i32 .. 2'i32:
-      for dx in -2'i32 .. 2'i32:
-        if not p.meadowFree(x + dx, y + dy):
-          clear = false
-    if not clear:
-      continue
-    centres.add tile
-    let yaw = p.rng.unit() * 2 * PI
-    if centres.len mod MeadowTreeEvery == 0:
-      discard p.claim(MeadowVegetation, p.rng.pick(SmallTrees), MeadowArea,
-        x, y, yaw, MeadowTreeHeight, variance = 0.15, tint = p.rng.plantTint())
-    for plant in 0 ..< MeadowUnderplanting:
-      let
-        px = x + p.rng.below(MeadowPlantReach * 2 + 1) - MeadowPlantReach
-        py = y + p.rng.below(MeadowPlantReach * 2 + 1) - MeadowPlantReach
-        angle = p.rng.unit() * 2 * PI
-      if not p.meadowFree(px, py):
-        continue
-      case plant mod 4
-      of 0, 1:
-        let node = if plant mod 2 == 0: "bush_01a" else: "flower_bush_01a"
-        discard p.claim(MeadowVegetation, node, MeadowArea,
-          px, py, angle, MeadowBushHeight, variance = 0.2,
-          tint = p.rng.plantTint())
-      of 2:
-        discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), MeadowArea,
-          px, py, angle, FlowerHeight * 1.5, variance = 0.2,
-          tint = p.rng.plantTint())
-      else:
-        discard
-
 proc dressOutskirts(p: var Placer) =
-  ## Low planting bridges the open meadow and forest edge.
+  ## A few small rocks at the feet of the forest trees and the odd medium
+  ## one. Nothing house-sized.
   let middle = tile2(GridSide div 2, GridSide div 2)
-  var rocks = 0
   for y in 0'i32 ..< GridSide:
     for x in 0'i32 ..< GridSide:
       let ring = chebyshev(tile2(x, y), middle)
-      if ring < ForestTransitionStart or ring >= ForestWallRadius:
+      if ring < ForestEdgeRadius or ring >= ForestWallRadius:
         continue
-      if not p.meadowFree(x, y):
-        continue
-      let chance = if p.nearTree(x, y): 2'i32 else: ForestTransitionOneIn
-      if p.rng.below(chance) != 0:
+      if not p.tileFree(x, y):
         continue
       let yaw = p.rng.unit() * 2 * PI
-      case p.rng.below(4)
-      of 0:
-        discard p.claim(MeadowVegetation, "bush_01a", OutskirtsArea,
-          x, y, yaw, MeadowBushHeight, 0.2, 0.2, p.rng.plantTint())
-      of 1:
-        discard p.claim(MeadowVegetation, p.rng.pick(Tufts), OutskirtsArea,
-          x, y, yaw, TuftHeight, 0.2, NaturalVariance, p.rng.plantTint())
-      of 2:
-        discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), OutskirtsArea,
-          x, y, yaw, FlowerHeight, 0.2, NaturalVariance, p.rng.plantTint())
-      else:
-        if rocks < ForestRockLimit and p.nearTree(x, y) and p.rng.below(10) == 0:
-          if p.claim(MeadowRocks, "rock_medium_01a", OutskirtsArea,
-              x, y, yaw, ForestRockHeight, tint = p.rng.rockTint()):
-            inc rocks
+      if p.nearTree(x, y):
+        if p.rng.below(MediumRockOneIn) == 0:
+          discard p.claim(MeadowRocks, p.rng.pick(MediumRocks),
+            OutskirtsArea, x, y, yaw, MediumRockHeight, 0.3,
+            NaturalVariance, p.rng.rockTint())
+        elif p.rng.below(TreeRockOneIn) == 0:
+          discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), OutskirtsArea,
+            x, y, yaw, SmallRockHeight, 0.3, NaturalVariance,
+            p.rng.rockTint())
 
 proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   ## Every decoration for one map, in a fixed order from one seeded stream.
@@ -552,7 +482,6 @@ proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   p.dressPlaza()
   p.dressHouses()
   p.dressGardens()
-  p.dressMeadow()
   p.dressVerges()
   p.dressOutskirts()
   p.placed
