@@ -21,7 +21,7 @@ type
     ValleyVegetation, ValleyBuildings
 
   DecorArea* = enum
-    PlazaArea, HouseArea, GardenArea, RoadArea, OutskirtsArea
+    PlazaArea, HouseArea, GardenArea, RoadArea, OutskirtsArea, MeadowArea
 
   Decoration* = object
     kit*: DecorKit
@@ -49,6 +49,11 @@ type
 
 const
   DecorSalt = 0xDEC0'u64
+  MeadowPatchCount = 16
+  MeadowPatchAttempts = 600
+  MeadowPatchSpacing = 7'i32
+  MeadowPatchRadius = 38'i32
+  MeadowBushHeight = 0.8'f32
   PlazaDressRadius = 5.5'f32
   PlazaSignRadius = 10.5'f32
   PlazaLimit* = 7.5'f32
@@ -476,6 +481,42 @@ proc dressOutskirts(p: var Placer) =
             x, y, yaw, SmallRockHeight, 0.3, NaturalVariance,
             p.rng.rockTint())
 
+proc dressMeadow(p: var Placer) =
+  ## A few low flower beds occupy gaps between the village's paths.
+  let middle = tile2(GridSide div 2, GridSide div 2)
+  var centres: seq[Tile2]
+  for attempt in 0 ..< MeadowPatchAttempts:
+    if centres.len >= MeadowPatchCount:
+      break
+    let
+      x = int32(middle.x) + p.rng.below(MeadowPatchRadius * 2 + 1) - MeadowPatchRadius
+      y = int32(middle.y) + p.rng.below(MeadowPatchRadius * 2 + 1) - MeadowPatchRadius
+      tile = tile2(x, y)
+    if chebyshev(tile, middle) < 13:
+      continue
+    var clear = true
+    for centre in centres:
+      if chebyshev(tile, centre) < MeadowPatchSpacing:
+        clear = false
+    for garden in p.map.gardenTiles:
+      if chebyshev(tile, garden) <= 3:
+        clear = false
+    for dy in -1'i32 .. 1'i32:
+      for dx in -1'i32 .. 1'i32:
+        if not p.tileFree(x + dx, y + dy) or
+            p.nearRoad(x + dx, y + dy) or
+            p.nearHouseDoor(x + dx, y + dy):
+          clear = false
+    if not clear:
+      continue
+    centres.add tile
+    let yaw = p.rng.unit() * 2 * PI
+    discard p.claim(MeadowVegetation, "flower_bush_01a", MeadowArea,
+      x, y, yaw, MeadowBushHeight, tint = p.rng.plantTint())
+    for side in [-1'i32, 1'i32]:
+      discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), MeadowArea,
+        x + side, y + side, yaw, FlowerHeight, tint = p.rng.plantTint())
+
 proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   ## Every decoration for one map, in a fixed order from one seeded stream.
   var p = Placer(map: map, rng: initRng(seed, DecorSalt))
@@ -484,4 +525,5 @@ proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   p.dressGardens()
   p.dressVerges()
   p.dressOutskirts()
+  p.dressMeadow()
   p.placed
