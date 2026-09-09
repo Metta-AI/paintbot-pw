@@ -3,6 +3,7 @@
 
 import
   std/strformat,
+  polyworld/rngs,
   ../examples/heartleaf/content,
   ../examples/heartleaf/maps,
   ../examples/heartleaf/sim,
@@ -52,10 +53,9 @@ block twinWorlds:
 echo "Testing the dinner tally to the exact point"
 block exactScoring:
   var w = newWorld(gameMap, 7)
-  ## Hand-build the 18:00 moment: Ivan hosts Anton and Yura with four
-  ## carrots and one tomato on the table. Everyone else stays outside.
-  w.villagers[0].inventory[0] = 4  # carrots
-  w.villagers[0].inventory[1] = 1  # a tomato
+  ## Hand-build the 18:00 moment: Ivan hosts Anton and Yura with five
+  ## carrots on the table. Everyone else stays outside.
+  w.villagers[0].inventory[0] = 5  # carrots
   w.villagers[0].inHouse = 0
   w.villagers[1].inHouse = 0
   w.villagers[2].inHouse = 0
@@ -69,23 +69,83 @@ block exactScoring:
   doAssert w.lastTally[0].pantry == 5
   doAssert w.lastTally[0].hostPoints == 10
 
-  ## Bites: three rounds, three diners, five items, so the pantry runs dry
-  ## after five bites. The draw prefers an untasted best-stocked kind, so
-  ## every first carrot is +3 except Yura's (+1), and whoever draws the
-  ## tomato gets +3. Total eating points: 3 + 3 + 1 + 3 + 1 = 11, however
-  ## the seating shuffle lands.
+  ## Everyone takes a first bite, then two repeat bites finish the pantry.
   var eatingPoints = 0'i32
   for slot in 0 ..< VillagerCount:
     eatingPoints += w.villagers[slot].score
   eatingPoints -= w.lastTally[0].hostPoints
-  doAssert eatingPoints == 11,
-    &"expected 11 eating points, got {eatingPoints}"
+  doAssert eatingPoints == 9,
+    &"expected 9 eating points, got {eatingPoints}"
 
   ## Hosting empties the pantry.
   doAssert w.villagers[0].carriedTotal() == 0
   ## Nobody outside a valid party scored.
   for slot in 3 ..< VillagerCount:
     doAssert w.villagers[slot].score == 0
+
+block dinnerSelectionProbabilities:
+  var
+    pantry: array[VeggieKinds, int16]
+    eaten: array[VeggieKinds, bool]
+    newCarrots = 0
+    repeatCarrots = 0
+  pantry[0] = 1
+  pantry[1] = 9
+  for seed in 0'i32 ..< 5000:
+    var rng = initRng(seed)
+    if chooseBite(pantry, eaten, rng) == 0:
+      inc newCarrots
+  doAssert newCarrots in 2300 .. 2700
+  for veggie in 0 ..< VeggieKinds:
+    eaten[veggie] = true
+  for seed in 0'i32 ..< 5000:
+    var rng = initRng(seed)
+    if chooseBite(pantry, eaten, rng) == 0:
+      inc repeatCarrots
+  doAssert repeatCarrots in 400 .. 600
+  eaten[1] = false
+  var rng = initRng(2026)
+  for bite in 0 ..< 100:
+    doAssert chooseBite(pantry, eaten, rng) == 1
+  pantry[0] = 0
+  pantry[1] = 0
+  doAssert chooseBite(pantry, eaten, rng) == -1
+
+block curfewBoundaryAndReset:
+  let w = newWorld(gameMap, 2)
+  for slot in 0 ..< VillagerCount:
+    w.villagers[slot].inHouse = int32(slot)
+  w.villagers[1].inHouse = 0
+  w.villagers[2].inHouse = NoHouse
+  w.villagers[2].inventory[0] = 3
+  w.villagers[2].eaten[0] = true
+  w.phase = EveningPhase
+  w.dayTick = DayTicks - 2
+  w.tickWorld(nil)
+  doAssert w.phase == EveningPhase
+  doAssert w.villagers[1].score == 0
+  w.tickWorld(nil)
+  doAssert w.phase == ScorePhase
+  for slot in 0 ..< VillagerCount:
+    let missed = slot in [1, 2]
+    doAssert w.villagers[slot].curfewMissed == missed
+    doAssert w.villagers[slot].score == (if missed: -3 else: 0)
+    doAssert w.villagers[slot].inHouse == int32(slot)
+  while w.phase == ScorePhase:
+    w.tickWorld(nil)
+  doAssert w.day == 2
+  doAssert w.villagers[1].score == -3
+  doAssert not w.villagers[1].curfewMissed
+  doAssert w.villagers[2].inventory[0] == 3 and w.villagers[2].eaten[0]
+
+block finalNightCurfew:
+  let w = newWorld(gameMap, 1)
+  w.phase = EveningPhase
+  w.dayTick = DayTicks - 1
+  while not w.over:
+    w.tickWorld(nil)
+  for v in w.villagers:
+    doAssert v.score == -3 and v.curfewMissed
 
 block aloneScoresNothing:
   var w = newWorld(gameMap, 7)
@@ -176,7 +236,12 @@ block botWeek:
   proc decide(w: World) =
     runBotDecisions(game)
   while not game.world.over:
+    let previousPhase = game.world.phase
     game.world.tickWorld(decide)
+    if game.world.phase == ScorePhase and previousPhase != ScorePhase:
+      for v in game.world.villagers:
+        doAssert not v.curfewMissed,
+          &"{VillagerNames[v.slot]} missed curfew on day {game.world.day}"
   for slot in 0 ..< VillagerCount:
     doAssert not game.brains[slot].failed,
       &"villager {slot} script failed: {game.brains[slot].lastError}"

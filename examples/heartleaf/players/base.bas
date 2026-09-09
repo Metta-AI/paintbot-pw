@@ -10,7 +10,8 @@
 ' (items carried) x (visitor count), then the pantry feeds everyone present
 ' for three bite rounds - a vegetable you have never tasted is worth 3,
 ' a repeat 1. Hosting empties your bag. Anyone alone, or outside, scores
-' nothing that night. Highest total after the last day wins.
+' nothing that night. Be inside your own house by 21:00 or lose 3 points.
+' Highest total after the last day wins.
 '
 ' READ-ONLY VALUES
 '   selfSlot worldTick day dayCount minuteOfDay dinnerDone
@@ -54,6 +55,7 @@ end sub
 ' New-day reset.
 if dayMark <> day then
   dayMark = day
+  returningHome = 0
   s = 0
   while s < villagerTotal
     invitedMark(s) = 0
@@ -68,14 +70,30 @@ if (day + selfSlot) mod 3 = 0 then
 end if
 
 if dinnerDone = 1 then
-  ' The party is over. Step outside and stroll for leftovers.
-  if inHouse >= 0 then
-    r = exitHouse()
+  ' Collect leftovers until it is time to get home for curfew.
+  homeMinutes = distTo(doorX(selfSlot), doorY(selfSlot)) * 2 + 30
+  if 1260 - minuteOfDay <= homeMinutes or minuteOfDay >= 1200 then
+    returningHome = 1
+  end if
+  if returningHome = 1 then
+    if inHouse >= 0 then
+      if inHouse <> selfSlot then
+        r = exitHouse()
+      end if
+    else
+      if orderKind <> 3 or orderTarget <> selfSlot then
+        r = enterHouse(selfSlot)
+      end if
+    end if
   else
-    if orderKind = 0 then
-      g = nearestStockedGarden()
-      if g >= 0 then
-        r = gather(g)
+    if inHouse >= 0 then
+      r = exitHouse()
+    else
+      if orderKind = 0 then
+        g = nearestStockedGarden()
+        if g >= 0 then
+          r = gather(g)
+        end if
       end if
     end if
   end if

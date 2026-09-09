@@ -11,6 +11,8 @@ block fingerprintIsStable:
 
 echo "Testing clock arithmetic"
 block clockMath:
+  doAssert DayTicks == 180 * TickRate
+  doAssert DecisionTicks == TicksPerGameMinute
   doAssert minuteOfDayAt(0) == DayStartMinute
   doAssert minuteOfDayAt(TicksPerGameMinute) == DayStartMinute + 1
   doAssert minuteOfDayAt(DayTicks) == DayEndMinute

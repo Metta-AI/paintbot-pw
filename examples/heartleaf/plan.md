@@ -11,7 +11,7 @@ borrowed from the 2D game of the same name; the code is not.
 ## The game
 
 A game is a week. Days run 9:00 to 21:00 on an accelerated clock (one real
-second is three game minutes, a day is four real minutes). Every morning
+second is four game minutes, a day is three real minutes). Every morning
 each of the 27 garden plots grows one of 24 vegetables; gathering a plot
 takes everything it holds and the plot stays bare until tomorrow.
 
@@ -22,10 +22,16 @@ valid when the owner is inside their own house with at least one visitor:
   host and visitors alike for three bite rounds — one bite per diner per
   round, in one seating order shuffled by the world rng.
 - A bite of a vegetable the diner has **never tasted this week is worth 3**;
-  a repeat is worth 1. The draw itself is deterministic: the best-stocked
-  untasted kind, then the best-stocked kind, ties to the lowest index.
+  a repeat is worth 1. Each bite chooses uniformly among untasted types,
+  or among remaining individual items when all available types were tasted.
+  The simulation RNG makes both choices reproducible.
 - Hosting **empties the pantry**. Guests eat for free.
 - Anyone alone, or outdoors, scores nothing that night.
+
+At 21:00, every villager outside their own house loses three points,
+including visitors inside another house. Scores can go negative. Everyone
+is then sent home for the score screen; the next morning starts at their
+own doorstep.
 
 Inventories persist across days and are cleared only by hosting; the tasted
 list persists all week. Highest cumulative score after the last score
@@ -97,7 +103,9 @@ pausing for random spells like a village square; three villagers are due to host
 (`(day + slot) mod 3 == 0`); hosts wave invitations at anyone passing
 within three tiles; guests walk to the nearest due host; everyone budgets
 about two game minutes per tile plus a half-hour margin and never stands
-outside at six.
+outside at six. After dinner they collect leftovers, then return to their
+own house before curfew using the same travel margin and a 20:00 latest
+departure. Once heading home, they stay committed until the next morning.
 
 ## Determinism notes
 

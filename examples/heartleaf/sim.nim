@@ -51,6 +51,7 @@ type
     hostingTonight*: bool             # HASH: include
     acceptedHost*: int32              # HASH: include, slot or -1
     inviteFrom*: array[VillagerCount, bool]  # HASH: include
+    curfewMissed*: bool              # HASH: include, cleared each morning
     lastGained*: int32                # HASH: include, points from last tally
     animation*: AnimationSlot         # HASH: include, viewer parity
     animationTicks*: int32            # HASH: include
@@ -410,23 +411,28 @@ proc advanceVillager(w: World, slot: int32) =
 ## the pantry feeds host and visitors alike for three bite rounds. A first
 ## taste of a vegetable scores triple. Hosting empties the pantry.
 
-proc chooseBite(pantry: array[VeggieKinds, int16],
-    eaten: array[VeggieKinds, bool]): int32 =
-  ## Picks the vegetable one diner bites: the best-stocked kind this diner
-  ## has never tasted, falling back to the best-stocked kind at all. Ties go
-  ## to the lowest index, so the draw needs no randomness.
-  result = -1
-  var best = 0'i16
+proc chooseBite*(pantry: array[VeggieKinds, int16],
+    eaten: array[VeggieKinds, bool], rng: var Rng): int32 =
+  ## Chooses uniformly among untasted types, otherwise among remaining items.
+  var
+    wanted: array[VeggieKinds, int32]
+    wantedCount = 0'i32
+    total = 0'i32
   for veggie in 0 ..< VeggieKinds:
-    if pantry[veggie] > best and not eaten[veggie]:
-      best = pantry[veggie]
-      result = int32(veggie)
-  if result >= 0:
-    return
+    total += int32(pantry[veggie])
+    if pantry[veggie] > 0 and not eaten[veggie]:
+      wanted[wantedCount] = int32(veggie)
+      inc wantedCount
+  if wantedCount > 0:
+    return wanted[rng.below(wantedCount)]
+  if total <= 0:
+    return -1
+  var pick = rng.below(total)
   for veggie in 0 ..< VeggieKinds:
-    if pantry[veggie] > best:
-      best = pantry[veggie]
-      result = int32(veggie)
+    if pick < int32(pantry[veggie]):
+      return int32(veggie)
+    pick -= int32(pantry[veggie])
+  -1
 
 proc runDinnerTally*(w: World) {.measure.} =
   ## Scores every house at 18:00.
@@ -456,7 +462,7 @@ proc runDinnerTally*(w: World) {.measure.} =
         for round in 0 ..< BiteRounds:
           for diner in diners:
             let eater = w.villagers[diner]
-            let veggie = chooseBite(host.inventory, eater.eaten)
+            let veggie = chooseBite(host.inventory, eater.eaten, w.rng)
             if veggie < 0:
               break feeding
             dec host.inventory[veggie]
@@ -486,6 +492,7 @@ proc startDay(w: World) =
   for slot in 0 ..< VillagerCount:
     let v = w.villagers[slot]
     v.inHouse = NoHouse
+    v.curfewMissed = false
     v.hostingTonight = false
     v.acceptedHost = NoVillager
     for other in 0 ..< VillagerCount:
@@ -498,7 +505,14 @@ proc startDay(w: World) =
   w.pathQueue.setLen(0)
 
 proc startScoreScreen(w: World) =
-  ## Freezes the village for the standings screen between days.
+  ## Applies curfew before sending everyone home for the standings screen.
+  for slot in 0 ..< VillagerCount:
+    let v = w.villagers[slot]
+    v.curfewMissed = v.inHouse != int32(slot)
+    if v.curfewMissed:
+      v.score -= CurfewPenalty
+    w.stepInside(int32(slot), int32(slot))
+  w.pathQueue.setLen(0)
   w.phase = ScorePhase
   w.phaseTicks = ScoreScreenTicks
 
@@ -758,6 +772,7 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(v.acceptedHost)
     for invited in v.inviteFrom:
       hash.addHashy(invited)
+    hash.addHashy(v.curfewMissed)
     hash.addHashy(v.lastGained)
     hash.addHashy(int32(v.animation.ord))
     hash.addHashy(v.animationTicks)

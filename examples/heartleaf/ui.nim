@@ -214,16 +214,22 @@ proc drawStandings(sk: Silky, layout: GameUiLayout, title: string) =
       vec2(60, 22),
       rgbx(240, 226, 180, 255)
     )
-    if v.lastGained > 0:
+    if v.lastGained > 0 or v.curfewMissed:
       hudScratch.setLen(0)
-      hudScratch.add '+'
-      hudScratch.addHudInt(v.lastGained.int)
-      hudScratch.add " tonight"
+      if v.curfewMissed:
+        hudScratch.add '-'
+        hudScratch.addHudInt(CurfewPenalty.int)
+        hudScratch.add " curfew"
+      else:
+        hudScratch.add '+'
+        hudScratch.addHudInt(v.lastGained.int)
+        hudScratch.add " tonight"
       sk.drawLabel(
         hudScratch,
         inner.origin + vec2(256, y + 4),
         vec2(120, 22),
-        rgbx(120, 196, 90, 255),
+        if v.curfewMissed: rgbx(230, 120, 100, 255)
+        else: rgbx(120, 196, 90, 255),
         "Small"
       )
     if run.world.lastTally[slot].valid:
