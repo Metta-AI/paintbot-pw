@@ -104,8 +104,8 @@ two things at startup, on the CPU, from nothing but the seed and the map:
   of every road and plaza tile. Both carry a little low-frequency wobble
   so no edge is a ruler line. House pads join that mask as rounded squares:
   solid cobble beneath each building, then ragged whole-stone dropout over
-  dirt into grass, merging directly into the doorway road. Gardens remain
-  dirt-only mask regions.
+  dirt into grass, merging directly into the doorway road. Gardens do not
+  add soil to the ground mask.
 
 A curb of larger cut stones rings the plaza. It is a second, cleaner
 sheet sampled in polar coordinates around the plaza centre, one stone row
@@ -147,10 +147,11 @@ magenta ground that shows any hole in a house.
 
 ## Crops
 
-A stocked plot grows one toon kit plant, drawn textured per frame so it
-can appear and vanish as villagers gather; a bare plot is a tilled dirt
-patch that fades into the grass through the ground mask, a shade darker
-than the roads. Neither kit has a literal lettuce or corn, so the
+Every plot has a permanent Meadow flower pot, varying among three shapes.
+A stocked pot grows one toon kit plant, drawn textured per frame above the
+soil opening so it can appear and vanish as villagers gather. Harvested pots
+remain visible on the surrounding grass; plots add no dark terrain tint or
+dirt mask. Neither kit has a literal lettuce or corn, so the
 twenty-four kinds share plants by silhouette, grassy stalks, root tops, a
 bush, seedling leaves, broad leaves, and a wheat clump, and a tint per
 kind tells them apart. The old village-pack farm building is gone.
@@ -169,7 +170,7 @@ into the terrain mesh once with the houses.
   third entrance.
 - Houses: a mailbox beside the door, flower pots flanking it, five
   flower beds and two bushes in the yard.
-- Gardens: flowers beside some plots.
+- Gardens: permanent pots at every plot, with flowers beside some plots.
 - Road verges: lamp posts spaced along the roads, and tufts, bushes,
   small rocks, and flowers on every other grass tile. Everything that
   grew or was left lying varies in size; everything gnomes made does not.

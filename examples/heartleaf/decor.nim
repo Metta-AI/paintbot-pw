@@ -75,6 +75,9 @@ const
     ## Lamp posts stand on road verges this many tiles apart at least.
   MailboxHeight = 1.1'f32
   PotHeight = 0.4'f32
+  GardenPotHeight* = 0.5'f32
+  GardenCropLift* = GardenPotHeight * 0.8'f32
+  GardenPots* = ["flower_pot_01a", "flower_pot_03a", "flower_pot_04a"]
   FlowerHeight = 0.6'f32
   BushHeight = 1.8'f32
   TuftHeight = 0.55'f32
@@ -130,7 +133,8 @@ const
     @["market_stand_01a", "canopy_01a", "canopy_02a", "canopy_03a",
       "canopy_04a", "apple_crate_01a", "pepper_crate_01a", "lamp_post_01a",
       "wood_cart_01a", "wood_barrel_01a", "sack_pile_01a", "wood_crate_01a",
-      "mailbox_01a", "flower_pot_01a", "wood_fence_pole_01a"],
+      "mailbox_01a", "flower_pot_01a", "flower_pot_03a", "flower_pot_04a",
+      "wood_fence_pole_01a"],
     @["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a",
       "flower_bush_01a", "bush_01a", "grass_patch_01a", "grass_patch_02a",
       "grass_patch_03a", "grass_patch_04a", "grass_patch_05a",
@@ -397,8 +401,11 @@ proc dressHouses(p: var Placer) =
         inc bushes
 
 proc dressGardens(p: var Placer) =
-  ## Flowers beside some plots.
-  for garden in p.map.gardenTiles:
+  ## Pots mark every crop plot, with flowers beside some plots.
+  for index, garden in p.map.gardenTiles:
+    p.add(MeadowProps, GardenPots[index mod GardenPots.len], GardenArea,
+      float32(garden.x) + 0.5'f32, float32(garden.y) + 0.5'f32,
+      float32(index) * 0.7'f32, GardenPotHeight)
     if p.rng.below(GardenFlowerOneIn) != 0:
       continue
     let

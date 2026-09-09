@@ -331,8 +331,6 @@ proc wobble(seed: int32, stream: uint64, x, y: int): float32 =
 
 proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
   ## Bakes stone and dirt coverage for the whole map at MaskTexelsPerTile.
-  ## Garden plots are dirt too, so a tilled bed fades into the grass the
-  ## way a road verge does instead of ending at a tile edge.
   ## Texel (tx, ty) covers tile coordinate tx / MaskTexelsPerTile, the same
   ## convention the terrain shader uses for its per-tile textures.
   let
@@ -347,7 +345,7 @@ proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
         int32(tx div MaskTexelsPerTile), int32(ty div MaskTexelsPerTile))]
       sources[ty * MaskSize + tx] =
         kind == uint8(RoadTile) or kind == uint8(StoneTile) or
-        kind == uint8(GardenTileKind) or kind == uint8(HouseTileKind)
+        kind == uint8(HouseTileKind)
       centres[ty * MaskSize + tx] = kind == uint8(RoadTile) and
         tx mod MaskTexelsPerTile == MaskTexelsPerTile div 2 and
         ty mod MaskTexelsPerTile == MaskTexelsPerTile div 2
@@ -367,10 +365,7 @@ proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
   for ty in 0 ..< MaskSize:
     for tx in 0 ..< MaskSize:
       let
-        kind = map.kinds[tileIndex(
-          int32(tx div MaskTexelsPerTile), int32(ty div MaskTexelsPerTile))]
         texel = (ty * MaskSize + tx) * MaskChannels
-      let
         x = (float32(tx) + 0.5'f32) / texelsPerTile
         y = (float32(ty) + 0.5'f32) / texelsPerTile
         plazaDistance = sqrt((x - center) * (x - center) +
@@ -399,9 +394,5 @@ proc buildGroundMask*(map: MapData, seed: int32): seq[uint8] =
           (HouseStoneReach - distance) / HouseStoneBand,
           0.0'f32, 1.0'f32))
       let stone = max(plazaStone, max(roadCoverage, houseCoverage))
-      if kind == uint8(GardenTileKind):
-        ## A tilled bed is dirt alone; a road's cobbles stop at its edge.
-        result[texel + 1] = 255
-        continue
       result[texel] = toByte(stone)
       result[texel + 1] = if stone > 0.0'f32: 255'u8 else: toByte(dirt)

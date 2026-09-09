@@ -1,6 +1,6 @@
 ## Heartleaf ground art: the cobble sheet tiles and carries per-stone
 ## heights, and the ground mask puts stone on the plaza, dirt on the roads,
-## and nothing on gardens.
+## with no extra soil beneath garden pots.
 
 import
   std/strformat,
@@ -105,11 +105,6 @@ block maskCoverage:
         roadFound = true
   doAssert roadFound, "no road tile away from the plaza"
 
-  for garden in map.gardenTiles:
-    let (stone, dirt) = tileTexel(garden)
-    doAssert stone == 0 and dirt == 255,
-      &"garden {garden.x},{garden.y} carries coverage {stone}/{dirt}"
-
   for house in map.houses:
     let (stone, dirt) = tileTexel(house.center)
     doAssert stone == 255 and dirt == 255,
@@ -128,5 +123,13 @@ block maskCoverage:
           feathered = true
     doAssert feathered,
       &"house {house.center.x},{house.center.y} has a hard cobble edge"
+
+
+block gardensDoNotPaintTerrain:
+  var map = generateMap(Seed)
+  let original = buildGroundMask(map, Seed)
+  for garden in map.gardenTiles:
+    map.kinds[tileIndex(garden)] = uint8(GrassTile)
+  doAssert buildGroundMask(map, Seed) == original
 
 echo "test_hlf_ground: all checks passed"

@@ -44,11 +44,10 @@ const
   PlazaHeightBlend = 2.0'f32
     ## Tighter than the engine defaults so dirt breaks into grass along the
     ## texture instead of feathering across a whole tile.
-  CropHeight = 1.0'f32
-    ## A growing crop stands this many tiles tall, waist high on a villager.
+  CropHeight = 0.7'f32
   CropBrightness = 1.3'f32
     ## The kit plants are painted a deep green; lifted so they read on
-    ## dark soil.
+    ## their containers.
   CropLooks: array[VeggieKinds, tuple[kit: DecorKit, node: string, tint: Vec3]] = [
     (ValleyVegetation, "plant_04a", vec3(1.0, 1.05, 0.85)),   # carrot
     (ValleyVegetation, "plant_06a", vec3(1.15, 0.95, 0.85)),  # tomato
@@ -80,7 +79,7 @@ const
     ## stalks for the onion family, low feathery tops for roots, a bush for
     ## tomatoes and peppers, seedling leaves for squashes, broad leaves for
     ## the cabbage family, and the wheat clump for corn. A tint tells them
-    ## apart. A bare plot is just the tilled dirt the terrain draws.
+    ## apart. Harvested plots retain their empty pots.
 
 type
   GraphicsError = object of CatchableError
@@ -250,12 +249,10 @@ proc runGraphics*() =
       int(RoadTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
     setTileMaterial(
       int(StoneTile), GrassMaterial, DirtMaterial, vec3(1), vec3(0.85), 1)
-    ## Tilled plots are dirt through the ground mask like the roads, only
-    ## darker, so the tile itself bakes as grass with a tilled tint.
     setTileMaterial(
       int(GardenTileKind),
       GrassMaterial, DirtMaterial,
-      vec3(0.72, 0.62, 0.55), vec3(0.8, 0.7, 0.55),
+      vec3(1), vec3(0.85),
       1
     )
     setTileMaterial(
@@ -670,7 +667,7 @@ proc runGraphics*() =
         setEnvironmentPalette(scene.toon)
 
         proc drawCrops(matrix: Mat4) =
-          ## Stocked gardens show their vegetable; bare plots show dirt.
+          ## Stocked pots show their vegetable; harvested pots stay empty.
           for garden in 0 ..< GardenCount:
             let veggie = run.world.gardens[garden]
             if veggie < 0:
@@ -678,7 +675,8 @@ proc runGraphics*() =
             let look = CropLooks[int(veggie)]
             kits[look.kit].drawProp(
               look.node,
-              tileWorldPoint(run.world.map.gardenTiles[garden]),
+              tileWorldPoint(run.world.map.gardenTiles[garden]) +
+                vec3(0, GardenCropLift, 0),
               float32(garden) * 0.7'f32,
               CropHeight,
               matrix,

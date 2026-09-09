@@ -38,6 +38,10 @@ block placementRules:
         dy = d.y - centre
       doAssert dx * dx + dy * dy <= PlazaLimit * PlazaLimit,
         &"{d.node} strayed off the plaza"
+    elif d.area == GardenArea and d.node in GardenPots:
+      doAssert map.kinds[tileIndex(d.tile)] == uint8(GardenTileKind)
+      doAssert d.x == float32(d.tile.x) + 0.5'f32
+      doAssert d.y == float32(d.tile.y) + 0.5'f32
     elif d.node != "flower_pot_01a" and d.lift == 0:
       let
         x = d.tile.x
@@ -52,6 +56,19 @@ block placementRules:
       doAssert index notin claimed, &"two decorations share tile {x},{y}"
       claimed.incl index
   doAssert wellFound, "no well"
+
+block everyGardenHasOnePot:
+  for seed in 1'i32 .. 40:
+    let map = generateMap(seed)
+    var pots: HashSet[int32]
+    for decoration in placeDecor(map, seed):
+      if decoration.area == GardenArea and decoration.node in GardenPots:
+        let index = tileIndex(decoration.tile)
+        doAssert index notin pots
+        pots.incl index
+    doAssert pots.len == GardenCount
+    for tile in map.gardenTiles:
+      doAssert tileIndex(tile) in pots
 
 block bushesClearHouseDoors:
   for seed in 1'i32 .. 40:
