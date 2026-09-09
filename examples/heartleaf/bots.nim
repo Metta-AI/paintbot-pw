@@ -263,6 +263,15 @@ proc buildVillagerHost*(slot: int32): Host =
       game.villagers[other].order in {NoOrder, MoveOrder, TalkOrder})
   discard result.addFunction("socialAvailable", 1, availableProc, 3)
 
+  let inConversationProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    int32(validSlot(arguments[0]) and int(arguments[0]) in game.socialGroup(slot))
+  discard result.addFunction("inMyConversation", 1, inConversationProc, 100)
+
+  let sameConversationProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    int32(validSlot(arguments[0]) and validSlot(arguments[1]) and
+      int(arguments[1]) in game.socialGroup(arguments[0]))
+  discard result.addFunction("sameConversation", 2, sameConversationProc, 100)
+
   let groupSizeProc: HostProc = proc(arguments: openArray[int32]): int32 =
     if not validSlot(arguments[0]): 0
     else: int32(game.socialGroup(arguments[0]).card)

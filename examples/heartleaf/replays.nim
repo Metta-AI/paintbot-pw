@@ -11,7 +11,7 @@ import
 const
   ReplayGame* = "heartleaf"
   ReplayFormatVersion* = 1'u16
-  ReplayGameVersion* = 3'u16
+  ReplayGameVersion* = 4'u16
 
   ActionMove* = 1'u8
   ActionGather* = 2'u8

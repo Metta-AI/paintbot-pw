@@ -216,15 +216,23 @@ block conversationsAreVoluntaryAndBounded:
   doAssert w.villagers[1].order == NoOrder,
     "talking commandeered the other villager"
   doAssert w.applyTalk(1, 0)
+  let before = w.villagers[0].body.pos
+  w.tickWorld(nil)
+  doAssert abs(w.villagers[0].body.facing) < FixedPi
+  doAssert w.villagers[0].body.pos == before, "a pair moved unnecessarily"
   doAssert w.applyTalk(2, 0)
   doAssert w.applyTalk(3, 0)
   doAssert w.socialGroup(0).card == 4
   doAssert not w.applyTalk(4, 0), "a fifth gnome joined the conversation"
-  let before = w.villagers[0].body.pos
-  w.tickWorld(nil)
-  doAssert abs(w.villagers[0].body.facing) < FixedPi,
-    "the speaker did not turn toward their partner"
-  doAssert w.villagers[0].body.pos == before, "talking moved the speaker"
+  for tick in 0 ..< 5 * TickRate:
+    w.tickWorld(nil)
+  for slot in 0 .. 3:
+    let v = w.villagers[slot]
+    doAssert v.talkCircle and v.order == TalkOrder
+    doAssert length(v.body.pos - v.talkPosition) <= 0.4'fx,
+      "a conversation member did not reach their circle position"
+    doAssert abs(length(v.body.pos - v.talkCenter) - 1.5'fx) <= 0.4'fx,
+      "the group did not stand around a shared center"
   for v in w.villagers:
     doAssert not v.hostingTonight and v.score == 0,
       "socializing changed dinner commitments or points"
@@ -233,6 +241,29 @@ block conversationsAreVoluntaryAndBounded:
   doAssert w.villagers[1].order == NoOrder,
     "the listener kept talking after their partner left to harvest"
   doAssert not w.applyTalk(4, 0), "a busy gatherer was available to chat"
+
+block threeSpeakersLeaveTheLine:
+  let w = newWorld(gameMap, 7)
+  for slot in 0 .. 2:
+    let v = w.villagers[slot]
+    v.tile = tile2(70 + int32(slot) * 2, 70)
+    v.body.pos = fixedVec2(fixed(int32(v.tile.x)) + 0.5'fx, 70.5'fx)
+  doAssert w.applyTalk(0, 1)
+  doAssert w.applyTalk(1, 0)
+  doAssert w.applyTalk(2, 1)
+  let center = w.villagers[0].talkCenter
+  for tick in 0 ..< 5 * TickRate:
+    w.tickWorld(nil)
+  let
+    a = w.villagers[1].body.pos - w.villagers[0].body.pos
+    b = w.villagers[2].body.pos - w.villagers[0].body.pos
+  doAssert abs(a.x * b.y - a.y * b.x) > 1'fx,
+    "three speakers remained in a line"
+  for slot in 0 .. 2:
+    let v = w.villagers[slot]
+    doAssert v.order == TalkOrder and v.talkCenter == center,
+      "the conversation center drifted while the group settled"
+    doAssert length(v.body.pos - v.talkPosition) <= 0.4'fx
 
 block scriptedConversationEnds:
   let game = newGame(gameMap, 7)
@@ -249,7 +280,8 @@ block scriptedConversationEnds:
     let v = game.world.villagers[slot]
     v.tile = tile2(70 + int32(slot) * 2, 70)
     v.body.pos = fixedVec2(fixed(int32(v.tile.x)) + 0.5'fx, 70.5'fx)
-  var answered, departed = false
+  var answered, departed, walkedAway = false
+  var departureOrigin: Tile2
   for tick in 0 ..< 30 * TickRate:
     game.world.tickWorld(proc(w: World) = runBotDecisions(game))
     let mutual = game.world.villagers[0].order == TalkOrder and
@@ -257,9 +289,41 @@ block scriptedConversationEnds:
     if mutual:
       answered = true
     elif answered:
+      if not departed:
+        departureOrigin = game.world.villagers[0].tile
       departed = true
+    if departed and chebyshev(game.world.villagers[0].tile, departureOrigin) >= 7:
+      walkedAway = true
+    if departed:
+      doAssert not mutual, "the same pair immediately restarted its conversation"
   doAssert answered, "nearby scripted gnomes never answered each other"
   doAssert departed, "a scripted conversation never ended"
+  doAssert walkedAway, "the departing villager stayed beside the same group"
+
+block isolatedVillagerSeeksDistantCompany:
+  let game = newGame(gameMap, 7)
+  var sources = newSeq[string](VillagerCount)
+  for slot in 0 ..< VillagerCount:
+    sources[slot] = if slot == 0: readFile("examples/heartleaf/players/base.bas")
+      else: "r = 0"
+    if slot >= 2:
+      game.world.villagers[slot].inHouse = int32(slot)
+  loadBots(game, sources)
+  for garden in 0 ..< GardenCount:
+    game.world.gardens[garden] = EmptyGarden
+  for slot in 0 .. 1:
+    let v = game.world.villagers[slot]
+    v.tile = tile2(60 + int32(slot) * 30, 70)
+    v.body.pos = fixedVec2(fixed(int32(v.tile.x)) + 0.5'fx, 70.5'fx)
+  var soughtCompany = false
+  for tick in 0 ..< 40 * TickRate:
+    game.world.tickWorld(proc(w: World) = runBotDecisions(game))
+    let v = game.world.villagers[0]
+    if v.order == MoveOrder and
+        chebyshev(v.goal, game.world.villagers[1].tile) <= 3:
+      soughtCompany = true
+  doAssert not game.brains[0].failed
+  doAssert soughtCompany, "an isolated villager never sought distant company"
 
 block competitiveHarvesting:
   let w = newWorld(gameMap, 7)
@@ -385,6 +449,9 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
   for slot in 0 ..< VillagerCount:
     sources.add source
   loadBots(game, sources)
+  var
+    lastTalkTick: array[VillagerCount, int32]
+    lastTalkPosition: array[VillagerCount, Tile2]
   proc decide(w: World) =
     var
       orders: array[VillagerCount, OrderKind]
@@ -395,6 +462,9 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
       goals[slot] = v.goal
       positions[slot] = v.tile
       outdoors[slot] = v.inHouse < 0
+      if v.order == TalkOrder:
+        lastTalkTick[slot] = w.tick
+        lastTalkPosition[slot] = v.tile
     runBotDecisions(game)
     for slot, v in w.villagers:
       if v.order == MoveOrder and
@@ -402,12 +472,15 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
         var visiting = false
         for other in w.villagers:
           if other.slot != v.slot and outdoors[other.slot] and
-              orders[other.slot] in {NoOrder, MoveOrder, TalkOrder} and
+              (orders[other.slot] in {NoOrder, MoveOrder, TalkOrder} or
+                other.order in {NoOrder, MoveOrder, TalkOrder}) and
               chebyshev(positions[other.slot], v.goal) <= 3:
             visiting = true
         doAssert chebyshev(v.tile, v.goal) <= 6 or
-            (visiting and chebyshev(v.tile, v.goal) <= 16),
-          &"seed {seed}: villager {slot} started a long aimless walk"
+            (visiting and chebyshev(v.tile, v.goal) <= 67) or
+            (lastTalkTick[slot] > 0 and w.tick - lastTalkTick[slot] <= 20 * TickRate and
+              chebyshev(lastTalkPosition[slot], v.goal) <= 10),
+          &"seed {seed}: villager {slot} started a long aimless walk at {w.tick}, {v.tile} to {v.goal}, last talk {lastTalkTick[slot]} at {lastTalkPosition[slot]}, peers {positions}, orders {orders}"
   var samples, outsidePlaza, crowded, restingPairs: int
   while not game.world.over:
     let previousPhase = game.world.phase
@@ -444,7 +517,7 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
   doAssert outsidePlaza > samples * VillagerCount div 2,
     &"seed {seed}: villagers spent most of the afternoon in the plaza"
   doAssert crowded < samples * VillagerCount div 10,
-    &"seed {seed}: villagers spent too much time in groups of five or more"
+    &"seed {seed}: villagers spent too much time in groups of five or more: {crowded}/{samples * VillagerCount}"
   doAssert restingPairs > 0,
     &"seed {seed}: villagers never joined a conversation"
   for slot in 0 ..< VillagerCount:

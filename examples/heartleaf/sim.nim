@@ -19,6 +19,9 @@ const
   VillagerBodyRadius = 0.22'fx
   BodyTurnRate = 0.35'fx
   PathArrive = 0.35'fx
+  TalkCircleRadius = 1.5'fx
+  TalkCircleRotations = 8
+  TalkApproachSamples = 16
   GestureTicks = TickRate
     ## How long a gather or wave pose is held before idling again.
 
@@ -34,6 +37,8 @@ type
     inHouse*: int32                   # HASH: include, house id or -1 outdoors
     order*: OrderKind                 # HASH: include
     orderTarget*: int32               # HASH: include, garden or house id
+    talkCircle*: bool                 # HASH: include
+    talkCenter*, talkPosition*: FixedVec2 # HASH: include
     goal*: Tile2                      # HASH: include
     hasGoal*: bool                    # HASH: include
     path*: seq[Tile2]                 # HASH: include
@@ -223,6 +228,9 @@ proc clearOrder(v: Villager, failed: bool) =
   ## Drops whatever the villager was doing and returns to idle.
   v.order = NoOrder
   v.orderTarget = 0
+  v.talkCircle = false
+  v.talkCenter = FixedVec2Zero
+  v.talkPosition = FixedVec2Zero
   v.hasGoal = false
   v.blockedTicks = 0
   v.clearPath()
@@ -403,9 +411,14 @@ proc advanceVillager(w: World, slot: int32) =
         (other.order != TalkOrder and v.animationTicks >= TalkReplyTicks):
       v.clearOrder(false)
     else:
-      let toward = other.body.pos - v.body.pos
-      if toward != FixedVec2Zero:
-        turnToward(v.body.facing, angle(toward), BodyTurnRate)
+      if v.talkCircle and length(v.talkPosition - v.body.pos) > PathArrive:
+        w.steerVillager(slot, v.talkPosition - v.body.pos)
+      else:
+        if v.animation == WalkAnimation:
+          v.animation = IdleAnimation
+        let toward = (if v.talkCircle: v.talkCenter else: other.body.pos) - v.body.pos
+        if toward != FixedVec2Zero:
+          turnToward(v.body.facing, angle(toward), BodyTurnRate)
     return
   of EnterOrder:
     let house = v.orderTarget
@@ -581,6 +594,69 @@ proc socialGroup*(w: World, slot: int32): set[0 .. VillagerCount - 1] =
         result.incl partner
         changed = changed or result.card != before
 
+proc arrangeConversation(w: World, group: set[0 .. VillagerCount - 1]) =
+  ## Gives consenting participants stable, nearby places around a shared center.
+  var
+    members: seq[int32]
+    center = FixedVec2Zero
+  for slot in group:
+    let v = w.villagers[slot]
+    if v.order == TalkOrder:
+      members.add int32(slot)
+      center += v.body.pos
+  if members.len < 3:
+    return
+  center = center / fixed(int32(members.len))
+  var
+    bestCost = int64.high
+    bestCenter: FixedVec2
+    best, chosen, points: array[int(TalkGroupLimit), FixedVec2]
+  proc clearApproach(start, finish: FixedVec2): bool =
+    ## Checks body clearance along the short move into the circle.
+    for step in 0 .. TalkApproachSamples:
+      let pos = start + (finish - start) * fixed(int32(step)) / fixed(TalkApproachSamples)
+      for dx in [-VillagerBodyRadius, VillagerBodyRadius]:
+        for dy in [-VillagerBodyRadius, VillagerBodyRadius]:
+          let (x, y) = cell(pos + fixedVec2(dx, dy))
+          if not w.terrainOpen(x, y):
+            return false
+    true
+  proc assign(index, used: int, cost: int64) =
+    ## Chooses the seating permutation with the least total movement.
+    if cost >= bestCost:
+      return
+    if index == members.len:
+      bestCost = cost
+      best = chosen
+      return
+    for seat in 0 ..< members.len:
+      if (used and (1 shl seat)) != 0:
+        continue
+      let start = w.villagers[members[index]].body.pos
+      if not clearApproach(start, points[seat]):
+        continue
+      chosen[index] = points[seat]
+      assign(index + 1, used or (1 shl seat),
+        cost + lengthSquared(points[seat] - start))
+  for (dx, dy) in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]:
+    let candidateCenter = center + fixedVec2(fixed(int32(dx)), fixed(int32(dy)))
+    for rotation in 0 ..< TalkCircleRotations:
+      for seat in 0 ..< members.len:
+        let heading = FixedTau * fixed(int32(seat)) / fixed(int32(members.len)) +
+          FixedTau * fixed(int32(rotation)) / fixed(TalkCircleRotations)
+        points[seat] = candidateCenter + direction(heading) * TalkCircleRadius
+      let before = bestCost
+      assign(0, 0, 0)
+      if bestCost < before:
+        bestCenter = candidateCenter
+  if bestCost == int64.high:
+    return
+  for index, slot in members:
+    let v = w.villagers[slot]
+    v.talkCircle = true
+    v.talkCenter = bestCenter
+    v.talkPosition = best[index]
+
 proc applyTalk*(w: World, player, target: int32): bool =
   ## Offers or joins a small conversation without controlling the other villager.
   if not w.commandsOpen or not validSlot(player) or not validSlot(target) or
@@ -597,6 +673,7 @@ proc applyTalk*(w: World, player, target: int32): bool =
   v.clearOrder(false)
   v.order = TalkOrder
   v.orderTarget = target
+  w.arrangeConversation(w.socialGroup(player))
   v.animation = WaveAnimation
   v.animationTicks = 0
   true
@@ -811,6 +888,11 @@ proc hashWorld(w: World): uint64 =
     hash.addHashy(v.inHouse)
     hash.addHashy(int32(v.order.ord))
     hash.addHashy(v.orderTarget)
+    hash.addHashy(v.talkCircle)
+    hash.addHashy(int32(v.talkCenter.x))
+    hash.addHashy(int32(v.talkCenter.y))
+    hash.addHashy(int32(v.talkPosition.x))
+    hash.addHashy(int32(v.talkPosition.y))
     hash.mixTile(v.goal)
     hash.addHashy(v.hasGoal)
     hash.addHashy(v.path.len)

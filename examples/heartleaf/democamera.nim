@@ -6,6 +6,7 @@ type
   DemoSubject* = object
     position*: Vec3
     indoors*, quiet*: bool
+    conversation*: int # Zero means no conversation.
 
   DemoCamera* = object
     active*: bool
@@ -39,6 +40,9 @@ proc choose(cam: DemoCamera, subjects: openArray[DemoSubject],
   for slot, subject in subjects:
     if subject.indoors or (rotate and slot == cam.subject):
       continue
+    if rotate and subjects[cam.subject].conversation != 0 and
+        subject.conversation == subjects[cam.subject].conversation:
+      continue
     let distance = (subject.position.xz - target.xz).lengthSq
     if result < 0 or
         (rotate and cam.visits[slot] < cam.visits[result]) or
@@ -57,7 +61,7 @@ proc selectSubject(cam: var DemoCamera, slot: int) =
 proc snapToSubject*(cam: var DemoCamera, subjects: openArray[DemoSubject],
     target: var Vec3) =
   ## Recentres on the selected subject without changing manual ownership or timing.
-  if cam.subject >= 0 and cam.subject < subjects.len:
+  if cam.active and cam.subject >= 0 and cam.subject < subjects.len:
     target = subjects[cam.subject].position
     cam.needsSnap = false
 

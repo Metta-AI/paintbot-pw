@@ -103,22 +103,23 @@ block pauseManualAndSeek:
   doAssert target == subjects[1].position and cam.elapsed == 0
 
 block speedControlRecentresWithoutChangingShotOrOwnership:
-  let subjects = [DemoSubject(position: vec3(5, 1, 9))]
+  let subjects = [DemoSubject(position: vec3(5, 1, 9)),
+    DemoSubject(position: vec3(40, 1, 20))]
   var
     cam = initDemoCamera(subjects.len)
     target = vec3(0)
   cam.activate(subjects, target)
   cam.advance(subjects, target, 20)
   let elapsed = cam.elapsed
-  for repeatClick in 0 ..< 3:
+  for speed in [1, 2, 4, 16]:
     target = vec3(100)
     cam.snapToSubject(subjects, target)
     doAssert target == subjects[0].position
-    doAssert cam.active and cam.elapsed == elapsed
+    doAssert cam.active and cam.subject == 0 and cam.elapsed == elapsed
   cam.deactivate()
   target = vec3(100)
   cam.snapToSubject(subjects, target)
-  doAssert target == subjects[0].position
+  doAssert target == vec3(100)
   doAssert not cam.active and cam.elapsed == elapsed
 
 block distantFocusChangeSnapsEvenWhilePaused:
@@ -162,3 +163,20 @@ block initiallyIndoors:
   cam.advance(subjects, target, 100)
   doAssert cam.subject == 0
   doAssert (target - subjects[0].position).length < 0.01
+
+block conversationIsOneShot:
+  var
+    subjects = [DemoSubject(position: vec3(0), quiet: true, conversation: 1),
+      DemoSubject(position: vec3(2, 0, 0), quiet: true, conversation: 1),
+      DemoSubject(position: vec3(20, 0, 0), quiet: true, conversation: 3)]
+    cam = initDemoCamera(subjects.len)
+    target = vec3(0)
+  cam.activate(subjects, target)
+  cam.advance(subjects, target, 61)
+  doAssert cam.subject == 2, "the camera switched within the same huddle"
+  subjects[2].conversation = 1
+  cam.advance(subjects, target, 100)
+  doAssert cam.subject == 2, "the camera cut within the only conversation"
+  subjects[0].conversation = 0
+  cam.advance(subjects, target, 1)
+  doAssert cam.subject == 0, "a departing villager never became eligible"

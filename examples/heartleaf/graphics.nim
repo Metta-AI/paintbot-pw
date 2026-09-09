@@ -492,7 +492,13 @@ proc runGraphics*() =
   proc demoSubjects(): array[VillagerCount, DemoSubject] =
     ## Supplies interpolated viewer positions without modifying the simulation.
     for slot, v in run.world.villagers:
+      var conversation = 0
+      if v.order == TalkOrder:
+        for member in run.world.socialGroup(int32(slot)):
+          conversation = member + 1
+          break
       result[slot] = DemoSubject(
+        conversation: conversation,
         position: followPoint(v),
         indoors: v.inHouse >= 0,
         quiet: v.animation == IdleAnimation
@@ -565,10 +571,10 @@ proc runGraphics*() =
       cameraTarget = followPoint(run.world.villagers[followSlot])
 
   proc snapFollowCamera() =
-    ## Speed controls recenter the current manual or last demo subject.
+    ## Speed controls recenter only the current follow target.
     if followSlot >= 0:
       cameraTarget = followPoint(run.world.villagers[followSlot])
-    elif demoMode:
+    elif demoMode and demoCamera.active:
       demoCamera.snapToSubject(demoSubjects(), cameraTarget)
 
   proc updateSelection(viewProjection: Mat4) =

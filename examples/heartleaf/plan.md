@@ -55,7 +55,9 @@ gathering, walking, and conversation, framing their house while indoors.
 Each shot lasts at least 60 real seconds. Three seconds
 idle or indoors allow a handoff after that minimum; at 90 seconds, any
 activity permits a handoff. The next outdoor villager is the least recently
-followed, with distance and slot breaking ties. With nobody else outdoors,
+followed, with distance and slot breaking ties. Members of the current
+conversation are excluded from automatic handoffs; if nobody outside the
+group is available, the current shot continues. With nobody else outdoors,
 the camera stays put. Focus changes snap immediately to the next subject.
 
 The camera tracks the same interpolated position used to draw the gnome,
@@ -116,21 +118,28 @@ These are grid-distance estimates, not exact path travel times.
 When no crop looks winnable, the bot looks for nearby company. A conversation
 is an explicit, replayed `talk` action: the caller stops and greets a neighbor,
 who can choose to answer. Participants face their conversation partner and
-show the greeting indicator while talking. An unanswered offer ends after
+show the greeting indicator while talking. Groups of three or four arrange
+around a shared center and face inward. Positions are assigned when members
+join, minimizing travel and checking body clearance along the approach;
+they stay fixed while the group settles. If no nearby clear circle fits,
+participants keep their current positions. An unanswered offer ends after
 two seconds. Conversations do not create dinner invitations or change scores.
 
 A conversation can include up to four connected participants, including
 joining existing pairs or trios. Each bot leaves after its own twelve to
-twenty-four-second stay and waits ten to twenty seconds before socializing
-again. It avoids immediately seeking the same partner. Harvesting a winnable
+twenty-four-second stay and walks at least seven tiles away before accepting
+another conversation. It remembers every recent group member for forty-five
+to seventy-five seconds, including when choosing another group to visit. Harvesting a winnable
 crop, dinner, and curfew override socializing.
 
-Social approaches seek available neighbors within fourteen tiles and stop
+Social approaches prefer available neighbors within fourteen tiles, widening
+the search to sixty-four tiles after twenty seconds alone. They stop
 if the target becomes busy, departs, or the group fills. Longer walks have
 a social destination; otherwise free-time walks remain short and within
 eight tiles of the local area, with five-to-ten-second rests and no immediate
 backtracking. Groups of four are allowed; larger nearby crowds encourage
-moving on. No generated dialogue or LLM calls are involved.
+moving on. Stalled walks are retried after two seconds without progress.
+No generated dialogue or LLM calls are involved.
 
 Three villagers are due to host each night by rotation
 (`(day + slot) mod 3 == 0`); hosts wave invitations at anyone passing

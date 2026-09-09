@@ -28,7 +28,7 @@
 '   gardenOutpaced(i)                      another gatherer leads by 3+ tiles
 '   villagerX(s) villagerY(s) villagerInHouse(s) villagerHosting(s)
 '   villagerCarried(s) villagerScore(s) inviteFrom(s)
-'   talkingTo(s) socialAvailable(s) socialGroupSize(s)
+'   talkingTo(s) socialAvailable(s) socialGroupSize(s) inMyConversation(s) sameConversation(a, b)
 '   doorX(h) doorY(h) occupants(h)
 '   distTo(x, y) distance(x1, y1, x2, y2) tilePassable(x, y)
 '
@@ -43,6 +43,7 @@
 ' by rotation; guests walk to the nearest due host; never be alone at six.
 
 dim invitedMark(8)
+dim avoidUntil(8)
 
 ' A small counter generator of our own, seeded by slot, so each villager
 ' wanders and pauses on their own rhythm. call rnd(n) leaves the next
@@ -69,15 +70,52 @@ sub company(x, y)
   wend
 end sub
 
+sub canMeet(candidate)
+  meetAllowed = 1
+  member = 0
+  while member < villagerTotal
+    if member <> selfSlot and worldTick < avoidUntil(member) then
+      if sameConversation(candidate, member) = 1 then
+        meetAllowed = 0
+      end if
+    end if
+    member = member + 1
+  wend
+end sub
+
 sub beginChat(peer)
-  r = talk(peer)
+  call canMeet(peer)
+  r = 0
+  if meetAllowed = 1 then
+    r = talk(peer)
+  end if
   if r = 1 then
     call rnd(289)
     chatUntil = worldTick + 288 + rndOut
     social = -1
     wandering = 0
     engaged = 1
+    aloneSince = worldTick
   end if
+end sub
+
+sub leaveGroup()
+  tries = 0
+  while tries < 12
+    call rnd(21)
+    x = leaveX + rndOut - 10
+    call rnd(21)
+    y = leaveY + rndOut - 10
+    d = distance(x, y, leaveX, leaveY)
+    call company(x, y)
+    if d >= 8 and d <= 10 and tilePassable(x, y) = 1 and neighbors <= 1 then
+      r = walkTo(x, y)
+      if r = 1 then
+        tries = 12
+      end if
+    end if
+    tries = tries + 1
+  wend
 end sub
 
 sub leisure()
@@ -97,21 +135,53 @@ sub leisure()
       wandering = 0
       leisureReady = 0
       social = -1
+      leaving = 0
     else
       if orderKind = 4 then
+        peer = 0
+        while peer < villagerTotal
+          if inMyConversation(peer) = 1 then
+            avoidUntil(peer) = worldTick + 1080
+          end if
+          peer = peer + 1
+        wend
         if worldTick >= chatUntil then
+          call rnd(721)
+          reunionAfter = worldTick + 1080 + rndOut
+          peer = 0
+          while peer < villagerTotal
+            if inMyConversation(peer) = 1 then
+              avoidUntil(peer) = reunionAfter
+            end if
+            peer = peer + 1
+          wend
           r = cancel()
-          call rnd(241)
-          socialAfter = worldTick + 240 + rndOut
-          lastPartner = orderTarget
+          socialAfter = worldTick + 240
+          aloneSince = worldTick
           leisureReady = 0
+          social = -1
+          leaving = 1
+          leaveX = myX
+          leaveY = myY
+          call leaveGroup()
         end if
       else
+        if leaving = 1 then
+          if distTo(leaveX, leaveY) >= 7 then
+            leaving = 0
+            leisureReady = 0
+          else
+            if orderKind = 0 then
+              call leaveGroup()
+            end if
+          end if
+          engaged = 1
+        end if
         ' Acknowledge a neighbor who has stopped to talk to us.
-        if worldTick >= socialAfter then
+        if engaged = 0 and worldTick >= socialAfter then
           peer = 0
           while peer < villagerTotal and engaged = 0
-            if peer <> selfSlot and talkingTo(peer) = selfSlot then
+            if peer <> selfSlot and talkingTo(peer) = selfSlot and worldTick >= avoidUntil(peer) then
               if distTo(villagerX(peer), villagerY(peer)) <= 4 then
                 call beginChat(peer)
               end if
@@ -157,9 +227,18 @@ sub leisure()
             best = 100000
             peer = 0
             while peer < villagerTotal
-              if peer <> selfSlot and peer <> lastPartner and socialAvailable(peer) = 1 then
+              if peer <> selfSlot and worldTick >= avoidUntil(peer) and socialAvailable(peer) = 1 then
                 d = distTo(villagerX(peer), villagerY(peer))
-                if d <= 14 and socialGroupSize(peer) < 4 then
+                reach = 14
+                if worldTick - aloneSince >= 480 then
+                  reach = 64
+                end if
+                call canMeet(peer)
+                call company(villagerX(peer), villagerY(peer))
+                if neighbors >= 3 then
+                  meetAllowed = 0
+                end if
+                if meetAllowed = 1 and d <= reach and socialGroupSize(peer) < 4 then
                   if d < best then
                     best = d
                     social = peer
@@ -198,12 +277,12 @@ sub leisure()
                 backtracking = previousStop = 1 and distance(x, y, previousX, previousY) <= 2
                 limit = 6
                 if social >= 0 then
-                  limit = 16
+                  limit = 67
                 end if
                 if nearby >= 2 and nearby <= limit and backtracking = 0 then
                   if tilePassable(x, y) = 1 and (social >= 0 or distance(x, y, leisureX, leisureY) <= 8) then
                     call company(x, y)
-                    if neighbors <= 3 then
+                    if neighbors <= 2 then
                       r = walkTo(x, y)
                       if r = 1 then
                         wandering = 1
@@ -240,18 +319,32 @@ if dayMark <> day then
   social = -1
   pauseUntil = 0
   socialAfter = worldTick + selfSlot * 12
-  lastPartner = -1
+  aloneSince = worldTick
+  leaving = 0
   chatUntil = 0
   s = 0
   while s < villagerTotal
     invitedMark(s) = 0
+    avoidUntil(s) = 0
     s = s + 1
   wend
 end if
 
-' Retry a house approach if it has made no tile progress for two seconds.
+' Retry an approach if it has made no tile progress for two seconds.
 if worldTick >= houseCheck then
   houseCheck = worldTick + 48
+  if orderKind = 1 then
+    if moveChecking = 1 and distTo(moveX, moveY) <= 1 then
+      r = cancel()
+      social = -1
+      wandering = 0
+    end if
+    moveChecking = 1
+    moveX = myX
+    moveY = myY
+  else
+    moveChecking = 0
+  end if
   if orderKind = 3 then
     if houseTarget = orderTarget and distTo(houseX, houseY) <= 1 then
       r = enterHouse(orderTarget)
