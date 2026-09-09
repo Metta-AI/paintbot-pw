@@ -60,9 +60,9 @@ the camera stays put. Focus changes snap immediately to the next subject.
 
 The camera tracks the same interpolated position used to draw the gnome,
 centred at body height, without additional camera damping or a speed cap.
-Automatic zoom is fixed; shot timing uses real seconds at every playback
-speed. Pausing freezes automatic tracking and shot timers. Seeking snaps
-to the selected subject at the restored position. Pan, zoom, minimap input,
+Zooming adjusts the distance without leaving demo following or restarting
+the shot. Shot timing uses real seconds at every playback speed. Pausing freezes automatic tracking and shot timers. Seeking snaps
+to the selected subject at the restored position. Pan, minimap input,
 and clicking a villager take manual control; C or the camera button resume
 the demo by snapping to a selected or nearby outdoor villager, preserving
 zoom. Clicking any speed button, including the already selected speed,

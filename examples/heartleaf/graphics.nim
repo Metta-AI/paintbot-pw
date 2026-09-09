@@ -535,7 +535,8 @@ proc runGraphics*() =
       followSlot = -1
       actionCam.takeManual()
     if not overUi and window.scrollDelta.y != 0:
-      actionCam.takeManual()
+      if not demoMode:
+        actionCam.takeManual()
       cameraDistance = clamp(
         cameraDistance * pow(0.92'f32, window.scrollDelta.y / 3.0'f32),
         6.0'f32,
