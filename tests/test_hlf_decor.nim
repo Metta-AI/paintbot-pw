@@ -80,6 +80,23 @@ block bushesClearHouseDoors:
         doAssert chebyshev(decoration.tile, house.door) > HouseBushClearance,
           &"seed {seed}: {decoration.node} blocks door {house.door}"
 
+block rocksAreSparse:
+  for seed in 1'i32 .. 20:
+    var roadRocks, forestRocks: int
+    for decoration in placeDecor(generateMap(seed), seed):
+      if decoration.kit != MeadowRocks:
+        continue
+      case decoration.area
+      of RoadArea:
+        inc roadRocks
+        doAssert decoration.height > 0.7
+      of OutskirtsArea:
+        inc forestRocks
+        doAssert decoration.node == "rock_medium_01a"
+      else:
+        doAssert false, "Rocks should not litter the meadow or gardens"
+    doAssert roadRocks <= 4 and forestRocks <= 8
+
 block meadowAndRoadBalance:
   let map = generateMap(Seed)
   var

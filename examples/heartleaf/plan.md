@@ -172,14 +172,14 @@ into the terrain mesh once with the houses.
   flower beds and two bushes in the yard.
 - Gardens: permanent crop pots at the original scattered garden positions,
   with flowers beside them.
-- Meadow: up to 95 patches of low bushes, flowers, and rocks. Only one in
+- Meadow: up to 95 patches of low bushes and flowers. Only one in
   four patches receives a small tree, keeping villagers visible. Tree
   heights vary around 3.2 tiles; bushes around 0.8 tiles. The village
   interior is planted first, with clearance around crops, doors, and roads.
-- Road verges: spaced lamp posts, with tufts, small rocks, flowers, and low
-  bushes on roughly half the available verge tiles.
-- Outskirts: low bushes, flowers, grass clumps, and rocks begin before the
-  forest boundary and become more frequent beside forest trees.
+- Road verges: spaced lamp posts, with tufts, flowers, and low bushes
+  on roughly half the available verge tiles, plus at most four rocks.
+- Outskirts: low bushes, flowers, and grass clumps begin before the forest
+  boundary, with at most eight medium rocks beside forest trees.
 
 Garden placement and the bundled demo use the original map generator.
 Meadow planting is presentation-only and does not change simulation state.

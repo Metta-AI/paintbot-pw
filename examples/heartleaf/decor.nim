@@ -75,7 +75,10 @@ const
   FlowerHeight = 0.6'f32
   BushHeight = 1.8'f32
   TuftHeight = 0.55'f32
-  SmallRockHeight = 0.7'f32
+  SmallRockHeight = 0.85'f32
+  RoadRockLimit = 4
+  ForestRockLimit = 8
+  ForestRockHeight = 1.1'f32
   HouseFlowerBeds = 5
   HouseBushes = 2
   HouseDecorReach = 4'i32
@@ -415,7 +418,9 @@ proc dressGardens(p: var Placer) =
 proc dressVerges(p: var Placer) =
   ## Lamp posts, tufts, bushes, small rocks, and flowers along the road
   ## edges.
-  var lamps: seq[Tile2]
+  var
+    lamps: seq[Tile2]
+    rocks = 0
   for y in 0'i32 ..< GridSide:
     for x in 0'i32 ..< GridSide:
       if not p.tileFree(x, y) or not p.nearRoad(x, y):
@@ -438,9 +443,11 @@ proc dressVerges(p: var Placer) =
         discard p.claim(MeadowVegetation, p.rng.pick(Tufts), RoadArea, x, y,
           yaw, TuftHeight, 0.3, NaturalVariance, p.rng.plantTint())
       of 1:
-        discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), RoadArea, x, y,
-          yaw, SmallRockHeight, 0.3, NaturalVariance, p.rng.rockTint(),
-          p.awayFromRoad(x, y) * VergeRockSetback)
+        if rocks < RoadRockLimit and p.rng.below(8) == 0:
+          if p.claim(MeadowRocks, p.rng.pick(SmallRocks), RoadArea, x, y,
+              yaw, SmallRockHeight, 0.2, 0.1, p.rng.rockTint(),
+              p.awayFromRoad(x, y) * VergeRockSetback):
+            inc rocks
       of 2:
         if not p.nearHouseDoor(x, y):
           discard p.claim(MeadowVegetation, "bush_01a", RoadArea, x, y,
@@ -506,12 +513,12 @@ proc dressMeadow(p: var Placer) =
           px, py, angle, FlowerHeight * 1.5, variance = 0.2,
           tint = p.rng.plantTint())
       else:
-        discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), MeadowArea,
-          px, py, angle, SmallRockHeight, tint = p.rng.rockTint())
+        discard
 
 proc dressOutskirts(p: var Placer) =
   ## Low planting bridges the open meadow and forest edge.
   let middle = tile2(GridSide div 2, GridSide div 2)
+  var rocks = 0
   for y in 0'i32 ..< GridSide:
     for x in 0'i32 ..< GridSide:
       let ring = chebyshev(tile2(x, y), middle)
@@ -534,8 +541,10 @@ proc dressOutskirts(p: var Placer) =
         discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), OutskirtsArea,
           x, y, yaw, FlowerHeight, 0.2, NaturalVariance, p.rng.plantTint())
       else:
-        discard p.claim(MeadowRocks, p.rng.pick(SmallRocks), OutskirtsArea,
-          x, y, yaw, SmallRockHeight, 0.2, NaturalVariance, p.rng.rockTint())
+        if rocks < ForestRockLimit and p.nearTree(x, y) and p.rng.below(10) == 0:
+          if p.claim(MeadowRocks, "rock_medium_01a", OutskirtsArea,
+              x, y, yaw, ForestRockHeight, tint = p.rng.rockTint()):
+            inc rocks
 
 proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   ## Every decoration for one map, in a fixed order from one seeded stream.
