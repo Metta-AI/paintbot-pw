@@ -56,6 +56,19 @@ block doorsHaveContinuousRoads:
       doAssert reached[tileIndex(house.door)],
         &"seed {seed}: reaching a house requires leaving the road"
 
+block southernPlazaRoadIsShared:
+  let map = generateMap(DefaultSeed)
+  for y in 75'i32 .. 81'i32:
+    var strips = 0
+    var pavedBefore = false
+    for x in 62'i32 .. 70'i32:
+      let paved = map.kinds[tileIndex(x, y)] == uint8(RoadTile)
+      if paved and not pavedBefore:
+        inc strips
+      pavedBefore = paved
+    doAssert strips == 1,
+      &"default map has {strips} separate southern roads at row {y}"
+
 block narrowParallelRoads:
   ## Count six-tile stretches of road separated by one to three unpaved
   ## tiles. Wide roads and ordinary intersections do not count.
@@ -82,7 +95,7 @@ block narrowParallelRoads:
                   parallel = false
             if parallel:
               inc runs
-  doAssert runs <= 6, &"{runs} narrow parallel road stretches remain"
+  doAssert runs == 0, &"{runs} narrow parallel road stretches remain"
 
 echo "Testing village invariants"
 block gridsAreWellFormed:

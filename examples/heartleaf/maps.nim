@@ -274,9 +274,15 @@ proc buildMap(seed: int32): MapData =
 
   for slot in 0 ..< VillagerCount:
     let door = houses[slot].door
+    var xFirst = rng.below(2'i32) == 0
+    # Doors near a plaza axis join its central street before the long leg.
+    if abs(int32(door.x) - MapCenter) <= RoadJoinMargin:
+      xFirst = true
+    elif abs(int32(door.y) - MapCenter) <= RoadJoinMargin:
+      xFirst = false
     carveDogleg(
       int32(door.x), int32(door.y), MapCenter, MapCenter,
-      wide = true, xFirst = rng.below(2'i32) == 0)
+      wide = true, xFirst = xFirst)
   proc connectNeighbors(start, goal: Tile2) =
     ## Keeps neighborhood links local while favoring existing streets over
     ## parallel strips of new paving.

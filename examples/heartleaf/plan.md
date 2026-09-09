@@ -86,7 +86,8 @@ tiles of the rectangle between neighboring doors. Existing streets cost less
 than fresh paving, and new paving close to a street costs extra. This favors
 shared streets over narrow parallel routes while keeping links local rather
 than sending every neighbor trip through the plaza. The wide plaza spokes
-retain their dogleg layout.
+use doglegs; doors within four tiles of a central axis join that street
+before the long leg so they do not create a parallel approach to the plaza.
 
 ## What is different from the other examples
 
