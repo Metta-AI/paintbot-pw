@@ -56,6 +56,7 @@ const
   MeadowRockCount = 5
   MeadowTreeCount = 6
   MeadowTreeHeight = 2.4'f32
+  MeadowMediumTreeHeight = 4.2'f32
   MeadowTreeAttempts = 80
   MeadowTreeSpacing = 12'i32
   MeadowTreeMinRadius = 16'i32
@@ -508,10 +509,11 @@ proc meadowTileFree(p: Placer, x, y: int32): bool =
   true
 
 proc dressMeadowTrees(p: var Placer) =
-  ## A handful of small trees have clear space beneath their crowns.
+  ## Small and medium trees have clear space beneath their crowns.
   let middle = int32(GridSide div 2)
   var trees: seq[Tile2]
   for sector in 0 ..< MeadowTreeCount:
+    let height = if sector mod 2 == 0: MeadowMediumTreeHeight else: MeadowTreeHeight
     for attempt in 0 ..< MeadowTreeAttempts:
       let
         angle = (float32(sector) + p.rng.unit()) * 2 * PI / float32(MeadowTreeCount)
@@ -530,7 +532,7 @@ proc dressMeadowTrees(p: var Placer) =
       if not clear:
         continue
       discard p.claim(MeadowVegetation, p.rng.pick(SmallTrees), MeadowArea,
-        x, y, p.rng.unit() * 2 * PI, MeadowTreeHeight, tint = p.rng.plantTint())
+        x, y, p.rng.unit() * 2 * PI, height, tint = p.rng.plantTint())
       trees.add tile
       break
 

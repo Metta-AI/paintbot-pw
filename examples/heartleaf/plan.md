@@ -178,8 +178,9 @@ into the terrain mesh once with the houses.
   spreading bushes, flowers, and tufts between the town roads as well as
   outside the houses. Only the actual plaza and local road, crop, and
   doorway clearances are excluded. At most 243 low plants and five medium
-  rocks cover the meadow, with up to six small trees spaced twelve tiles
-  apart and set back from roads. Trees are 2.4 tiles tall.
+  rocks cover the meadow, with up to six trees spaced twelve tiles
+  apart and set back from roads. Alternating sectors have small trees
+  (2.4 tiles tall) and medium trees (4.2 tiles tall), at most three of each.
 - Outskirts: small rocks at the feet of the forest trees and the odd
   medium one.
 - Forest floor: low bushes and grass tufts bridge the outer meadow and

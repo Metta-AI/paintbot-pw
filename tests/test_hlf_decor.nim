@@ -86,12 +86,15 @@ block meadowAdditionStaysSmall:
     var
       foliage = 0
       rocks = 0
+      mediumTrees = 0
       trees: seq[Tile2]
     for decoration in placeDecor(map, seed):
       if decoration.area != MeadowArea:
         continue
       if decoration.node in ["tree_05a", "tree_06a"]:
-        doAssert decoration.height <= 2.4'f32
+        doAssert decoration.height in [2.4'f32, 4.2'f32]
+        if decoration.height == 4.2'f32:
+          inc mediumTrees
         for tree in trees:
           doAssert chebyshev(decoration.tile, tree) >= 12
         trees.add decoration.tile
@@ -112,6 +115,7 @@ block meadowAdditionStaysSmall:
         doAssert chebyshev(decoration.tile, house.door) > HouseBushClearance
     doAssert foliage > 0 and foliage <= 243
     doAssert trees.len >= 4 and trees.len <= 6
+    doAssert mediumTrees > 0 and mediumTrees <= 3
     doAssert rocks > 0 and rocks <= 5
 
 block townGrassHasNearbyPlanting:
