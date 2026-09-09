@@ -147,7 +147,8 @@ var
     live = not run.replayMode,
     durationTicks = run.maximumTicks,
     playing = not options.pauseOnStart,
-    speed = options.speed
+    speed = options.speed,
+    repeating = true
   )
   placedEditCount = 0
   placedBuildingKey = ""
@@ -319,7 +320,8 @@ proc runGraphics*() =
       WindowTitle,
       AtlasPath,
       gameWindowSize(options.windowWidth, options.windowHeight),
-      options.vsync
+      options.vsync,
+      msaa = msaa4x
     )
   if options.playerSlot > 0 and not run.replayMode:
     let player = options.playerSlot - 1
@@ -1540,6 +1542,8 @@ proc runGraphics*() =
           scene.sunDepthPass = true
           drawWorldUnits()
           scene.sunDepthPass = false
+        when not defined(emscripten):
+          glEnable(GL_MULTISAMPLE)
         glClearColor(0.05, 0.06, 0.09, 1.0)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
         scene.toon.drawBackground()

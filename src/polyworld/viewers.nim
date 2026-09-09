@@ -5,7 +5,7 @@ import
   chroma, opengl, pixie, silky, vmath, windy,
   common, player
 
-when defined(emscripten) and defined(replayViewer):
+when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
 
 const
@@ -102,10 +102,11 @@ proc initGameWindow*(
     title,
     atlasPath: string,
     size = DefaultWindowSize,
-    vsync = true
+    vsync = true,
+    msaa = msaaDisabled
 ): (Window, Silky) =
   ## Creates the spectator window, GL context, and Silky atlas client.
-  let window = newWindow(title, size, vsync = vsync)
+  let window = newWindow(title, size, vsync = vsync, msaa = msaa)
   window.makeContextCurrent()
   loadExtensions()
   let sk = newSilky(window, atlasPath)
@@ -255,7 +256,7 @@ proc captureScreenshot*(
 
 proc reportReplayFrame*(tick, mismatches: int32) =
   ## Reports browser readiness and divergence after presenting a game frame.
-  when defined(emscripten) and defined(replayViewer):
+  when defined(emscripten):
     {.emit: """
     EM_ASM({
       if (Module.polyworldFrame) Module.polyworldFrame($0, $1);

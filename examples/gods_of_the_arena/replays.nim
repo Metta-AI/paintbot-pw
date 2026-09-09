@@ -7,7 +7,7 @@ import
 const
   ReplayGame* = "gods_of_the_arena"
   ReplayFormatVersion* = 3'u16
-  ReplayGameVersion* = 13'u16
+  ReplayGameVersion* = 14'u16
   ReplayGridTiles* = 128'u16
   ActionWalkTo* = 1'u8
   ActionAttackTarget* = 2'u8

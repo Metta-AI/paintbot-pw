@@ -82,14 +82,16 @@ proc initPlayer*(
     live: bool,
     durationTicks: int32,
     playing = true,
-    speed = 1'i32
+    speed = 1'i32,
+    repeating = false
 ): Player =
   ## Creates a transport that starts in play unless asked to pause.
   result.live = live
   result.durationTicks = max(durationTicks, 0)
   result.playing = playing
+  result.repeating = repeating
   when defined(replayViewer):
-    result.repeating = not live
+    result.repeating = repeating or not live
   result.speedIndex = speedIndexOf(speed)
   result.restoreTick = -1
   result.targetTick = -1

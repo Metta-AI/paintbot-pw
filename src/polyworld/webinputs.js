@@ -69,6 +69,10 @@
 
   function showError(message) {
     console.error(message);
+    if (Module["polyworldError"]) {
+      Module["polyworldError"](message);
+      return;
+    }
     var output = document.createElement("pre");
     output.textContent = message;
     output.style.background = "#220b0b";

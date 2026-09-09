@@ -201,7 +201,8 @@ proc runGraphics*() =
       "Gods of the Arena",
       AtlasPath,
       gameWindowSize(options.windowWidth, options.windowHeight),
-      options.vsync
+      options.vsync,
+      msaa = msaa4x
     )
   let splash = startSplash(sk, window)
   profileBlock "terrain":
@@ -764,7 +765,8 @@ proc runGraphics*() =
         else:
           options.maximumTicks,
       playing = not options.pauseOnStart,
-      speed = options.speed
+      speed = options.speed,
+      repeating = true
     )
 
   window.onButtonPress = proc(button: Button) =
@@ -1919,6 +1921,8 @@ proc runGraphics*() =
           scene.sunDepthPass = true
           drawWorldCharacters()
           scene.sunDepthPass = false
+        when not defined(emscripten):
+          glEnable(GL_MULTISAMPLE)
         glClearColor(0.05, 0.06, 0.09, 1.0)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
         scene.toon.drawBackground()
