@@ -1,6 +1,6 @@
 import
   vmath,
-  polyworld/[chrome, gameuis, player]
+  polyworld/[chrome, gameuis]
 
 echo "Testing minimap map area insets"
 block:
@@ -26,99 +26,34 @@ block:
   doAssert fitUiScale(vec2(400, 300), vec2(1800, 630)) == 0.25'f32
   doAssert fitUiScale(vec2(5000, 3000), vec2(1800, 630)) == 2.5'f32
 
-echo "Testing HUD scale waits for panel clearance"
+echo "Testing shared game UI resolution breakpoints"
 block:
-  const
-    PanelScore = vec2(407, 159)
-    PanelHeroes = vec2(1051, 145)
-    PanelClock = vec2(242, 106)
-    PanelMinimap = vec2(356, 373)
-    PanelDetails = vec2(1028, 321)
-    PanelInventory = vec2(379, 322)
-    TransportH = TransportHeight
-    Clearance = 48.0'f32
-  proc gotaFits(layoutSize: Vec2): bool =
-    let
-      layout = initGameUiLayout(layoutSize, TransportH)
-      plates = [
-        layout.panel(GameUiRegion.TopLeft, PanelScore),
-        layout.panel(GameUiRegion.TopCenter, PanelHeroes),
-        layout.panel(GameUiRegion.TopRight, PanelClock),
-        layout.panel(GameUiRegion.BottomLeft, PanelMinimap),
-        layout.panel(GameUiRegion.BottomCenter, PanelDetails),
-        layout.panel(GameUiRegion.BottomRight, PanelInventory)
-      ]
-    layoutFits(layout, plates, Clearance)
-  doAssert fitUiScale(vec2(1024, 576), gotaFits, UiCrispSteps) ==
-    0.5'f32
-  doAssert fitUiScale(vec2(1920, 1080), gotaFits, UiCrispSteps) ==
-    0.5'f32
-  doAssert fitUiScale(vec2(2560, 1440), gotaFits, UiCrispSteps) ==
-    1.0'f32
-  doAssert fitUiScale(vec2(3840, 2160), gotaFits, UiCrispSteps) ==
-    1.0'f32
-  doAssert fitUiScale(vec2(4096, 2304), gotaFits, UiCrispSteps) ==
-    2.0'f32
-  doAssert fitUiScale(vec2(900, 2000), gotaFits, UiCrispSteps) ==
-    0.25'f32
-  doAssert fitUiScale(vec2(1920, 300), gotaFits, UiCrispSteps) ==
-    0.25'f32
-  doAssert fitUiScale(vec2(400, 300), gotaFits, UiCrispSteps) ==
-    0.25'f32
+  for (size, expected) in [
+    (vec2(480, 270), 0.25'f),
+    (vec2(960, 540), 0.5'f),
+    (vec2(1024, 576), 0.5'f),
+    (vec2(1280, 720), 0.5'f),
+    (vec2(1920, 1080), 1.0'f),
+    (vec2(2560, 1440), 1.0'f),
+    (vec2(3840, 2160), 2.0'f),
+    (vec2(7680, 4320), 4.0'f),
+    (vec2(3440, 1440), 1.0'f),
+    (vec2(1080, 1920), 0.5'f),
+    (vec2(400, 300), 0.25'f),
+    (vec2(0), 0.25'f)
+  ]:
+    doAssert gameUiScale(size) == expected, $size
 
-echo "Testing CTA HUD scale waits for panel clearance"
-block:
-  const
-    PanelParty = vec2(316, 434)
-    PanelMinimap = vec2(252, 252)
-    PanelQuest = vec2(448, 132)
-    PanelChat = vec2(337, 177)
-    PanelAbilities = vec2(947, 157)
-    PanelMenu = vec2(407, 71)
-    TransportH = TransportHeight
-    Clearance = 48.0'f32
-  proc ctaFits(layoutSize: Vec2): bool =
-    let
-      layout = initGameUiLayout(layoutSize, TransportH)
-      plates = [
-        layout.panel(GameUiRegion.TopLeft, PanelParty),
-        layout.panel(GameUiRegion.TopRight, PanelMinimap),
-        layout.panel(GameUiRegion.TopCenter, PanelQuest),
-        layout.panel(GameUiRegion.BottomLeft, PanelChat),
-        layout.panel(GameUiRegion.BottomCenter, PanelAbilities),
-        layout.panel(GameUiRegion.BottomRight, PanelMenu)
-      ]
-    layoutFits(layout, plates, Clearance)
-  doAssert fitUiScale(vec2(1024, 576), ctaFits, UiCrispSteps) ==
-    0.5'f32
-  doAssert fitUiScale(vec2(1920, 1080), ctaFits, UiCrispSteps) ==
-    1.0'f32
-
-echo "Testing LVD HUD scale waits for panel clearance"
-block:
-  const
-    PanelScore = vec2(353, 150)
-    PanelResources = vec2(700, 90)
-    PanelMinimap = vec2(320, 372)
-    PanelSelection = vec2(488, 250)
-    PanelBuild = vec2(642, 283)
-    TransportH = TransportHeight
-    Clearance = 48.0'f32
-  proc lvdFits(layoutSize: Vec2): bool =
-    let
-      layout = initGameUiLayout(layoutSize, TransportH)
-      plates = [
-        layout.panel(GameUiRegion.TopLeft, PanelScore),
-        layout.panel(GameUiRegion.TopCenter, PanelResources),
-        layout.panel(GameUiRegion.TopRight, PanelMinimap),
-        layout.panel(GameUiRegion.BottomLeft, PanelSelection),
-        layout.panel(GameUiRegion.BottomRight, PanelBuild)
-      ]
-    layoutFits(layout, plates, Clearance)
-  doAssert fitUiScale(vec2(1024, 576), lvdFits, UiCrispSteps) ==
-    0.5'f32
-  doAssert fitUiScale(vec2(1920, 1080), lvdFits, UiCrispSteps) ==
-    1.0'f32
+  for (size, previous, current) in [
+    (vec2(960, 540), 0.25'f, 0.5'f),
+    (vec2(1920, 1080), 0.5'f, 1.0'f),
+    (vec2(3840, 2160), 1.0'f, 2.0'f),
+    (vec2(7680, 4320), 2.0'f, 4.0'f)
+  ]:
+    doAssert gameUiScale(size - vec2(1, 0)) == previous
+    doAssert gameUiScale(size - vec2(0, 1)) == previous
+    doAssert gameUiScale(size) == current
+    doAssert gameUiScale(size + vec2(1)) == current
 
 echo "Testing spectator clock"
 block:

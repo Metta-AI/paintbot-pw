@@ -1156,7 +1156,7 @@ proc runGraphics*() =
         )
 
   window.onButtonPress = proc(button: Button) =
-    sk.uiScale = hudUiScale(window)
+    sk.uiScale = gameUiScale(window)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     case button
     of MouseLeft, MouseLeftKey:
@@ -1209,7 +1209,7 @@ proc runGraphics*() =
       discard
 
   window.onScroll = proc() =
-    sk.uiScale = hudUiScale(window)
+    sk.uiScale = gameUiScale(window)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     if not mouseOverUi(window, sk.mousePos):
       cancelCameraEase(cameraEase)
@@ -1255,7 +1255,7 @@ proc runGraphics*() =
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, SimulationStep)
-      sk.uiScale = hudUiScale(window)
+      sk.uiScale = gameUiScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)

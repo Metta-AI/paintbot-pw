@@ -1785,7 +1785,7 @@ proc runGraphics*() =
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime)
-      sk.uiScale = hudUiScale(window)
+      sk.uiScale = gameUiScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
       profileBlock "camera":
         updateCamera(dt)
