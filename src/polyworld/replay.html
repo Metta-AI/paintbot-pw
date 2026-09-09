@@ -18,7 +18,7 @@ canvas{display:block;width:100%;height:100%;outline:none}
 const statusElement = document.getElementById('status');
 let failed = false, ready = false;
 function message(type, extra = {}) {
-  window.parent.postMessage({src:'coworld-replay', type, ...extra}, '*');
+  if (window.parent !== window) window.parent.postMessage({src:'coworld-replay', type, ...extra}, '*');
 }
 function fail(reason) {
   if (failed) return;
@@ -58,14 +58,18 @@ var Module = {
       const uri = new URLSearchParams(location.hash.slice(1)).get('replay') ||
         new URLSearchParams(location.search).get('replay');
       if (!uri) throw new Error('No replay was supplied. Open a completed episode replay.');
-      message('phase', {phase:'fetch_start'});
+      message('phase', {phase:'replay_fetch_start'});
       const response = await fetch(uri);
       if (!response.ok) throw new Error('Replay download failed (HTTP ' + response.status + ').');
       let bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.length > 64 * 1024 * 1024) throw new Error('Replay exceeds the 64 MiB limit.');
-      const compressed = bytes[0] === 31 && bytes[1] === 139;
+      const downloaded = bytes.length;
+      const gzip = bytes[0] === 31 && bytes[1] === 139;
+      const zlib = (bytes[0] & 15) === 8 && (bytes[0] >> 4) <= 7 &&
+        ((bytes[0] << 8) | bytes[1]) % 31 === 0;
+      const compressed = gzip || zlib;
       if (compressed) {
-        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(gzip ? 'gzip' : 'deflate'));
         const reader = stream.getReader(), chunks = [];
         let size = 0;
         while (true) {
@@ -80,7 +84,7 @@ var Module = {
       if (!bytes.length) throw new Error('The replay file is empty.');
       FS.mkdirTree('/tmp');
       FS.writeFile('/episode.replay', bytes);
-      message('phase', {phase:'fetch_end', bytes:bytes.length, compressed});
+      message('phase', {phase:'replay_fetch_end', bytes:downloaded, compressed});
       removeRunDependency('episode-replay');
     })().catch(fail);
   }]
