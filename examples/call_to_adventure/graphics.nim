@@ -505,7 +505,8 @@ proc runGraphics*() =
       live = not run.replayMode,
       durationTicks = options.maximumTicks,
       playing = not options.pauseOnStart,
-      speed = options.speed
+      speed = options.speed,
+      repeating = true
     )
 
   proc copyLog(): seq[string] =

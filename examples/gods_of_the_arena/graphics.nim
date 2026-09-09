@@ -765,7 +765,8 @@ proc runGraphics*() =
         else:
           options.maximumTicks,
       playing = not options.pauseOnStart,
-      speed = options.speed
+      speed = options.speed,
+      repeating = true
     )
 
   window.onButtonPress = proc(button: Button) =

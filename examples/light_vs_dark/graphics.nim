@@ -147,7 +147,8 @@ var
     live = not run.replayMode,
     durationTicks = run.maximumTicks,
     playing = not options.pauseOnStart,
-    speed = options.speed
+    speed = options.speed,
+    repeating = true
   )
   placedEditCount = 0
   placedBuildingKey = ""

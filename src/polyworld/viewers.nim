@@ -5,7 +5,7 @@ import
   chroma, opengl, pixie, silky, vmath, windy,
   common, player
 
-when defined(emscripten) and defined(replayViewer):
+when defined(emscripten):
   {.emit: "#include <emscripten.h>".}
 
 const
@@ -256,7 +256,7 @@ proc captureScreenshot*(
 
 proc reportReplayFrame*(tick, mismatches: int32) =
   ## Reports browser readiness and divergence after presenting a game frame.
-  when defined(emscripten) and defined(replayViewer):
+  when defined(emscripten):
     {.emit: """
     EM_ASM({
       if (Module.polyworldFrame) Module.polyworldFrame($0, $1);
