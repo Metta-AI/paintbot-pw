@@ -113,15 +113,17 @@ every two seconds, keeping their target otherwise. Walking villagers also
 check for newly winnable crops, without inventory caps or harvesting breaks.
 These are grid-distance estimates, not exact path travel times.
 
-When no crop looks winnable, the bot spends free time around
-home gardens, neighboring yards, and occasionally the square. Outdoor
-neighbors within sixteen tiles are occasional social destinations, with
-thirty to sixty seconds between opportunities. A visit targets a fixed
-spot beside one neighbor rather than following them. Destinations with
-more than one nearby villager are avoided; arrivals pause for five to ten
-seconds and leave sooner if a group forms. The same routine fills the time
-after dinner until the return home. Each villager has a separate deterministic
-random stream and resets their routine each morning.
+When no crop looks winnable, the bot pauses for five to ten seconds where
+harvesting ended, then takes occasional short walks. Each destination is
+three to six tiles away and stays within eight tiles of where this free-time
+period began. The immediately previous stop is avoided. This area resets
+when harvesting resumes, after leaving a house, or each morning.
+
+Social visits target individual outdoor neighbors within six tiles, with
+thirty to sixty seconds between opportunities. A departing or indoor
+neighbor ends the approach. Destinations with more than one nearby villager
+are avoided; a crowd can shorten the resting period. Arrivals pause for five
+to ten seconds. Each villager has a separate deterministic random stream.
 
 Three villagers are due to host each night by rotation
 (`(day + slot) mod 3 == 0`); hosts wave invitations at anyone passing

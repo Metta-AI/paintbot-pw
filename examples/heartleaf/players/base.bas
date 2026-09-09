@@ -69,6 +69,11 @@ end sub
 
 sub leisure()
   f = orderFailed()
+  if orderKind = 1 and wandering = 1 and social >= 0 then
+    if villagerInHouse(social) >= 0 or distance(ax, ay, villagerX(social), villagerY(social)) > 3 then
+      r = cancel()
+    end if
+  end if
   ' Reconsider clear losses every two seconds, but stay in close races.
   if worldTick >= harvestCheck then
     harvestCheck = worldTick + 48
@@ -82,6 +87,7 @@ sub leisure()
         if g >= 0 then
           r = gather(g)
           wandering = 0
+          leisureReady = 0
         end if
       end if
     end if
@@ -91,7 +97,16 @@ sub leisure()
     if g >= 0 then
       r = gather(g)
       wandering = 0
+      leisureReady = 0
     else
+      if leisureReady = 0 then
+        leisureReady = 1
+        leisureX = myX
+        leisureY = myY
+        previousStop = 0
+        call rnd(121)
+        pauseUntil = worldTick + 120 + rndOut
+      end if
       if wandering = 1 then
         wandering = 0
         call rnd(121)
@@ -120,7 +135,7 @@ sub leisure()
                 px = villagerX(peer)
                 py = villagerY(peer)
                 d = distTo(px, py)
-                if d > 4 and d <= 16 then
+                if d > 3 and d <= 6 then
                   call company(px, py)
                   if neighbors = 1 then
                     social = peer
@@ -134,24 +149,8 @@ sub leisure()
           socialAfter = worldTick + 720 + rndOut
         end if
 
-        call rnd(10)
-        outing = rndOut
-        ax = doorX(selfSlot)
-        ay = doorY(selfSlot)
-        if outing >= 4 and outing < 7 then
-          call rnd(gardenTotal)
-          ax = gardenX(rndOut)
-          ay = gardenY(rndOut)
-        end if
-        if outing >= 7 and outing < 9 then
-          call rnd(villagerTotal)
-          ax = doorX(rndOut)
-          ay = doorY(rndOut)
-        end if
-        if outing = 9 then
-          ax = 64
-          ay = 64
-        end if
+        ax = myX
+        ay = myY
         if social >= 0 then
           ax = villagerX(social)
           ay = villagerY(social)
@@ -170,13 +169,18 @@ sub leisure()
           end if
           x = ax + dx
           y = ay + dy
-          if dx * dx + dy * dy >= 4 and distTo(x, y) >= 4 then
-            if tilePassable(x, y) = 1 then
+          nearby = distTo(x, y)
+          backtracking = previousStop = 1 and distance(x, y, previousX, previousY) <= 2
+          if nearby >= 3 and nearby <= 6 and backtracking = 0 then
+            if distance(x, y, leisureX, leisureY) <= 8 and tilePassable(x, y) = 1 then
               call company(x, y)
               if neighbors <= 1 then
                 r = walkTo(x, y)
                 if r = 1 then
                   wandering = 1
+                  previousStop = 1
+                  previousX = myX
+                  previousY = myY
                   tries = 6
                 end if
               end if
@@ -185,7 +189,7 @@ sub leisure()
           tries = tries + 1
         wend
         if wandering = 0 then
-          pauseUntil = worldTick + 24
+          pauseUntil = worldTick + 72
         end if
       end if
     end if
@@ -200,6 +204,8 @@ if dayMark <> day then
   houseCheck = 0
   houseTarget = -1
   wandering = 0
+  leisureReady = 0
+  social = -1
   pauseUntil = 0
   socialAfter = worldTick + 240 + selfSlot * 48
   s = 0
@@ -240,6 +246,7 @@ if dinnerDone = 1 then
     if inHouse >= 0 then
       if inHouse <> selfSlot then
         r = exitHouse()
+        leisureReady = 0
       end if
     else
       if orderKind <> 3 or orderTarget <> selfSlot then
@@ -249,6 +256,7 @@ if dinnerDone = 1 then
   else
     if inHouse >= 0 then
       r = exitHouse()
+      leisureReady = 0
     else
       call leisure()
     end if

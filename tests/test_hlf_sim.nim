@@ -275,6 +275,26 @@ block botAbandonsClearLoss:
   doAssert w.villagers[0].order == GatherOrder,
     "the script failed to resume harvesting when its rival gave up"
 
+block freeTimeStartsWithARest:
+  let game = newGame(gameMap, 7)
+  var sources = newSeq[string](VillagerCount)
+  for source in sources.mitems:
+    source = "r = 0"
+  sources[0] = readFile("examples/heartleaf/players/base.bas")
+  loadBots(game, sources)
+  for garden in 0 ..< GardenCount:
+    game.world.gardens[garden] = EmptyGarden
+  for slot in 1 ..< VillagerCount:
+    game.world.villagers[slot].inHouse = int32(slot)
+  runBotDecisions(game)
+  doAssert game.world.villagers[0].order == NoOrder,
+    "the bot walked away immediately when harvesting ended"
+  for tick in 1 ..< 5 * TickRate:
+    game.world.tickWorld(proc(w: World) = runBotDecisions(game))
+    doAssert game.world.villagers[0].order == NoOrder,
+      "the bot did not finish its initial rest"
+  doAssert not game.brains[0].failed
+
 block houseRules:
   var w = newWorld(gameMap, 7)
   doAssert not w.applyExitHouse(0), "exited a house while outdoors"
@@ -307,7 +327,18 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
     sources.add source
   loadBots(game, sources)
   proc decide(w: World) =
+    var
+      orders: array[VillagerCount, OrderKind]
+      goals: array[VillagerCount, Tile2]
+    for slot, v in w.villagers:
+      orders[slot] = v.order
+      goals[slot] = v.goal
     runBotDecisions(game)
+    for slot, v in w.villagers:
+      if v.order == MoveOrder and
+          (orders[slot] != MoveOrder or goals[slot] != v.goal):
+        doAssert chebyshev(v.tile, v.goal) <= 6,
+          &"seed {seed}: villager {slot} started a long free-time walk"
   var samples, outsidePlaza, crowded, restingPairs: int
   while not game.world.over:
     let previousPhase = game.world.phase
