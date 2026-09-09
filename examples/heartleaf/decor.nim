@@ -54,6 +54,8 @@ const
   MeadowPatchSpacing = 7'i32
   MeadowPatchRadius = 38'i32
   MeadowBushHeight = 0.8'f32
+  MeadowRockHeight = 1.0'f32
+  MeadowRockEvery = 3
   PlazaDressRadius = 5.5'f32
   PlazaSignRadius = 10.5'f32
   PlazaLimit* = 7.5'f32
@@ -516,6 +518,19 @@ proc dressMeadow(p: var Placer) =
     for side in [-1'i32, 1'i32]:
       discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), MeadowArea,
         x + side, y + side, yaw, FlowerHeight, tint = p.rng.plantTint())
+
+  for i, centre in centres:
+    let
+      x = int32(centre.x)
+      y = int32(centre.y)
+      yaw = p.rng.unit() * 2 * PI
+    discard p.claim(MeadowVegetation, "bush_01a", MeadowArea,
+      x - 1, y, yaw, MeadowBushHeight, tint = p.rng.plantTint())
+    discard p.claim(MeadowVegetation, p.rng.pick(Tufts), MeadowArea,
+      x, y + 1, yaw, TuftHeight, tint = p.rng.plantTint())
+    if (i + 1) mod MeadowRockEvery == 0:
+      discard p.claim(MeadowRocks, p.rng.pick(MediumRocks), MeadowArea,
+        x + 1, y - 1, yaw, MeadowRockHeight, tint = p.rng.rockTint())
 
 proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   ## Every decoration for one map, in a fixed order from one seeded stream.

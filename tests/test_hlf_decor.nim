@@ -83,18 +83,25 @@ block bushesClearHouseDoors:
 block meadowAdditionStaysSmall:
   for seed in 1'i32 .. 20:
     let map = generateMap(seed)
-    var added = 0
+    var
+      foliage = 0
+      rocks = 0
     for decoration in placeDecor(map, seed):
       if decoration.area != MeadowArea:
         continue
-      inc added
-      doAssert decoration.kit == MeadowVegetation
-      doAssert decoration.height <= 0.8'f32
+      if decoration.kit == MeadowRocks:
+        inc rocks
+        doAssert decoration.height <= 1.0'f32
+      else:
+        inc foliage
+        doAssert decoration.kit == MeadowVegetation
+        doAssert decoration.height <= 0.8'f32
       for garden in map.gardenTiles:
         doAssert chebyshev(decoration.tile, garden) > 1
       for house in map.houses:
         doAssert chebyshev(decoration.tile, house.door) > HouseBushClearance
-    doAssert added > 0 and added <= 48
+    doAssert foliage > 0 and foliage <= 80
+    doAssert rocks > 0 and rocks <= 5
 
 echo "Testing that every node exists in its kit"
 block nodesExist:
