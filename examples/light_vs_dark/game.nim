@@ -15,6 +15,9 @@ import
   controls,
   replays
 
+when defined(coworld):
+  import polyworld/coworld
+
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
   echo """
@@ -76,7 +79,11 @@ proc parseGameOptions(): GameOptions =
     "a live match requires exactly two bots"
   )
 
-let options* = parseGameOptions()
+var options* =
+  when defined(coworld):
+    coworldOptions(2)
+  else:
+    parseGameOptions()
 
 var run*: Game
 
@@ -226,7 +233,8 @@ proc runHeadless*() =
     for player in 0'i32 ..< PlayerCount:
       let brain = run.brains[player]
       if brain.failed:
-        echo &"         script FAILED: {brain.lastError}"
+        when not defined(coworld):
+          echo &"         script FAILED: {brain.lastError}"
       else:
         echo &"         {brain.decisions} decisions, last used " &
           &"{brain.lastInstructions} instructions and {brain.lastWork} work"

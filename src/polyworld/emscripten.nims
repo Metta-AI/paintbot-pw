@@ -8,9 +8,27 @@ proc setupEmscripten*(exampleDir: string) =
   when defined(emscripten):
     let
       repoDir = exampleDir / ".." / ".."
-      dataDir = repoDir / ".." / "polyworld_data"
+      dataDir = getEnv("POLYWORLD_DATA", repoDir / ".." / "polyworld_data")
       outputDir = exampleDir / "emscripten"
-      shellFile = repoDir / "src" / "polyworld" / "emscripten.html"
+      shellFile = repoDir / "src" / "polyworld" /
+        (if defined(replayViewer): "replay.html" else: "emscripten.html")
+    let preJs =
+      if defined(replayViewer):
+        ""
+      else:
+        "--pre-js " & repoDir / "src" / "polyworld" / "webinputs.js"
+    var preload = "--preload-file " & dataDir & "@/polyworld_data"
+    let selection = exampleDir / "webdata.txt"
+    if fileExists(selection):
+      preload = ""
+      for line in readFile(selection).splitLines():
+        let name = line.strip()
+        if name.len == 0 or name.startsWith("#"):
+          continue
+        if not fileExists(dataDir / name) and not dirExists(dataDir / name):
+          raise newException(ValueError, "Missing replay asset: " & name)
+        preload.add " --preload-file " & dataDir / name &
+          "@/polyworld_data/" & name
     if not dirExists(outputDir):
       mkDir(outputDir)
     switch("nimcache", outputDir / "tmp")
@@ -28,7 +46,6 @@ proc setupEmscripten*(exampleDir: string) =
       --clang.linkerexe:emcc
       --clang.cpp.exe:emcc
       --clang.cpp.linkerexe:emcc
-    --listCmd
     --gc:arc
     --exceptions:goto
     --define:noSignalHandler
@@ -41,11 +58,12 @@ proc setupEmscripten*(exampleDir: string) =
       "passL",
       (&"""
       -o {outputDir / projectName()}.html
-      --preload-file {dataDir}@/polyworld_data
-      --pre-js {repoDir / "src" / "polyworld" / "webinputs.js"}
+      {preload}
+      {preJs}
       --shell-file {shellFile}
       -s ASYNCIFY
       -s FETCH
+      -s EXIT_RUNTIME=1
       -s USE_WEBGL2=1
       -s MAX_WEBGL_VERSION=2
       -s MIN_WEBGL_VERSION=1

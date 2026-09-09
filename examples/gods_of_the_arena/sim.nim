@@ -71,6 +71,7 @@ type
   Heading* = object
     x*, z*: int32
   HeroVm* = ref object
+    output*: PrintProc
     runtime*: Runtime
     limits*: Limits
     ready*: bool
@@ -2679,3 +2680,11 @@ proc newGame*(
   world.heroTurnStart = seededHeroTurnStart(world)
   if replayMode:
     validateReplayWorld(result)
+
+proc scores*(world: World): seq[int] =
+  ## Awards every hero on the victorious team one win.
+  result.setLen(world.heroes.len)
+  if world.gameOver:
+    for slot, hero in world.heroes:
+      if hero.team == world.winner:
+        result[slot] = 1

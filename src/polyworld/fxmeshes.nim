@@ -2315,8 +2315,9 @@ proc drawFxMesh*(
   glActiveTexture(GL_TEXTURE1)
   glBindTexture(GL_TEXTURE_2D, renderer.patternTextures[NoiseTexture])
   glActiveTexture(GL_TEXTURE0)
-  if wireframe:
-    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+  when not defined(emscripten):
+    if wireframe:
+      glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
   glBindVertexArray(renderer.vertexArray)
   glDrawElements(
     GL_TRIANGLES,
@@ -2325,8 +2326,9 @@ proc drawFxMesh*(
     nil
   )
   glBindVertexArray(0)
-  if wireframe:
-    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
+  when not defined(emscripten):
+    if wireframe:
+      glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
   glUseProgram(0)
   glDepthMask(GL_TRUE)
   glDisable(GL_DEPTH_TEST)

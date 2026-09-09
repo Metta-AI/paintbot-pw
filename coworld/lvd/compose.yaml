@@ -1,0 +1,10 @@
+services:
+  game:
+    image: polyworld-lvd-coworld:latest
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: coworld/Dockerfile
+      args:
+        GAME: light_vs_dark
+        ENTRY: lvd

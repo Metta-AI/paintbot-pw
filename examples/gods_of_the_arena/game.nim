@@ -14,6 +14,9 @@ import
   controls,
   replays
 
+when defined(coworld):
+  import polyworld/coworld
+
 proc usage() =
   ## Prints the command-line and compile-time configuration surface.
   echo "Gods of the Arena"
@@ -83,7 +86,11 @@ proc parseGameOptions(): GameOptions =
     "live games require exactly 10 bots"
   )
 
-let options* = parseGameOptions()
+var options* =
+  when defined(coworld):
+    coworldOptions(10)
+  else:
+    parseGameOptions()
 
 var run*: Game
 

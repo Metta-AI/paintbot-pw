@@ -5,6 +5,9 @@ import
   chroma, opengl, pixie, silky, vmath, windy,
   common, player
 
+when defined(emscripten) and defined(replayViewer):
+  {.emit: "#include <emscripten.h>".}
+
 const
   DefaultWindowSize* = ivec2(1280, 800)
   DefaultFontPath* = DataRoot & "/fonts/Rubik-Regular.ttf"
@@ -249,3 +252,12 @@ proc captureScreenshot*(
     quit(0)
   else:
     discard (window, frame, waitFrames, defaultPath)
+
+proc reportReplayFrame*(tick, mismatches: int32) =
+  ## Reports browser readiness and divergence after presenting a game frame.
+  when defined(emscripten) and defined(replayViewer):
+    {.emit: """
+    EM_ASM({
+      if (Module.polyworldFrame) Module.polyworldFrame($0, $1);
+    }, `tick`, `mismatches`);
+    """.}

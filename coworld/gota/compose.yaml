@@ -1,0 +1,10 @@
+services:
+  game:
+    image: polyworld-gota-coworld:latest
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: coworld/Dockerfile
+      args:
+        GAME: gods_of_the_arena
+        ENTRY: gota

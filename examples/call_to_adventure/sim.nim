@@ -17,6 +17,7 @@ import
 
 type
   HeroVm* = ref object
+    output*: PrintProc
     ## One compiled BASIC program for a party slot. Not simulation state.
     runtime*: Runtime
     ready*: bool
@@ -1685,8 +1686,10 @@ proc tickWorld*(
       if int(game.world.actors[slot].home.level) != 0:
         continue
       inc surfaced
+      game.world.returned[slot] = true
       if game.world.actors[slot].carriedValue > 0:
         game.world.banked += game.world.actors[slot].carriedValue
+        game.world.bankedGold[slot] += game.world.actors[slot].carriedValue
         game.log.add HeroClass(game.world.actors[slot].class).`$` &
           " banks " & $game.world.actors[slot].carriedValue & " gold"
         game.world.actors[slot].carriedValue = 0
@@ -1703,3 +1706,17 @@ proc partyGold*(game: Game): int32 =
 proc stateHash*(game: Game): uint64 =
   ## The replay digest. `World` has nothing to skip.
   hashWorld(game.world)
+
+proc scores*(world: World): seq[int] =
+  ## Awards shared wins to surviving returners with the most banked gold.
+  result.setLen(PartySize)
+  var highest = -1'i32
+  for slot in 0 ..< PartySize:
+    if world.actors[slot].alive and world.returned[slot]:
+      highest = max(highest, world.bankedGold[slot])
+  if highest < 0:
+    return
+  for slot in 0 ..< PartySize:
+    if world.actors[slot].alive and world.returned[slot] and
+      world.bankedGold[slot] == highest:
+        result[slot] = 1

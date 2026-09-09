@@ -365,3 +365,14 @@ block:
   doAssert outside, "the tracked footman never left the red fort walls"
 
 echo "test_gota_sim: all checks passed"
+
+echo "Testing team victories and timeout standings"
+block:
+  let world = run.world.clone()
+  world.gameOver = false
+  doAssert world.scores() == @[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  world.gameOver = true
+  world.winner = RedTeam
+  doAssert world.scores() == @[1, 1, 1, 1, 1, 0, 0, 0, 0, 0]
+  world.winner = BlueTeam
+  doAssert world.scores() == @[0, 0, 0, 0, 0, 1, 1, 1, 1, 1]

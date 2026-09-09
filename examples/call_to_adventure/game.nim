@@ -14,6 +14,9 @@ import
   controls,
   replays
 
+when defined(coworld):
+  import polyworld/coworld
+
 proc usage() =
   ## Prints the shared Polyworld game command surface.
   echo "Call to Adventure"
@@ -203,9 +206,13 @@ proc runHeadless*() =
     saveRecording()
     for slot in 0 ..< PartySize:
       if run.heroVms[slot] != nil and run.heroVms[slot].failed:
-        echo &"hero {100 + slot} script FAILED: {run.heroVms[slot].lastError}"
+        when not defined(coworld):
+          echo &"hero {100 + slot} script FAILED: {run.heroVms[slot].lastError}"
 
-options = parseGameOptions()
+when defined(coworld):
+  options = coworldOptions(4)
+else:
+  options = parseGameOptions()
 startGameProfile()
 if options.replayPath.len > 0:
   var replayData: ReplayData

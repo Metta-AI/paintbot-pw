@@ -849,3 +849,13 @@ block replayReproducesTheMatch:
     " ticks with no divergence"
 
 echo "test_lvd_sim: all checks passed"
+
+echo "Testing the simulation winner determines standings"
+block:
+  let world = newWorld(map, MatchTicks)
+  world.winner = -1
+  doAssert world.scores() == @[0, 0]
+  world.winner = LightPlayer
+  doAssert world.scores() == @[1, 0]
+  world.winner = DarkPlayer
+  doAssert world.scores() == @[0, 1]

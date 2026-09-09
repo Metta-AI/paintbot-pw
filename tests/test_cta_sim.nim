@@ -192,6 +192,8 @@ block:
   mutates "explored": world.markExplored(TileRef(level: 5, x: 1, z: 1))
   mutates "visible": world.markVisible(3, TileRef(level: 5, x: 1, z: 1))
   mutates "chat": world.chat[2].phrase = 4
+  mutates "personal gold": world.bankedGold[1] = 100
+  mutates "returned heroes": world.returned[2] = true
   mutates "rng": discard world.rng.next()
 
 echo "Testing tile claims are exclusive"
@@ -602,3 +604,44 @@ block:
   doAssert game.world.items[index].tile == hero.home
 
 echo "test_cta_sim: all checks passed"
+
+echo "Testing standings require a living returned hero"
+block:
+  let world = newWorld(testSetup())
+  world.populate()
+  world.bankedGold = [10'i32, 20, 30, 999]
+  doAssert world.scores() == @[0, 0, 0, 0]
+  world.returned[0] = true
+  doAssert world.scores() == @[1, 0, 0, 0]
+  world.returned[1] = true
+  doAssert world.scores() == @[0, 1, 0, 0]
+  world.bankedGold[0] = 20
+  doAssert world.scores() == @[1, 1, 0, 0]
+  world.returned[3] = true
+  world.actors[3].hp = 0
+  doAssert world.scores() == @[1, 1, 0, 0]
+  world.actors[0].hp = 0
+  world.actors[1].hp = 0
+  doAssert world.scores() == @[0, 0, 0, 0]
+
+echo "Testing personal gold is banked before carried gold is cleared"
+block:
+  let game = newGame(2026, 240)
+  game.world.phase = ReturningPhase
+  for slot in 0 ..< PartySize:
+    game.world.actors[slot].carriedValue = int32(slot + 1) * 100
+  proc noDecision(game: Game, slot: int32) =
+    ## Leaves the heroes at the surface for the banking test.
+    discard
+  game.tickWorld(noDecision)
+  doAssert game.world.returned == [true, true, true, true]
+  doAssert game.world.bankedGold == [100'i32, 200, 300, 400]
+  doAssert game.world.banked == 1000
+  for slot in 0 ..< PartySize:
+    doAssert game.world.actors[slot].carriedValue == 0
+  doAssert game.world.scores() == @[0, 0, 0, 1]
+  let snapshot = game.world.clone()
+  game.world.bankedGold[3] = 0
+  game.world.returned[3] = false
+  game.world.restore(snapshot)
+  doAssert game.world.scores() == @[0, 0, 0, 1]
