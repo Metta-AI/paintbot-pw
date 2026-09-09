@@ -7,7 +7,7 @@ import
   ../examples/heartleaf/content,
   ../examples/heartleaf/maps
 
-const SeedsUnderTest = 30
+const SeedsUnderTest = 100
 
 echo "Testing map determinism"
 block sameSeedSameMap:
@@ -78,6 +78,16 @@ block gardensBelongToHouses:
       let garden = map.gardenTiles[slot * GardensPerHouse + i]
       doAssert chebyshev(garden, map.houses[slot].center) <= 8,
         &"garden {i} strayed from house {slot}"
+
+block gardensFormCompactGroups:
+  for seed in 1'i32 .. SeedsUnderTest:
+    let map = generateMap(seed)
+    for slot in 0 ..< VillagerCount:
+      for first in 0 ..< GardensPerHouse:
+        for second in first + 1 ..< GardensPerHouse:
+          doAssert chebyshev(
+            map.gardenTiles[slot * GardensPerHouse + first],
+            map.gardenTiles[slot * GardensPerHouse + second]) == 2
 
 echo "Testing that a broken map is actually caught"
 block validationRejectsABlockedDoor:

@@ -80,6 +80,21 @@ block bushesClearHouseDoors:
         doAssert chebyshev(decoration.tile, house.door) > HouseBushClearance,
           &"seed {seed}: {decoration.node} blocks door {house.door}"
 
+block meadowAndRoadBalance:
+  let map = generateMap(Seed)
+  var trees = 0
+  for decoration in placeDecor(map, Seed):
+    if decoration.area == RoadArea:
+      doAssert decoration.node notin ["bush_01a", "flower_bush_01a"]
+    if decoration.area == MeadowArea:
+      for garden in map.gardenTiles:
+        doAssert chebyshev(decoration.tile, garden) > 1
+      for house in map.houses:
+        doAssert chebyshev(decoration.tile, house.door) > HouseBushClearance
+      if decoration.node in ["tree_05a", "tree_06a"]:
+        inc trees
+  doAssert trees >= 20
+
 echo "Testing that every node exists in its kit"
 block nodesExist:
   for kit in DecorKit:
