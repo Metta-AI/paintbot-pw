@@ -56,6 +56,9 @@ const
     "decisionPeriod"
   ]
 
+const HarvestLeadTiles = 3'i32
+  ## A smaller distance difference is still a competitive race.
+
 var
   activeGame: Game
   villagerDataIds: array[VillagerDataSlot, int32]
@@ -100,6 +103,31 @@ proc clampVeggie(value: int32): int32 =
   ## Folds any argument into the vegetable range so a bad index reads as
   ## zeroes instead of crashing the host.
   if value < 0 or value >= VeggieKinds: -1 else: value
+
+proc gardenOutpaced*(w: World, slot, garden: int32): bool =
+  ## Estimates losing races from grid distance and an opponent's gather order.
+  if garden < 0 or garden >= int32(GardenCount) or w.gardens[garden] < 0:
+    return false
+  let
+    goal = w.map.gardenTiles[garden]
+    distance = chebyshev(w.villagers[slot].tile, goal)
+  for other in w.villagers:
+    if other.slot != slot and other.inHouse < 0 and
+        other.order == GatherOrder and other.orderTarget == garden and
+        chebyshev(other.tile, goal) + HarvestLeadTiles <= distance:
+      return true
+
+proc nearestWinnableGarden*(w: World, slot: int32): int32 =
+  ## Finds the nearest stocked plot without a clearly leading competitor.
+  result = -1
+  var best = int32.high
+  for garden in 0'i32 ..< int32(GardenCount):
+    if w.gardens[garden] < 0:
+      continue
+    let distance = chebyshev(w.villagers[slot].tile, w.map.gardenTiles[garden])
+    if distance < best and not w.gardenOutpaced(slot, garden):
+      best = distance
+      result = garden
 
 proc buildVillagerHost*(slot: int32): Host =
   ## Builds the complete world-query and command interface for one villager.
@@ -155,6 +183,16 @@ proc buildVillagerHost*(slot: int32): Host =
         best = distance
         result = garden
   discard result.addFunction("nearestStockedGarden", 0, nearestStockedProc, 40)
+
+  let nearestWinnableProc: HostProc = proc(
+      arguments: openArray[int32]): int32 =
+    game.nearestWinnableGarden(slot)
+  discard result.addFunction("nearestWinnableGarden", 0, nearestWinnableProc, 400)
+
+  let gardenOutpacedProc: HostProc = proc(
+      arguments: openArray[int32]): int32 =
+    int32(game.gardenOutpaced(slot, arguments[0]))
+  discard result.addFunction("gardenOutpaced", 1, gardenOutpacedProc, 20)
 
   ## The other villagers. A villager inside a house reads as standing on
   ## that house's doorstep.

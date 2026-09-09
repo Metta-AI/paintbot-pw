@@ -24,7 +24,8 @@
 ' QUERIES
 '   invOf(v) eatenOf(v)                    your bag and your palate
 '   gardenX(i) gardenY(i) gardenVeggie(i)  gardenVeggie is -1 when bare
-'   nearestStockedGarden()                 garden id or -1
+'   nearestStockedGarden() nearestWinnableGarden()  garden id or -1
+'   gardenOutpaced(i)                      another gatherer leads by 3+ tiles
 '   villagerX(s) villagerY(s) villagerInHouse(s) villagerHosting(s)
 '   villagerCarried(s) villagerScore(s) inviteFrom(s)
 '   doorX(h) doorY(h) occupants(h)
@@ -68,8 +69,25 @@ end sub
 
 sub leisure()
   f = orderFailed()
+  ' Reconsider clear losses every two seconds, but stay in close races.
+  if worldTick >= harvestCheck then
+    harvestCheck = worldTick + 48
+    if orderKind = 2 then
+      if gardenOutpaced(orderTarget) = 1 then
+        r = cancel()
+      end if
+    else
+      if orderKind = 1 then
+        g = nearestWinnableGarden()
+        if g >= 0 then
+          r = gather(g)
+          wandering = 0
+        end if
+      end if
+    end if
+  end if
   if orderKind = 0 then
-    g = nearestStockedGarden()
+    g = nearestWinnableGarden()
     if g >= 0 then
       r = gather(g)
       wandering = 0
@@ -178,6 +196,9 @@ end sub
 if dayMark <> day then
   dayMark = day
   returningHome = 0
+  harvestCheck = 0
+  houseCheck = 0
+  houseTarget = -1
   wandering = 0
   pauseUntil = 0
   socialAfter = worldTick + 240 + selfSlot * 48
@@ -186,6 +207,21 @@ if dayMark <> day then
     invitedMark(s) = 0
     s = s + 1
   wend
+end if
+
+' Retry a house approach if it has made no tile progress for two seconds.
+if worldTick >= houseCheck then
+  houseCheck = worldTick + 48
+  if orderKind = 3 then
+    if houseTarget = orderTarget and distTo(houseX, houseY) <= 1 then
+      r = enterHouse(orderTarget)
+    end if
+    houseTarget = orderTarget
+    houseX = myX
+    houseY = myY
+  else
+    houseTarget = -1
+  end if
 end if
 
 ' Am I due to host tonight? Rotation puts three hosts on every night.

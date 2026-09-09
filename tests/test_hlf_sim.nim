@@ -202,6 +202,79 @@ block gatherRace:
     "the losing gatherer was never told"
   doAssert w.gardens[garden] < 0, "the plot still holds food"
 
+block competitiveHarvesting:
+  let w = newWorld(gameMap, 7)
+  for garden in 0 ..< GardenCount:
+    w.gardens[garden] = EmptyGarden
+  w.map.gardenTiles[0] = tile2(64, 64)
+  w.map.gardenTiles[1] = tile2(64, 80)
+  w.gardens[0] = 0
+  w.gardens[1] = 1
+  let
+    me = w.villagers[0]
+    rival = w.villagers[1]
+  me.tile = tile2(64, 58)
+  rival.tile = tile2(64, 62)
+  rival.order = GatherOrder
+  rival.orderTarget = 0
+  doAssert w.gardenOutpaced(0, 0)
+  doAssert w.nearestWinnableGarden(0) == 1,
+    "a clearly losing gatherer ignored an uncontested crop"
+  me.tile = tile2(64, 63)
+  doAssert not w.gardenOutpaced(0, 0)
+  doAssert w.nearestWinnableGarden(0) == 0,
+    "the closer gatherer yielded a winning race"
+  me.tile = rival.tile
+  doAssert w.nearestWinnableGarden(0) == 0, "a tied race was abandoned"
+  me.tile = tile2(64, 60)
+  doAssert not w.gardenOutpaced(0, 0), "a close race was abandoned"
+  me.tile = tile2(64, 58)
+  rival.order = MoveOrder
+  doAssert w.nearestWinnableGarden(0) == 0,
+    "an unrelated passerby deterred harvesting"
+  rival.order = GatherOrder
+  rival.orderTarget = 1
+  doAssert w.nearestWinnableGarden(0) == 0
+  rival.orderTarget = 0
+  rival.inHouse = 1
+  doAssert w.nearestWinnableGarden(0) == 0
+  rival.inHouse = NoHouse
+  w.gardens[1] = EmptyGarden
+  doAssert w.nearestWinnableGarden(0) == -1,
+    "a losing gatherer chased the last contested crop"
+  rival.order = NoOrder
+  doAssert w.nearestWinnableGarden(0) == 0,
+    "an abandoned crop did not become an opportunity again"
+  w.gardens[0] = EmptyGarden
+  doAssert w.nearestWinnableGarden(0) == -1
+
+block botAbandonsClearLoss:
+  let game = newGame(gameMap, 7)
+  var sources = newSeq[string](VillagerCount)
+  for source in sources.mitems:
+    source = "r = 0"
+  sources[0] = readFile("examples/heartleaf/players/base.bas")
+  loadBots(game, sources)
+  let w = game.world
+  for garden in 0 ..< GardenCount:
+    w.gardens[garden] = EmptyGarden
+  w.map.gardenTiles[0] = tile2(64, 64)
+  w.gardens[0] = 0
+  w.villagers[0].tile = tile2(64, 56)
+  w.villagers[1].tile = tile2(64, 62)
+  for slot in 0 .. 1:
+    w.villagers[slot].order = GatherOrder
+    w.villagers[slot].orderTarget = 0
+  runBotDecisions(game)
+  doAssert not game.brains[0].failed
+  doAssert w.villagers[0].order == NoOrder,
+    "the script kept following a clearly losing gather order"
+  w.villagers[1].order = NoOrder
+  w.tick += DecisionTicks
+  runBotDecisions(game)
+  doAssert w.villagers[0].order == GatherOrder,
+    "the script failed to resume harvesting when its rival gave up"
+
 block houseRules:
   var w = newWorld(gameMap, 7)
   doAssert not w.applyExitHouse(0), "exited a house while outdoors"
@@ -240,6 +313,10 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
     let previousPhase = game.world.phase
     game.world.tickWorld(decide)
     let w = game.world
+    if previousPhase == DaytimePhase and w.phase == EveningPhase:
+      for veggie in w.gardens:
+        doAssert veggie == EmptyGarden,
+          &"seed {seed}: competitive harvesting left crops on day {w.day}"
     if w.phase == DaytimePhase and w.tick mod (2 * TickRate) == 0 and
         w.minuteOfDay >= 12 * 60 and w.minuteOfDay < 16 * 60:
       inc samples

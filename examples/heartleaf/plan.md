@@ -105,7 +105,15 @@ props bake exactly once.
 
 ## The scripted villager
 
-`players/base.bas` gathers available crops, then spends free time around
+`players/base.bas` chooses the nearest crop it can plausibly win. Another
+outdoor villager counts as a competitor only while gathering that same plot;
+a lead of at least three grid tiles makes the race a clear loss. Ties and
+smaller leads remain competitive. Active gatherers reconsider clear losses
+every two seconds, keeping their target otherwise. Walking villagers also
+check for newly winnable crops, without inventory caps or harvesting breaks.
+These are grid-distance estimates, not exact path travel times.
+
+When no crop looks winnable, the bot spends free time around
 home gardens, neighboring yards, and occasionally the square. Outdoor
 neighbors within sixteen tiles are occasional social destinations, with
 thirty to sixty seconds between opportunities. A visit targets a fixed
@@ -122,6 +130,8 @@ about two game minutes per tile plus a half-hour margin and never stands
 outside at six. After dinner they collect leftovers, then return to their
 own house before curfew using the same travel margin and a 20:00 latest
 departure. Once heading home, they stay committed until the next morning.
+House approaches are retried after two seconds without meaningful tile
+progress, allowing recovery from a stuck approach.
 
 ## Determinism notes
 
@@ -129,8 +139,7 @@ departure. Once heading home, they stay committed until the next morning.
   and clear, so a live game and its replay legitimately differ there while
   the simulation itself stays bit-exact. This showed up as 41k hash
   mismatches on the very first record/replay run.
-- The dinner shuffle is the only rng the tally consumes; the bite draw is
-  deterministic so the divergence surface stays small.
+- Dinner seating and bite selection use the deterministic world RNG.
 - The 17:59 door crush is real: nine bodies shove on one doorstep, so
   `enterHouse` accepts from a king-move of one around the door tile and
   `tests/test_hlf_sim.nim` sends all nine through one door.
