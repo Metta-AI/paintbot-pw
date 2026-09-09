@@ -335,40 +335,41 @@ proc buildMap(seed: int32): MapData =
           int32(tops[2]) + int32(tops[3])) div 4
       )
 
+  ## Gardens: three tilled plots in the grass near each house. A plot must be
+  ## walkable and keep a tile of spacing from its neighbours so gathering
+  ## villagers do not stand in each other's beds.
   var placed = 0
   for slot in 0 ..< VillagerCount:
     let center = houses[slot].center
+    var found = 0
     for attempt in 0 ..< GardenAttempts:
+      if found >= GardensPerHouse:
+        break
       let
-        anchor = tile2(
-          int32(center.x) + rng.below(GardenMaxReach * 2 + 1) - GardenMaxReach,
-          int32(center.y) + rng.below(GardenMaxReach * 2 + 1) - GardenMaxReach)
-        sx = if rng.below(2) == 0: -2'i32 else: 2'i32
-        sy = if rng.below(2) == 0: -2'i32 else: 2'i32
-        beds = [anchor, tile2(int32(anchor.x) + sx, int32(anchor.y)),
-          tile2(int32(anchor.x), int32(anchor.y) + sy)]
-      var fits = true
-      for bed in beds:
-        let reach = chebyshev(bed, center)
-        if not inGrid(bed) or reach < GardenMinReach or reach > GardenMaxReach:
-          fits = false
-          break
-        let index = tileIndex(bed)
-        if map.kinds[index] != uint8(GrassTile) or map.passable[index] == 0:
-          fits = false
-          break
-        for existing in 0 ..< placed:
-          if chebyshev(map.gardenTiles[existing], bed) <= 1:
-            fits = false
-            break
-      if not fits:
+        x = int32(center.x) +
+          rng.below(GardenMaxReach * 2 + 1) - GardenMaxReach
+        y = int32(center.y) +
+          rng.below(GardenMaxReach * 2 + 1) - GardenMaxReach
+        reach = max(abs(x - int32(center.x)), abs(y - int32(center.y)))
+      if reach < GardenMinReach or reach > GardenMaxReach:
         continue
-      for bed in beds:
-        map.gardenTiles[placed] = bed
-        map.kinds[tileIndex(bed)] = uint8(GardenTileKind)
-        groundLayer.tiles[tileIndex(bed)].kind = GardenTileKind
-        inc placed
-      break
+      if not inGrid(x, y):
+        continue
+      let index = tileIndex(x, y)
+      if map.kinds[index] != uint8(GrassTile) or map.passable[index] == 0:
+        continue
+      var crowded = false
+      for existing in 0 ..< placed:
+        if chebyshev(map.gardenTiles[existing], tile2(x, y)) <= 1:
+          crowded = true
+          break
+      if crowded:
+        continue
+      map.gardenTiles[placed] = tile2(x, y)
+      map.kinds[index] = uint8(GardenTileKind)
+      groundLayer.tiles[index].kind = GardenTileKind
+      inc placed
+      inc found
 
   ## Fingerprint. Covers the packed terrain, walkability, and every village
   ## placement, so a generator change is caught at replay load rather than

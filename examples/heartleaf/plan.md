@@ -48,7 +48,7 @@ meadow pressed flat inside the village ring, nine houses on a jittered
 ring of unit-circle points around a round paved plaza with a one-tile
 dirt apron and a blocked three-by-three well footprint at its centre,
 five-by-five house footprints, two-wide dirt roads from every door to the plaza plus a
-one-wide ring path, three garden plots grouped in an L-shaped garden near each house, and
+one-wide ring path, three garden plots spread through the grass near each house, and
 a noise-gated forest thickening to a solid wall at the map edge. A flood fill from the plaza must reach every door and
 every garden or the generator retries the seed deterministically.
 
@@ -168,21 +168,21 @@ into the terrain mesh once with the houses.
   table, a bench with pots, a cart with barrels, or sacks and a crate; a
   signpost, a fence pole with the sign board hung on it, beside every
   third entrance.
-- Houses: a mailbox beside the door, flower pots flanking it, three
-  flower beds and one bush in the yard.
-- Gardens: three permanent crop pots spaced two tiles apart, a spare corner
-  containing a bucket, bench, or flowers, and a short fence where space permits.
-- Meadow: spaced islands of two small trees, a bush, flowers, and a rock,
-  with clear space around garden plots, doors, and roads.
-- Road verges: lamp posts spaced along the roads, with occasional tufts,
-  small rocks, and flowers. Everything that
-  grew or was left lying varies in size; everything gnomes made does not.
-- Outskirts: small rocks at the feet of the forest trees and the odd
-  medium one.
+- Houses: a mailbox beside the door, flower pots flanking it, five
+  flower beds and two bushes in the yard.
+- Gardens: permanent crop pots at the original scattered garden positions,
+  with flowers beside them.
+- Meadow: up to 95 patches of low bushes, flowers, and rocks. Only one in
+  four patches receives a small tree, keeping villagers visible. Tree
+  heights vary around 3.2 tiles; bushes around 0.8 tiles. The village
+  interior is planted first, with clearance around crops, doors, and roads.
+- Road verges: spaced lamp posts, with tufts, small rocks, flowers, and low
+  bushes on roughly half the available verge tiles.
+- Outskirts: low bushes, flowers, grass clumps, and rocks begin before the
+  forest boundary and become more frequent beside forest trees.
 
-Grouping the garden plots changes the map fingerprint. Replays recorded
-with the older generator are rejected; the bundled demo uses the grouped
-gardens.
+Garden placement and the bundled demo use the original map generator.
+Meadow planting is presentation-only and does not change simulation state.
 
 Every height and probability is a const at the top of `decor.nim`. The
 loader keeps only the named nodes from each kit and draws them textured,
