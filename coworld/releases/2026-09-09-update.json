@@ -1,0 +1,1855 @@
+{
+  "recorded_at": "2026-09-09T22:55:58.948724+00:00",
+  "version": "2026.9.9.4",
+  "source": {
+    "polyworld": "d8960441d675caa5e403154ebc30487108e8be32",
+    "branch": "master",
+    "metta_tooling": "b8b89256ffa9810aa93f195d56505b0271810fa5",
+    "assets": "1915026884331904860d81648e4d1559ea06eb51",
+    "lock_sha256": {
+      "nimby.lock": "6fd517388ea867e6c57192507df2d276b1e4a528275c0a97b179f1e33c88b354",
+      "coworld/dependencies.lock": "818f72c99c2fb4694e88a3837fca0f5392d27bb916a1da1d4f9bfa06fe074508"
+    }
+  },
+  "verification": {
+    "checks": "nim check tests/tests.nim and nim r tests/tests.nim passed.",
+    "local_certification": {
+      "gota": {
+        "artifacts": "/Users/me/p/metta-polyworld-coworld/tmp/coworld-cert-w9q779pq",
+        "results": {
+          "scores": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "ticks": 13548,
+          "seed": 2026,
+          "outcome": "RedTeam",
+          "banked_gold": [],
+          "returned": []
+        },
+        "replay_sha256": "eb7b1df4a2b409879da1e6cf94c166894622396d2cd1a3a8e4e96ae9857bb7bc"
+      },
+      "lvd": {
+        "artifacts": "/Users/me/p/metta-polyworld-coworld/tmp/coworld-cert-y49599pw",
+        "results": {
+          "scores": [
+            0,
+            1
+          ],
+          "ticks": 28800,
+          "seed": 2026,
+          "outcome": "winner_1",
+          "banked_gold": [],
+          "returned": []
+        },
+        "replay_sha256": "ceb144487b413b86835c486941ba16178b76a53108c586e0cf1250e4f15f4c8e"
+      },
+      "cta": {
+        "artifacts": "/Users/me/p/metta-polyworld-coworld/tmp/coworld-cert-2mo90utb",
+        "results": {
+          "scores": [
+            0,
+            0,
+            1,
+            0
+          ],
+          "ticks": 15029,
+          "seed": 2026,
+          "outcome": "escaped",
+          "banked_gold": [
+            348,
+            393,
+            4531,
+            713
+          ],
+          "returned": [
+            true,
+            true,
+            true,
+            true
+          ]
+        },
+        "replay_sha256": "7d751770f73ccb97c38c3bb9aece95b903442b94fe1ed680e3519fae1e458d0c"
+      }
+    },
+    "builds": {
+      "gota": {
+        "image": "polyworld-gota-coworld:coworld-28bdbd6ae4cf",
+        "source_url": "https://github.com/Metta-AI/polyworld/tree/d8960441d675caa5e403154ebc30487108e8be32/examples/gods_of_the_arena",
+        "files": {
+          "index.html": "48b85655e01db64019cedfaad123213bb10a3130b872969fa15d276c3b556419",
+          "gota.wasm": "574f4a9d5c5c7f0cefb2938615f320e6d3684e9d64b027ff64f0483461c29285",
+          "gota.js": "21bd2b1aa5f17561359d2cff55807cbf26e7c4e0bd423b16bf0ce6f7e843507b",
+          "gota.data": "3b484a597bcb9b19e378447fc38c56f8206e2cb49aa462f101211fbb1f9a7db1"
+        }
+      },
+      "lvd": {
+        "image": "polyworld-lvd-coworld:coworld-0a3bab18e876",
+        "source_url": "https://github.com/Metta-AI/polyworld/tree/d8960441d675caa5e403154ebc30487108e8be32/examples/light_vs_dark",
+        "files": {
+          "index.html": "946d77a5f0483454fc85cff4f773ed7e106cba05d3366d9b273a078b3af85a4b",
+          "lvd.js": "366fc478284c1f3d8c24236995855997160bd238f973ca84e09c8506a0426049",
+          "lvd.wasm": "1a604e8fc86b2034b69ab97a5161074a76cfd478c89faa17c33de9abba9f6380",
+          "lvd.data": "a8e1cbaea4655167396b3d1a1f52fcfc7afb8bcdca87df0f7cdccac05c54087c"
+        }
+      },
+      "cta": {
+        "image": "polyworld-cta-coworld:coworld-ce2a5c9c33c3",
+        "source_url": "https://github.com/Metta-AI/polyworld/tree/d8960441d675caa5e403154ebc30487108e8be32/examples/call_to_adventure",
+        "files": {
+          "index.html": "1408edaf3ccfdff70d66c2a0c7356fb5deac8fd23d0c758cbb7f025f7ac7d289",
+          "cta.wasm": "6daed38c0d21fcf7a9bf62bd2b04ad283eac7bd972eeea3d03ad12b405d244b5",
+          "cta.js": "9376d1a853ee94661ef62f1f102da13b00149578b354039e98ce1e25f17d3402",
+          "cta.data": "78820db49663bdb4a4456ff19c89163ba44696ac3e0707f5d293ca952d675132"
+        }
+      }
+    },
+    "local_browser": {
+      "gota": {
+        "native_replay": "eb7b1df4a2b409879da1e6cf94c166894622396d2cd1a3a8e4e96ae9857bb7bc",
+        "first_frame_rendered": true,
+        "loop_control_enabled": true,
+        "browser_errors": [],
+        "browser": "Codex in-app browser on macOS ARM"
+      },
+      "lvd": {
+        "native_replay": "ceb144487b413b86835c486941ba16178b76a53108c586e0cf1250e4f15f4c8e",
+        "first_frame_rendered": true,
+        "loop_control_enabled": true,
+        "browser_errors": [],
+        "browser": "Codex in-app browser on macOS ARM"
+      },
+      "cta": {
+        "native_replay": "7d751770f73ccb97c38c3bb9aece95b903442b94fe1ed680e3519fae1e458d0c",
+        "first_frame_rendered": true,
+        "loop_control_enabled": true,
+        "browser_errors": [],
+        "browser": "Codex in-app browser on macOS ARM"
+      }
+    },
+    "hosted_browser": {
+      "gota": {
+        "browser": "Codex in-app browser on macOS ARM",
+        "hub_url": "https://softmax.com/gods-of-the-arena",
+        "hub_episode_id": "ereq_d0dfacbc-36b1-4d7b-ba64-75217e54a3f1",
+        "served_coworld_id": "cow_eca75986-4007-4dc7-be31-8f1f40ea2287",
+        "served_manifest_hash": "sha256:9be20f21e5b606ab72cd96a51d29b78d1254bdcc5fe4d43eadc50a708f3a2682",
+        "hub_rendered": true,
+        "loading_overlay_cleared": true,
+        "loop_control_enabled": true,
+        "runtime_errors": [],
+        "initial_asset_download_diagnostics": "Emscripten emitted waiting-on-datafile diagnostics during the first download; loading completed successfully.",
+        "experience_replays": {
+          "explicit_experience": {
+            "episode_id": "ereq_df52e4f1-7442-449d-8dd2-017414036980",
+            "rendered": true,
+            "loading_overlay_cleared": true,
+            "loop_control_enabled": true,
+            "browser_errors": []
+          },
+          "league_experience": {
+            "episode_id": "ereq_4b2416c8-507f-4631-9149-31f77daf8e96",
+            "rendered": true,
+            "loading_overlay_cleared": true,
+            "loop_control_enabled": true,
+            "browser_errors": []
+          }
+        }
+      },
+      "lvd": {
+        "browser": "Codex in-app browser on macOS ARM",
+        "hub_url": "https://softmax.com/light-vs-dark",
+        "hub_episode_id": "ereq_e6ee5d42-dba7-4720-9f89-c95af279c154",
+        "served_coworld_id": "cow_a15fa579-49fb-4427-ab3f-7d8c488dda81",
+        "served_manifest_hash": "sha256:25d3524b18bdd39ee70d0f85c8047d5ddc8fdab49536612351a8000fee8470b3",
+        "hub_rendered": true,
+        "loading_overlay_cleared": true,
+        "loop_control_enabled": true,
+        "runtime_errors": [],
+        "initial_asset_download_diagnostics": "Emscripten emitted waiting-on-datafile diagnostics during the first download; loading completed successfully.",
+        "experience_replays": {
+          "explicit_experience": {
+            "episode_id": "ereq_999bdf15-fb0f-42cc-9bca-c24f2b5da972",
+            "rendered": true,
+            "loading_overlay_cleared": true,
+            "loop_control_enabled": true,
+            "browser_errors": []
+          },
+          "league_experience": {
+            "episode_id": "ereq_c5a9decb-e814-4bef-9d6d-6f8ba3de3c31",
+            "rendered": true,
+            "loading_overlay_cleared": true,
+            "loop_control_enabled": true,
+            "browser_errors": []
+          }
+        }
+      },
+      "cta": {
+        "browser": "Codex in-app browser on macOS ARM",
+        "hub_url": "https://softmax.com/call-to-adventure",
+        "hub_episode_id": "ereq_bf6444bb-1689-4308-a850-d1a575cf7a78",
+        "served_coworld_id": "cow_2e4565e4-0673-4d0e-99fc-6861be7f4c51",
+        "served_manifest_hash": "sha256:2a2144cdf45f552a70c2f4837ea391bb5bdd5a4a7e66a55737bebe513d49273b",
+        "hub_rendered": true,
+        "loading_overlay_cleared": true,
+        "loop_control_enabled": true,
+        "runtime_errors": [],
+        "initial_asset_download_diagnostics": null,
+        "experience_replays": {
+          "explicit_experience": {
+            "episode_id": "ereq_4779c1be-4cc4-4458-84a7-e2f0b4fe0d75",
+            "rendered": true,
+            "loading_overlay_cleared": true,
+            "loop_control_enabled": true,
+            "browser_errors": []
+          },
+          "league_experience": {
+            "episode_id": "ereq_b90502bb-ad3f-478f-8643-498513b61dd2",
+            "rendered": true,
+            "loading_overlay_cleared": true,
+            "loop_control_enabled": true,
+            "browser_errors": []
+          }
+        }
+      }
+    }
+  },
+  "games": {
+    "gota": {
+      "coworld_id": "cow_eca75986-4007-4dc7-be31-8f1f40ea2287",
+      "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+      "division_id": "div_a4534073-c5d2-4193-a94a-93d9c5e2e443",
+      "version": "2026.9.9.4",
+      "certification": {
+        "coworld_id": "cow_eca75986-4007-4dc7-be31-8f1f40ea2287",
+        "state": "certified",
+        "certified": true,
+        "contract_version": "main-f16254ec03f4",
+        "certification_job_id": "d059870e-974f-4152-953f-9ddf20ae58bc",
+        "failed_step": null,
+        "failure": null,
+        "transcript_summary": [
+          {
+            "id": "matriculate",
+            "status": "pass"
+          },
+          {
+            "id": "source-resolves",
+            "status": "pass"
+          },
+          {
+            "id": "images-reachable",
+            "status": "pass"
+          },
+          {
+            "id": "fixture-conforms",
+            "status": "pass"
+          },
+          {
+            "id": "smoke-episode",
+            "status": "pass"
+          },
+          {
+            "id": "results-conform",
+            "status": "pass"
+          },
+          {
+            "id": "replay-present",
+            "status": "pass"
+          },
+          {
+            "id": "replay-loadable",
+            "status": "pass"
+          },
+          {
+            "id": "players-run",
+            "status": "pass"
+          },
+          {
+            "id": "supporting-roles",
+            "status": "pass"
+          }
+        ],
+        "completed_at": "2026-09-09T22:49:34.151269Z"
+      },
+      "smoke": [
+        {
+          "id": "ereq_5969f06f-3331-4fe8-b7cd-0a5ba6d18019",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_75e91912-261b-4635-8b4f-eb1dc52dc917",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_7e44e877-6a94-4af3-ac60-caf2c05883f5",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_8231bea5-2ddf-4711-978f-f4ae806e7b76",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_86260628-84ae-464a-ba0f-2d0a98db3bac",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "entrant": {
+        "id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+        "name": "Polyworld GOTA base.bas",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "filler": {
+        "id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+        "name": "Polyworld GOTA Baseline Filler",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "artifact_checks": [
+        {
+          "id": "ereq_df52e4f1-7442-449d-8dd2-017414036980",
+          "round_id": null,
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/9e089d75-d1f6-4963-b9a0-f0fa91f2c895.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_df52e4f1-7442-449d-8dd2-017414036980/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            },
+            {
+              "slot": 2,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+            },
+            {
+              "slot": 3,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+            },
+            {
+              "slot": 4,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+            },
+            {
+              "slot": 5,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+            },
+            {
+              "slot": 6,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+            },
+            {
+              "slot": 7,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+            },
+            {
+              "slot": 8,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+            },
+            {
+              "slot": 9,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+            }
+          ],
+          "outcome": {
+            "scores": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "ticks": 28800,
+            "seed": 969833873,
+            "outcome": "time_limit",
+            "banked_gold": [],
+            "returned": []
+          },
+          "results": {
+            "bytes": 117,
+            "sha256": "5910a4bdfff49752ef922fe1b7fa705b00ce0f30882ad1f7f510e18f49e86d65"
+          },
+          "logs": {
+            "bytes": 1366,
+            "sha256": "7704b3ab101492c660eb13f800f6285e3c87a1b97f4372291ea5efa7d97252de"
+          },
+          "replay": {
+            "bytes": 5408278,
+            "sha256": "74f534525d2dfb206f51ac618df11022fa07483cb2627b0ab2cad0f09cee9f03"
+          }
+        },
+        {
+          "id": "ereq_4b2416c8-507f-4631-9149-31f77daf8e96",
+          "round_id": null,
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/6cf15cf3-b9a2-424c-a9a7-364ce463e391.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_4b2416c8-507f-4631-9149-31f77daf8e96/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            },
+            {
+              "slot": 2,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+            },
+            {
+              "slot": 3,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+            },
+            {
+              "slot": 4,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+            },
+            {
+              "slot": 5,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+            },
+            {
+              "slot": 6,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+            },
+            {
+              "slot": 7,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+            },
+            {
+              "slot": 8,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+            },
+            {
+              "slot": 9,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+            }
+          ],
+          "outcome": {
+            "scores": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "ticks": 13788,
+            "seed": 331929413,
+            "outcome": "BlueTeam",
+            "banked_gold": [],
+            "returned": []
+          },
+          "results": {
+            "bytes": 115,
+            "sha256": "886e0e23fe7703822c88b49362040ba715360cd7ee63cb0ba0ecad27d215d67d"
+          },
+          "logs": {
+            "bytes": 1353,
+            "sha256": "e0a8ec8d07c704a76610099cf9095694c74020d7825c519e1c04f5cce27f7898"
+          },
+          "replay": {
+            "bytes": 2592562,
+            "sha256": "9141790bce6be45437b8399d2b6d9eeac5cd6135c5ee94b15a199359ee9cb0ce"
+          }
+        },
+        {
+          "id": "ereq_d0dfacbc-36b1-4d7b-ba64-75217e54a3f1",
+          "round_id": "round_79cb81e4-0382-452c-836c-3c08ef288246",
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/de7c8595-4eb9-4d88-8719-de586f5b8574.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_d0dfacbc-36b1-4d7b-ba64-75217e54a3f1/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "fa00903c-0ba4-4eec-b20f-4c082550d80f",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            },
+            {
+              "slot": 2,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+            },
+            {
+              "slot": 3,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+            },
+            {
+              "slot": 4,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+            },
+            {
+              "slot": 5,
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "bytes": 49,
+              "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+            },
+            {
+              "slot": 6,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+            },
+            {
+              "slot": 7,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+            },
+            {
+              "slot": 8,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+            },
+            {
+              "slot": 9,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+            }
+          ],
+          "filler_slots": [
+            1,
+            2,
+            3,
+            4,
+            6,
+            7,
+            8,
+            9
+          ],
+          "outcome": {
+            "scores": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "ticks": 13182,
+            "seed": 1529563662,
+            "outcome": "RedTeam",
+            "banked_gold": [],
+            "returned": []
+          },
+          "results": {
+            "bytes": 115,
+            "sha256": "3b2f497d4d5ba201d88157941e3a52757082fac935fd4d2465e62faf83f9b1da"
+          },
+          "logs": {
+            "bytes": 1350,
+            "sha256": "69a75605367f30dd5dee221a586da93f2b02533fed99817b1e241377f8934108"
+          },
+          "replay": {
+            "bytes": 2586434,
+            "sha256": "d3c659ff6420bd0ef888366283b96b406789ead942a5dded730b97ecd7afca97"
+          }
+        },
+        {
+          "id": "ereq_e66147a9-e5aa-4442-8dfd-5cfb71acdc15",
+          "round_id": "round_79cb81e4-0382-452c-836c-3c08ef288246",
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/c421063e-e44f-483a-995a-29cf9df0b755.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_e66147a9-e5aa-4442-8dfd-5cfb71acdc15/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "fa00903c-0ba4-4eec-b20f-4c082550d80f",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            },
+            {
+              "slot": 2,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+            },
+            {
+              "slot": 3,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+            },
+            {
+              "slot": 4,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+            },
+            {
+              "slot": 5,
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "bytes": 49,
+              "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+            },
+            {
+              "slot": 6,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+            },
+            {
+              "slot": 7,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+            },
+            {
+              "slot": 8,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+            },
+            {
+              "slot": 9,
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "bytes": 49,
+              "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+            }
+          ],
+          "filler_slots": [
+            1,
+            2,
+            3,
+            4,
+            6,
+            7,
+            8,
+            9
+          ],
+          "outcome": {
+            "scores": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "ticks": 7159,
+            "seed": 1529563661,
+            "outcome": "RedTeam",
+            "banked_gold": [],
+            "returned": []
+          },
+          "results": {
+            "bytes": 114,
+            "sha256": "ae192b05ef82868edbae472dd9e61289726d973a7920a0a23a20444ae5cf3079"
+          },
+          "logs": {
+            "bytes": 1347,
+            "sha256": "8dc779a94466a3b255f8da9c0662e4d66ecb5f75535f84126675865f4c97b456"
+          },
+          "replay": {
+            "bytes": 1401110,
+            "sha256": "94112e4c9921264acad0b8a0d0e56515a4176b3643b2c417b5ac7aab74355f93"
+          }
+        }
+      ],
+      "manifest_hash": "sha256:9be20f21e5b606ab72cd96a51d29b78d1254bdcc5fe4d43eadc50a708f3a2682",
+      "league_game_id": "cow_eca75986-4007-4dc7-be31-8f1f40ea2287",
+      "round_interval_minutes": 30,
+      "scheduling_enabled": true,
+      "active_champions": 2,
+      "rounds": [
+        {
+          "id": "round_79cb81e4-0382-452c-836c-3c08ef288246",
+          "round_number": 9,
+          "commissioner_key": "platform",
+          "execution_backend": "dispatch",
+          "round_config": {
+            "stages": null,
+            "purpose": "ladder",
+            "entrant_attributions": [
+              {
+                "subject_id": "ply_3d22435e-30a2-4f2a-b037-a5c249583788",
+                "subject_type": "player",
+                "policy_version_id": "fa00903c-0ba4-4eec-b20f-4c082550d80f",
+                "league_policy_membership_id": "lpm_4c6982f4-c333-4521-9f67-14538d7dbc6f"
+              },
+              {
+                "subject_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+                "subject_type": "player",
+                "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+                "league_policy_membership_id": "lpm_3a952c74-b355-4152-afbb-84d72866536f"
+              }
+            ],
+            "entrant_policy_version_ids": [
+              "fa00903c-0ba4-4eec-b20f-4c082550d80f",
+              "e8aed568-d03c-49bf-beaf-68c731f05d26"
+            ]
+          },
+          "round_display": null,
+          "status": "completed",
+          "error": null,
+          "started_at": null,
+          "completed_at": "2026-09-09T22:52:20.611250Z",
+          "division": {
+            "id": "div_a4534073-c5d2-4193-a94a-93d9c5e2e443",
+            "name": "Competition",
+            "level": 1,
+            "type": "competition",
+            "hidden": false,
+            "league": {
+              "id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+              "name": "Gods of the Arena",
+              "slug": null,
+              "game": {
+                "id": "game_e6b33734-d7f4-40c9-be09-7967baf1c032",
+                "name": "Gods Of The Arena",
+                "slug": null,
+                "coworld_name": "Gods of the Arena",
+                "coworld_id": null,
+                "description": "Two teams of five BASIC heroes battle to destroy the enemy fort. Every hero on the winning team scores one win. A time limit without a fort victory gives everyone zero.",
+                "created_at": "2026-09-09T19:22:39.991124Z",
+                "owner_user_id": "system",
+                "notes": null,
+                "default_league_id": null,
+                "canonical_coworld_id": null,
+                "coworld_tags": []
+              },
+              "commissioner_key": "platform",
+              "commissioner_config": {
+                "default_variant_id": "competition"
+              },
+              "public": true,
+              "hidden": false,
+              "is_game_of_week": false,
+              "created_at": "2026-09-09T19:22:40.020134Z",
+              "disabled_at": null,
+              "short_name": null,
+              "description": "Gods of the Arena league for submitted policies and recurring competition rounds.",
+              "commissioner_migration_version": null,
+              "rounds_paused_at": null,
+              "submissions_locked_at": null,
+              "settings": {
+                "ladder": {
+                  "enabled": true,
+                  "ranking": {
+                    "k_factor": 32.0,
+                    "algorithm": "elo",
+                    "initial_rating": 1500.0,
+                    "round_scoring_rule": "mean"
+                  },
+                  "divisions": [
+                    {
+                      "name": "Competition",
+                      "division_id": "div_a4534073-c5d2-4193-a94a-93d9c5e2e443",
+                      "disqualify_after_consecutive_failures": 3
+                    }
+                  ],
+                  "scheduler": {
+                    "strategy": "team_n",
+                    "team_count": 2,
+                    "team_layout": "blocks",
+                    "distinct_teammates": true,
+                    "insufficient_players": "filler_policy",
+                    "min_episodes_per_entrant": 2
+                  },
+                  "fulfillment": {
+                    "retry_times": 2,
+                    "allowed_failures": 0.0
+                  }
+                },
+                "round_interval_minutes": 30
+              },
+              "filler_policy_version_ids": [
+                "8878f93e-dbee-4440-8ea3-0080e690954c"
+              ],
+              "seed_policy_version_ids": null,
+              "seed_policy_number": null,
+              "rules": {
+                "division_leaderboard": {
+                  "aggregation": "score",
+                  "source_score": "mean_round_score"
+                }
+              },
+              "notes": null,
+              "mod": null,
+              "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_3c60897b-25cf-4b37-9d1a-8554c1198f28.md",
+              "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Gods of the Arena.md",
+              "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Gods of the Arena/pages.md",
+              "logs_reporter_id": null,
+              "handicaps": null,
+              "handicap_dynamic": null
+            },
+            "description": null,
+            "archived_at": null,
+            "commissioner_description": null,
+            "created_at": "2026-09-09T19:22:40.453555Z",
+            "round_schedule": null,
+            "notes": null
+          },
+          "created_at": "2026-09-09T22:50:37.713689Z",
+          "scheduled_by": "ladder",
+          "skip_kind": null
+        }
+      ],
+      "experience_requests": {
+        "explicit_experience": {
+          "id": "xreq_1181b417-7ee9-4b74-b817-78095008e1e2",
+          "status": "completed",
+          "episode_ids": [
+            "ereq_df52e4f1-7442-449d-8dd2-017414036980"
+          ]
+        },
+        "league_experience": {
+          "id": "xreq_48b4acd7-fc88-43f4-80a0-12ee4d1a537b",
+          "status": "completed",
+          "episode_ids": [
+            "ereq_4b2416c8-507f-4631-9149-31f77daf8e96"
+          ]
+        }
+      }
+    },
+    "lvd": {
+      "coworld_id": "cow_a15fa579-49fb-4427-ab3f-7d8c488dda81",
+      "league_id": "league_c2fa3bf9-72bd-4b46-89a5-f88261136449",
+      "division_id": "div_1e2aff9f-d4f7-4197-9b3e-8243dc82097d",
+      "version": "2026.9.9.4",
+      "certification": {
+        "coworld_id": "cow_a15fa579-49fb-4427-ab3f-7d8c488dda81",
+        "state": "certified",
+        "certified": true,
+        "contract_version": "main-f16254ec03f4",
+        "certification_job_id": "98fde8f7-be16-4be9-a0e4-9d60e964cdf1",
+        "failed_step": null,
+        "failure": null,
+        "transcript_summary": [
+          {
+            "id": "matriculate",
+            "status": "pass"
+          },
+          {
+            "id": "source-resolves",
+            "status": "pass"
+          },
+          {
+            "id": "images-reachable",
+            "status": "pass"
+          },
+          {
+            "id": "fixture-conforms",
+            "status": "pass"
+          },
+          {
+            "id": "smoke-episode",
+            "status": "pass"
+          },
+          {
+            "id": "results-conform",
+            "status": "pass"
+          },
+          {
+            "id": "replay-present",
+            "status": "pass"
+          },
+          {
+            "id": "replay-loadable",
+            "status": "pass"
+          },
+          {
+            "id": "players-run",
+            "status": "pass"
+          },
+          {
+            "id": "supporting-roles",
+            "status": "pass"
+          }
+        ],
+        "completed_at": "2026-09-09T22:47:44.455861Z"
+      },
+      "smoke": [
+        {
+          "id": "ereq_3571b243-0330-4470-93d8-62e08f51fab8",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_3f7efcf4-ded7-418e-87eb-82e2588e77cd",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_9aac6026-4f93-4403-8a43-0f99d20fca1e",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_a546cba1-1119-4c5f-b551-eecc305c4e11",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_d2c885fc-7ec1-45ad-99de-3bea9b99f793",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "entrant": {
+        "id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+        "name": "Polyworld LVD base.bas",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "filler": {
+        "id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+        "name": "Polyworld LVD Baseline Filler",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "artifact_checks": [
+        {
+          "id": "ereq_999bdf15-fb0f-42cc-9bca-c24f2b5da972",
+          "round_id": null,
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/5137b849-fb26-4fac-8ac1-03fa5d013360.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_999bdf15-fb0f-42cc-9bca-c24f2b5da972/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            }
+          ],
+          "outcome": {
+            "scores": [
+              1,
+              0
+            ],
+            "ticks": 28800,
+            "seed": 954286828,
+            "outcome": "winner_0",
+            "banked_gold": [],
+            "returned": []
+          },
+          "results": {
+            "bytes": 99,
+            "sha256": "5b059be5aad527a88eea8eb9c88876bc00171d61dd25f69cdc4e2c614bbe057e"
+          },
+          "logs": {
+            "bytes": 1510,
+            "sha256": "87eddd0e4eb47bfbcdd04135e6d0ad901cac8022906c4008bcabc2776ffb6167"
+          },
+          "replay": {
+            "bytes": 247418,
+            "sha256": "2f2263356b98a5f635d95dec023a044997f56a50b7916e2066c4eda3f88de4cf"
+          }
+        },
+        {
+          "id": "ereq_c5a9decb-e814-4bef-9d6d-6f8ba3de3c31",
+          "round_id": null,
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/957c35ee-1293-4ad6-91f4-7a42c1afcff1.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_c5a9decb-e814-4bef-9d6d-6f8ba3de3c31/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "ab4d88f7-6a6e-4a7f-ac21-a02962e3e152",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            }
+          ],
+          "outcome": {
+            "scores": [
+              1,
+              0
+            ],
+            "ticks": 17701,
+            "seed": 1719105228,
+            "outcome": "winner_0",
+            "banked_gold": [],
+            "returned": []
+          },
+          "results": {
+            "bytes": 100,
+            "sha256": "0106cb82a77a3695a3f6ebbba76b550cadd2ec13a71e46ba4cf3bf02c28de366"
+          },
+          "logs": {
+            "bytes": 1508,
+            "sha256": "d73aa374f6557d96cd2b799043e6f34aa43f0c72739adf09442b8c6fda63024b"
+          },
+          "replay": {
+            "bytes": 155746,
+            "sha256": "b798f67cbd67cbbca2afe785fe793ea3f1409b72453a6f8c9ac9a104a89ce18b"
+          }
+        },
+        {
+          "id": "ereq_9c417fc3-0680-42d2-8bc2-4152feeeecb4",
+          "round_id": "round_d2205606-51e7-4a84-a842-1b16b9750f03",
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/17e0cc8b-a1b0-44da-bbc0-6907ea3aa009.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_9c417fc3-0680-42d2-8bc2-4152feeeecb4/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "ab4d88f7-6a6e-4a7f-ac21-a02962e3e152",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            }
+          ],
+          "filler_slots": [],
+          "outcome": {
+            "scores": [
+              0,
+              1
+            ],
+            "ticks": 28800,
+            "seed": 980557130,
+            "outcome": "winner_1",
+            "banked_gold": [],
+            "returned": []
+          },
+          "results": {
+            "bytes": 99,
+            "sha256": "d0ae8aa1bc51a6c3ab717d16fcd9b636644b8c9b93669b1c8318ea654c3d9854"
+          },
+          "logs": {
+            "bytes": 1512,
+            "sha256": "04bf2b239ed7de8e33f24f5b50021655252a7bfe89b9d0d0e21714a1641133b9"
+          },
+          "replay": {
+            "bytes": 3020690,
+            "sha256": "ea449ab1efba901eae6c8bdc45d3e208b6dda0dfc929db65477acc4635355fd4"
+          }
+        },
+        {
+          "id": "ereq_e6ee5d42-dba7-4720-9f89-c95af279c154",
+          "round_id": "round_d2205606-51e7-4a84-a842-1b16b9750f03",
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/25c25c5b-3156-42af-a902-c8c6a168e303.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_e6ee5d42-dba7-4720-9f89-c95af279c154/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "ab4d88f7-6a6e-4a7f-ac21-a02962e3e152",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            }
+          ],
+          "filler_slots": [],
+          "outcome": {
+            "scores": [
+              0,
+              1
+            ],
+            "ticks": 28800,
+            "seed": 980557129,
+            "outcome": "winner_1",
+            "banked_gold": [],
+            "returned": []
+          },
+          "results": {
+            "bytes": 99,
+            "sha256": "043bcd81a0782e31ead891d761e0477c61a6dc64f9d423afc629f09684bee3c8"
+          },
+          "logs": {
+            "bytes": 1512,
+            "sha256": "5cbce6e8eeb6e26a7c2eca99cea3c8d2304ad6145eb95861df56b269d740efcb"
+          },
+          "replay": {
+            "bytes": 3749138,
+            "sha256": "837adafc8afc47d648f07ef7b6c46e59f96f3c17cdd3e7947256863409be7934"
+          }
+        }
+      ],
+      "manifest_hash": "sha256:25d3524b18bdd39ee70d0f85c8047d5ddc8fdab49536612351a8000fee8470b3",
+      "league_game_id": "cow_a15fa579-49fb-4427-ab3f-7d8c488dda81",
+      "round_interval_minutes": 30,
+      "scheduling_enabled": true,
+      "active_champions": 2,
+      "rounds": [
+        {
+          "id": "round_d2205606-51e7-4a84-a842-1b16b9750f03",
+          "round_number": 9,
+          "commissioner_key": "platform",
+          "execution_backend": "dispatch",
+          "round_config": {
+            "stages": null,
+            "purpose": "ladder",
+            "entrant_attributions": [
+              {
+                "subject_id": "ply_3d22435e-30a2-4f2a-b037-a5c249583788",
+                "subject_type": "player",
+                "policy_version_id": "ab4d88f7-6a6e-4a7f-ac21-a02962e3e152",
+                "league_policy_membership_id": "lpm_582c52e5-5f3d-4ef4-9172-e700c9be2b3f"
+              },
+              {
+                "subject_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+                "subject_type": "player",
+                "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+                "league_policy_membership_id": "lpm_8842d286-a424-4a76-bcb0-ee908dda9cc4"
+              }
+            ],
+            "entrant_policy_version_ids": [
+              "ab4d88f7-6a6e-4a7f-ac21-a02962e3e152",
+              "29ad945e-2ec2-48ac-b359-c29a6e3db4f9"
+            ]
+          },
+          "round_display": null,
+          "status": "completed",
+          "error": null,
+          "started_at": null,
+          "completed_at": "2026-09-09T22:50:25.727056Z",
+          "division": {
+            "id": "div_1e2aff9f-d4f7-4197-9b3e-8243dc82097d",
+            "name": "Competition",
+            "level": 1,
+            "type": "competition",
+            "hidden": false,
+            "league": {
+              "id": "league_c2fa3bf9-72bd-4b46-89a5-f88261136449",
+              "name": "Light vs Dark",
+              "slug": null,
+              "game": {
+                "id": "game_8fb84c75-4a23-4a1d-9ac9-0902a3d48377",
+                "name": "Light vs Dark",
+                "slug": null,
+                "coworld_name": "Light vs Dark",
+                "coworld_id": null,
+                "description": "Two BASIC overlords gather resources, build armies, and fight. The simulation winner scores one win, including its existing time-limit resolution.",
+                "created_at": "2026-09-09T19:20:53.769050Z",
+                "owner_user_id": "system",
+                "notes": null,
+                "default_league_id": null,
+                "canonical_coworld_id": null,
+                "coworld_tags": []
+              },
+              "commissioner_key": "platform",
+              "commissioner_config": {
+                "default_variant_id": "competition"
+              },
+              "public": true,
+              "hidden": false,
+              "is_game_of_week": false,
+              "created_at": "2026-09-09T19:20:53.811617Z",
+              "disabled_at": null,
+              "short_name": null,
+              "description": "Light vs Dark league for submitted policies and recurring competition rounds.",
+              "commissioner_migration_version": null,
+              "rounds_paused_at": null,
+              "submissions_locked_at": null,
+              "settings": {
+                "ladder": {
+                  "enabled": true,
+                  "ranking": {
+                    "k_factor": 32.0,
+                    "algorithm": "elo",
+                    "initial_rating": 1500.0,
+                    "round_scoring_rule": "mean"
+                  },
+                  "divisions": [
+                    {
+                      "name": "Competition",
+                      "division_id": "div_1e2aff9f-d4f7-4197-9b3e-8243dc82097d",
+                      "disqualify_after_consecutive_failures": 3
+                    }
+                  ],
+                  "scheduler": {
+                    "strategy": "team_pair",
+                    "insufficient_players": "filler_policy",
+                    "min_episodes_per_entrant": 2
+                  },
+                  "fulfillment": {
+                    "retry_times": 2,
+                    "allowed_failures": 0.0
+                  }
+                },
+                "round_interval_minutes": 30
+              },
+              "filler_policy_version_ids": [
+                "bb4c552e-c69c-4cdf-be0d-530241bf41e3"
+              ],
+              "seed_policy_version_ids": null,
+              "seed_policy_number": null,
+              "rules": {
+                "division_leaderboard": {
+                  "aggregation": "score",
+                  "source_score": "mean_round_score"
+                }
+              },
+              "notes": null,
+              "mod": null,
+              "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_c2fa3bf9-72bd-4b46-89a5-f88261136449.md",
+              "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Light vs Dark.md",
+              "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Light vs Dark/pages.md",
+              "logs_reporter_id": null,
+              "handicaps": null,
+              "handicap_dynamic": null
+            },
+            "description": null,
+            "archived_at": null,
+            "commissioner_description": null,
+            "created_at": "2026-09-09T19:20:54.248741Z",
+            "round_schedule": null,
+            "notes": null
+          },
+          "created_at": "2026-09-09T22:48:43.064975Z",
+          "scheduled_by": "ladder",
+          "skip_kind": null
+        }
+      ],
+      "experience_requests": {
+        "explicit_experience": {
+          "id": "xreq_62c44abf-e412-47fe-a789-43a870632bf7",
+          "status": "completed",
+          "episode_ids": [
+            "ereq_999bdf15-fb0f-42cc-9bca-c24f2b5da972"
+          ]
+        },
+        "league_experience": {
+          "id": "xreq_a992205d-c792-4a98-9dda-08e1a07dd444",
+          "status": "completed",
+          "episode_ids": [
+            "ereq_c5a9decb-e814-4bef-9d6d-6f8ba3de3c31"
+          ]
+        }
+      }
+    },
+    "cta": {
+      "coworld_id": "cow_2e4565e4-0673-4d0e-99fc-6861be7f4c51",
+      "league_id": "league_9f1ea72c-89a7-4282-bfca-d8e96e53453b",
+      "division_id": "div_3fcb8152-5073-4ea5-8ce6-7ba12e146fa3",
+      "version": "2026.9.9.4",
+      "certification": {
+        "coworld_id": "cow_2e4565e4-0673-4d0e-99fc-6861be7f4c51",
+        "state": "certified",
+        "certified": true,
+        "contract_version": "main-f16254ec03f4",
+        "certification_job_id": "4bb08ecd-2de1-4cf6-9acb-2795006d720c",
+        "failed_step": null,
+        "failure": null,
+        "transcript_summary": [
+          {
+            "id": "matriculate",
+            "status": "pass"
+          },
+          {
+            "id": "source-resolves",
+            "status": "pass"
+          },
+          {
+            "id": "images-reachable",
+            "status": "pass"
+          },
+          {
+            "id": "fixture-conforms",
+            "status": "pass"
+          },
+          {
+            "id": "smoke-episode",
+            "status": "pass"
+          },
+          {
+            "id": "results-conform",
+            "status": "pass"
+          },
+          {
+            "id": "replay-present",
+            "status": "pass"
+          },
+          {
+            "id": "replay-loadable",
+            "status": "pass"
+          },
+          {
+            "id": "players-run",
+            "status": "pass"
+          },
+          {
+            "id": "supporting-roles",
+            "status": "pass"
+          }
+        ],
+        "completed_at": "2026-09-09T22:49:39.435239Z"
+      },
+      "smoke": [
+        {
+          "id": "ereq_3a5a1a32-fabb-48e7-99b7-b57bb390049b",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_5333a8f1-3717-4361-a95a-229a08b348b8",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_6607ca1d-f8ee-4d91-99b6-4dd9b4027a27",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_9d476f66-fadd-4f67-b003-f0970b9e7da3",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_b952ddcc-dda3-4be8-8c12-f4a068bff9f1",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "entrant": {
+        "id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+        "name": "Polyworld CTA base.bas",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "filler": {
+        "id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+        "name": "Polyworld CTA Baseline Filler",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "artifact_checks": [
+        {
+          "id": "ereq_4779c1be-4cc4-4458-84a7-e2f0b4fe0d75",
+          "round_id": null,
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/7a165dac-2fd0-465a-9ca0-c444d5cff887.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_4779c1be-4cc4-4458-84a7-e2f0b4fe0d75/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            },
+            {
+              "slot": 2,
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "bytes": 49,
+              "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+            },
+            {
+              "slot": 3,
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "bytes": 49,
+              "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+            }
+          ],
+          "outcome": {
+            "scores": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "ticks": 16126,
+            "seed": 1192769671,
+            "outcome": "escaped",
+            "banked_gold": [
+              389,
+              565,
+              0,
+              2578
+            ],
+            "returned": [
+              true,
+              true,
+              false,
+              true
+            ]
+          },
+          "results": {
+            "bytes": 137,
+            "sha256": "b9cb220b7517232cbae971609dc034635af277e0e3427a501a1ff16d9a01ce7a"
+          },
+          "logs": {
+            "bytes": 1595,
+            "sha256": "9a9fe0268620aa17542bccb0b50c4cbd93969f4431cadb03877b3bf658b2b264"
+          },
+          "replay": {
+            "bytes": 1356277,
+            "sha256": "c81ba47866523d789421325e458a3fff390d5244a948b2d7d59e7a60fa2bbd97"
+          }
+        },
+        {
+          "id": "ereq_b90502bb-ad3f-478f-8643-498513b61dd2",
+          "round_id": null,
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/41b8a3a1-5655-4cec-88fb-109d7fec3357.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_b90502bb-ad3f-478f-8643-498513b61dd2/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "e1e09dd5-2b6d-4304-b1da-8d5fbfaedaf1",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            },
+            {
+              "slot": 2,
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "bytes": 49,
+              "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+            },
+            {
+              "slot": 3,
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "bytes": 49,
+              "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+            }
+          ],
+          "outcome": {
+            "scores": [
+              0,
+              0,
+              1,
+              0
+            ],
+            "ticks": 15732,
+            "seed": 1505125578,
+            "outcome": "escaped",
+            "banked_gold": [
+              1016,
+              1226,
+              1690,
+              364
+            ],
+            "returned": [
+              true,
+              true,
+              true,
+              true
+            ]
+          },
+          "results": {
+            "bytes": 140,
+            "sha256": "b01009388a84a94defe42933daa05e8690f5cd49e2062049bbc4d830b2fee7ad"
+          },
+          "logs": {
+            "bytes": 1632,
+            "sha256": "d9c8bd740390571938e8de1d3084b3f79b5c370b186ef469292a1503f9e4881b"
+          },
+          "replay": {
+            "bytes": 1445453,
+            "sha256": "a53854cf9e14ef4ffe54ecc2a32461bb3b9e13c6e2f04084a0eb95e49dee4584"
+          }
+        },
+        {
+          "id": "ereq_2fb120bb-dacf-4dc0-b1ee-1d575e7ca242",
+          "round_id": "round_610bd48b-ae53-4d8d-bc79-f3e16115a0e6",
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/47fb1218-d93c-4bbf-b4b8-35274d7e6266.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_2fb120bb-dacf-4dc0-b1ee-1d575e7ca242/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "e1e09dd5-2b6d-4304-b1da-8d5fbfaedaf1",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            },
+            {
+              "slot": 2,
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "bytes": 49,
+              "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+            },
+            {
+              "slot": 3,
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "bytes": 49,
+              "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+            }
+          ],
+          "filler_slots": [
+            2,
+            3
+          ],
+          "outcome": {
+            "scores": [
+              1,
+              0,
+              0,
+              0
+            ],
+            "ticks": 14944,
+            "seed": 1809648689,
+            "outcome": "escaped",
+            "banked_gold": [
+              3258,
+              320,
+              853,
+              1382
+            ],
+            "returned": [
+              true,
+              true,
+              true,
+              true
+            ]
+          },
+          "results": {
+            "bytes": 139,
+            "sha256": "67f5136659e0c9be1e64e885536ecf3d19de6250e01c8c0067007b0af1b41d96"
+          },
+          "logs": {
+            "bytes": 1632,
+            "sha256": "42690db95a4a67904e081b957027e383fe0af38305a4fecb6b62af6151568fcd"
+          },
+          "replay": {
+            "bytes": 1381885,
+            "sha256": "a53eee926cd0d9ae8a2018fa5de17eac47350c5531500639b4586a06b443f09f"
+          }
+        },
+        {
+          "id": "ereq_bf6444bb-1689-4308-a850-d1a575cf7a78",
+          "round_id": "round_610bd48b-ae53-4d8d-bc79-f3e16115a0e6",
+          "replay_url": "https://softmax-public.s3.amazonaws.com/replays/65daa51a-5c21-4116-a353-eba5a942606b.replay",
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_bf6444bb-1689-4308-a850-d1a575cf7a78/watch",
+          "player_logs": [
+            {
+              "slot": 0,
+              "policy_version_id": "e1e09dd5-2b6d-4304-b1da-8d5fbfaedaf1",
+              "bytes": 49,
+              "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+            },
+            {
+              "slot": 1,
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "bytes": 49,
+              "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+            },
+            {
+              "slot": 2,
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "bytes": 49,
+              "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+            },
+            {
+              "slot": 3,
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "bytes": 49,
+              "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+            }
+          ],
+          "filler_slots": [
+            2,
+            3
+          ],
+          "outcome": {
+            "scores": [
+              0,
+              0,
+              1,
+              0
+            ],
+            "ticks": 16473,
+            "seed": 1809648688,
+            "outcome": "escaped",
+            "banked_gold": [
+              1244,
+              535,
+              1833,
+              394
+            ],
+            "returned": [
+              true,
+              true,
+              true,
+              true
+            ]
+          },
+          "results": {
+            "bytes": 139,
+            "sha256": "16de5880bf249c347ce739964874bac1ccb19ea75a95fdb91a35fd21455fb98b"
+          },
+          "logs": {
+            "bytes": 1632,
+            "sha256": "2a3129e7bf31f442787d1066f1732895762ad1843d39fd3d7763585473f29728"
+          },
+          "replay": {
+            "bytes": 1527125,
+            "sha256": "b0350c61538224c7d037374d43ef99f3d2c0eebbb4eb6183b636a4380a6981a2"
+          }
+        }
+      ],
+      "manifest_hash": "sha256:2a2144cdf45f552a70c2f4837ea391bb5bdd5a4a7e66a55737bebe513d49273b",
+      "league_game_id": "cow_2e4565e4-0673-4d0e-99fc-6861be7f4c51",
+      "round_interval_minutes": 30,
+      "scheduling_enabled": true,
+      "active_champions": 2,
+      "rounds": [
+        {
+          "id": "round_610bd48b-ae53-4d8d-bc79-f3e16115a0e6",
+          "round_number": 9,
+          "commissioner_key": "platform",
+          "execution_backend": "dispatch",
+          "round_config": {
+            "stages": null,
+            "purpose": "ladder",
+            "entrant_attributions": [
+              {
+                "subject_id": "ply_3d22435e-30a2-4f2a-b037-a5c249583788",
+                "subject_type": "player",
+                "policy_version_id": "e1e09dd5-2b6d-4304-b1da-8d5fbfaedaf1",
+                "league_policy_membership_id": "lpm_e0f76dd3-26d0-479e-8e35-150c56761999"
+              },
+              {
+                "subject_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+                "subject_type": "player",
+                "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+                "league_policy_membership_id": "lpm_e500740f-9819-425d-ad6d-98d60e8780e8"
+              }
+            ],
+            "entrant_policy_version_ids": [
+              "e1e09dd5-2b6d-4304-b1da-8d5fbfaedaf1",
+              "7d04762f-0f4b-49b4-b738-c0b33f69b828"
+            ]
+          },
+          "round_display": null,
+          "status": "completed",
+          "error": null,
+          "started_at": null,
+          "completed_at": "2026-09-09T22:52:20.092588Z",
+          "division": {
+            "id": "div_3fcb8152-5073-4ea5-8ce6-7ba12e146fa3",
+            "name": "Competition",
+            "level": 1,
+            "type": "competition",
+            "hidden": false,
+            "league": {
+              "id": "league_9f1ea72c-89a7-4282-bfca-d8e96e53453b",
+              "name": "Call to Adventure",
+              "slug": null,
+              "game": {
+                "id": "game_1e6cb891-298d-470f-a204-183417f48703",
+                "name": "Call To Adventure",
+                "slug": null,
+                "coworld_name": "Call to Adventure",
+                "coworld_id": null,
+                "description": "Four BASIC heroes explore a dungeon and return with treasure. Living heroes who returned with the highest personal banked gold score one win. Tied leaders share the win. Dead or unreturned heroes score zero; nobody returning means no winner.",
+                "created_at": "2026-09-09T19:21:30.849735Z",
+                "owner_user_id": "system",
+                "notes": null,
+                "default_league_id": null,
+                "canonical_coworld_id": null,
+                "coworld_tags": []
+              },
+              "commissioner_key": "platform",
+              "commissioner_config": {
+                "default_variant_id": "competition"
+              },
+              "public": true,
+              "hidden": false,
+              "is_game_of_week": false,
+              "created_at": "2026-09-09T19:21:30.886812Z",
+              "disabled_at": null,
+              "short_name": null,
+              "description": "Call to Adventure league for submitted policies and recurring competition rounds.",
+              "commissioner_migration_version": null,
+              "rounds_paused_at": null,
+              "submissions_locked_at": null,
+              "settings": {
+                "ladder": {
+                  "enabled": true,
+                  "ranking": {
+                    "k_factor": 32.0,
+                    "algorithm": "elo",
+                    "initial_rating": 1500.0,
+                    "round_scoring_rule": "mean"
+                  },
+                  "divisions": [
+                    {
+                      "name": "Competition",
+                      "division_id": "div_3fcb8152-5073-4ea5-8ce6-7ba12e146fa3",
+                      "disqualify_after_consecutive_failures": 3
+                    }
+                  ],
+                  "scheduler": {
+                    "strategy": "swiss_neighbor",
+                    "insufficient_players": "filler_policy",
+                    "min_episodes_per_entrant": 2
+                  },
+                  "fulfillment": {
+                    "retry_times": 2,
+                    "allowed_failures": 0.0
+                  }
+                },
+                "round_interval_minutes": 30
+              },
+              "filler_policy_version_ids": [
+                "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+              ],
+              "seed_policy_version_ids": null,
+              "seed_policy_number": null,
+              "rules": {
+                "division_leaderboard": {
+                  "aggregation": "score",
+                  "source_score": "mean_round_score"
+                }
+              },
+              "notes": null,
+              "mod": null,
+              "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_9f1ea72c-89a7-4282-bfca-d8e96e53453b.md",
+              "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Call to Adventure.md",
+              "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Call to Adventure/pages.md",
+              "logs_reporter_id": null,
+              "handicaps": null,
+              "handicap_dynamic": null
+            },
+            "description": null,
+            "archived_at": null,
+            "commissioner_description": null,
+            "created_at": "2026-09-09T19:21:31.413471Z",
+            "round_schedule": null,
+            "notes": null
+          },
+          "created_at": "2026-09-09T22:50:36.694128Z",
+          "scheduled_by": "ladder",
+          "skip_kind": null
+        }
+      ],
+      "experience_requests": {
+        "explicit_experience": {
+          "id": "xreq_a1654c53-0024-42a9-951a-cfe4ae810a22",
+          "status": "completed",
+          "episode_ids": [
+            "ereq_4779c1be-4cc4-4458-84a7-e2f0b4fe0d75"
+          ]
+        },
+        "league_experience": {
+          "id": "xreq_2f5cde85-46b0-4ffc-8626-31d4521d46c0",
+          "status": "completed",
+          "episode_ids": [
+            "ereq_b90502bb-ad3f-478f-8643-498513b61dd2"
+          ]
+        }
+      }
+    }
+  }
+}
