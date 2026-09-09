@@ -18,6 +18,15 @@ def probe_url(base, game, replay):
     return base + '/coworld/tools/replay_probe.html?viewer=' + quote(viewer, safe='')
 
 
+def click(page, x, y):
+    """Hold a real mouse press across frames on software-rendered browsers."""
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.wait_for_timeout(500)
+    page.mouse.up()
+    page.wait_for_timeout(500)
+
+
 def check_browser(base, executable, output):
     """Verify rendering, replay determinism, controls, resize and visible errors."""
     report = {}
@@ -35,17 +44,18 @@ def check_browser(base, executable, output):
             assert not frame.evaluate('failed')
             assert frame.evaluate('Module.replayTick') >= 0
             page.screenshot(path=str(output / (game + '.png')))
+            print(game + ': first frame rendered', flush=True)
             # Turn looping off, then seek forward through every recorded tick.
-            page.mouse.click(210, 556)
+            click(page, 210, 556)
             page.wait_for_timeout(100)
-            page.mouse.click(166, 556)
-            frame.wait_for_function('Module.replayTick === ' + str(end_tick), timeout=180000)
+            click(page, 166, 556)
+            frame.wait_for_function('Module.replayTick === ' + str(end_tick), timeout=600000)
             assert not frame.evaluate('failed'), frame.locator('#status').inner_text()
             report[game] = {'end_tick': end_tick, 'messages': page.evaluate('replayMessages')}
             # Rewind, change speed, then resize the real iframe canvas.
-            page.mouse.click(22, 556)
+            click(page, 22, 556)
             page.wait_for_timeout(200)
-            page.mouse.click(362, 556)
+            click(page, 362, 556)
             frame.wait_for_function('Module.replayTick < 2000', timeout=30000)
             page.set_viewport_size({'width': 960, 'height': 640})
             frame.wait_for_function('Module.canvas.width === 960 && Module.canvas.height === 640')

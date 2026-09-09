@@ -19,6 +19,6 @@ ARG ENTRY
 RUN nim c -d:coworld --nimcache:/tmp/nimcache -o:/out/game examples/${GAME}/${ENTRY}.nim
 FROM ubuntu:24.04
 COPY --from=compiler /out/game /usr/local/bin/polyworld
-USER 1000
+# The runner stages writable outputs as root in its shared volume.
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/polyworld"]
