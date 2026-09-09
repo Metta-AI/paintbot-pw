@@ -327,6 +327,8 @@ proc beginSunDepthPass*(step: int) =
   ## Binds one step's shadow framebuffer and clears it. Prefer the
   ## sunDepthPasses template, which brackets both steps.
   glBindFramebuffer(GL_FRAMEBUFFER, sunFramebuffers[step])
+  when not defined(emscripten):
+    glDisable(GL_MULTISAMPLE)
   glViewport(0, 0, SunShadowMapSize, SunShadowMapSize)
   glClear(GL_DEPTH_BUFFER_BIT)
   glEnable(GL_DEPTH_TEST)
@@ -365,8 +367,18 @@ template sunDepthPasses*(windowSize: IVec2, body: untyped) =
   ## Runs the caster draws in `body` once per shadow step, so both maps of
   ## the cross-fade see the same frame. `sunPassIndex` is 0 for the first
   ## pass and 1 for the second, for loops that must mutate state only once.
+  ## Restores the window target and MSAA setting even if a draw fails.
   if sunShadowsActive():
-    for sunPassIndex {.inject.} in 0 .. 1:
-      beginSunDepthPass(sunPassIndex)
-      body
-    endSunDepthPass(windowSize)
+    when not defined(emscripten):
+      let multisampleEnabled = glIsEnabled(GL_MULTISAMPLE)
+    try:
+      for sunPassIndex {.inject.} in 0 .. 1:
+        beginSunDepthPass(sunPassIndex)
+        body
+    finally:
+      endSunDepthPass(windowSize)
+      when not defined(emscripten):
+        if multisampleEnabled == GL_TRUE:
+          glEnable(GL_MULTISAMPLE)
+        else:
+          glDisable(GL_MULTISAMPLE)

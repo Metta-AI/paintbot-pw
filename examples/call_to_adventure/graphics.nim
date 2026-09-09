@@ -239,7 +239,8 @@ proc runGraphics*() =
       "Call to Adventure",
       AtlasPath,
       gameWindowSize(options.windowWidth, options.windowHeight),
-      options.vsync
+      options.vsync,
+      msaa = msaa4x
     )
   let splash = startSplash(sk, window)
   # The stack spans about 45 tiles top to bottom; the shading uses amplitude
@@ -1563,6 +1564,8 @@ proc runGraphics*() =
             scene.sunDepthPass = false
 
         glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
+        when not defined(emscripten):
+          glEnable(GL_MULTISAMPLE)
         glClearColor(0, 0, 0, 1)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
 

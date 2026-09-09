@@ -102,10 +102,11 @@ proc initGameWindow*(
     title,
     atlasPath: string,
     size = DefaultWindowSize,
-    vsync = true
+    vsync = true,
+    msaa = msaaDisabled
 ): (Window, Silky) =
   ## Creates the spectator window, GL context, and Silky atlas client.
-  let window = newWindow(title, size, vsync = vsync)
+  let window = newWindow(title, size, vsync = vsync, msaa = msaa)
   window.makeContextCurrent()
   loadExtensions()
   let sk = newSilky(window, atlasPath)
