@@ -13,7 +13,7 @@
 ## change how a game plays out.
 
 import
-  std/strformat,
+  std/[heapqueue, strformat],
   polyworld/[hashes, noises, pathing, profiles, rngs],
   content
 
@@ -30,6 +30,11 @@ const
     ## Between flat and fade the meadow rises back to full height.
   PlazaStoneRadius* = 8'i32
     ## The plaza is a disc of paving this many tiles across from the middle.
+  RoadJoinMargin = 4'i32
+  RoadSeparation = 2'i32
+  ExistingRoadCost = 2'i32
+  NewRoadCost = 6'i32
+  ParallelRoadCost = 12'i32
   PlazaRoadRadius = 9'i32
     ## A one-tile road apron rings the paving.
   WellRadius* = 1'i32
@@ -227,8 +232,8 @@ proc buildMap(seed: int32): MapData =
         groundTile(x, y).kind = HouseTileKind
         groundTile(x, y).impassable = true
 
-  ## Roads. Doorsteps, a two-wide dogleg from every door to the plaza, and a
-  ## one-wide ring path from door to door.
+  ## Roads. Wide plaza spokes and narrow neighborhood links that reuse
+  ## nearby streets.
   proc stampRoad(x, y: int32) =
     if not inGrid(x, y):
       return
@@ -272,13 +277,69 @@ proc buildMap(seed: int32): MapData =
     carveDogleg(
       int32(door.x), int32(door.y), MapCenter, MapCenter,
       wide = true, xFirst = rng.below(2'i32) == 0)
-  for slot in 0 ..< VillagerCount:
+  proc connectNeighbors(start, goal: Tile2) =
+    ## Keeps neighborhood links local while favoring existing streets over
+    ## parallel strips of new paving.
     let
-      door = houses[slot].door
-      next = houses[(slot + 1) mod VillagerCount].door
-    carveDogleg(
-      int32(door.x), int32(door.y), int32(next.x), int32(next.y),
-      wide = false, xFirst = rng.below(2'i32) == 0)
+      minX = max(0'i32, min(int32(start.x), int32(goal.x)) - RoadJoinMargin)
+      maxX = min(GridSide - 1, max(int32(start.x), int32(goal.x)) + RoadJoinMargin)
+      minY = max(0'i32, min(int32(start.y), int32(goal.y)) - RoadJoinMargin)
+      maxY = min(GridSide - 1, max(int32(start.y), int32(goal.y)) + RoadJoinMargin)
+      startIndex = tileIndex(start)
+      goalIndex = tileIndex(goal)
+    var
+      costs = newSeq[int32](GridCells)
+      previous = newSeq[int32](GridCells)
+      frontier = initHeapQueue[tuple[cost: int32, index: int32]]()
+    for index in 0 ..< GridCells:
+      costs[index] = int32.high
+      previous[index] = -1
+    costs[startIndex] = 0
+    frontier.push((0'i32, startIndex))
+    while frontier.len > 0:
+      let current = frontier.pop()
+      if current.cost != costs[current.index]:
+        continue
+      if current.index == goalIndex:
+        break
+      let
+        x = int32(current.index mod GridSide)
+        y = int32(current.index div GridSide)
+      for (dx, dy) in [(0'i32, -1'i32), (1'i32, 0'i32),
+          (0'i32, 1'i32), (-1'i32, 0'i32)]:
+        let
+          nx = x + dx
+          ny = y + dy
+        if nx < minX or nx > maxX or ny < minY or ny > maxY:
+          continue
+        if groundTile(nx, ny).impassable:
+          continue
+        let index = tileIndex(nx, ny)
+        var stepCost = NewRoadCost
+        if groundTile(nx, ny).kind in {RoadTile, StoneTile}:
+          stepCost = ExistingRoadCost
+        else:
+          for oy in -RoadSeparation .. RoadSeparation:
+            for ox in -RoadSeparation .. RoadSeparation:
+              if inGrid(nx + ox, ny + oy) and
+                  groundTile(nx + ox, ny + oy).kind == RoadTile:
+                stepCost = ParallelRoadCost
+        let cost = current.cost + stepCost
+        if cost < costs[index]:
+          costs[index] = cost
+          previous[index] = current.index
+          frontier.push((cost, index))
+    if previous[goalIndex] < 0:
+      raise newException(ValueError, &"seed {seed}: no neighborhood road route")
+    var index = goalIndex
+    while index != startIndex:
+      stampRoad(int32(index mod GridSide), int32(index div GridSide))
+      index = previous[index]
+
+  for slot in 0 ..< VillagerCount:
+    # Reserve the link's draw so garden randomness is independent of routing.
+    discard rng.below(2'i32)
+    connectNeighbors(houses[slot].door, houses[(slot + 1) mod VillagerCount].door)
 
   ## Forest. Purely noise-gated, thickening away from the village until it
   ## becomes the solid wall that frames the map. Roads keep a clear margin.

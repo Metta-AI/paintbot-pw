@@ -34,6 +34,56 @@ block everySeedValidates:
     let map = generateMap(seed)
     map.validateMap()
 
+block doorsHaveContinuousRoads:
+  for seed in 1'i32 .. SeedsUnderTest:
+    let map = generateMap(seed)
+    var reached = newSeq[bool](GridCells)
+    var frontier = @[map.houses[0].door]
+    reached[tileIndex(frontier[0])] = true
+    while frontier.len > 0:
+      let tile = frontier.pop()
+      for (dx, dy) in [(0'i32, -1'i32), (1'i32, 0'i32),
+          (0'i32, 1'i32), (-1'i32, 0'i32)]:
+        let next = tile2(int32(tile.x) + dx, int32(tile.y) + dy)
+        if not inGrid(next):
+          continue
+        let index = tileIndex(next)
+        if not reached[index] and map.passable[index] != 0 and
+            map.kinds[index] in [uint8(RoadTile), uint8(StoneTile)]:
+          reached[index] = true
+          frontier.add next
+    for house in map.houses:
+      doAssert reached[tileIndex(house.door)],
+        &"seed {seed}: reaching a house requires leaving the road"
+
+block narrowParallelRoads:
+  ## Count six-tile stretches of road separated by one to three unpaved
+  ## tiles. Wide roads and ordinary intersections do not count.
+  var runs = 0
+  for seed in [1'i32, 7, 1988, DefaultSeed]:
+    let map = generateMap(seed)
+    for y in 1'i32 .. GridSide - 7:
+      for x in 1'i32 .. GridSide - 7:
+        for (dx, dy) in [(1'i32, 0'i32), (0'i32, 1'i32)]:
+          for gap in 1'i32 .. 3'i32:
+            var parallel = true
+            for step in 0'i32 .. 5'i32:
+              let
+                px = x + dy * step
+                py = y + dx * step
+              if map.kinds[tileIndex(px, py)] != uint8(RoadTile) or
+                  map.kinds[tileIndex(px + dx * (gap + 1),
+                    py + dy * (gap + 1))] != uint8(RoadTile):
+                parallel = false
+                break
+              for across in 1'i32 .. gap:
+                if map.kinds[tileIndex(px + dx * across, py + dy * across)] in
+                    [uint8(RoadTile), uint8(StoneTile)]:
+                  parallel = false
+            if parallel:
+              inc runs
+  doAssert runs <= 6, &"{runs} narrow parallel road stretches remain"
+
 echo "Testing village invariants"
 block gridsAreWellFormed:
   let map = generateMap(DefaultSeed)

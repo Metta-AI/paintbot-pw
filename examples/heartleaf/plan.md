@@ -77,9 +77,16 @@ meadow pressed flat inside the village ring, nine houses on a jittered
 ring of unit-circle points around a round paved plaza with a one-tile
 dirt apron and a blocked three-by-three well footprint at its centre,
 five-by-five house footprints, two-wide dirt roads from every door to the plaza plus a
-one-wide ring path, three garden plots in the grass near each house, and
+one-wide neighborhood links, three garden plots in the grass near each house, and
 a noise-gated forest thickening to a solid wall at the map edge. A flood fill from the plaza must reach every door and
 every garden or the generator retries the seed deterministically.
+
+Neighborhood links use a deterministic cardinal route search within four
+tiles of the rectangle between neighboring doors. Existing streets cost less
+than fresh paving, and new paving close to a street costs extra. This favors
+shared streets over narrow parallel routes while keeping links local rather
+than sending every neighbor trip through the plaza. The wide plaza spokes
+retain their dogleg layout.
 
 ## What is different from the other examples
 
