@@ -103,6 +103,43 @@ block meadowAdditionStaysSmall:
     doAssert foliage > 0 and foliage <= 80
     doAssert rocks > 0 and rocks <= 5
 
+block foliageReachesForest:
+  let middle = tile2(GridSide div 2, GridSide div 2)
+  for sample in 0'i32 .. 20:
+    let
+      seed = if sample == 0: 2026'i32 else: sample
+      map = generateMap(seed)
+    var
+      count = 0
+      coverage: array[2, array[4, bool]]
+      besideTree = false
+    for d in placeDecor(map, seed):
+      if d.area != ForestFloorArea:
+        continue
+      inc count
+      doAssert d.kit == MeadowVegetation
+      doAssert d.height <= 0.8'f32
+      let
+        ring = chebyshev(d.tile, middle)
+        dx = int32(d.tile.x) - int32(middle.x)
+        dy = int32(d.tile.y) - int32(middle.y)
+        side = if abs(dx) >= abs(dy): (if dx > 0: 0 else: 2)
+               else: (if dy > 0: 1 else: 3)
+      doAssert ring >= 36 and ring < ForestWallRadius
+      coverage[ord(ring >= ForestEdgeRadius)][side] = true
+      for garden in map.gardenTiles:
+        doAssert chebyshev(d.tile, garden) > 1
+      for oy in -1'i32 .. 1'i32:
+        for ox in -1'i32 .. 1'i32:
+          if map.kinds[tileIndex(int32(d.tile.x) + ox,
+              int32(d.tile.y) + oy)] == uint8(TreeTile):
+            besideTree = true
+    doAssert count > 0 and count <= 96
+    doAssert besideTree, &"seed {seed}: foliage never reaches the trees"
+    for band in coverage:
+      for covered in band:
+        doAssert covered, &"seed {seed}: a side has an empty foliage band"
+
 echo "Testing that every node exists in its kit"
 block nodesExist:
   for kit in DecorKit:

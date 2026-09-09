@@ -180,6 +180,9 @@ into the terrain mesh once with the houses.
   The meadow adds at most 85 props after the existing decorations.
 - Outskirts: small rocks at the feet of the forest trees and the odd
   medium one.
+- Forest floor: low bushes and grass tufts bridge the outer meadow and
+  forest clearings. Three bands each sample four locations per side,
+  adding at most 96 props between radii 36 and 58.
 
 Every height and probability is a const at the top of `decor.nim`. The
 loader keeps only the named nodes from each kit and draws them textured,

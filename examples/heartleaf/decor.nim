@@ -21,7 +21,8 @@ type
     ValleyVegetation, ValleyBuildings
 
   DecorArea* = enum
-    PlazaArea, HouseArea, GardenArea, RoadArea, OutskirtsArea, MeadowArea
+    PlazaArea, HouseArea, GardenArea, RoadArea, OutskirtsArea, MeadowArea,
+    ForestFloorArea
 
   Decoration* = object
     kit*: DecorKit
@@ -56,6 +57,10 @@ const
   MeadowBushHeight = 0.8'f32
   MeadowRockHeight = 1.0'f32
   MeadowRockEvery = 3
+  ForestFloorStart = MeadowPatchRadius - 2
+  ForestFloorBandWidth = 8'i32
+  ForestFloorSlots = 4'i32
+  ForestFloorAttempts = 20
   PlazaDressRadius = 5.5'f32
   PlazaSignRadius = 10.5'f32
   PlazaLimit* = 7.5'f32
@@ -532,6 +537,42 @@ proc dressMeadow(p: var Placer) =
       discard p.claim(MeadowRocks, p.rng.pick(MediumRocks), MeadowArea,
         x + 1, y - 1, yaw, MeadowRockHeight, tint = p.rng.rockTint())
 
+proc dressForestFloor(p: var Placer) =
+  ## Low foliage bridges the open meadow and the forest's clearings.
+  let middle = int32(GridSide div 2)
+  var band = ForestFloorStart
+  while band < ForestWallRadius:
+    let width = min(ForestFloorBandWidth, ForestWallRadius - band)
+    for (sx, sy) in Sides:
+      for slot in 0'i32 ..< ForestFloorSlots:
+        for attempt in 0 ..< ForestFloorAttempts:
+          let
+            radius = band + p.rng.below(width)
+            slotWidth = radius * 2 div ForestFloorSlots
+            along = -radius + slot * slotWidth + p.rng.below(slotWidth)
+            x = middle + (if sx != 0: sx * radius else: along)
+            y = middle + (if sy != 0: sy * radius else: along)
+          var clear = true
+          for step in 0'i32 .. 1'i32:
+            let
+              tx = x + step * sy
+              ty = y + step * sx
+            if not p.tileFree(tx, ty) or p.nearRoad(tx, ty) or
+                p.nearHouseDoor(tx, ty):
+              clear = false
+            for garden in p.map.gardenTiles:
+              if chebyshev(tile2(tx, ty), garden) <= 1:
+                clear = false
+          if not clear:
+            continue
+          let yaw = p.rng.unit() * 2 * PI
+          discard p.claim(MeadowVegetation, "bush_01a", ForestFloorArea,
+            x, y, yaw, MeadowBushHeight, tint = p.rng.plantTint())
+          discard p.claim(MeadowVegetation, p.rng.pick(Tufts), ForestFloorArea,
+            x + sy, y + sx, yaw, TuftHeight, tint = p.rng.plantTint())
+          break
+    band += ForestFloorBandWidth
+
 proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   ## Every decoration for one map, in a fixed order from one seeded stream.
   var p = Placer(map: map, rng: initRng(seed, DecorSalt))
@@ -541,4 +582,5 @@ proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   p.dressVerges()
   p.dressOutskirts()
   p.dressMeadow()
+  p.dressForestFloor()
   p.placed
