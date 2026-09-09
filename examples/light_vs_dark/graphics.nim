@@ -15,7 +15,7 @@ import
     particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shapes,
-    shadows, tapes, viewers, visions, worldbars
+    shadows, tapes, toon, viewers, visions, worldbars
   ],
   content,
   sim,
@@ -1542,6 +1542,7 @@ proc runGraphics*() =
           scene.sunDepthPass = false
         glClearColor(0.05, 0.06, 0.09, 1.0)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+        scene.toon.drawBackground()
         updateTerrainVision()
         drawTerrain(viewProjection, showTiles)
         beginCharacters(scene, window, view, projection, cameraEye)

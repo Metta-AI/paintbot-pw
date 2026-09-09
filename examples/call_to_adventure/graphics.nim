@@ -13,7 +13,7 @@ import
   polyworld/[actioncam, characters, clickmarks, common, fixed, inputs, particles,
     particleshaders,
     chrome, pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
-    shadows, shapes, tapes, viewers, visions, worldbars],
+    shadows, shapes, tapes, toon, viewers, visions, worldbars],
   content, maps, sim, game, replays, ui, controls
 
 when defined(takeScreenshot):
@@ -1565,6 +1565,7 @@ proc runGraphics*() =
         glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
         glClearColor(0.04, 0.04, 0.06, 1)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+        scene.toon.drawBackground()
 
         if layerVertexRanges.len > visibleFrom:
           let
