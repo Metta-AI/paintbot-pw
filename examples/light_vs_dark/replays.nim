@@ -12,7 +12,7 @@ import
 const
   ReplayGame* = "light_vs_dark"
   ReplayFormatVersion* = 1'u16
-  ReplayGameVersion* = 9'u16
+  ReplayGameVersion* = 10'u16
 
   ActionMove* = 1'u8
   ActionAttack* = 2'u8

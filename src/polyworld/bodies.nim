@@ -101,13 +101,20 @@ proc steer*(
     speed, turnRate: Fixed,
     walkable: Walkable
 ) =
-  ## Turns toward an offset and walks along facing when the turn is small.
+  ## Finishes turning, then advances toward the waypoint without overshoot.
   if toward == FixedVec2Zero:
     return
   let want = angle(toward)
   turnToward(body.facing, want, turnRate)
-  if abs(shortestTurn(body.facing, want)) <= FixedHalfPi:
-    slide(body.pos, direction(body.facing) * speed, walkable)
+  if shortestTurn(body.facing, want) != FixedZero or speed <= FixedZero:
+    return
+  # Walking along an unfinished turn can orbit a nearby waypoint forever.
+  # Use the exact offset so rounded headings cannot miss the final step.
+  slide(
+    body.pos,
+    desiredStep(FixedVec2Zero, toward, speed, FixedZero),
+    walkable
+  )
 
 proc separatePair*(a, b: var Body, walkable: Walkable) =
   ## Pushes two overlapping circles apart and clamps both to walkable ground.
