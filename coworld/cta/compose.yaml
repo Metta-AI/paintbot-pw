@@ -1,0 +1,10 @@
+services:
+  game:
+    image: polyworld-cta-coworld:latest
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: coworld/Dockerfile
+      args:
+        GAME: call_to_adventure
+        ENTRY: cta

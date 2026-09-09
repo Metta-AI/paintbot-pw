@@ -6,6 +6,9 @@
 import
   cli
 
+when defined(coworld):
+  import coworld
+
 type
   ControllerKind* = enum
     BotController
@@ -35,7 +38,11 @@ proc expandBotSources*(
   result.setLen(kinds.len)
   var next = 0
   for group in groups:
-    let source = readFile(group.path)
+    let source =
+      when defined(coworld):
+        readPlayerSource(group.path)
+      else:
+        readFile(group.path)
     for _ in 0 ..< group.count:
       while next < kinds.len and kinds[next] == PlayerController:
         inc next
@@ -43,6 +50,7 @@ proc expandBotSources*(
         fail("too many bots to expand")
       result[next] = source
       inc next
-  for i, kind in kinds:
-    if kind == BotController and result[i].len == 0:
-      fail("bot files do not fill every slot")
+  when not defined(coworld):
+    for i, kind in kinds:
+      if kind == BotController and result[i].len == 0:
+        fail("bot files do not fill every slot")

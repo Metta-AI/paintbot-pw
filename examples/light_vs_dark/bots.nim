@@ -15,6 +15,9 @@ import
   content,
   sim
 
+when defined(coworld):
+  import polyworld/coworld
+
 const
   ObservedBuilding* = 1'i32
   ObservedUnit* = 2'i32
@@ -525,9 +528,14 @@ proc loadBots*(game: Game, sources: array[PlayerCount, string]) =
   let schema = buildOverlordHost(0)
   var bound = false
   for player in 0'i32 ..< PlayerCount:
-    if sources[player].len == 0:
-      continue
-    let program = compile(sources[player], schema, limits)
+    when not defined(coworld):
+      if sources[player].len == 0:
+        continue
+    let program =
+      when defined(coworld):
+        compilePlayer(sources[player], schema, limits, int(player))
+      else:
+        compile(sources[player], schema, limits)
     game.brains[player] = OverlordVm(
       runtime: initRuntime(program, buildOverlordHost(player), limits),
       ready: true
@@ -535,6 +543,8 @@ proc loadBots*(game: Game, sources: array[PlayerCount, string]) =
     if not bound:
       bindOverlordData(program)
       bound = true
+    when defined(coworld):
+      game.brains[player].output = playerPrinter(int(player))
 
 proc runDecision(game: Game, player: int32) =
   ## Runs one player's script for one decision.
@@ -578,12 +588,15 @@ proc runDecision(game: Game, player: int32) =
       ids[DataDecisionPeriod],
       DecisionTicks
     )
-    discard game.brains[player].runtime.run()
+    discard game.brains[player].runtime.run(game.brains[player].output)
     inc game.brains[player].decisions
   except BasicError as error:
     game.brains[player].failed = true
     game.brains[player].lastError = error.msg
-    echo "player ", player, " BASIC error: ", error.msg
+    when defined(coworld):
+      playerError(int(player), error.msg)
+    else:
+      echo "player ", player, " BASIC error: ", error.msg
   game.brains[player].lastWork = game.brains[player].runtime.workUsed
   game.brains[player].lastInstructions =
     game.brains[player].runtime.instructionsUsed

@@ -88,6 +88,8 @@ proc initPlayer*(
   result.live = live
   result.durationTicks = max(durationTicks, 0)
   result.playing = playing
+  when defined(replayViewer):
+    result.repeating = not live
   result.speedIndex = speedIndexOf(speed)
   result.restoreTick = -1
   result.targetTick = -1

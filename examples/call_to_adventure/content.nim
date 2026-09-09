@@ -426,6 +426,8 @@ type World* = ref object
   chat*: array[ChatLines, ChatLine]
   chatHead*: int32
   banked*: int32
+  bankedGold*: array[PartySize, int32]
+  returned*: array[PartySize, bool]
   phase*: Phase
   deepest*: int32
   respawnTicks*: int32

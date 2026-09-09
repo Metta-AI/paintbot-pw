@@ -7,6 +7,9 @@ import
   sim,
   replays
 
+when defined(coworld):
+  import polyworld/coworld
+
 type
   HeroDataSlot = enum
     DataSelfId,
@@ -262,7 +265,11 @@ proc loadBots*(
   for i in 0 ..< game.world.heroes.len:
     if kinds[i] == PlayerController:
       continue
-    let program = compile(sources[i], schema, limits)
+    let program =
+      when defined(coworld):
+        compilePlayer(sources[i], schema, limits, int(i))
+      else:
+        compile(sources[i], schema, limits)
     if not bound:
       bindHeroData(program)
       bound = true
@@ -275,6 +282,8 @@ proc loadBots*(
       limits: limits,
       ready: true
     )
+    when defined(coworld):
+      game.heroVms[i].output = playerPrinter(int(i))
 
 proc runHeroScript(game: Game, index: int) =
   ## Runs one bounded persistent BASIC decision for a living hero.
@@ -305,12 +314,15 @@ proc runHeroScript(game: Game, index: int) =
     vm.runtime.setData(heroDataIds[DataSelfGold], int32(hero.gold))
     vm.runtime.setData(heroDataIds[DataSelfLevel], int32(hero.level))
     vm.runtime.setData(heroDataIds[DataWorldTick], game.world.tick)
-    discard vm.runtime.run()
+    discard vm.runtime.run(vm.output)
     inc vm.decisions
   except BasicError as error:
     vm.failed = true
     vm.lastError = error.msg
-    echo "hero ", hero.id, " BASIC error: ", error.msg
+    when defined(coworld):
+      playerError(index, error.msg)
+    else:
+      echo "hero ", hero.id, " BASIC error: ", error.msg
   vm.lastWork = vm.runtime.workUsed
   vm.lastInstructions = vm.runtime.instructionsUsed
 

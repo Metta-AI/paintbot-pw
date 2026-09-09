@@ -36,3 +36,10 @@ examples/heartleaf/*.png
 examples/heartleaf/emscripten/
 tmp/
 experiments/modular_chars/modular_chars_shot.png
+
+# Coworld build outputs.
+coworld/*/dist/
+coworld/evidence/
+!Dockerfile
+!.dockerignore
+coworld/**/__pycache__/

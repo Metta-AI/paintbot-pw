@@ -13,7 +13,6 @@ const
     rgbx(196, 168, 120, 255),
     rgbx(160, 200, 160, 255)
   ]
-  HudClearance = 48.0'f32
   ## Icons draw at power-of-two sizes so the 128 and 256 px source art
   ## lands on exact mip levels and stays crisp.
   IconTiny = 16.0'f32
@@ -120,36 +119,11 @@ proc placeChrome(layout: GameUiLayout): HudChrome =
   )
   result.build = layout.panel(GameUiRegion.BottomRight, PanelBuild)
 
-proc hudLayoutFits(layoutSize: Vec2): bool =
-  ## Returns whether native HUD plates fit this layout without overlap.
-  let
-    layout = initGameUiLayout(layoutSize, TransportHeight)
-    chrome = placeChrome(layout)
-  layoutSize.x >= TransportMinWidth and layoutFits(
-    layout,
-    [
-      chrome.score,
-      chrome.resources,
-      chrome.minimap,
-      chrome.selection,
-      chrome.build
-    ],
-    HudClearance
-  )
-
-proc hudUiScale*(windowSize: Vec2): float32 =
-  ## Returns the stepped Silky scale that keeps HUD plates from overlapping.
-  fitUiScale(windowSize, hudLayoutFits, UiCrispSteps)
-
-proc hudUiScale*(window: Window): float32 =
-  ## Returns the stepped Silky scale that fits the native HUD on this window.
-  hudUiScale(vec2(window.size.x.float32, window.size.y.float32))
-
 proc currentLayout*(window: Window): GameUiLayout =
   ## Returns the nine-region HUD layout in Silky layout space.
   initGameUiLayout(
     vec2(window.size.x.float32, window.size.y.float32) /
-      hudUiScale(window),
+      gameUiScale(window),
     TransportHeight
   )
 

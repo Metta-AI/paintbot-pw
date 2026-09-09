@@ -100,6 +100,10 @@ nim r experiments/fxmesh/fxmesh.nim
 
 # Houses
 nim r experiments/houses/houses.nim
+
+# Wind Waker water: generated foam lattice, warp map, and shore strips
+nim r experiments/windwaker_water/windwaker_water.nim
+nim r experiments/windwaker_water/gen_textures.nim
 ```
 
 ## Goals

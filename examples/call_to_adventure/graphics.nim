@@ -1156,7 +1156,7 @@ proc runGraphics*() =
         )
 
   window.onButtonPress = proc(button: Button) =
-    sk.uiScale = hudUiScale(window)
+    sk.uiScale = gameUiScale(window)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     case button
     of MouseLeft, MouseLeftKey:
@@ -1209,7 +1209,7 @@ proc runGraphics*() =
       discard
 
   window.onScroll = proc() =
-    sk.uiScale = hudUiScale(window)
+    sk.uiScale = gameUiScale(window)
     sk.mousePos = window.mousePos.vec2 / sk.uiScale
     if not mouseOverUi(window, sk.mousePos):
       cancelCameraEase(cameraEase)
@@ -1255,7 +1255,7 @@ proc runGraphics*() =
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, SimulationStep)
-      sk.uiScale = hudUiScale(window)
+      sk.uiScale = gameUiScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)
@@ -1563,7 +1563,7 @@ proc runGraphics*() =
             scene.sunDepthPass = false
 
         glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
-        glClearColor(0.04, 0.04, 0.06, 1)
+        glClearColor(0, 0, 0, 1)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
 
         if layerVertexRanges.len > visibleFrom:
@@ -1637,6 +1637,7 @@ proc runGraphics*() =
         )
       profileBlock "present":
         window.presentFrame(framePaceHz)
+        reportReplayFrame(run.world.tick, int32(run.hashCheck.mismatches))
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true

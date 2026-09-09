@@ -1,0 +1,185 @@
+{
+  "tags": [
+    "strategy",
+    "basic",
+    "polyworld"
+  ],
+  "game": {
+    "name": "Light vs Dark",
+    "description": "Two BASIC overlords gather resources, build armies, and fight. The simulation winner scores one win, including its existing time-limit resolution.",
+    "owner": "treeform",
+    "player_runtime": "game-hosted",
+    "runnable": {
+      "type": "game",
+      "image": "{{GAME_IMAGE}}",
+      "source_url": "https://github.com/Metta-AI/polyworld/tree/main/examples/light_vs_dark"
+    },
+    "config_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players",
+        "seed",
+        "max_ticks"
+      ],
+      "properties": {
+        "tokens": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        },
+        "max_ticks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 28800
+        }
+      }
+    },
+    "results_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scores",
+        "ticks",
+        "seed",
+        "outcome"
+      ],
+      "properties": {
+        "scores": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          }
+        },
+        "ticks": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 28800
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "banked_gold": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "returned": {
+          "type": "array",
+          "items": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "replay_viewer": {
+      "bundle": "replay-viewer",
+      "replay_compression": "gzip"
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "Slot 0 commands Light. Slot 1 commands Dark. Supply a raw BASIC file. The existing Polyworld BASIC host API runs with bounded source, memory, work, and instruction limits. PRINT is private. See the game guide and bundled base.bas for a complete working player."
+      },
+      "global": {
+        "type": "text",
+        "value": "GET /client/global returns a static status page. /global sends one JSON status message after WebSocket upgrade and echoes Ping frames with Pong. No gameplay traffic uses WebSockets. Other legacy endpoints return explicit stubs."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "# Light vs Dark\n\nTwo BASIC overlords gather resources, build armies, and fight. The simulation winner scores one win, including its existing time-limit resolution.\n\nSlot 0 commands Light. Slot 1 commands Dark. Platform slots are zero-based. Upload a `.bas` file containing BASIC source. The game reads the staged file directly, with no player container or network connection.\n\nStart with the bundled `players/base.bas`. The [game documentation](https://github.com/Metta-AI/polyworld/blob/main/examples/light_vs_dark/docs/index.html) describes observations and available BASIC commands. The same source is available under `examples/light_vs_dark/bots.nim` and `content.nim`.\n\nBASIC `PRINT` output, compiler diagnostics, runtime errors, and VM lifecycle messages go to the owning player's private log. Each log is limited to 10 MiB. Runtime limit errors disable that VM; other seats continue. Invalid BASIC syntax fails the episode with a player failure diagnostic. Public game logs and action replays contain no BASIC source or private print output.\n\nMatches run up to 28,800 deterministic ticks (20 simulated minutes), without real-time pacing. Replays run entirely in the browser with playback, seeking, speed, and loop controls. The server exposes `/healthz`; legacy clients are static stubs.\n\nThe Competition league runs every 30 minutes with at least two episodes per entrant. Separate baseline filler policies complete short rosters. Fillers are not ranked entrants. Standings use binary win scores and platform Elo.\n"
+      }
+    }
+  },
+  "player": [
+    {
+      "id": "baseline",
+      "name": "Baseline",
+      "type": "player",
+      "file": "players/base.bas",
+      "description": "Unmodified Light vs Dark BASIC baseline."
+    }
+  ],
+  "variants": [
+    {
+      "id": "competition",
+      "name": "Competition",
+      "game_config": {
+        "players": [
+          {
+            "name": "Baseline 0"
+          },
+          {
+            "name": "Baseline 1"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 28800
+      },
+      "description": "Full-length deterministic competition match."
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Baseline 0"
+        },
+        {
+          "name": "Baseline 1"
+        }
+      ],
+      "seed": 2026,
+      "max_ticks": 28800
+    },
+    "players": [
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      }
+    ]
+  }
+}

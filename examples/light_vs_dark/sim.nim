@@ -128,6 +128,7 @@ type
     visionGeneration*: array[PlayerCount, uint32]    # HASH: derived
     explored*: array[PlayerCount, seq[uint8]]        # HASH: derived
   OverlordVm* = ref object
+    output*: PrintProc
     ## One compiled BASIC program for a player. Not simulation state.
     runtime*: Runtime
     ready*: bool
@@ -2348,3 +2349,9 @@ proc newGame*(map: MapData, maximumTicks: int32): Game =
     mapSeed: map.seed,
     maximumTicks: maximumTicks
   )
+
+proc scores*(world: World): seq[int] =
+  ## Converts the existing winner into binary scores in platform slot order.
+  result.setLen(PlayerCount)
+  if world.winner >= 0:
+    result[world.winner] = 1

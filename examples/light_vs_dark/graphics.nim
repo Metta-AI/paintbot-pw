@@ -15,7 +15,7 @@ import
     particleshaders,
     pathing, player, profiles, quadterrain, rtscameras, selectionoutlines,
     shapes,
-    shadows, tapes, viewers, visions, worldbars
+    shadows, tapes, toon, viewers, visions, worldbars
   ],
   content,
   sim,
@@ -1456,7 +1456,7 @@ proc runGraphics*() =
   window.onFrame = proc() =
     profileBlock "frame":
       let dt = frameDelta(lastFrameTime, Step)
-      sk.uiScale = hudUiScale(window)
+      sk.uiScale = gameUiScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
       profileBlock "camera":
         updateCamera(dt)
@@ -1542,6 +1542,7 @@ proc runGraphics*() =
           scene.sunDepthPass = false
         glClearColor(0.05, 0.06, 0.09, 1.0)
         glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
+        scene.toon.drawBackground()
         updateTerrainVision()
         drawTerrain(viewProjection, showTiles)
         beginCharacters(scene, window, view, projection, cameraEye)
@@ -1626,6 +1627,7 @@ proc runGraphics*() =
         )
       profileBlock "present":
         window.presentFrame(framePaceHz)
+        reportReplayFrame(run.world.tick, int32(run.hashCheck.mismatches))
     if noteProfileFrame():
       when not defined(emscripten):
         window.closeRequested = true
