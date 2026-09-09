@@ -226,8 +226,8 @@ block doorCrush:
     &"only {w.lastTally[0].visitors} of eight visitors got in"
 
 echo "Testing a whole bot-driven week"
-block botWeek:
-  let game = newGame(gameMap, int32(DefaultDayCount))
+for seed in [1'i32, 7, 1988, DefaultSeed]:
+  let game = newGame(generateMap(seed), int32(DefaultDayCount))
   var sources: seq[string]
   let source = readFile("examples/heartleaf/players/base.bas")
   for slot in 0 ..< VillagerCount:
@@ -235,13 +235,41 @@ block botWeek:
   loadBots(game, sources)
   proc decide(w: World) =
     runBotDecisions(game)
+  var samples, outsidePlaza, crowded, restingPairs: int
   while not game.world.over:
     let previousPhase = game.world.phase
     game.world.tickWorld(decide)
+    let w = game.world
+    if w.phase == DaytimePhase and w.tick mod (2 * TickRate) == 0 and
+        w.minuteOfDay >= 12 * 60 and w.minuteOfDay < 16 * 60:
+      inc samples
+      for v in w.villagers:
+        if chebyshev(v.tile, tile2(GridSide div 2, GridSide div 2)) > 7:
+          inc outsidePlaza
+        var nearby = 0
+        for other in w.villagers:
+          if other.slot != v.slot and other.inHouse < 0 and
+              chebyshev(v.tile, other.tile) <= 4:
+            inc nearby
+        if nearby >= 3:
+          inc crowded
+        if nearby == 1 and v.order == NoOrder:
+          inc restingPairs
     if game.world.phase == ScorePhase and previousPhase != ScorePhase:
+      var validParty = false
+      for report in w.lastTally:
+        validParty = validParty or report.valid
+      doAssert validParty, &"seed {seed} had no dinner on day {w.day}"
       for v in game.world.villagers:
         doAssert not v.curfewMissed,
           &"{VillagerNames[v.slot]} missed curfew on day {game.world.day}"
+  doAssert samples > 0
+  doAssert outsidePlaza > samples * VillagerCount div 2,
+    &"seed {seed}: villagers spent most of the afternoon in the plaza"
+  doAssert crowded < samples * VillagerCount div 10,
+    &"seed {seed}: villagers spent too much time in groups of four or more"
+  doAssert restingPairs > 0,
+    &"seed {seed}: villagers never stopped beside a neighbor"
   for slot in 0 ..< VillagerCount:
     doAssert not game.brains[slot].failed,
       &"villager {slot} script failed: {game.brains[slot].lastError}"

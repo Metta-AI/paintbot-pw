@@ -52,10 +52,135 @@ sub rnd(n)
   rndOut = rngState mod n
 end sub
 
+' Count outdoor company without treating hidden house occupants as a crowd.
+sub company(x, y)
+  neighbors = 0
+  other = 0
+  while other < villagerTotal
+    if other <> selfSlot and villagerInHouse(other) < 0 then
+      if distance(x, y, villagerX(other), villagerY(other)) <= 4 then
+        neighbors = neighbors + 1
+      end if
+    end if
+    other = other + 1
+  wend
+end sub
+
+sub leisure()
+  f = orderFailed()
+  if orderKind = 0 then
+    g = nearestStockedGarden()
+    if g >= 0 then
+      r = gather(g)
+      wandering = 0
+    else
+      if wandering = 1 then
+        wandering = 0
+        call rnd(121)
+        pauseUntil = worldTick + 120 + rndOut
+        if f = 1 then
+          pauseUntil = worldTick
+        end if
+      end if
+      call company(myX, myY)
+      if neighbors >= 2 then
+        pauseUntil = worldTick
+      end if
+      if worldTick >= pauseUntil then
+        ' Occasionally approach one quiet neighbor. Take a fixed destination
+        ' beside them, so a departing neighbor does not start a chase.
+        social = -1
+        if worldTick >= socialAfter then
+          call rnd(3)
+          if rndOut = 0 then
+            call rnd(villagerTotal)
+            first = rndOut
+            scan = 0
+            while scan < villagerTotal and social < 0
+              peer = (first + scan) mod villagerTotal
+              if peer <> selfSlot and villagerInHouse(peer) < 0 then
+                px = villagerX(peer)
+                py = villagerY(peer)
+                d = distTo(px, py)
+                if d > 4 and d <= 16 then
+                  call company(px, py)
+                  if neighbors = 1 then
+                    social = peer
+                  end if
+                end if
+              end if
+              scan = scan + 1
+            wend
+          end if
+          call rnd(721)
+          socialAfter = worldTick + 720 + rndOut
+        end if
+
+        call rnd(10)
+        outing = rndOut
+        ax = doorX(selfSlot)
+        ay = doorY(selfSlot)
+        if outing >= 4 and outing < 7 then
+          call rnd(gardenTotal)
+          ax = gardenX(rndOut)
+          ay = gardenY(rndOut)
+        end if
+        if outing >= 7 and outing < 9 then
+          call rnd(villagerTotal)
+          ax = doorX(rndOut)
+          ay = doorY(rndOut)
+        end if
+        if outing = 9 then
+          ax = 64
+          ay = 64
+        end if
+        if social >= 0 then
+          ax = villagerX(social)
+          ay = villagerY(social)
+        end if
+        tries = 0
+        while tries < 6
+          call rnd(9)
+          dx = rndOut - 4
+          call rnd(9)
+          dy = rndOut - 4
+          if social >= 0 then
+            call rnd(5)
+            dx = rndOut - 2
+            call rnd(5)
+            dy = rndOut - 2
+          end if
+          x = ax + dx
+          y = ay + dy
+          if dx * dx + dy * dy >= 4 and distTo(x, y) >= 4 then
+            if tilePassable(x, y) = 1 then
+              call company(x, y)
+              if neighbors <= 1 then
+                r = walkTo(x, y)
+                if r = 1 then
+                  wandering = 1
+                  tries = 6
+                end if
+              end if
+            end if
+          end if
+          tries = tries + 1
+        wend
+        if wandering = 0 then
+          pauseUntil = worldTick + 24
+        end if
+      end if
+    end if
+  end if
+end sub
+
 ' New-day reset.
 if dayMark <> day then
   dayMark = day
   returningHome = 0
+  wandering = 0
+  pauseUntil = 0
+  socialAfter = worldTick + 240 + selfSlot * 48
   s = 0
   while s < villagerTotal
     invitedMark(s) = 0
@@ -89,12 +214,7 @@ if dinnerDone = 1 then
     if inHouse >= 0 then
       r = exitHouse()
     else
-      if orderKind = 0 then
-        g = nearestStockedGarden()
-        if g >= 0 then
-          r = gather(g)
-        end if
-      end if
+      call leisure()
     end if
   end if
 else
@@ -178,50 +298,6 @@ else
       wend
     end if
 
-    ' Gather whatever still grows; when the gardens are bare, loiter on
-    ' the plaza like it is a village square: walk to some random spot
-    ' inside the ring, stand about for a while, pick another.
-    f = orderFailed()
-    if orderKind = 0 then
-      g = nearestStockedGarden()
-      if g >= 0 then
-        r = gather(g)
-        wandering = 0
-      else
-        if wandering = 1 then
-          ' Just arrived. Stand here for five to thirty seconds.
-          wandering = 0
-          call rnd(600)
-          pauseUntil = worldTick + 120 + rndOut
-        else
-          if worldTick >= pauseUntil then
-            tries = 0
-            while tries < 6
-              call rnd(15)
-              dx = rndOut - 7
-              call rnd(15)
-              dy = rndOut - 7
-              ok = 1
-              if dx * dx + dy * dy > 49 then
-                ok = 0
-              end if
-              if dx >= -2 and dx <= 2 and dy >= -2 and dy <= 2 then
-                ok = 0
-              end if
-              if ok = 1 then
-                if tilePassable(64 + dx, 64 + dy) = 1 then
-                  r = walkTo(64 + dx, 64 + dy)
-                  if r = 1 then
-                    wandering = 1
-                    tries = 6
-                  end if
-                end if
-              end if
-              tries = tries + 1
-            wend
-          end if
-        end if
-      end if
-    end if
+    call leisure()
   end if
 end if
