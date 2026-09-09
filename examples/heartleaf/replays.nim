@@ -11,7 +11,7 @@ import
 const
   ReplayGame* = "heartleaf"
   ReplayFormatVersion* = 1'u16
-  ReplayGameVersion* = 2'u16
+  ReplayGameVersion* = 3'u16
 
   ActionMove* = 1'u8
   ActionGather* = 2'u8
@@ -21,7 +21,8 @@ const
   ActionEnterHouse* = 6'u8
   ActionExitHouse* = 7'u8
   ActionStop* = 8'u8
-  ActionKindHigh* = ActionStop
+  ActionTalk* = 9'u8
+  ActionKindHigh* = ActionTalk
 
   MaxReplayBytes* = 64 * 1024 * 1024
   MaxReplayActions* = 4_000_000
@@ -57,6 +58,7 @@ type
       ##   EnterHouse  house id, unused
       ##   ExitHouse   unused, unused
       ##   Stop        unused, unused
+      ##   Talk        target slot, unused
 
   ReplayHeader* = TapeHeader[Setup]
   ReplayData* = ActionTape[Setup, ReplayAction]
@@ -151,7 +153,7 @@ proc validateAction(action: ReplayAction, setup: Setup) =
   of ActionGather:
     if action.first < 0 or action.first >= GardenCount:
       fail("replay gather does not name a garden")
-  of ActionInvite, ActionAccept, ActionDecline:
+  of ActionInvite, ActionAccept, ActionDecline, ActionTalk:
     if action.first < 0 or action.first >= VillagerCount:
       fail("replay action does not name a villager")
     if action.first == int32(action.playerId):

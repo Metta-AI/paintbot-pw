@@ -75,6 +75,9 @@ const
   GatherRadius* = 1'i32
   DoorRadius* = 1'i32
   InviteRadius* = 3'i32
+  TalkRadius* = 4'i32
+  TalkGroupLimit* = 4'i32
+  TalkReplyTicks* = 2 * TickRate
   GardenEnterCost* = 64'i32
     ## Paths skirt garden plots instead of trampling through them.
   RepathAfterTicks* = 36'i32
@@ -182,7 +185,8 @@ proc contentHash*(): uint64 =
     DayTicks, ScoreScreenTicks, int32(VillagerCount), int32(VeggieKinds),
     int32(GardensPerHouse), int32(GardenCount), BiteRounds, NewVeggiePoints,
     RepeatVeggiePoints, CurfewPenalty, StepTicks, OrthogonalCost, DiagonalCost,
-    GatherRadius, DoorRadius, InviteRadius, GardenEnterCost,
+    GatherRadius, DoorRadius, InviteRadius, TalkRadius, TalkGroupLimit,
+    TalkReplyTicks, GardenEnterCost,
     RepathAfterTicks, AbandonAfterTicks, RepathCooldownTicks,
     ShortPathCooldownTicks
   ]:

@@ -27,6 +27,7 @@ proc sampleReplay(): ReplayData =
   recorder.recordAction(uint32(DecisionTicks * 3), 4, ActionEnterHouse, 0)
   recorder.recordAction(uint32(DecisionTicks * 4), 4, ActionExitHouse)
   recorder.recordAction(uint32(DecisionTicks * 4), 0, ActionStop)
+  recorder.recordAction(uint32(DecisionTicks * 5), 0, ActionTalk, 4)
   for tick in 0 ..< gameLengthTicks(2):
     recorder.recordHash(uint64(tick) * 0x9E3779B97F4A7C15'u64 + 1)
   recorder.data

@@ -251,6 +251,23 @@ proc buildVillagerHost*(slot: int32): Host =
     else: game.occupants(arguments[0])
   discard result.addFunction("occupants", 1, occupantsProc, 6)
 
+  let talkingToProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    let other = arguments[0]
+    if not validSlot(other) or game.villagers[other].order != TalkOrder: -1
+    else: game.villagers[other].orderTarget
+  discard result.addFunction("talkingTo", 1, talkingToProc, 3)
+
+  let availableProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    let other = arguments[0]
+    int32(validSlot(other) and game.villagers[other].inHouse < 0 and
+      game.villagers[other].order in {NoOrder, MoveOrder, TalkOrder})
+  discard result.addFunction("socialAvailable", 1, availableProc, 3)
+
+  let groupSizeProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    if not validSlot(arguments[0]): 0
+    else: int32(game.socialGroup(arguments[0]).card)
+  discard result.addFunction("socialGroupSize", 1, groupSizeProc, 100)
+
   ## Geometry.
   let distToProc: HostProc = proc(arguments: openArray[int32]): int32 =
     max(abs(arguments[0] - int32(me.tile.x)),
@@ -274,6 +291,10 @@ proc buildVillagerHost*(slot: int32): Host =
   let gatherProc: HostProc = proc(arguments: openArray[int32]): int32 =
     int32(activeGame.applyGather(slot, arguments[0]))
   discard result.addFunction("gather", 1, gatherProc, 400)
+
+  let talkProc: HostProc = proc(arguments: openArray[int32]): int32 =
+    int32(activeGame.applyTalk(slot, arguments[0]))
+  discard result.addFunction("talk", 1, talkProc, 200)
 
   let inviteProc: HostProc = proc(arguments: openArray[int32]): int32 =
     int32(activeGame.applyInvite(slot, arguments[0]))

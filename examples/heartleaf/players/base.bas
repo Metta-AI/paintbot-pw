@@ -19,7 +19,7 @@
 '   score villagerTotal gardenTotal decisionPeriod
 ' minuteOfDay counts minutes since midnight: 540 is 9:00, 1080 is 18:00.
 ' inHouse is the house you are inside, or -1 outdoors.
-' orderKind: 0 idle, 1 walking, 2 gathering, 3 heading into a house.
+' orderKind: 0 idle, 1 walking, 2 gathering, 3 heading home, 4 talking.
 '
 ' QUERIES
 '   invOf(v) eatenOf(v)                    your bag and your palate
@@ -28,12 +28,14 @@
 '   gardenOutpaced(i)                      another gatherer leads by 3+ tiles
 '   villagerX(s) villagerY(s) villagerInHouse(s) villagerHosting(s)
 '   villagerCarried(s) villagerScore(s) inviteFrom(s)
+'   talkingTo(s) socialAvailable(s) socialGroupSize(s)
 '   doorX(h) doorY(h) occupants(h)
 '   distTo(x, y) distance(x1, y1, x2, y2) tilePassable(x, y)
 '
 ' COMMANDS, all return 1 when accepted and 0 when refused.
 '   walkTo(x, y)   gather(gardenId)  invite(s)   accept(s)   decline(s)
 '   enterHouse(h)  exitHouse()       cancel()    orderFailed()
+'   talk(s)        offer or join a nearby conversation, up to four gnomes
 ' invite needs both of you outdoors within 3 tiles, and declares you a host.
 ' Entering a house hides you from the map until you exitHouse().
 '
@@ -67,129 +69,159 @@ sub company(x, y)
   wend
 end sub
 
+sub beginChat(peer)
+  r = talk(peer)
+  if r = 1 then
+    call rnd(289)
+    chatUntil = worldTick + 288 + rndOut
+    social = -1
+    wandering = 0
+    engaged = 1
+  end if
+end sub
+
 sub leisure()
   f = orderFailed()
-  if orderKind = 1 and wandering = 1 and social >= 0 then
-    if villagerInHouse(social) >= 0 or distance(ax, ay, villagerX(social), villagerY(social)) > 3 then
-      r = cancel()
-    end if
-  end if
-  ' Reconsider clear losses every two seconds, but stay in close races.
-  if worldTick >= harvestCheck then
-    harvestCheck = worldTick + 48
-    if orderKind = 2 then
+  engaged = 0
+  g = nearestWinnableGarden()
+  if orderKind = 2 then
+    if worldTick >= harvestCheck then
+      harvestCheck = worldTick + 48
       if gardenOutpaced(orderTarget) = 1 then
         r = cancel()
       end if
-    else
-      if orderKind = 1 then
-        g = nearestWinnableGarden()
-        if g >= 0 then
-          r = gather(g)
-          wandering = 0
-          leisureReady = 0
-        end if
-      end if
     end if
-  end if
-  if orderKind = 0 then
-    g = nearestWinnableGarden()
+  else
     if g >= 0 then
       r = gather(g)
       wandering = 0
       leisureReady = 0
+      social = -1
     else
-      if leisureReady = 0 then
-        leisureReady = 1
-        leisureX = myX
-        leisureY = myY
-        previousStop = 0
-        call rnd(121)
-        pauseUntil = worldTick + 120 + rndOut
-      end if
-      if wandering = 1 then
-        wandering = 0
-        call rnd(121)
-        pauseUntil = worldTick + 120 + rndOut
-        if f = 1 then
-          pauseUntil = worldTick
+      if orderKind = 4 then
+        if worldTick >= chatUntil then
+          r = cancel()
+          call rnd(241)
+          socialAfter = worldTick + 240 + rndOut
+          lastPartner = orderTarget
+          leisureReady = 0
         end if
-      end if
-      call company(myX, myY)
-      if neighbors >= 2 then
-        pauseUntil = worldTick
-      end if
-      if worldTick >= pauseUntil then
-        ' Occasionally approach one quiet neighbor. Take a fixed destination
-        ' beside them, so a departing neighbor does not start a chase.
-        social = -1
+      else
+        ' Acknowledge a neighbor who has stopped to talk to us.
         if worldTick >= socialAfter then
-          call rnd(3)
-          if rndOut = 0 then
-            call rnd(villagerTotal)
-            first = rndOut
-            scan = 0
-            while scan < villagerTotal and social < 0
-              peer = (first + scan) mod villagerTotal
-              if peer <> selfSlot and villagerInHouse(peer) < 0 then
-                px = villagerX(peer)
-                py = villagerY(peer)
-                d = distTo(px, py)
-                if d > 3 and d <= 6 then
-                  call company(px, py)
-                  if neighbors = 1 then
+          peer = 0
+          while peer < villagerTotal and engaged = 0
+            if peer <> selfSlot and talkingTo(peer) = selfSlot then
+              if distTo(villagerX(peer), villagerY(peer)) <= 4 then
+                call beginChat(peer)
+              end if
+            end if
+            peer = peer + 1
+          wend
+        end if
+        if engaged = 0 and social >= 0 then
+          if socialAvailable(social) = 0 or socialGroupSize(social) >= 4 then
+            r = cancel()
+            social = -1
+            wandering = 0
+          else
+            if distTo(villagerX(social), villagerY(social)) <= 3 then
+              call beginChat(social)
+            else
+              if distance(ax, ay, villagerX(social), villagerY(social)) > 3 then
+                r = cancel()
+                social = -1
+                wandering = 0
+              end if
+            end if
+          end if
+        end if
+        if engaged = 0 and orderKind = 0 then
+          if leisureReady = 0 then
+            leisureReady = 1
+            leisureX = myX
+            leisureY = myY
+            previousStop = 0
+            call rnd(121)
+            pauseUntil = worldTick + 120 + rndOut
+          end if
+          if wandering = 1 then
+            wandering = 0
+            call rnd(121)
+            pauseUntil = worldTick + 120 + rndOut
+          end if
+
+          ' Seek a neighbor or a small gathering, favoring nearby company.
+          social = -1
+          if worldTick >= socialAfter then
+            best = 100000
+            peer = 0
+            while peer < villagerTotal
+              if peer <> selfSlot and peer <> lastPartner and socialAvailable(peer) = 1 then
+                d = distTo(villagerX(peer), villagerY(peer))
+                if d <= 14 and socialGroupSize(peer) < 4 then
+                  if d < best then
+                    best = d
                     social = peer
                   end if
                 end if
               end if
-              scan = scan + 1
+              peer = peer + 1
             wend
           end if
-          call rnd(721)
-          socialAfter = worldTick + 720 + rndOut
-        end if
-
-        ax = myX
-        ay = myY
-        if social >= 0 then
-          ax = villagerX(social)
-          ay = villagerY(social)
-        end if
-        tries = 0
-        while tries < 6
-          call rnd(9)
-          dx = rndOut - 4
-          call rnd(9)
-          dy = rndOut - 4
           if social >= 0 then
-            call rnd(5)
-            dx = rndOut - 2
-            call rnd(5)
-            dy = rndOut - 2
+            if best <= 3 then
+              call beginChat(social)
+            end if
           end if
-          x = ax + dx
-          y = ay + dy
-          nearby = distTo(x, y)
-          backtracking = previousStop = 1 and distance(x, y, previousX, previousY) <= 2
-          if nearby >= 3 and nearby <= 6 and backtracking = 0 then
-            if distance(x, y, leisureX, leisureY) <= 8 and tilePassable(x, y) = 1 then
-              call company(x, y)
-              if neighbors <= 1 then
-                r = walkTo(x, y)
-                if r = 1 then
-                  wandering = 1
-                  previousStop = 1
-                  previousX = myX
-                  previousY = myY
-                  tries = 6
+          if engaged = 0 then
+            call company(myX, myY)
+            if neighbors >= 4 then
+              pauseUntil = worldTick
+            end if
+            if social >= 0 or worldTick >= pauseUntil then
+              ax = myX
+              ay = myY
+              if social >= 0 then
+                ax = villagerX(social)
+                ay = villagerY(social)
+              end if
+              tries = 0
+              while tries < 6
+                call rnd(7)
+                dx = rndOut - 3
+                call rnd(7)
+                dy = rndOut - 3
+                x = ax + dx
+                y = ay + dy
+                nearby = distTo(x, y)
+                backtracking = previousStop = 1 and distance(x, y, previousX, previousY) <= 2
+                limit = 6
+                if social >= 0 then
+                  limit = 16
                 end if
+                if nearby >= 2 and nearby <= limit and backtracking = 0 then
+                  if tilePassable(x, y) = 1 and (social >= 0 or distance(x, y, leisureX, leisureY) <= 8) then
+                    call company(x, y)
+                    if neighbors <= 3 then
+                      r = walkTo(x, y)
+                      if r = 1 then
+                        wandering = 1
+                        previousStop = 1
+                        previousX = myX
+                        previousY = myY
+                        tries = 6
+                      end if
+                    end if
+                  end if
+                end if
+                tries = tries + 1
+              wend
+              if wandering = 0 then
+                pauseUntil = worldTick + 72
               end if
             end if
           end if
-          tries = tries + 1
-        wend
-        if wandering = 0 then
-          pauseUntil = worldTick + 72
         end if
       end if
     end if
@@ -207,7 +239,9 @@ if dayMark <> day then
   leisureReady = 0
   social = -1
   pauseUntil = 0
-  socialAfter = worldTick + 240 + selfSlot * 48
+  socialAfter = worldTick + selfSlot * 12
+  lastPartner = -1
+  chatUntil = 0
   s = 0
   while s < villagerTotal
     invitedMark(s) = 0

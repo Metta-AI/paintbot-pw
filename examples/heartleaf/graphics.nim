@@ -809,7 +809,7 @@ proc runGraphics*() =
           let v = run.world.villagers[slot]
           if v.inHouse >= 0:
             continue
-          if v.animation notin {GatherAnimation, WaveAnimation}:
+          if v.order != TalkOrder and v.animation notin {GatherAnimation, WaveAnimation}:
             continue
           let anchor = screenPosition(
             renderPoint(v) + vec3(0, VillagerHeight + 0.6'f32, 0),

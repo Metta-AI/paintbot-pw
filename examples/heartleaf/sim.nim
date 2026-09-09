@@ -24,7 +24,7 @@ const
 
 type
   OrderKind* = enum
-    NoOrder, MoveOrder, GatherOrder, EnterOrder
+    NoOrder, MoveOrder, GatherOrder, EnterOrder, TalkOrder
 
   Villager* = ref object
     slot*: int32
@@ -396,6 +396,17 @@ proc advanceVillager(w: World, slot: int32) =
       v.animation = GatherAnimation
       v.animationTicks = 0
       return
+  of TalkOrder:
+    let other = w.villagers[v.orderTarget]
+    if other.inHouse >= 0 or chebyshev(v.tile, other.tile) > TalkRadius or
+        other.order in {GatherOrder, EnterOrder} or
+        (other.order != TalkOrder and v.animationTicks >= TalkReplyTicks):
+      v.clearOrder(false)
+    else:
+      let toward = other.body.pos - v.body.pos
+      if toward != FixedVec2Zero:
+        turnToward(v.body.facing, angle(toward), BodyTurnRate)
+    return
   of EnterOrder:
     let house = v.orderTarget
     if chebyshev(v.tile, w.doorOf(house)) <= DoorRadius:
@@ -552,6 +563,44 @@ proc applyGather*(w: World, player, garden: int32): bool =
   w.setGoal(player, w.map.gardenTiles[garden])
   true
 
+proc socialGroup*(w: World, slot: int32): set[0 .. VillagerCount - 1] =
+  ## Includes everyone connected by an active conversation, in either direction.
+  result.incl int(slot)
+  var changed = true
+  while changed:
+    changed = false
+    for v in w.villagers:
+      if v.order != TalkOrder:
+        continue
+      let
+        member = int(v.slot)
+        partner = int(v.orderTarget)
+      if member in result or partner in result:
+        let before = result.card
+        result.incl member
+        result.incl partner
+        changed = changed or result.card != before
+
+proc applyTalk*(w: World, player, target: int32): bool =
+  ## Offers or joins a small conversation without controlling the other villager.
+  if not w.commandsOpen or not validSlot(player) or not validSlot(target) or
+      player == target:
+    return false
+  let
+    v = w.villagers[player]
+    other = w.villagers[target]
+  if v.inHouse >= 0 or other.inHouse >= 0 or
+      other.order in {GatherOrder, EnterOrder} or
+      chebyshev(v.tile, other.tile) > TalkRadius or
+      (w.socialGroup(player) + w.socialGroup(target)).card > TalkGroupLimit:
+    return false
+  v.clearOrder(false)
+  v.order = TalkOrder
+  v.orderTarget = target
+  v.animation = WaveAnimation
+  v.animationTicks = 0
+  true
+
 proc applyInvite*(w: World, player, target: int32): bool =
   ## Invites another villager to tonight's party, declaring the caller a
   ## host. Both must be outdoors and close enough to talk, and the tally
@@ -659,6 +708,8 @@ proc applyReplayAction*(w: World, action: ReplayAction) =
     discard w.applyExitHouse(player)
   of ActionStop:
     discard w.applyStop(player)
+  of ActionTalk:
+    discard w.applyTalk(player, action.first)
   else:
     raise newException(ReplayError, "replay action kind is invalid")
 
@@ -683,6 +734,12 @@ proc applyGather*(game: Game, player, garden: int32): bool =
   result = game.world.applyGather(player, garden)
   if result:
     game.record(ActionGather, player, garden)
+
+proc applyTalk*(game: Game, player, target: int32): bool =
+  ## Records an accepted conversation offer or response.
+  result = game.world.applyTalk(player, target)
+  if result:
+    game.record(ActionTalk, player, target)
 
 proc applyInvite*(game: Game, player, target: int32): bool =
   ## Invites a villager and records the command when accepted.

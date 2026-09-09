@@ -3,7 +3,7 @@
 
 import
   std/strformat,
-  polyworld/rngs,
+  polyworld/[fixed, rngs],
   ../examples/heartleaf/content,
   ../examples/heartleaf/maps,
   ../examples/heartleaf/sim,
@@ -202,6 +202,65 @@ block gatherRace:
     "the losing gatherer was never told"
   doAssert w.gardens[garden] < 0, "the plot still holds food"
 
+block conversationsAreVoluntaryAndBounded:
+  let w = newWorld(gameMap, 7)
+  for slot in 0 .. 4:
+    let v = w.villagers[slot]
+    v.tile = tile2(70 + int32(slot mod 2) * 2, 70 + int32(slot div 2))
+    v.body.pos = fixedVec2(fixed(int32(v.tile.x)) + 0.5'fx,
+      fixed(int32(v.tile.y)) + 0.5'fx)
+  w.villagers[0].body.facing = FixedPi
+  doAssert not w.applyTalk(0, 0)
+  doAssert not w.applyTalk(0, -1)
+  doAssert w.applyTalk(0, 1)
+  doAssert w.villagers[1].order == NoOrder,
+    "talking commandeered the other villager"
+  doAssert w.applyTalk(1, 0)
+  doAssert w.applyTalk(2, 0)
+  doAssert w.applyTalk(3, 0)
+  doAssert w.socialGroup(0).card == 4
+  doAssert not w.applyTalk(4, 0), "a fifth gnome joined the conversation"
+  let before = w.villagers[0].body.pos
+  w.tickWorld(nil)
+  doAssert abs(w.villagers[0].body.facing) < FixedPi,
+    "the speaker did not turn toward their partner"
+  doAssert w.villagers[0].body.pos == before, "talking moved the speaker"
+  for v in w.villagers:
+    doAssert not v.hostingTonight and v.score == 0,
+      "socializing changed dinner commitments or points"
+  doAssert w.applyGather(0, 0)
+  w.tickWorld(nil)
+  doAssert w.villagers[1].order == NoOrder,
+    "the listener kept talking after their partner left to harvest"
+  doAssert not w.applyTalk(4, 0), "a busy gatherer was available to chat"
+
+block scriptedConversationEnds:
+  let game = newGame(gameMap, 7)
+  var sources = newSeq[string](VillagerCount)
+  for slot in 0 ..< VillagerCount:
+    sources[slot] = if slot < 2: readFile("examples/heartleaf/players/base.bas")
+      else: "r = 0"
+    if slot >= 2:
+      game.world.villagers[slot].inHouse = int32(slot)
+  loadBots(game, sources)
+  for garden in 0 ..< GardenCount:
+    game.world.gardens[garden] = EmptyGarden
+  for slot in 0 .. 1:
+    let v = game.world.villagers[slot]
+    v.tile = tile2(70 + int32(slot) * 2, 70)
+    v.body.pos = fixedVec2(fixed(int32(v.tile.x)) + 0.5'fx, 70.5'fx)
+  var answered, departed = false
+  for tick in 0 ..< 30 * TickRate:
+    game.world.tickWorld(proc(w: World) = runBotDecisions(game))
+    let mutual = game.world.villagers[0].order == TalkOrder and
+      game.world.villagers[1].order == TalkOrder
+    if mutual:
+      answered = true
+    elif answered:
+      departed = true
+  doAssert answered, "nearby scripted gnomes never answered each other"
+  doAssert departed, "a scripted conversation never ended"
+
 block competitiveHarvesting:
   let w = newWorld(gameMap, 7)
   for garden in 0 ..< GardenCount:
@@ -329,16 +388,26 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
   proc decide(w: World) =
     var
       orders: array[VillagerCount, OrderKind]
-      goals: array[VillagerCount, Tile2]
+      goals, positions: array[VillagerCount, Tile2]
+      outdoors: array[VillagerCount, bool]
     for slot, v in w.villagers:
       orders[slot] = v.order
       goals[slot] = v.goal
+      positions[slot] = v.tile
+      outdoors[slot] = v.inHouse < 0
     runBotDecisions(game)
     for slot, v in w.villagers:
       if v.order == MoveOrder and
           (orders[slot] != MoveOrder or goals[slot] != v.goal):
-        doAssert chebyshev(v.tile, v.goal) <= 6,
-          &"seed {seed}: villager {slot} started a long free-time walk"
+        var visiting = false
+        for other in w.villagers:
+          if other.slot != v.slot and outdoors[other.slot] and
+              orders[other.slot] in {NoOrder, MoveOrder, TalkOrder} and
+              chebyshev(positions[other.slot], v.goal) <= 3:
+            visiting = true
+        doAssert chebyshev(v.tile, v.goal) <= 6 or
+            (visiting and chebyshev(v.tile, v.goal) <= 16),
+          &"seed {seed}: villager {slot} started a long aimless walk"
   var samples, outsidePlaza, crowded, restingPairs: int
   while not game.world.over:
     let previousPhase = game.world.phase
@@ -359,9 +428,9 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
           if other.slot != v.slot and other.inHouse < 0 and
               chebyshev(v.tile, other.tile) <= 4:
             inc nearby
-        if nearby >= 3:
+        if nearby >= 4:
           inc crowded
-        if nearby == 1 and v.order == NoOrder:
+        if nearby >= 1 and v.order == TalkOrder:
           inc restingPairs
     if game.world.phase == ScorePhase and previousPhase != ScorePhase:
       var validParty = false
@@ -375,9 +444,9 @@ for seed in [1'i32, 7, 1988, DefaultSeed]:
   doAssert outsidePlaza > samples * VillagerCount div 2,
     &"seed {seed}: villagers spent most of the afternoon in the plaza"
   doAssert crowded < samples * VillagerCount div 10,
-    &"seed {seed}: villagers spent too much time in groups of four or more"
+    &"seed {seed}: villagers spent too much time in groups of five or more"
   doAssert restingPairs > 0,
-    &"seed {seed}: villagers never stopped beside a neighbor"
+    &"seed {seed}: villagers never joined a conversation"
   for slot in 0 ..< VillagerCount:
     doAssert not game.brains[slot].failed,
       &"villager {slot} script failed: {game.brains[slot].lastError}"
