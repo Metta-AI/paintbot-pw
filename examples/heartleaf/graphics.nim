@@ -21,6 +21,7 @@ import
   controls,
   ground,
   decor,
+  democamera,
   houses,
   houseview
 
@@ -355,6 +356,11 @@ proc runGraphics*() =
     closeScale = 0.5
   )
 
+  let demoMode = options.playerSlot == 0 or run.replayMode
+  var demoCamera = initDemoCamera(VillagerCount)
+  if demoMode:
+    cameraDistance = DemoDistance
+
   ## Replay scaffolding
 
   seekCheckpoints.add SeekCheckpoint(
@@ -386,6 +392,7 @@ proc runGraphics*() =
     run.hashCheck = seekCheckpoints[slot].hashCheck
     run.historyPlayback = true
     havePoses = false
+    demoCamera.resetMotion()
     while run.world.tick < wanted:
       advanceGame()
       captureCheckpoint()
@@ -475,6 +482,18 @@ proc runGraphics*() =
             48
           )
 
+  proc demoSubjects(): array[VillagerCount, DemoSubject] =
+    ## Supplies interpolated viewer positions without modifying the simulation.
+    for slot, v in run.world.villagers:
+      result[slot] = DemoSubject(
+        position: if v.inHouse >= 0:
+          tileWorldPoint(run.world.map.houses[v.inHouse].center)
+        else:
+          renderPoint(v),
+        indoors: v.inHouse >= 0,
+        quiet: v.animation == IdleAnimation
+      )
+
   proc updateCamera(dt: float32) =
     ## Applies fixed-north RTS pan, zoom, and villager following.
     updateMinimapCamera(
@@ -518,6 +537,18 @@ proc runGraphics*() =
         6.0'f32,
         220.0'f32
       )
+    if demoMode:
+      if actionCam.enabled:
+        let subjects = demoSubjects()
+        if not demoCamera.active:
+          let initial = demoCamera.subject < 0
+          demoCamera.activate(subjects, cameraTarget, int(followSlot))
+          followSlot = -1
+          if initial:
+            cameraTarget = subjects[demoCamera.subject].position
+        demoCamera.update(subjects, cameraTarget, dt, transport.playing and not run.world.over)
+        return
+      demoCamera.deactivate()
     if actionCam.enabled:
       feedActionCam()
       actionCam.chooseShot(dt, transport.speed)
@@ -795,7 +826,8 @@ proc runGraphics*() =
           cameraDistance,
           viewProjection,
           followSlot,
-          actionCam
+          actionCam,
+          preserveFollowOnAuto = demoMode
         )
         sk.endUi()
       when defined(takeScreenshot):
@@ -817,7 +849,7 @@ proc runGraphics*() =
     of KeyC:
       var following = followSlot >= 0
       actionCam.toggle(following)
-      if not following:
+      if not following and not (demoMode and actionCam.enabled):
         followSlot = -1
     of KeyT: scene.toggleShading()
     of KeyF1, KeyF2:

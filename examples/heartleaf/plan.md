@@ -41,6 +41,26 @@ Houses have no interiors. Entering removes the villager's body from the
 map — occupants show as portrait icons floating over the roof — and exiting
 puts it back on the doorstep.
 
+## Demo camera
+
+The spectator starts at a fixed distance of 40, following the outdoor
+villager nearest the town centre. It stays with that villager through
+gathering, walking, and conversation, framing their house while indoors.
+After arriving, each shot lasts at least 60 real seconds. Three seconds
+idle or indoors allow a handoff after that minimum; at 90 seconds, any
+activity permits a handoff. The next outdoor villager is the least recently
+followed, with distance and slot breaking ties. With nobody else outdoors,
+the camera stays put. Transitions finish before the next shot timer starts.
+
+Movement is critically damped with a 1.5-second smoothing time and a
+six-tile-per-second speed limit. Automatic zoom is fixed; playback speed
+does not accelerate the camera. Pausing freezes automatic movement and
+shot timers. Seeking keeps the subject and eases toward their restored
+position. Pan, zoom, minimap input, and clicking a villager take manual
+control; C or the camera button resume the demo from a selected villager
+or the nearest outdoor villager, preserving the current zoom. Human-player
+mode retains its existing camera behavior.
+
 ## The map
 
 `maps.nim` generates the village with integers from one seed: a gentle

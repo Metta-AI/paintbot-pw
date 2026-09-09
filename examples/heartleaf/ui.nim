@@ -252,7 +252,8 @@ proc drawUi*(
     cameraDistance: float32,
     viewProjection: Mat4,
     followSlot: var int32,
-    actionCam: var ActionCam
+    actionCam: var ActionCam,
+    preserveFollowOnAuto = false
 ) =
   ## Draws every Silky HUD panel for the current frame.
   let
@@ -467,7 +468,7 @@ proc drawUi*(
     actionCam,
     following
   )
-  if not following:
+  if not following and not (preserveFollowOnAuto and actionCam.enabled):
     followSlot = -1
 
   if run.hashCheck.mismatches > 0:
