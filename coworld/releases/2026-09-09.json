@@ -1,0 +1,5058 @@
+{
+  "recorded_at": "2026-09-09T20:26:29.309938+00:00",
+  "version": "2026.9.9.3",
+  "source": {
+    "polyworld": "028cc5f1692fa51f3dab65b8b261fa327013a543",
+    "polyworld_branch": "treeform/coworld-games",
+    "metta_tooling": "9b99c8e18a763850bc6e04f331db98caf7fd645d",
+    "assets": "1915026884331904860d81648e4d1559ea06eb51",
+    "assets_branch": "treeform/coworld-assets",
+    "nimby_lock_sha256": "6fd517388ea867e6c57192507df2d276b1e4a528275c0a97b179f1e33c88b354",
+    "coworld_dependencies_lock_sha256": "818f72c99c2fb4694e88a3837fca0f5392d27bb916a1da1d4f9bfa06fe074508"
+  },
+  "verification": {
+    "native": "Desktop, headless, Coworld nim check; tests/tests.nim; all three recording regressions and full replay verification passed.",
+    "runtime": "Extensionless and empty sources, zero-based slots, silent logs, private PRINT, compiler failures, disabled VMs, instruction limits, 10 MiB log bound, health/stubs/Ping/Pong, results-last ordering, clean completed shutdown passed.",
+    "scoring": "GotA both teams and timeout; LvD existing outcomes; CTA unique and tied leaders, dead richest, unreturned richest, nobody returned passed. CTA replay version 15.",
+    "local_stack": "All three releases locally certified and canonical; submitted file entrants, filler rounds and both experience request forms completed with all artifacts.",
+    "browser_arm": "Native macOS ARM Chrome: full static and actual Softmax page replays, controls, resize, readiness, visible errors passed.",
+    "browser_x86": "Linux AMD64 Chromium under OrbStack emulation: all three full static replays passed. ARM native also verified Linux AMD64 recordings. No separate physical x86 host was used.",
+    "replay_bootstrap": "Hash precedence, query fallback, gzip/zlib, missing/corrupt/incompatible replay errors and looping passed."
+  },
+  "browser_evidence": {
+    "arm": {
+      "gota": {
+        "end_tick": 18680,
+        "messages": [
+          {
+            "src": "coworld-replay",
+            "type": "loading"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "bundle_ready"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "fetch_start"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "fetch_end",
+            "bytes": 3453098,
+            "compressed": false
+          },
+          {
+            "src": "coworld-replay",
+            "type": "ready"
+          }
+        ]
+      },
+      "lvd": {
+        "end_tick": 28800,
+        "messages": [
+          {
+            "src": "coworld-replay",
+            "type": "loading"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "bundle_ready"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "fetch_start"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "fetch_end",
+            "bytes": 932186,
+            "compressed": false
+          },
+          {
+            "src": "coworld-replay",
+            "type": "ready"
+          }
+        ]
+      },
+      "cta": {
+        "end_tick": 28800,
+        "messages": [
+          {
+            "src": "coworld-replay",
+            "type": "loading"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "bundle_ready"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "fetch_start"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "fetch_end",
+            "bytes": 2840261,
+            "compressed": false
+          },
+          {
+            "src": "coworld-replay",
+            "type": "ready"
+          }
+        ]
+      },
+      "missing": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "error",
+          "message": "No replay was supplied. Open a completed episode replay."
+        }
+      ],
+      "corrupt.replay": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "fetch_start"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "fetch_end",
+          "bytes": 22,
+          "compressed": false
+        },
+        {
+          "src": "coworld-replay",
+          "type": "error",
+          "message": "Error: unhandled exception: not a Polyworld replay file [ReplayError]"
+        }
+      ],
+      "divergent.replay": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "fetch_start"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "fetch_end",
+          "bytes": 2840261,
+          "compressed": false
+        },
+        {
+          "src": "coworld-replay",
+          "type": "ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "error",
+          "message": "Replay simulation diverged at or before tick 1"
+        }
+      ]
+    },
+    "x86": {
+      "lvd": {
+        "end_tick": 28800,
+        "messages": [
+          {
+            "src": "coworld-replay",
+            "type": "loading"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "bundle_ready"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "replay_fetch_start"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "replay_fetch_end",
+            "bytes": 932186,
+            "compressed": false
+          },
+          {
+            "src": "coworld-replay",
+            "type": "ready"
+          }
+        ]
+      },
+      "cta": {
+        "end_tick": 28800,
+        "messages": [
+          {
+            "src": "coworld-replay",
+            "type": "loading"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "bundle_ready"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "replay_fetch_start"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "replay_fetch_end",
+            "bytes": 2840261,
+            "compressed": false
+          },
+          {
+            "src": "coworld-replay",
+            "type": "ready"
+          }
+        ]
+      },
+      "missing": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "error",
+          "message": "No replay was supplied. Open a completed episode replay."
+        }
+      ],
+      "corrupt.replay": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_start"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_end",
+          "bytes": 22,
+          "compressed": false
+        },
+        {
+          "src": "coworld-replay",
+          "type": "error",
+          "message": "Error: unhandled exception: not a Polyworld replay file [ReplayError]"
+        }
+      ],
+      "divergent.replay": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_start"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_end",
+          "bytes": 2840261,
+          "compressed": false
+        },
+        {
+          "src": "coworld-replay",
+          "type": "ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "error",
+          "message": "Replay simulation diverged at or before tick 2"
+        }
+      ]
+    },
+    "x86_gota_full_playback_passed": true,
+    "bootstrap": {
+      "cta.replay.gz": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_start"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_end",
+          "bytes": 396342,
+          "compressed": true
+        },
+        {
+          "src": "coworld-replay",
+          "type": "ready"
+        }
+      ],
+      "cta.replay.z": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_start"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_end",
+          "bytes": 398736,
+          "compressed": true
+        },
+        {
+          "src": "coworld-replay",
+          "type": "ready"
+        }
+      ],
+      "incompatible.replay": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_start"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_end",
+          "bytes": 2840261,
+          "compressed": false
+        },
+        {
+          "src": "coworld-replay",
+          "type": "error",
+          "message": "Error: unhandled exception: replay game version 14 for 'call_to_adventure' is unsupported; expected 15 [ReplayError]"
+        }
+      ],
+      "short.replay": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_start"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_end",
+          "bytes": 2621,
+          "compressed": false
+        },
+        {
+          "src": "coworld-replay",
+          "type": "ready"
+        }
+      ],
+      "query": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_start"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_end",
+          "bytes": 2621,
+          "compressed": false
+        },
+        {
+          "src": "coworld-replay",
+          "type": "ready"
+        }
+      ],
+      "hash": [
+        {
+          "src": "coworld-replay",
+          "type": "loading"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "bundle_ready"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_start"
+        },
+        {
+          "src": "coworld-replay",
+          "type": "phase",
+          "phase": "replay_fetch_end",
+          "bytes": 2621,
+          "compressed": false
+        },
+        {
+          "src": "coworld-replay",
+          "type": "ready"
+        }
+      ]
+    }
+  },
+  "hub_fix": {
+    "url": "https://app.graphite.dev/github/pr/Metta-AI/metta/22274",
+    "branch": "treeform/watch-filler-replays",
+    "commit": "38f0f74614529dbf26d9ed9e5355533b04cfbc73",
+    "deployment": {
+      "conclusion": "success",
+      "created_at": "2026-09-09T20:12:29Z",
+      "head_sha": "38f0f74614529dbf26d9ed9e5355533b04cfbc73",
+      "html_url": "https://github.com/Metta-AI/metta/actions/runs/34399638659",
+      "id": 34399638659,
+      "status": "completed",
+      "updated_at": "2026-09-09T20:20:01Z"
+    },
+    "base": "d9bb9e5c24ad9cded1fde7f8c653c5f0bb110bd2",
+    "status": "Merged into Metta main and deployed successfully. All three production hubs autoplay and select one-entrant filler game replays.",
+    "production_browser": {
+      "gota": {
+        "method": "Codex in-app browser accessibility and screenshot inspection",
+        "default_url": "https://softmax.com/gods-of-the-arena?e=94015a25-32b5-40d0-b3c3-59b1e18b46c5",
+        "url": "https://softmax.com/gods-of-the-arena?e=e72ff4b2-b83f-4199-8e74-406bf585b42f",
+        "autoplay": true,
+        "selection": true,
+        "visible_canvas": true,
+        "loading_ui_dismissed": true,
+        "default_episode": "ereq_8ef00f00-844c-4d80-a170-345b6fd65ca4",
+        "selected_episode": "ereq_ac4a579a-18e1-4593-8946-5c28264bbdc5"
+      },
+      "lvd": {
+        "method": "Codex in-app browser accessibility and screenshot inspection",
+        "default_url": "https://softmax.com/light-vs-dark?e=8f62792f-b377-4610-a084-ac1a85413f6c",
+        "url": "https://softmax.com/light-vs-dark?e=33eed799-1526-445a-9056-1cc51238d179",
+        "autoplay": true,
+        "selection": true,
+        "visible_canvas": true,
+        "loading_ui_dismissed": true,
+        "default_episode": "ereq_e2d173c5-d684-49eb-9d44-21ca29ae2d0d",
+        "selected_episode": "ereq_f34041ad-1b2b-48db-99ac-12d92cfbaa3c"
+      },
+      "cta": {
+        "method": "Codex in-app browser accessibility and screenshot inspection",
+        "default_url": "https://softmax.com/call-to-adventure?e=0553fb96-5a30-4f70-b45b-9ef5bdae35bb",
+        "url": "https://softmax.com/call-to-adventure?e=12895325-e9b9-45fc-af6d-c92efb6b71c9",
+        "autoplay": true,
+        "selection": true,
+        "visible_canvas": true,
+        "loading_ui_dismissed": true,
+        "default_episode": "ereq_372a0c1e-cce6-4620-8175-883c5b28924a",
+        "selected_episode": "ereq_bf4a0aed-f210-43b4-8198-839d736630c3"
+      }
+    },
+    "validation": "381 watch-page tests and changed-file Biome passed; all three real local hubs autoplayed and selected another replay with ready messages and no replay errors.",
+    "production_probe_note": "The headless production probe timed out after 180 seconds on the first replay. Final production verification used the real in-app browser and directly inspected autoplay, changed episode addresses, dismissed loading UI and rendered canvases.",
+    "baseline_check_failures": "Metta main type-check: next.config.ts:163 Next 16.3.0/16.3.1 MDX peer mismatch. Scoped Bazel lint query: unmatched *.cjs glob. No type errors in changed files."
+  },
+  "games": {
+    "gota": {
+      "name": "Gods of the Arena",
+      "hub_url": "https://softmax.com/gods-of-the-arena",
+      "coworld_id": "cow_e8fbfdfd-8cce-4cd0-a046-796e3c287fb8",
+      "manifest_hash": "sha256:457c712171c9db536f9a5a544981ac3e71224f216b1a2c240ec079e4f300d4b2",
+      "certification": {
+        "coworld_id": "cow_e8fbfdfd-8cce-4cd0-a046-796e3c287fb8",
+        "state": "certified",
+        "certified": true,
+        "contract_version": "main-bb8260360bbb",
+        "certification_job_id": "8142fef8-f571-4c46-a68d-fc3b9fa97b85",
+        "failed_step": null,
+        "failure": null,
+        "transcript_summary": [
+          {
+            "id": "matriculate",
+            "status": "pass"
+          },
+          {
+            "id": "source-resolves",
+            "status": "pass"
+          },
+          {
+            "id": "images-reachable",
+            "status": "pass"
+          },
+          {
+            "id": "fixture-conforms",
+            "status": "pass"
+          },
+          {
+            "id": "smoke-episode",
+            "status": "pass"
+          },
+          {
+            "id": "results-conform",
+            "status": "pass"
+          },
+          {
+            "id": "replay-present",
+            "status": "pass"
+          },
+          {
+            "id": "replay-loadable",
+            "status": "pass"
+          },
+          {
+            "id": "players-run",
+            "status": "pass"
+          },
+          {
+            "id": "supporting-roles",
+            "status": "pass"
+          }
+        ],
+        "completed_at": "2026-09-09T19:20:58.879333Z"
+      },
+      "upload_smokes": [
+        {
+          "id": "ereq_27ba24f0-f5f2-474d-8b9a-fbeda588d590",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_46b860e1-2a7b-494b-960e-6835c3d1496f",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_60be14e7-2c8e-4fcc-ad27-0236e2d1297c",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_7c5c50dc-87a4-4b37-8287-c722dbcb9fef",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_9c976d3e-7884-4572-9c3e-c078451e7358",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+      "division_id": "div_a4534073-c5d2-4193-a94a-93d9c5e2e443",
+      "entrant": {
+        "id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+        "name": "Polyworld GOTA base.bas",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "filler": {
+        "id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+        "name": "Polyworld GOTA Baseline Filler",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "memberships": {
+        "entries": [
+          {
+            "id": "lpm_3a952c74-b355-4152-afbb-84d72866536f",
+            "status": "competing",
+            "substatus": "active",
+            "is_champion": true,
+            "start_time": "2026-09-09T19:23:13.322471Z",
+            "end_time": null,
+            "league": {
+              "id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+              "name": "Gods of the Arena",
+              "slug": null,
+              "game": {
+                "id": "game_e6b33734-d7f4-40c9-be09-7967baf1c032",
+                "name": "Gods Of The Arena",
+                "slug": null,
+                "coworld_name": "Gods of the Arena",
+                "coworld_id": null,
+                "description": "Two teams of five BASIC heroes battle to destroy the enemy fort. Every hero on the winning team scores one win. A time limit without a fort victory gives everyone zero.",
+                "created_at": "2026-09-09T19:22:39.991124Z",
+                "owner_user_id": "system",
+                "notes": null,
+                "default_league_id": null,
+                "canonical_coworld_id": null,
+                "coworld_tags": []
+              },
+              "commissioner_key": "platform",
+              "commissioner_config": {
+                "default_variant_id": "competition"
+              },
+              "public": true,
+              "hidden": false,
+              "is_game_of_week": false,
+              "created_at": "2026-09-09T19:22:40.020134Z",
+              "disabled_at": null,
+              "short_name": null,
+              "description": "Gods of the Arena league for submitted policies and recurring competition rounds.",
+              "commissioner_migration_version": null,
+              "rounds_paused_at": null,
+              "submissions_locked_at": null,
+              "settings": {
+                "ladder": {
+                  "enabled": true,
+                  "ranking": {
+                    "k_factor": 32.0,
+                    "algorithm": "elo",
+                    "initial_rating": 1500.0,
+                    "round_scoring_rule": "mean"
+                  },
+                  "divisions": [
+                    {
+                      "name": "Competition",
+                      "division_id": "div_a4534073-c5d2-4193-a94a-93d9c5e2e443",
+                      "disqualify_after_consecutive_failures": 3
+                    }
+                  ],
+                  "scheduler": {
+                    "strategy": "team_n",
+                    "team_count": 2,
+                    "team_layout": "blocks",
+                    "distinct_teammates": true,
+                    "insufficient_players": "filler_policy",
+                    "min_episodes_per_entrant": 2
+                  },
+                  "fulfillment": {
+                    "retry_times": 2,
+                    "allowed_failures": 0.0
+                  }
+                },
+                "round_interval_minutes": 30
+              },
+              "filler_policy_version_ids": [
+                "8878f93e-dbee-4440-8ea3-0080e690954c"
+              ],
+              "seed_policy_version_ids": null,
+              "seed_policy_number": null,
+              "rules": {
+                "division_leaderboard": {
+                  "aggregation": "score",
+                  "source_score": "mean_round_score"
+                }
+              },
+              "notes": null,
+              "mod": null,
+              "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_3c60897b-25cf-4b37-9d1a-8554c1198f28.md",
+              "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Gods of the Arena.md",
+              "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Gods of the Arena/pages.md",
+              "logs_reporter_id": null,
+              "handicaps": null,
+              "handicap_dynamic": null
+            },
+            "division": {
+              "id": "div_a4534073-c5d2-4193-a94a-93d9c5e2e443",
+              "name": "Competition",
+              "level": 1,
+              "type": "competition",
+              "hidden": false,
+              "league": {
+                "id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+                "name": "Gods of the Arena",
+                "slug": null,
+                "game": {
+                  "id": "game_e6b33734-d7f4-40c9-be09-7967baf1c032",
+                  "name": "Gods Of The Arena",
+                  "slug": null,
+                  "coworld_name": "Gods of the Arena",
+                  "coworld_id": null,
+                  "description": "Two teams of five BASIC heroes battle to destroy the enemy fort. Every hero on the winning team scores one win. A time limit without a fort victory gives everyone zero.",
+                  "created_at": "2026-09-09T19:22:39.991124Z",
+                  "owner_user_id": "system",
+                  "notes": null,
+                  "default_league_id": null,
+                  "canonical_coworld_id": null,
+                  "coworld_tags": []
+                },
+                "commissioner_key": "platform",
+                "commissioner_config": {
+                  "default_variant_id": "competition"
+                },
+                "public": true,
+                "hidden": false,
+                "is_game_of_week": false,
+                "created_at": "2026-09-09T19:22:40.020134Z",
+                "disabled_at": null,
+                "short_name": null,
+                "description": "Gods of the Arena league for submitted policies and recurring competition rounds.",
+                "commissioner_migration_version": null,
+                "rounds_paused_at": null,
+                "submissions_locked_at": null,
+                "settings": {
+                  "ladder": {
+                    "enabled": true,
+                    "ranking": {
+                      "k_factor": 32.0,
+                      "algorithm": "elo",
+                      "initial_rating": 1500.0,
+                      "round_scoring_rule": "mean"
+                    },
+                    "divisions": [
+                      {
+                        "name": "Competition",
+                        "division_id": "div_a4534073-c5d2-4193-a94a-93d9c5e2e443",
+                        "disqualify_after_consecutive_failures": 3
+                      }
+                    ],
+                    "scheduler": {
+                      "strategy": "team_n",
+                      "team_count": 2,
+                      "team_layout": "blocks",
+                      "distinct_teammates": true,
+                      "insufficient_players": "filler_policy",
+                      "min_episodes_per_entrant": 2
+                    },
+                    "fulfillment": {
+                      "retry_times": 2,
+                      "allowed_failures": 0.0
+                    }
+                  },
+                  "round_interval_minutes": 30
+                },
+                "filler_policy_version_ids": [
+                  "8878f93e-dbee-4440-8ea3-0080e690954c"
+                ],
+                "seed_policy_version_ids": null,
+                "seed_policy_number": null,
+                "rules": {
+                  "division_leaderboard": {
+                    "aggregation": "score",
+                    "source_score": "mean_round_score"
+                  }
+                },
+                "notes": null,
+                "mod": null,
+                "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_3c60897b-25cf-4b37-9d1a-8554c1198f28.md",
+                "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Gods of the Arena.md",
+                "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Gods of the Arena/pages.md",
+                "logs_reporter_id": null,
+                "handicaps": null,
+                "handicap_dynamic": null
+              },
+              "description": null,
+              "archived_at": null,
+              "commissioner_description": null,
+              "created_at": "2026-09-09T19:22:40.453555Z",
+              "round_schedule": null,
+              "notes": null
+            },
+            "policy_version": {
+              "id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "policy": {
+                "id": "a4c0f5e1-e58e-48be-bec1-4e38e04b66ac",
+                "name": "Polyworld GOTA base.bas"
+              },
+              "version": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "label": "Polyworld GOTA base.bas:v1"
+            },
+            "player": {
+              "id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "name": "Andre von Houck",
+              "avatar_url": null
+            },
+            "created_at": "2026-09-09T19:23:13.324720Z",
+            "notes": null
+          }
+        ],
+        "next_cursor": null
+      },
+      "visibility": {
+        "public": true,
+        "hidden": false
+      },
+      "pause": {
+        "paused": false,
+        "rounds_paused_at": null,
+        "rounds_paused_reason": null,
+        "rounds_paused_by": null
+      },
+      "standings": [
+        {
+          "rank": 1,
+          "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+          "player_name": "Andre von Houck",
+          "score": 1500.0,
+          "rounds_played": 3,
+          "recent_rounds": null,
+          "score_label": "MMR",
+          "score_value_type": "integer",
+          "episode_wins": 0.0,
+          "episodes_played": null,
+          "win_rate": 0.0,
+          "policy_label": "Polyworld GOTA base.bas:v1"
+        }
+      ],
+      "log_ownership": {
+        "owner": 200,
+        "anonymous": 401
+      },
+      "manual_triggers": [
+        {
+          "kind": "platform",
+          "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+          "workflow_id": "ladder-league_3c60897b-25cf-4b37-9d1a-8554c1198f28"
+        },
+        {
+          "kind": "platform",
+          "league_id": "league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+          "workflow_id": "ladder-league_3c60897b-25cf-4b37-9d1a-8554c1198f28",
+          "requested_at": "2026-09-09T19:28:12.957500+00:00"
+        }
+      ],
+      "local_log_ownership": {
+        "owner": 200,
+        "anonymous": 401,
+        "unrelated_user": 403
+      },
+      "settings": {
+        "ladder": {
+          "enabled": true,
+          "scheduler": {
+            "strategy": "team_n",
+            "insufficient_players": "filler_policy",
+            "entrant_preferences_field": null,
+            "num_episodes": null,
+            "min_episodes_per_entrant": 2,
+            "neighbor_window": null,
+            "seat_count_min": null,
+            "seat_count_max": null,
+            "seat_count_weights": null,
+            "roster_partition": null,
+            "seat_rungs": null,
+            "episodes_per_round": null,
+            "roster_overflow": null,
+            "overflow_episodes_per_table": null,
+            "variant_rotation_by_seat_count": null,
+            "seat_count": null,
+            "episodes_per_entrant": null,
+            "clone_score_aggregation": null,
+            "team_count": 2,
+            "matchmaking": null,
+            "matchmaking_temperature": null,
+            "allied_teams": null,
+            "team_layout": "blocks",
+            "variant_rotation": null,
+            "distinct_teammates": true
+          },
+          "fulfillment": {
+            "allowed_failures": 0.0,
+            "retry_times": 2
+          },
+          "ranking": {
+            "algorithm": "elo",
+            "initial_rating": 1500.0,
+            "k_factor": 32.0,
+            "round_scoring_rule": "mean"
+          },
+          "leader_slot_config": null,
+          "handicap_config": null,
+          "qualification": null,
+          "persistent": null,
+          "divisions": [
+            {
+              "division_id": "div_a4534073-c5d2-4193-a94a-93d9c5e2e443",
+              "name": "Competition",
+              "promotion": null,
+              "relegation": null,
+              "disqualify_after_consecutive_failures": 3
+            }
+          ],
+          "players_per_user": null
+        },
+        "campaign": null,
+        "landscape": null,
+        "counterfactual_eval": null,
+        "episodes_per_round": null,
+        "round_interval_minutes": 30,
+        "episode_player_pod_llm_spend_limit_usd": null,
+        "llm": null,
+        "leaderboard": null,
+        "logs": null,
+        "achievements": null,
+        "rewards": null,
+        "tournament_sim_visibility": null
+      },
+      "play_allocation": {
+        "initial_grant_credits": 100,
+        "daily_drip_credits": 10,
+        "max_balance_credits": 100
+      },
+      "automatic_round_interval_seconds": 1800.432205,
+      "rounds": [
+        {
+          "id": "round_e3f7b4ea-47a8-43fb-9980-438f596ac196",
+          "round_number": 1,
+          "status": "completed",
+          "error": null,
+          "created_at": "2026-09-09T19:23:20.393243Z",
+          "completed_at": "2026-09-09T19:25:43.666798Z"
+        },
+        {
+          "id": "round_e5a404bd-6fec-4426-8bef-3db30e45bffa",
+          "round_number": 2,
+          "status": "completed",
+          "error": null,
+          "created_at": "2026-09-09T19:28:13.507913Z",
+          "completed_at": "2026-09-09T19:29:56.915903Z"
+        },
+        {
+          "id": "round_dda8bb00-963e-450d-9453-753f5249cb16",
+          "round_number": 3,
+          "status": "completed",
+          "error": null,
+          "created_at": "2026-09-09T19:58:13.940118Z",
+          "completed_at": "2026-09-09T19:59:56.643180Z"
+        }
+      ],
+      "experiences": {
+        "explicit_experience": {
+          "id": "xreq_661be95f-eb3a-4f3e-b6d2-f35346244ac0",
+          "status": "completed",
+          "episode_count": 1,
+          "completed_count": 1,
+          "failed_count": 0,
+          "episodes": [
+            "ereq_535cf551-8876-43d2-9e23-d78def85b2c9"
+          ]
+        },
+        "league_experience": {
+          "id": "xreq_e947f522-aba4-4e26-9b12-25981d04ec6a",
+          "status": "completed",
+          "episode_count": 1,
+          "completed_count": 1,
+          "failed_count": 0,
+          "episodes": [
+            "ereq_22c23344-a9d9-4e44-9ff1-ff645c487445"
+          ]
+        }
+      },
+      "episodes": [
+        {
+          "id": "ereq_545c1afa-5997-489b-9e4f-12230194fe4d",
+          "episode_id": "5dbc577f-c8d1-441f-ae10-6c35cf89c2e8",
+          "round_id": "round_e3f7b4ea-47a8-43fb-9980-438f596ac196",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "e8aed568-d03c-49bf-beaf-68c731f05d26",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_545c1afa-5997-489b-9e4f-12230194fe4d/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 4,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 5,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 6,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 7,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 8,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 9,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              },
+              {
+                "slot": 4,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+              },
+              {
+                "slot": 5,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+              },
+              {
+                "slot": 6,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+              },
+              {
+                "slot": 7,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+              },
+              {
+                "slot": 8,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+              },
+              {
+                "slot": 9,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+              }
+            ],
+            "filler_slots": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9
+            ],
+            "results": {
+              "bytes": 115,
+              "sha256": "394685ee00449454260afd3e67268d50af11448f63a6c9137b44a793894c1d39"
+            },
+            "logs": {
+              "bytes": 1356,
+              "sha256": "82e3ea533be7548dfe6f8c0c988f0faa67a18ba341221f9acd67cf3942297ccb"
+            },
+            "replay": {
+              "bytes": 3731050,
+              "sha256": "ded2c55f9e3120acbb3641e642d994bf9d2aac18640ef5820e49062c4e27e012"
+            }
+          }
+        },
+        {
+          "id": "ereq_ac4a579a-18e1-4593-8946-5c28264bbdc5",
+          "episode_id": "e72ff4b2-b83f-4199-8e74-406bf585b42f",
+          "round_id": "round_e3f7b4ea-47a8-43fb-9980-438f596ac196",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "e8aed568-d03c-49bf-beaf-68c731f05d26",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_ac4a579a-18e1-4593-8946-5c28264bbdc5/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 4,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 5,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 6,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 7,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 8,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 9,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              },
+              {
+                "slot": 4,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+              },
+              {
+                "slot": 5,
+                "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+                "bytes": 49,
+                "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+              },
+              {
+                "slot": 6,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+              },
+              {
+                "slot": 7,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+              },
+              {
+                "slot": 8,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+              },
+              {
+                "slot": 9,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+              }
+            ],
+            "filler_slots": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              6,
+              7,
+              8,
+              9
+            ],
+            "results": {
+              "bytes": 115,
+              "sha256": "b17e4c065d94b40f3f534472be6ce89def93449d86caecfd62c9887d87ea99f3"
+            },
+            "logs": {
+              "bytes": 1351,
+              "sha256": "74c7336a8cc5fb5d78beba9a91efd2d046e65e0314cfb6ac495d41f4673a8caa"
+            },
+            "replay": {
+              "bytes": 2724694,
+              "sha256": "470e0237723a9b00a2760722fe0725f3775a66075927ca883126253dd936924f"
+            }
+          }
+        },
+        {
+          "id": "ereq_55b347ad-0ddb-4d8a-be6d-84c26eb9fa56",
+          "episode_id": "6400bc88-0913-4134-938c-0802a75d8ef5",
+          "round_id": "round_e5a404bd-6fec-4426-8bef-3db30e45bffa",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "e8aed568-d03c-49bf-beaf-68c731f05d26",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_55b347ad-0ddb-4d8a-be6d-84c26eb9fa56/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 4,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 5,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 6,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 7,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 8,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 9,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              },
+              {
+                "slot": 4,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+              },
+              {
+                "slot": 5,
+                "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+                "bytes": 49,
+                "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+              },
+              {
+                "slot": 6,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+              },
+              {
+                "slot": 7,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+              },
+              {
+                "slot": 8,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+              },
+              {
+                "slot": 9,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+              }
+            ],
+            "filler_slots": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              6,
+              7,
+              8,
+              9
+            ],
+            "results": {
+              "bytes": 115,
+              "sha256": "5bee2861acd1c708a0ea8b10249d92cb8b23b6992ad6e0114a14f282698999a4"
+            },
+            "logs": {
+              "bytes": 1357,
+              "sha256": "1c831997ae07bdaa42e0a43c08e5a0e776b62de59d1fdcc8a16dbc55b4e6c0b1"
+            },
+            "replay": {
+              "bytes": 3966782,
+              "sha256": "d43eb9e5d025b0e947228b865f25c510806d36004303ec7d40982372f1e1ab44"
+            }
+          }
+        },
+        {
+          "id": "ereq_adbdfb24-2483-4961-9e23-1c4e63ff5a67",
+          "episode_id": "426f61f9-f617-4842-ac70-fcbcae9c95d8",
+          "round_id": "round_e5a404bd-6fec-4426-8bef-3db30e45bffa",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "e8aed568-d03c-49bf-beaf-68c731f05d26",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_adbdfb24-2483-4961-9e23-1c4e63ff5a67/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 4,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 5,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 6,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 7,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 8,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 9,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              },
+              {
+                "slot": 4,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+              },
+              {
+                "slot": 5,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+              },
+              {
+                "slot": 6,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+              },
+              {
+                "slot": 7,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+              },
+              {
+                "slot": 8,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+              },
+              {
+                "slot": 9,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+              }
+            ],
+            "filler_slots": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9
+            ],
+            "results": {
+              "bytes": 113,
+              "sha256": "c953fb94254004b4daaad2ea3790308e2e580dfc8a786e7707213a56d0e2b2c6"
+            },
+            "logs": {
+              "bytes": 1346,
+              "sha256": "20b22b5f749588bcfb37b6a7d45a474dc607466f510d20037d7f181d6c30b053"
+            },
+            "replay": {
+              "bytes": 927718,
+              "sha256": "25b5262091e9610dd31666a10e1563aab781deb738d3dd1eec7222a1a41be58d"
+            }
+          }
+        },
+        {
+          "id": "ereq_8ef00f00-844c-4d80-a170-345b6fd65ca4",
+          "episode_id": "94015a25-32b5-40d0-b3c3-59b1e18b46c5",
+          "round_id": "round_dda8bb00-963e-450d-9453-753f5249cb16",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "e8aed568-d03c-49bf-beaf-68c731f05d26",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_8ef00f00-844c-4d80-a170-345b6fd65ca4/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 4,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 5,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 6,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 7,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 8,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 9,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              },
+              {
+                "slot": 4,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+              },
+              {
+                "slot": 5,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+              },
+              {
+                "slot": 6,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+              },
+              {
+                "slot": 7,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+              },
+              {
+                "slot": 8,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+              },
+              {
+                "slot": 9,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+              }
+            ],
+            "filler_slots": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9
+            ],
+            "results": {
+              "bytes": 113,
+              "sha256": "9aeae1228420bdb11a9fd38db66a74a9b62ba26ca06ec95c083f69d1f43c815e"
+            },
+            "logs": {
+              "bytes": 1347,
+              "sha256": "05049c9d21bcbcd981b1763e9be2f33500bab93361ca28363cb641966d97781a"
+            },
+            "replay": {
+              "bytes": 734050,
+              "sha256": "c5d827fa5de97a781ff8ea9c289c5fb0c12b59e200b459e381ba025ecf72e1a5"
+            }
+          }
+        },
+        {
+          "id": "ereq_7a812a11-8a28-4684-98df-94eda9ae2db0",
+          "episode_id": "1293324b-37dc-4bbd-b643-ac0f429b2008",
+          "round_id": "round_dda8bb00-963e-450d-9453-753f5249cb16",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "e8aed568-d03c-49bf-beaf-68c731f05d26",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_7a812a11-8a28-4684-98df-94eda9ae2db0/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 4,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 5,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 6,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 7,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 8,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 9,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            1,
+            1,
+            1,
+            1,
+            1
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              },
+              {
+                "slot": 4,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+              },
+              {
+                "slot": 5,
+                "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+                "bytes": 49,
+                "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+              },
+              {
+                "slot": 6,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+              },
+              {
+                "slot": 7,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+              },
+              {
+                "slot": 8,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+              },
+              {
+                "slot": 9,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+              }
+            ],
+            "filler_slots": [
+              0,
+              1,
+              2,
+              3,
+              4,
+              6,
+              7,
+              8,
+              9
+            ],
+            "results": {
+              "bytes": 114,
+              "sha256": "f0ee039d0f4f5ecc672c1f45fe4ddc284a59c70c4086a7581adfd7d69909988b"
+            },
+            "logs": {
+              "bytes": 1348,
+              "sha256": "cbdc8f0fc10993a8147d55012da47bd05d0fa9ea4fd29d5e252fdf47e453a348"
+            },
+            "replay": {
+              "bytes": 1608654,
+              "sha256": "cb8793faca0a581c760fe79c85c10e37929061b120fac4dd2feb1772285f04a5"
+            }
+          }
+        },
+        {
+          "id": "ereq_535cf551-8876-43d2-9e23-d78def85b2c9",
+          "episode_id": "a327ead9-f6c9-41bd-b842-edadb8747827",
+          "round_id": null,
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "e8aed568-d03c-49bf-beaf-68c731f05d26",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_535cf551-8876-43d2-9e23-d78def85b2c9/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 4,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 5,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 6,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 7,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 8,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 9,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              },
+              {
+                "slot": 4,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+              },
+              {
+                "slot": 5,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+              },
+              {
+                "slot": 6,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+              },
+              {
+                "slot": 7,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+              },
+              {
+                "slot": 8,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+              },
+              {
+                "slot": 9,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+              }
+            ],
+            "results": {
+              "bytes": 118,
+              "sha256": "5fa07d3b1acdc4e0b44b78a38ffbd6ec0aa6447cdc35ec08f04b0e3dfd0cf64f"
+            },
+            "logs": {
+              "bytes": 1750,
+              "sha256": "50bb9a58110f2bc4fa33a302fbfe1be336b969025e8a9fbb06d794fd44b85153"
+            },
+            "replay": {
+              "bytes": 5434758,
+              "sha256": "42b35fe79a6aa7fe6d137d09d0b99a7a909c805ab6cf9ff3a9558d6d0f99cc90"
+            }
+          }
+        },
+        {
+          "id": "ereq_22c23344-a9d9-4e44-9ff1-ff645c487445",
+          "episode_id": "1e2e32c2-11aa-4c68-beed-1486853f6610",
+          "round_id": null,
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "e8aed568-d03c-49bf-beaf-68c731f05d26",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c",
+            "8878f93e-dbee-4440-8ea3-0080e690954c"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_22c23344-a9d9-4e44-9ff1-ff645c487445/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 4,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 5,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 6,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 7,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 8,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 9,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+              "is_filler": false,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "e8aed568-d03c-49bf-beaf-68c731f05d26",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              },
+              {
+                "slot": 4,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "5ea8b2c9ac0386104a3a50ec49d000f070060666e5d454c3edbc5812642ea77d"
+              },
+              {
+                "slot": 5,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "8216d8787111a1a740ccf401f5e6bdd6d895b0020be3cf6236c5b5c348fb80be"
+              },
+              {
+                "slot": 6,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "83ca48a99418b820b28752ddf1d187529f644ac6e4c27389da1d2bc9bd4a1cb4"
+              },
+              {
+                "slot": 7,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "6d10336b87e4cf700379a1e8aeda735501bbb8db24acc80d54488d96be14b1d7"
+              },
+              {
+                "slot": 8,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "4ad9dbdbee7e8e1da8f1946500109f290d7c9274cf69cf47cd9548bba31b0a5d"
+              },
+              {
+                "slot": 9,
+                "policy_version_id": "8878f93e-dbee-4440-8ea3-0080e690954c",
+                "bytes": 49,
+                "sha256": "3fb7853ad458a4a1bd42cc97854b22143567a388a1f970b8c10c4dfa99d6d7a5"
+              }
+            ],
+            "results": {
+              "bytes": 115,
+              "sha256": "47c8c5b0ecd5a5bbe930fb90ed7f3fb6ff898ae86136ff3cc42007723bcb7aaf"
+            },
+            "logs": {
+              "bytes": 1348,
+              "sha256": "fa369bc18977e8bf769d3bda338e3be65bb4ba7480e7e40a7d25ffcc6f8a0468"
+            },
+            "replay": {
+              "bytes": 1868026,
+              "sha256": "d475778a23ca0440658e49dfad4cf4becfe35f06004bee3ce2db372f05e2d176"
+            }
+          }
+        }
+      ],
+      "full_hosted_browser": {
+        "episode_id": "ereq_535cf551-8876-43d2-9e23-d78def85b2c9",
+        "url": "https://softmax.com/observatory/v2/episode-requests/ereq_535cf551-8876-43d2-9e23-d78def85b2c9/watch",
+        "end_tick": 28800,
+        "mismatches": 0,
+        "messages": [
+          {
+            "src": "coworld-replay",
+            "type": "loading"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "bundle_ready"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "replay_fetch_start"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "replay_fetch_end",
+            "bytes": 802580,
+            "compressed": true
+          },
+          {
+            "src": "coworld-replay",
+            "type": "ready"
+          }
+        ]
+      },
+      "hosted_browser_pages": [
+        {
+          "episode_id": "ereq_535cf551-8876-43d2-9e23-d78def85b2c9",
+          "url": "https://softmax.com/observatory/v2/episode-requests/ereq_535cf551-8876-43d2-9e23-d78def85b2c9/watch",
+          "messages": [
+            {
+              "src": "coworld-replay",
+              "type": "loading"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "bundle_ready"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_start"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_end",
+              "bytes": 802580,
+              "compressed": true
+            },
+            {
+              "src": "coworld-replay",
+              "type": "ready"
+            }
+          ]
+        },
+        {
+          "episode_id": "ereq_22c23344-a9d9-4e44-9ff1-ff645c487445",
+          "url": "https://softmax.com/observatory/v2/episode-requests/ereq_22c23344-a9d9-4e44-9ff1-ff645c487445/watch",
+          "messages": [
+            {
+              "src": "coworld-replay",
+              "type": "loading"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "bundle_ready"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_start"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_end",
+              "bytes": 277660,
+              "compressed": true
+            },
+            {
+              "src": "coworld-replay",
+              "type": "ready"
+            }
+          ]
+        }
+      ],
+      "baseline_sha256": "6af2a79e0c7815b41a00e824de897b1ab2a2f3057798c6c5395778e59d734ae9"
+    },
+    "lvd": {
+      "name": "Light vs Dark",
+      "hub_url": "https://softmax.com/light-vs-dark",
+      "coworld_id": "cow_3efe33d4-511c-4048-b03a-9840c8acbf9b",
+      "manifest_hash": "sha256:b3286188e221eae85bef36c63427930a39f15c34a65a9b22a773ead007146608",
+      "certification": {
+        "coworld_id": "cow_3efe33d4-511c-4048-b03a-9840c8acbf9b",
+        "state": "certified",
+        "certified": true,
+        "contract_version": "main-bb8260360bbb",
+        "certification_job_id": "735c91e4-bed6-4e45-9966-48c5c99dbb4f",
+        "failed_step": null,
+        "failure": null,
+        "transcript_summary": [
+          {
+            "id": "matriculate",
+            "status": "pass"
+          },
+          {
+            "id": "source-resolves",
+            "status": "pass"
+          },
+          {
+            "id": "images-reachable",
+            "status": "pass"
+          },
+          {
+            "id": "fixture-conforms",
+            "status": "pass"
+          },
+          {
+            "id": "smoke-episode",
+            "status": "pass"
+          },
+          {
+            "id": "results-conform",
+            "status": "pass"
+          },
+          {
+            "id": "replay-present",
+            "status": "pass"
+          },
+          {
+            "id": "replay-loadable",
+            "status": "pass"
+          },
+          {
+            "id": "players-run",
+            "status": "pass"
+          },
+          {
+            "id": "supporting-roles",
+            "status": "pass"
+          }
+        ],
+        "completed_at": "2026-09-09T19:18:55.386260Z"
+      },
+      "upload_smokes": [
+        {
+          "id": "ereq_16eb5517-9ed3-497a-b8ea-227a599f6841",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_73eab288-c850-4510-96a5-528e39f24f70",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_816d9e54-f6a8-422b-a8da-ab87070222d7",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_a0917da8-21d3-4870-9ada-f91e7a3701a5",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_add6f2d7-3b95-40e7-89c3-b0bab1b72933",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "league_id": "league_c2fa3bf9-72bd-4b46-89a5-f88261136449",
+      "division_id": "div_1e2aff9f-d4f7-4197-9b3e-8243dc82097d",
+      "entrant": {
+        "id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+        "name": "Polyworld LVD base.bas",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "filler": {
+        "id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+        "name": "Polyworld LVD Baseline Filler",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "memberships": {
+        "entries": [
+          {
+            "id": "lpm_8842d286-a424-4a76-bcb0-ee908dda9cc4",
+            "status": "competing",
+            "substatus": "active",
+            "is_champion": true,
+            "start_time": "2026-09-09T19:21:00.643358Z",
+            "end_time": null,
+            "league": {
+              "id": "league_c2fa3bf9-72bd-4b46-89a5-f88261136449",
+              "name": "Light vs Dark",
+              "slug": null,
+              "game": {
+                "id": "game_8fb84c75-4a23-4a1d-9ac9-0902a3d48377",
+                "name": "Light vs Dark",
+                "slug": null,
+                "coworld_name": "Light vs Dark",
+                "coworld_id": null,
+                "description": "Two BASIC overlords gather resources, build armies, and fight. The simulation winner scores one win, including its existing time-limit resolution.",
+                "created_at": "2026-09-09T19:20:53.769050Z",
+                "owner_user_id": "system",
+                "notes": null,
+                "default_league_id": null,
+                "canonical_coworld_id": null,
+                "coworld_tags": []
+              },
+              "commissioner_key": "platform",
+              "commissioner_config": {
+                "default_variant_id": "competition"
+              },
+              "public": true,
+              "hidden": false,
+              "is_game_of_week": false,
+              "created_at": "2026-09-09T19:20:53.811617Z",
+              "disabled_at": null,
+              "short_name": null,
+              "description": "Light vs Dark league for submitted policies and recurring competition rounds.",
+              "commissioner_migration_version": null,
+              "rounds_paused_at": null,
+              "submissions_locked_at": null,
+              "settings": {
+                "ladder": {
+                  "enabled": true,
+                  "ranking": {
+                    "k_factor": 32.0,
+                    "algorithm": "elo",
+                    "initial_rating": 1500.0,
+                    "round_scoring_rule": "mean"
+                  },
+                  "divisions": [
+                    {
+                      "name": "Competition",
+                      "division_id": "div_1e2aff9f-d4f7-4197-9b3e-8243dc82097d",
+                      "disqualify_after_consecutive_failures": 3
+                    }
+                  ],
+                  "scheduler": {
+                    "strategy": "team_pair",
+                    "insufficient_players": "filler_policy",
+                    "min_episodes_per_entrant": 2
+                  },
+                  "fulfillment": {
+                    "retry_times": 2,
+                    "allowed_failures": 0.0
+                  }
+                },
+                "round_interval_minutes": 30
+              },
+              "filler_policy_version_ids": [
+                "bb4c552e-c69c-4cdf-be0d-530241bf41e3"
+              ],
+              "seed_policy_version_ids": null,
+              "seed_policy_number": null,
+              "rules": {
+                "division_leaderboard": {
+                  "aggregation": "score",
+                  "source_score": "mean_round_score"
+                }
+              },
+              "notes": null,
+              "mod": null,
+              "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_c2fa3bf9-72bd-4b46-89a5-f88261136449.md",
+              "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Light vs Dark.md",
+              "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Light vs Dark/pages.md",
+              "logs_reporter_id": null,
+              "handicaps": null,
+              "handicap_dynamic": null
+            },
+            "division": {
+              "id": "div_1e2aff9f-d4f7-4197-9b3e-8243dc82097d",
+              "name": "Competition",
+              "level": 1,
+              "type": "competition",
+              "hidden": false,
+              "league": {
+                "id": "league_c2fa3bf9-72bd-4b46-89a5-f88261136449",
+                "name": "Light vs Dark",
+                "slug": null,
+                "game": {
+                  "id": "game_8fb84c75-4a23-4a1d-9ac9-0902a3d48377",
+                  "name": "Light vs Dark",
+                  "slug": null,
+                  "coworld_name": "Light vs Dark",
+                  "coworld_id": null,
+                  "description": "Two BASIC overlords gather resources, build armies, and fight. The simulation winner scores one win, including its existing time-limit resolution.",
+                  "created_at": "2026-09-09T19:20:53.769050Z",
+                  "owner_user_id": "system",
+                  "notes": null,
+                  "default_league_id": null,
+                  "canonical_coworld_id": null,
+                  "coworld_tags": []
+                },
+                "commissioner_key": "platform",
+                "commissioner_config": {
+                  "default_variant_id": "competition"
+                },
+                "public": true,
+                "hidden": false,
+                "is_game_of_week": false,
+                "created_at": "2026-09-09T19:20:53.811617Z",
+                "disabled_at": null,
+                "short_name": null,
+                "description": "Light vs Dark league for submitted policies and recurring competition rounds.",
+                "commissioner_migration_version": null,
+                "rounds_paused_at": null,
+                "submissions_locked_at": null,
+                "settings": {
+                  "ladder": {
+                    "enabled": true,
+                    "ranking": {
+                      "k_factor": 32.0,
+                      "algorithm": "elo",
+                      "initial_rating": 1500.0,
+                      "round_scoring_rule": "mean"
+                    },
+                    "divisions": [
+                      {
+                        "name": "Competition",
+                        "division_id": "div_1e2aff9f-d4f7-4197-9b3e-8243dc82097d",
+                        "disqualify_after_consecutive_failures": 3
+                      }
+                    ],
+                    "scheduler": {
+                      "strategy": "team_pair",
+                      "insufficient_players": "filler_policy",
+                      "min_episodes_per_entrant": 2
+                    },
+                    "fulfillment": {
+                      "retry_times": 2,
+                      "allowed_failures": 0.0
+                    }
+                  },
+                  "round_interval_minutes": 30
+                },
+                "filler_policy_version_ids": [
+                  "bb4c552e-c69c-4cdf-be0d-530241bf41e3"
+                ],
+                "seed_policy_version_ids": null,
+                "seed_policy_number": null,
+                "rules": {
+                  "division_leaderboard": {
+                    "aggregation": "score",
+                    "source_score": "mean_round_score"
+                  }
+                },
+                "notes": null,
+                "mod": null,
+                "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_c2fa3bf9-72bd-4b46-89a5-f88261136449.md",
+                "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Light vs Dark.md",
+                "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Light vs Dark/pages.md",
+                "logs_reporter_id": null,
+                "handicaps": null,
+                "handicap_dynamic": null
+              },
+              "description": null,
+              "archived_at": null,
+              "commissioner_description": null,
+              "created_at": "2026-09-09T19:20:54.248741Z",
+              "round_schedule": null,
+              "notes": null
+            },
+            "policy_version": {
+              "id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "policy": {
+                "id": "49e4313a-cd53-4ac9-a8e1-fdeb1361f32f",
+                "name": "Polyworld LVD base.bas"
+              },
+              "version": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "label": "Polyworld LVD base.bas:v1"
+            },
+            "player": {
+              "id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "name": "Andre von Houck",
+              "avatar_url": null
+            },
+            "created_at": "2026-09-09T19:21:00.646216Z",
+            "notes": null
+          }
+        ],
+        "next_cursor": null
+      },
+      "visibility": {
+        "public": true,
+        "hidden": false
+      },
+      "pause": {
+        "paused": false,
+        "rounds_paused_at": null,
+        "rounds_paused_reason": null,
+        "rounds_paused_by": null
+      },
+      "standings": [
+        {
+          "rank": 1,
+          "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+          "player_name": "Andre von Houck",
+          "score": 1500.0,
+          "rounds_played": 3,
+          "recent_rounds": null,
+          "score_label": "MMR",
+          "score_value_type": "integer",
+          "episode_wins": 0.0,
+          "episodes_played": null,
+          "win_rate": 0.0,
+          "policy_label": "Polyworld LVD base.bas:v1"
+        }
+      ],
+      "log_ownership": {
+        "owner": 200,
+        "anonymous": 401
+      },
+      "manual_triggers": [
+        {
+          "kind": "platform",
+          "league_id": "league_c2fa3bf9-72bd-4b46-89a5-f88261136449",
+          "workflow_id": "ladder-league_c2fa3bf9-72bd-4b46-89a5-f88261136449"
+        },
+        {
+          "kind": "platform",
+          "league_id": "league_c2fa3bf9-72bd-4b46-89a5-f88261136449",
+          "workflow_id": "ladder-league_c2fa3bf9-72bd-4b46-89a5-f88261136449",
+          "requested_at": "2026-09-09T19:28:29.685131+00:00"
+        }
+      ],
+      "local_log_ownership": {
+        "owner": 200,
+        "anonymous": 401,
+        "unrelated_user": 403
+      },
+      "settings": {
+        "ladder": {
+          "enabled": true,
+          "scheduler": {
+            "strategy": "team_pair",
+            "insufficient_players": "filler_policy",
+            "entrant_preferences_field": null,
+            "num_episodes": null,
+            "min_episodes_per_entrant": 2,
+            "neighbor_window": null,
+            "seat_count_min": null,
+            "seat_count_max": null,
+            "seat_count_weights": null,
+            "roster_partition": null,
+            "seat_rungs": null,
+            "episodes_per_round": null,
+            "roster_overflow": null,
+            "overflow_episodes_per_table": null,
+            "variant_rotation_by_seat_count": null,
+            "seat_count": null,
+            "episodes_per_entrant": null,
+            "clone_score_aggregation": null,
+            "team_count": null,
+            "matchmaking": null,
+            "matchmaking_temperature": null,
+            "allied_teams": null,
+            "team_layout": null,
+            "variant_rotation": null,
+            "distinct_teammates": null
+          },
+          "fulfillment": {
+            "allowed_failures": 0.0,
+            "retry_times": 2
+          },
+          "ranking": {
+            "algorithm": "elo",
+            "initial_rating": 1500.0,
+            "k_factor": 32.0,
+            "round_scoring_rule": "mean"
+          },
+          "leader_slot_config": null,
+          "handicap_config": null,
+          "qualification": null,
+          "persistent": null,
+          "divisions": [
+            {
+              "division_id": "div_1e2aff9f-d4f7-4197-9b3e-8243dc82097d",
+              "name": "Competition",
+              "promotion": null,
+              "relegation": null,
+              "disqualify_after_consecutive_failures": 3
+            }
+          ],
+          "players_per_user": null
+        },
+        "campaign": null,
+        "landscape": null,
+        "counterfactual_eval": null,
+        "episodes_per_round": null,
+        "round_interval_minutes": 30,
+        "episode_player_pod_llm_spend_limit_usd": null,
+        "llm": null,
+        "leaderboard": null,
+        "logs": null,
+        "achievements": null,
+        "rewards": null,
+        "tournament_sim_visibility": null
+      },
+      "play_allocation": {
+        "initial_grant_credits": 100,
+        "daily_drip_credits": 10,
+        "max_balance_credits": 100
+      },
+      "automatic_round_interval_seconds": 1800.47135,
+      "rounds": [
+        {
+          "id": "round_787060e0-19e7-4f62-8e4a-39d185e8d7c1",
+          "round_number": 1,
+          "status": "completed",
+          "error": null,
+          "created_at": "2026-09-09T19:22:00.623170Z",
+          "completed_at": "2026-09-09T19:23:43.648841Z"
+        },
+        {
+          "id": "round_da83a359-8f73-429a-b9f7-6a731092f8f6",
+          "round_number": 2,
+          "status": "completed",
+          "error": null,
+          "created_at": "2026-09-09T19:28:29.989356Z",
+          "completed_at": "2026-09-09T19:30:12.662443Z"
+        },
+        {
+          "id": "round_dd1b084f-bf37-4f67-b303-ca90a6a84b88",
+          "round_number": 3,
+          "status": "completed",
+          "error": null,
+          "created_at": "2026-09-09T19:58:30.460706Z",
+          "completed_at": "2026-09-09T20:00:13.252207Z"
+        }
+      ],
+      "experiences": {
+        "explicit_experience": {
+          "id": "xreq_9fd1c664-fee5-441b-9f5a-bfaeb08b9e65",
+          "status": "completed",
+          "episode_count": 1,
+          "completed_count": 1,
+          "failed_count": 0,
+          "episodes": [
+            "ereq_f6345858-b362-4a4a-95e0-0f3ac06f3bb1"
+          ]
+        },
+        "league_experience": {
+          "id": "xreq_bd8c72b5-1c69-4154-9181-1c2bfc277443",
+          "status": "completed",
+          "episode_count": 1,
+          "completed_count": 1,
+          "failed_count": 0,
+          "episodes": [
+            "ereq_e59b4432-bab1-4912-9370-66fb973a5cfa"
+          ]
+        }
+      },
+      "episodes": [
+        {
+          "id": "ereq_f34041ad-1b2b-48db-99ac-12d92cfbaa3c",
+          "episode_id": "33eed799-1526-445a-9056-1cc51238d179",
+          "round_id": "round_787060e0-19e7-4f62-8e4a-39d185e8d7c1",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+            "29ad945e-2ec2-48ac-b359-c29a6e3db4f9"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_f34041ad-1b2b-48db-99ac-12d92cfbaa3c/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "is_filler": false,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              }
+            ],
+            "filler_slots": [
+              0
+            ],
+            "results": {
+              "bytes": 99,
+              "sha256": "b666a1d2e34b710fdd7750a274cf2260e47fd028335d001364c6b2533cd663c7"
+            },
+            "logs": {
+              "bytes": 1512,
+              "sha256": "852a34afd2b2f8d54b056eb8e197aecf74074c745f169115650502e17891af67"
+            },
+            "replay": {
+              "bytes": 689978,
+              "sha256": "61c9a9d833f10a12f349c2c014a0360c57b54e7e7cd282dc54732a68612f304a"
+            }
+          }
+        },
+        {
+          "id": "ereq_ffb9f835-192b-40ca-babe-fbc407c3ec84",
+          "episode_id": "bb194d76-6bd2-4d65-ba58-c83746b29fc3",
+          "round_id": "round_787060e0-19e7-4f62-8e4a-39d185e8d7c1",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+            "bb4c552e-c69c-4cdf-be0d-530241bf41e3"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_ffb9f835-192b-40ca-babe-fbc407c3ec84/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              }
+            ],
+            "filler_slots": [
+              1
+            ],
+            "results": {
+              "bytes": 99,
+              "sha256": "3fbd88332f954c2cc7bf57afc1955c8b82c782eadf6a497aa723e87bf962ea10"
+            },
+            "logs": {
+              "bytes": 1510,
+              "sha256": "5b8598a3c01895a67653629c931c4143e9b84c30aad9e31aaed55f5021576641"
+            },
+            "replay": {
+              "bytes": 250106,
+              "sha256": "139c2b0131d1420e233e724b3e9d0b90b693e67c04049882c8cbbb2beb9bef7f"
+            }
+          }
+        },
+        {
+          "id": "ereq_443af9ba-3c28-4fb9-be85-2184ba10c9a8",
+          "episode_id": "442b61a6-8940-44ea-9993-b13c5e0b74d7",
+          "round_id": "round_da83a359-8f73-429a-b9f7-6a731092f8f6",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+            "29ad945e-2ec2-48ac-b359-c29a6e3db4f9"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_443af9ba-3c28-4fb9-be85-2184ba10c9a8/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "is_filler": false,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              }
+            ],
+            "filler_slots": [
+              0
+            ],
+            "results": {
+              "bytes": 99,
+              "sha256": "b666a1d2e34b710fdd7750a274cf2260e47fd028335d001364c6b2533cd663c7"
+            },
+            "logs": {
+              "bytes": 1511,
+              "sha256": "72baa6d5380937d2751d90d0051edb47fdbbffbbbbe1ec4ccbb190af74566bc2"
+            },
+            "replay": {
+              "bytes": 689978,
+              "sha256": "99ca0f2fec712ec83f8082c9815103a730dc61e58ae38285f108724c1a97d156"
+            }
+          }
+        },
+        {
+          "id": "ereq_e12cd09a-8eba-4796-baf2-49fd7e918086",
+          "episode_id": "cfbdc6e9-ab8c-4a73-941d-35b413d5a31c",
+          "round_id": "round_da83a359-8f73-429a-b9f7-6a731092f8f6",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+            "bb4c552e-c69c-4cdf-be0d-530241bf41e3"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_e12cd09a-8eba-4796-baf2-49fd7e918086/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              }
+            ],
+            "filler_slots": [
+              1
+            ],
+            "results": {
+              "bytes": 99,
+              "sha256": "3fbd88332f954c2cc7bf57afc1955c8b82c782eadf6a497aa723e87bf962ea10"
+            },
+            "logs": {
+              "bytes": 1510,
+              "sha256": "708b65f7b2d58c3cdc171d249103b13e0d5b2d704be0bc0e80bf452015e20c21"
+            },
+            "replay": {
+              "bytes": 250106,
+              "sha256": "0a0248f2591ef81d9d428dc0c3df03041940238b76d383eb7d3004618b5003ac"
+            }
+          }
+        },
+        {
+          "id": "ereq_052b4b24-92c5-4492-87ed-2ea9fc1579a9",
+          "episode_id": "91e0940c-c5ee-45fb-bf69-9753c1c7b8ad",
+          "round_id": "round_dd1b084f-bf37-4f67-b303-ca90a6a84b88",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+            "29ad945e-2ec2-48ac-b359-c29a6e3db4f9"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_052b4b24-92c5-4492-87ed-2ea9fc1579a9/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "is_filler": false,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            1
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              }
+            ],
+            "filler_slots": [
+              0
+            ],
+            "results": {
+              "bytes": 100,
+              "sha256": "53fd1d4eec84f085ca70fe972537b760ae8d38f5febc22767b92c95d2a6c2adb"
+            },
+            "logs": {
+              "bytes": 1513,
+              "sha256": "deb7c7f90cdb3e7e1659111bdca6b7a671a5e091ca4ba6dca3f9edc534bd5fd4"
+            },
+            "replay": {
+              "bytes": 1020578,
+              "sha256": "5de1738d30773bdd29ed449d38914d5b2bb579dc532b74c8db06748f616db18d"
+            }
+          }
+        },
+        {
+          "id": "ereq_e2d173c5-d684-49eb-9d44-21ca29ae2d0d",
+          "episode_id": "8f62792f-b377-4610-a084-ac1a85413f6c",
+          "round_id": "round_dd1b084f-bf37-4f67-b303-ca90a6a84b88",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+            "bb4c552e-c69c-4cdf-be0d-530241bf41e3"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_e2d173c5-d684-49eb-9d44-21ca29ae2d0d/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              }
+            ],
+            "filler_slots": [
+              1
+            ],
+            "results": {
+              "bytes": 100,
+              "sha256": "164a5ec36f7e48bef3e5d5d25d6ce2b2d0bd58bc975e59696c153e499cde0b49"
+            },
+            "logs": {
+              "bytes": 1510,
+              "sha256": "5a9c6d44a8bbf892450e3968b1760be52e27ac02e698e982ca0005332d578778"
+            },
+            "replay": {
+              "bytes": 245474,
+              "sha256": "91fb37e62870843841ccc81a06bd16e30ab40f3f343224f9e4edc5faa0433c07"
+            }
+          }
+        },
+        {
+          "id": "ereq_f6345858-b362-4a4a-95e0-0f3ac06f3bb1",
+          "episode_id": "af42c0f8-6e8c-4d9c-9031-c962ab54f3f9",
+          "round_id": null,
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+            "bb4c552e-c69c-4cdf-be0d-530241bf41e3"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_f6345858-b362-4a4a-95e0-0f3ac06f3bb1/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+              "is_filler": false,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            1
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              }
+            ],
+            "results": {
+              "bytes": 99,
+              "sha256": "308dc38293a1b8f291b949788b7f7026136139fd88ad994dd4d9fd59aa480fd8"
+            },
+            "logs": {
+              "bytes": 2128,
+              "sha256": "3d8401eee234d0d28207d355cb840a38f8684a2837bd4dc92d0ab051a15b1e42"
+            },
+            "replay": {
+              "bytes": 252818,
+              "sha256": "08ef4900b9978628dae811993fce786c0594c001e9daa41a798320bf57396ec9"
+            }
+          }
+        },
+        {
+          "id": "ereq_e59b4432-bab1-4912-9370-66fb973a5cfa",
+          "episode_id": "ac33de3c-0084-4195-9411-142c34db3f3b",
+          "round_id": null,
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+            "bb4c552e-c69c-4cdf-be0d-530241bf41e3"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_e59b4432-bab1-4912-9370-66fb973a5cfa/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+              "is_filler": false,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            1
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "29ad945e-2ec2-48ac-b359-c29a6e3db4f9",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "bb4c552e-c69c-4cdf-be0d-530241bf41e3",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              }
+            ],
+            "results": {
+              "bytes": 99,
+              "sha256": "1c143dd4e664cc2ee21e93ff43230af9e915a8480b44bf7a0a8a3bac5deffe98"
+            },
+            "logs": {
+              "bytes": 1509,
+              "sha256": "427f9fa7e8620f482704cef50bad969946f6cd67d6c3ebcc041c3001b79d4336"
+            },
+            "replay": {
+              "bytes": 248354,
+              "sha256": "175e61abfb89fbc168b62c31b8fd005bb1c3db66f5e46e1acf33f58cf8ad064b"
+            }
+          }
+        }
+      ],
+      "full_hosted_browser": {
+        "episode_id": "ereq_f6345858-b362-4a4a-95e0-0f3ac06f3bb1",
+        "url": "https://softmax.com/observatory/v2/episode-requests/ereq_f6345858-b362-4a4a-95e0-0f3ac06f3bb1/watch",
+        "end_tick": 28800,
+        "mismatches": 0,
+        "messages": [
+          {
+            "src": "coworld-replay",
+            "type": "loading"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "bundle_ready"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "replay_fetch_start"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "replay_fetch_end",
+            "bytes": 150480,
+            "compressed": true
+          },
+          {
+            "src": "coworld-replay",
+            "type": "ready"
+          }
+        ]
+      },
+      "hosted_browser_pages": [
+        {
+          "episode_id": "ereq_f6345858-b362-4a4a-95e0-0f3ac06f3bb1",
+          "url": "https://softmax.com/observatory/v2/episode-requests/ereq_f6345858-b362-4a4a-95e0-0f3ac06f3bb1/watch",
+          "messages": [
+            {
+              "src": "coworld-replay",
+              "type": "loading"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "bundle_ready"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_start"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_end",
+              "bytes": 150480,
+              "compressed": true
+            },
+            {
+              "src": "coworld-replay",
+              "type": "ready"
+            }
+          ]
+        },
+        {
+          "episode_id": "ereq_e59b4432-bab1-4912-9370-66fb973a5cfa",
+          "url": "https://softmax.com/observatory/v2/episode-requests/ereq_e59b4432-bab1-4912-9370-66fb973a5cfa/watch",
+          "messages": [
+            {
+              "src": "coworld-replay",
+              "type": "loading"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "bundle_ready"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_start"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_end",
+              "bytes": 149421,
+              "compressed": true
+            },
+            {
+              "src": "coworld-replay",
+              "type": "ready"
+            }
+          ]
+        }
+      ],
+      "baseline_sha256": "04f3825d874ac7d179a1e07c3d9a5ad829552e066c9aeb18701576da60d94011"
+    },
+    "cta": {
+      "name": "Call to Adventure",
+      "hub_url": "https://softmax.com/call-to-adventure",
+      "coworld_id": "cow_e843c737-6683-4ce6-802b-106c649d8067",
+      "manifest_hash": "sha256:589992f55ae1fb9166c66e27742bd14010f49f848bfe39e4821a8ffdc802c7ef",
+      "certification": {
+        "coworld_id": "cow_e843c737-6683-4ce6-802b-106c649d8067",
+        "state": "certified",
+        "certified": true,
+        "contract_version": "main-bb8260360bbb",
+        "certification_job_id": "f66fdfb0-f9b8-46ab-ac2e-0fddb86e9e55",
+        "failed_step": null,
+        "failure": null,
+        "transcript_summary": [
+          {
+            "id": "matriculate",
+            "status": "pass"
+          },
+          {
+            "id": "source-resolves",
+            "status": "pass"
+          },
+          {
+            "id": "images-reachable",
+            "status": "pass"
+          },
+          {
+            "id": "fixture-conforms",
+            "status": "pass"
+          },
+          {
+            "id": "smoke-episode",
+            "status": "pass"
+          },
+          {
+            "id": "results-conform",
+            "status": "pass"
+          },
+          {
+            "id": "replay-present",
+            "status": "pass"
+          },
+          {
+            "id": "replay-loadable",
+            "status": "pass"
+          },
+          {
+            "id": "players-run",
+            "status": "pass"
+          },
+          {
+            "id": "supporting-roles",
+            "status": "pass"
+          }
+        ],
+        "completed_at": "2026-09-09T19:19:05.084738Z"
+      },
+      "upload_smokes": [
+        {
+          "id": "ereq_2e29844b-cd31-4cb3-a364-46d946814e09",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_9369d9e9-3050-4960-b749-8b3b8ded3312",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_cdf09a50-9fab-48d6-a224-f96bd924c9bd",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_ea3c0167-cbd3-4277-84be-b7e5d0d0aee3",
+          "status": "completed",
+          "error": null
+        },
+        {
+          "id": "ereq_ff785134-bfba-4950-9e9f-8467032af775",
+          "status": "completed",
+          "error": null
+        }
+      ],
+      "league_id": "league_9f1ea72c-89a7-4282-bfca-d8e96e53453b",
+      "division_id": "div_3fcb8152-5073-4ea5-8ce6-7ba12e146fa3",
+      "entrant": {
+        "id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+        "name": "Polyworld CTA base.bas",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "filler": {
+        "id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+        "name": "Polyworld CTA Baseline Filler",
+        "version": 1,
+        "pools": null,
+        "submit_error": null
+      },
+      "memberships": {
+        "entries": [
+          {
+            "id": "lpm_e500740f-9819-425d-ad6d-98d60e8780e8",
+            "status": "competing",
+            "substatus": "active",
+            "is_champion": true,
+            "start_time": "2026-09-09T19:21:52.510598Z",
+            "end_time": null,
+            "league": {
+              "id": "league_9f1ea72c-89a7-4282-bfca-d8e96e53453b",
+              "name": "Call to Adventure",
+              "slug": null,
+              "game": {
+                "id": "game_1e6cb891-298d-470f-a204-183417f48703",
+                "name": "Call To Adventure",
+                "slug": null,
+                "coworld_name": "Call to Adventure",
+                "coworld_id": null,
+                "description": "Four BASIC heroes explore a dungeon and return with treasure. Living heroes who returned with the highest personal banked gold score one win. Tied leaders share the win. Dead or unreturned heroes score zero; nobody returning means no winner.",
+                "created_at": "2026-09-09T19:21:30.849735Z",
+                "owner_user_id": "system",
+                "notes": null,
+                "default_league_id": null,
+                "canonical_coworld_id": null,
+                "coworld_tags": []
+              },
+              "commissioner_key": "platform",
+              "commissioner_config": {
+                "default_variant_id": "competition"
+              },
+              "public": true,
+              "hidden": false,
+              "is_game_of_week": false,
+              "created_at": "2026-09-09T19:21:30.886812Z",
+              "disabled_at": null,
+              "short_name": null,
+              "description": "Call to Adventure league for submitted policies and recurring competition rounds.",
+              "commissioner_migration_version": null,
+              "rounds_paused_at": null,
+              "submissions_locked_at": null,
+              "settings": {
+                "ladder": {
+                  "enabled": true,
+                  "ranking": {
+                    "k_factor": 32.0,
+                    "algorithm": "elo",
+                    "initial_rating": 1500.0,
+                    "round_scoring_rule": "mean"
+                  },
+                  "divisions": [
+                    {
+                      "name": "Competition",
+                      "division_id": "div_3fcb8152-5073-4ea5-8ce6-7ba12e146fa3",
+                      "disqualify_after_consecutive_failures": 3
+                    }
+                  ],
+                  "scheduler": {
+                    "strategy": "swiss_neighbor",
+                    "insufficient_players": "filler_policy",
+                    "min_episodes_per_entrant": 2
+                  },
+                  "fulfillment": {
+                    "retry_times": 2,
+                    "allowed_failures": 0.0
+                  }
+                },
+                "round_interval_minutes": 30
+              },
+              "filler_policy_version_ids": [
+                "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+              ],
+              "seed_policy_version_ids": null,
+              "seed_policy_number": null,
+              "rules": {
+                "division_leaderboard": {
+                  "aggregation": "score",
+                  "source_score": "mean_round_score"
+                }
+              },
+              "notes": null,
+              "mod": null,
+              "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_9f1ea72c-89a7-4282-bfca-d8e96e53453b.md",
+              "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Call to Adventure.md",
+              "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Call to Adventure/pages.md",
+              "logs_reporter_id": null,
+              "handicaps": null,
+              "handicap_dynamic": null
+            },
+            "division": {
+              "id": "div_3fcb8152-5073-4ea5-8ce6-7ba12e146fa3",
+              "name": "Competition",
+              "level": 1,
+              "type": "competition",
+              "hidden": false,
+              "league": {
+                "id": "league_9f1ea72c-89a7-4282-bfca-d8e96e53453b",
+                "name": "Call to Adventure",
+                "slug": null,
+                "game": {
+                  "id": "game_1e6cb891-298d-470f-a204-183417f48703",
+                  "name": "Call To Adventure",
+                  "slug": null,
+                  "coworld_name": "Call to Adventure",
+                  "coworld_id": null,
+                  "description": "Four BASIC heroes explore a dungeon and return with treasure. Living heroes who returned with the highest personal banked gold score one win. Tied leaders share the win. Dead or unreturned heroes score zero; nobody returning means no winner.",
+                  "created_at": "2026-09-09T19:21:30.849735Z",
+                  "owner_user_id": "system",
+                  "notes": null,
+                  "default_league_id": null,
+                  "canonical_coworld_id": null,
+                  "coworld_tags": []
+                },
+                "commissioner_key": "platform",
+                "commissioner_config": {
+                  "default_variant_id": "competition"
+                },
+                "public": true,
+                "hidden": false,
+                "is_game_of_week": false,
+                "created_at": "2026-09-09T19:21:30.886812Z",
+                "disabled_at": null,
+                "short_name": null,
+                "description": "Call to Adventure league for submitted policies and recurring competition rounds.",
+                "commissioner_migration_version": null,
+                "rounds_paused_at": null,
+                "submissions_locked_at": null,
+                "settings": {
+                  "ladder": {
+                    "enabled": true,
+                    "ranking": {
+                      "k_factor": 32.0,
+                      "algorithm": "elo",
+                      "initial_rating": 1500.0,
+                      "round_scoring_rule": "mean"
+                    },
+                    "divisions": [
+                      {
+                        "name": "Competition",
+                        "division_id": "div_3fcb8152-5073-4ea5-8ce6-7ba12e146fa3",
+                        "disqualify_after_consecutive_failures": 3
+                      }
+                    ],
+                    "scheduler": {
+                      "strategy": "swiss_neighbor",
+                      "insufficient_players": "filler_policy",
+                      "min_episodes_per_entrant": 2
+                    },
+                    "fulfillment": {
+                      "retry_times": 2,
+                      "allowed_failures": 0.0
+                    }
+                  },
+                  "round_interval_minutes": 30
+                },
+                "filler_policy_version_ids": [
+                  "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+                ],
+                "seed_policy_version_ids": null,
+                "seed_policy_number": null,
+                "rules": {
+                  "division_leaderboard": {
+                    "aggregation": "score",
+                    "source_score": "mean_round_score"
+                  }
+                },
+                "notes": null,
+                "mod": null,
+                "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_9f1ea72c-89a7-4282-bfca-d8e96e53453b.md",
+                "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/Call to Adventure.md",
+                "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/Call to Adventure/pages.md",
+                "logs_reporter_id": null,
+                "handicaps": null,
+                "handicap_dynamic": null
+              },
+              "description": null,
+              "archived_at": null,
+              "commissioner_description": null,
+              "created_at": "2026-09-09T19:21:31.413471Z",
+              "round_schedule": null,
+              "notes": null
+            },
+            "policy_version": {
+              "id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "policy": {
+                "id": "074bba5f-4275-410d-ae98-1e81bd0f0296",
+                "name": "Polyworld CTA base.bas"
+              },
+              "version": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "label": "Polyworld CTA base.bas:v1"
+            },
+            "player": {
+              "id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "name": "Andre von Houck",
+              "avatar_url": null
+            },
+            "created_at": "2026-09-09T19:21:52.512987Z",
+            "notes": null
+          }
+        ],
+        "next_cursor": null
+      },
+      "visibility": {
+        "public": true,
+        "hidden": false
+      },
+      "pause": {
+        "paused": false,
+        "rounds_paused_at": null,
+        "rounds_paused_reason": null,
+        "rounds_paused_by": null
+      },
+      "standings": [
+        {
+          "rank": 1,
+          "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+          "player_name": "Andre von Houck",
+          "score": 1500.0,
+          "rounds_played": 3,
+          "recent_rounds": null,
+          "score_label": "MMR",
+          "score_value_type": "integer",
+          "episode_wins": 0.0,
+          "episodes_played": null,
+          "win_rate": 0.0,
+          "policy_label": "Polyworld CTA base.bas:v1"
+        }
+      ],
+      "log_ownership": {
+        "owner": 200,
+        "anonymous": 401
+      },
+      "manual_triggers": [
+        {
+          "kind": "platform",
+          "league_id": "league_9f1ea72c-89a7-4282-bfca-d8e96e53453b",
+          "workflow_id": "ladder-league_9f1ea72c-89a7-4282-bfca-d8e96e53453b"
+        },
+        {
+          "kind": "platform",
+          "league_id": "league_9f1ea72c-89a7-4282-bfca-d8e96e53453b",
+          "workflow_id": "ladder-league_9f1ea72c-89a7-4282-bfca-d8e96e53453b",
+          "requested_at": "2026-09-09T19:28:42.836789+00:00"
+        }
+      ],
+      "local_log_ownership": {
+        "owner": 200,
+        "anonymous": 401,
+        "unrelated_user": 403
+      },
+      "settings": {
+        "ladder": {
+          "enabled": true,
+          "scheduler": {
+            "strategy": "swiss_neighbor",
+            "insufficient_players": "filler_policy",
+            "entrant_preferences_field": null,
+            "num_episodes": null,
+            "min_episodes_per_entrant": 2,
+            "neighbor_window": null,
+            "seat_count_min": null,
+            "seat_count_max": null,
+            "seat_count_weights": null,
+            "roster_partition": null,
+            "seat_rungs": null,
+            "episodes_per_round": null,
+            "roster_overflow": null,
+            "overflow_episodes_per_table": null,
+            "variant_rotation_by_seat_count": null,
+            "seat_count": null,
+            "episodes_per_entrant": null,
+            "clone_score_aggregation": null,
+            "team_count": null,
+            "matchmaking": null,
+            "matchmaking_temperature": null,
+            "allied_teams": null,
+            "team_layout": null,
+            "variant_rotation": null,
+            "distinct_teammates": null
+          },
+          "fulfillment": {
+            "allowed_failures": 0.0,
+            "retry_times": 2
+          },
+          "ranking": {
+            "algorithm": "elo",
+            "initial_rating": 1500.0,
+            "k_factor": 32.0,
+            "round_scoring_rule": "mean"
+          },
+          "leader_slot_config": null,
+          "handicap_config": null,
+          "qualification": null,
+          "persistent": null,
+          "divisions": [
+            {
+              "division_id": "div_3fcb8152-5073-4ea5-8ce6-7ba12e146fa3",
+              "name": "Competition",
+              "promotion": null,
+              "relegation": null,
+              "disqualify_after_consecutive_failures": 3
+            }
+          ],
+          "players_per_user": null
+        },
+        "campaign": null,
+        "landscape": null,
+        "counterfactual_eval": null,
+        "episodes_per_round": null,
+        "round_interval_minutes": 30,
+        "episode_player_pod_llm_spend_limit_usd": null,
+        "llm": null,
+        "leaderboard": null,
+        "logs": null,
+        "achievements": null,
+        "rewards": null,
+        "tournament_sim_visibility": null
+      },
+      "play_allocation": {
+        "initial_grant_credits": 100,
+        "daily_drip_credits": 10,
+        "max_balance_credits": 100
+      },
+      "automatic_round_interval_seconds": 1800.427097,
+      "rounds": [
+        {
+          "id": "round_9bacbca1-aa95-409b-9297-93b5b8d15029",
+          "round_number": 1,
+          "status": "completed",
+          "error": null,
+          "created_at": "2026-09-09T19:22:01.009932Z",
+          "completed_at": "2026-09-09T19:23:43.981600Z"
+        },
+        {
+          "id": "round_41bf7d46-1636-4a0d-a0de-f043d33450c9",
+          "round_number": 2,
+          "status": "completed",
+          "error": null,
+          "created_at": "2026-09-09T19:28:43.200989Z",
+          "completed_at": "2026-09-09T19:30:25.651605Z"
+        },
+        {
+          "id": "round_faf5254e-e938-4517-91fb-ab05def5fd12",
+          "round_number": 3,
+          "status": "completed",
+          "error": null,
+          "created_at": "2026-09-09T19:58:43.628086Z",
+          "completed_at": "2026-09-09T20:00:26.207653Z"
+        }
+      ],
+      "experiences": {
+        "explicit_experience": {
+          "id": "xreq_20b301f6-432e-4b61-954c-47888a5e91ec",
+          "status": "completed",
+          "episode_count": 1,
+          "completed_count": 1,
+          "failed_count": 0,
+          "episodes": [
+            "ereq_31ae42d4-c8b1-442d-b89a-e6d3b7244c7f"
+          ]
+        },
+        "league_experience": {
+          "id": "xreq_79d85f02-2dff-418a-831d-93434e53260a",
+          "status": "completed",
+          "episode_count": 1,
+          "completed_count": 1,
+          "failed_count": 0,
+          "episodes": [
+            "ereq_09a213dd-5ee5-49e1-984d-3a6b4ec474f0"
+          ]
+        }
+      },
+      "episodes": [
+        {
+          "id": "ereq_bf4a0aed-f210-43b4-8198-839d736630c3",
+          "episode_id": "12895325-e9b9-45fc-af6d-c92efb6b71c9",
+          "round_id": "round_9bacbca1-aa95-409b-9297-93b5b8d15029",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_bf4a0aed-f210-43b4-8198-839d736630c3/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              }
+            ],
+            "filler_slots": [
+              1,
+              2,
+              3
+            ],
+            "results": {
+              "bytes": 140,
+              "sha256": "5bd9c2909670a5f764fedcf402da4f2383e6263d2761004a20d475617e0f1913"
+            },
+            "logs": {
+              "bytes": 1634,
+              "sha256": "5faa267c17fd4d3065d98bf1b43d716ceb53deec25cdaa139ccac1a72c4a8e41"
+            },
+            "replay": {
+              "bytes": 2823029,
+              "sha256": "f258321c67135d8d906c51d9c4bd99df1cc4214f1771a3516e6ff2987296e4a4"
+            }
+          }
+        },
+        {
+          "id": "ereq_88682eca-bceb-493e-a446-568988da2035",
+          "episode_id": "11cbdea1-de4c-4e07-ad20-4994bdaec5ef",
+          "round_id": "round_9bacbca1-aa95-409b-9297-93b5b8d15029",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_88682eca-bceb-493e-a446-568988da2035/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              }
+            ],
+            "filler_slots": [
+              1,
+              2,
+              3
+            ],
+            "results": {
+              "bytes": 138,
+              "sha256": "cba885c4e3be9f490b7fd407f8f7b7a958f1baf9b0692206a27d064e5e329b6b"
+            },
+            "logs": {
+              "bytes": 1632,
+              "sha256": "d9546f9edba598618c28108a5cb83bfaee801a815d69bcaf63e82ea6c3c0023d"
+            },
+            "replay": {
+              "bytes": 1667157,
+              "sha256": "74c3ebb70eb108aa51cb9c6dc84581b18557d19eb956f1369f91be519628f467"
+            }
+          }
+        },
+        {
+          "id": "ereq_39e50572-2633-4cc4-9953-8393dc885aa2",
+          "episode_id": "fbf1c13d-e3cb-484b-b86f-99c4aecf8ac3",
+          "round_id": "round_41bf7d46-1636-4a0d-a0de-f043d33450c9",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_39e50572-2633-4cc4-9953-8393dc885aa2/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              }
+            ],
+            "filler_slots": [
+              1,
+              2,
+              3
+            ],
+            "results": {
+              "bytes": 140,
+              "sha256": "5bd9c2909670a5f764fedcf402da4f2383e6263d2761004a20d475617e0f1913"
+            },
+            "logs": {
+              "bytes": 1634,
+              "sha256": "3de3aec2bc13f44c74e76b7f289a0ec596d7791aed4d394bd74b68ed7581310d"
+            },
+            "replay": {
+              "bytes": 2823029,
+              "sha256": "9e14ff1e519fbecc3328a6ec037c77135d7ae56c922163601781f61794ae8534"
+            }
+          }
+        },
+        {
+          "id": "ereq_cebbbef4-4442-425c-a63d-7b8cb8d76636",
+          "episode_id": "f9963753-10f7-4954-8ba8-8de5e5b0fe7e",
+          "round_id": "round_41bf7d46-1636-4a0d-a0de-f043d33450c9",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_cebbbef4-4442-425c-a63d-7b8cb8d76636/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              }
+            ],
+            "filler_slots": [
+              1,
+              2,
+              3
+            ],
+            "results": {
+              "bytes": 138,
+              "sha256": "cba885c4e3be9f490b7fd407f8f7b7a958f1baf9b0692206a27d064e5e329b6b"
+            },
+            "logs": {
+              "bytes": 1632,
+              "sha256": "f7956013fcbdbf0b499bd154188cbd2a17403ff8d395708fd3c0c1a844e4d92a"
+            },
+            "replay": {
+              "bytes": 1667157,
+              "sha256": "e133d0c18146a6f0e7a0988e4c8ddda758d074233310315e8680a4a309b5f237"
+            }
+          }
+        },
+        {
+          "id": "ereq_d291b501-a203-48e1-abfc-4d3ccf5c9309",
+          "episode_id": "82bb0873-8b06-4597-8ccb-42958df71ad3",
+          "round_id": "round_faf5254e-e938-4517-91fb-ab05def5fd12",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_d291b501-a203-48e1-abfc-4d3ccf5c9309/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              }
+            ],
+            "filler_slots": [
+              1,
+              2,
+              3
+            ],
+            "results": {
+              "bytes": 136,
+              "sha256": "d126faecff597571f5bd86de3211999dd67324f63c8dc7631cf80dde9570e7b7"
+            },
+            "logs": {
+              "bytes": 1557,
+              "sha256": "84b6ae88dba5260aee8b66b5c72babf2290aa8c0e7321875f2526850284cd577"
+            },
+            "replay": {
+              "bytes": 1904885,
+              "sha256": "ca9b6820e087909dd4a44b834bad3b3b4978a573744edfe414c6bb5ef9e1f9bd"
+            }
+          }
+        },
+        {
+          "id": "ereq_372a0c1e-cce6-4620-8175-883c5b28924a",
+          "episode_id": "0553fb96-5a30-4f70-b45b-9ef5bdae35bb",
+          "round_id": "round_faf5254e-e938-4517-91fb-ab05def5fd12",
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_372a0c1e-cce6-4620-8175-883c5b28924a/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": true,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              }
+            ],
+            "filler_slots": [
+              1,
+              2,
+              3
+            ],
+            "results": {
+              "bytes": 141,
+              "sha256": "55b9b3066f8bd7717e7a56de9529693bb1b06f960cb0a33c63b4804646fd5206"
+            },
+            "logs": {
+              "bytes": 1632,
+              "sha256": "b69d54d1df481085cc7e4cb4dcadb64665c0bacb20aa4acbf4fad50e4130ae9d"
+            },
+            "replay": {
+              "bytes": 2846741,
+              "sha256": "0af00f3a3f657e1a9393e8fd59081e4546576215a62d6f3786f2a658f6acef67"
+            }
+          }
+        },
+        {
+          "id": "ereq_31ae42d4-c8b1-442d-b89a-e6d3b7244c7f",
+          "episode_id": "5df70509-e721-4399-8c4f-00b494f593ba",
+          "round_id": null,
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_31ae42d4-c8b1-442d-b89a-e6d3b7244c7f/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": false,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              }
+            ],
+            "results": {
+              "bytes": 139,
+              "sha256": "dc88fbbe21355478db76cd40df14ec74fc754d2811f20aa35c73b4c3811c7201"
+            },
+            "logs": {
+              "bytes": 1632,
+              "sha256": "fac2518fd790ba83756ebf346ab5a7d6e2e7baeeececdbdde52516c0e6721727"
+            },
+            "replay": {
+              "bytes": 1539845,
+              "sha256": "ea4ce1aeb4bdf7b812d5a94dd3e9e9476ebd4ed13a6113d55fc5d9ac07070856"
+            }
+          }
+        },
+        {
+          "id": "ereq_09a213dd-5ee5-49e1-984d-3a6b4ec474f0",
+          "episode_id": "cba1dbc9-ac3f-4d1d-a02e-a7104650af7d",
+          "round_id": null,
+          "status": "completed",
+          "error": null,
+          "error_type": null,
+          "policy_version_ids": [
+            "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+            "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e"
+          ],
+          "watch_url": "https://softmax.com/observatory/v2/episode-requests/ereq_09a213dd-5ee5-49e1-984d-3a6b4ec474f0/watch",
+          "participants": [
+            {
+              "position": 0,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 1,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 2,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": false,
+              "is_seed": false
+            },
+            {
+              "position": 3,
+              "player_id": "ply_607f17a2-3acf-405b-91fe-d12ef1001c00",
+              "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+              "is_filler": false,
+              "is_seed": false
+            }
+          ],
+          "scores": [
+            0,
+            1,
+            0,
+            0
+          ],
+          "artifacts": {
+            "player_logs": [
+              {
+                "slot": 0,
+                "policy_version_id": "7d04762f-0f4b-49b4-b738-c0b33f69b828",
+                "bytes": 49,
+                "sha256": "b8612617fe50acffc0731735b6cd5855305d61ff72a07420025def84b9bbadec"
+              },
+              {
+                "slot": 1,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "e6798882921aaf2eef6d4590fce79e8d1168ca9644c008153dd4d4d6282ba529"
+              },
+              {
+                "slot": 2,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "4ecd5ffca92c42ac7dbf7c99f5f80590653707b4bd00fc5e4e509195b16927e3"
+              },
+              {
+                "slot": 3,
+                "policy_version_id": "7aa62ad0-87a1-44c7-8d12-d13807eb9d4e",
+                "bytes": 49,
+                "sha256": "d304a2c0f9873a84395585943af6700f80d061d49fa01ea02ddf0df1dda999cc"
+              }
+            ],
+            "results": {
+              "bytes": 138,
+              "sha256": "ceba0319bbed38b2f7792bd5560625417062e6792f854f0e9a826ab6de7a15ea"
+            },
+            "logs": {
+              "bytes": 1631,
+              "sha256": "4071d5edb08e2eb92e12eea1e86c2084ca9cba759c2b8d36d39fea22764e9a7e"
+            },
+            "replay": {
+              "bytes": 1320357,
+              "sha256": "83f8ba895b0c6b245e21a85620bf464249a45b381558c32dd896c2811b0485ab"
+            }
+          }
+        }
+      ],
+      "full_hosted_browser": {
+        "episode_id": "ereq_31ae42d4-c8b1-442d-b89a-e6d3b7244c7f",
+        "url": "https://softmax.com/observatory/v2/episode-requests/ereq_31ae42d4-c8b1-442d-b89a-e6d3b7244c7f/watch",
+        "end_tick": 16311,
+        "mismatches": 0,
+        "messages": [
+          {
+            "src": "coworld-replay",
+            "type": "loading"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "bundle_ready"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "replay_fetch_start"
+          },
+          {
+            "src": "coworld-replay",
+            "type": "phase",
+            "phase": "replay_fetch_end",
+            "bytes": 221245,
+            "compressed": true
+          },
+          {
+            "src": "coworld-replay",
+            "type": "ready"
+          }
+        ]
+      },
+      "hosted_browser_pages": [
+        {
+          "episode_id": "ereq_31ae42d4-c8b1-442d-b89a-e6d3b7244c7f",
+          "url": "https://softmax.com/observatory/v2/episode-requests/ereq_31ae42d4-c8b1-442d-b89a-e6d3b7244c7f/watch",
+          "messages": [
+            {
+              "src": "coworld-replay",
+              "type": "loading"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "bundle_ready"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_start"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_end",
+              "bytes": 221245,
+              "compressed": true
+            },
+            {
+              "src": "coworld-replay",
+              "type": "ready"
+            }
+          ]
+        },
+        {
+          "episode_id": "ereq_09a213dd-5ee5-49e1-984d-3a6b4ec474f0",
+          "url": "https://softmax.com/observatory/v2/episode-requests/ereq_09a213dd-5ee5-49e1-984d-3a6b4ec474f0/watch",
+          "messages": [
+            {
+              "src": "coworld-replay",
+              "type": "loading"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "bundle_ready"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_start"
+            },
+            {
+              "src": "coworld-replay",
+              "type": "phase",
+              "phase": "replay_fetch_end",
+              "bytes": 191477,
+              "compressed": true
+            },
+            {
+              "src": "coworld-replay",
+              "type": "ready"
+            }
+          ]
+        }
+      ],
+      "baseline_sha256": "705996fc72efe3c1429da2ed85b19b46d10e283feb1f442439338279da3a11d1"
+    }
+  }
+}

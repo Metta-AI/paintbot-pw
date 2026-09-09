@@ -19,9 +19,9 @@ separate Metta checkout so an existing development checkout stays intact.
 ```sh
 python3 coworld/tools/sync_dependencies.py
 export POLYWORLD_DEPS="$PWD/tmp/coworld/deps"
-coworld build --project coworld/gota --version 2026.9.9.1
-coworld build --project coworld/lvd --version 2026.9.9.1
-coworld build --project coworld/cta --version 2026.9.9.1
+coworld build --project coworld/gota --version 2026.9.9.3
+coworld build --project coworld/lvd --version 2026.9.9.3
+coworld build --project coworld/cta --version 2026.9.9.3
 ```
 
 `nimby.lock` pins ordinary dependencies. `coworld/dependencies.lock` pins the same
@@ -84,3 +84,5 @@ submitted as ranked entrants.
 Record canonical Coworld IDs, league/division/policy IDs, certification evidence,
 experience requests, three successful league rounds including an automatic cycle,
 and game/player log plus browser replay evidence in the release handoff.
+
+The published release receipt is [9 September 2026](releases/2026-09-09.md).
