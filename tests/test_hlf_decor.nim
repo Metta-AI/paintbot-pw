@@ -86,10 +86,20 @@ block meadowAdditionStaysSmall:
     var
       foliage = 0
       rocks = 0
+      trees: seq[Tile2]
     for decoration in placeDecor(map, seed):
       if decoration.area != MeadowArea:
         continue
-      if decoration.kit == MeadowRocks:
+      if decoration.node in ["tree_05a", "tree_06a"]:
+        doAssert decoration.height <= 2.4'f32
+        for tree in trees:
+          doAssert chebyshev(decoration.tile, tree) >= 12
+        trees.add decoration.tile
+        for oy in -2'i32 .. 2'i32:
+          for ox in -2'i32 .. 2'i32:
+            doAssert map.kinds[tileIndex(int32(decoration.tile.x) + ox,
+              int32(decoration.tile.y) + oy)] != uint8(RoadTile)
+      elif decoration.kit == MeadowRocks:
         inc rocks
         doAssert decoration.height <= 1.0'f32
       else:
@@ -100,8 +110,28 @@ block meadowAdditionStaysSmall:
         doAssert chebyshev(decoration.tile, garden) > 1
       for house in map.houses:
         doAssert chebyshev(decoration.tile, house.door) > HouseBushClearance
-    doAssert foliage > 0 and foliage <= 80
+    doAssert foliage > 0 and foliage <= 243
+    doAssert trees.len >= 4 and trees.len <= 6
     doAssert rocks > 0 and rocks <= 5
+
+block townGrassHasNearbyPlanting:
+  let middle = int32(GridSide div 2)
+  for seed in [1988'i32, 2026]:
+    let map = generateMap(seed)
+    var plants: seq[Tile2]
+    for d in placeDecor(map, seed):
+      if d.area == MeadowArea and d.kit == MeadowVegetation and d.height <= 0.8'f32:
+        plants.add d.tile
+    for y in middle - 26 .. middle + 26:
+      for x in middle - 26 .. middle + 26:
+        if map.kinds[tileIndex(x, y)] != uint8(GrassTile) or
+            map.passable[tileIndex(x, y)] == 0:
+          continue
+        var nearest = GridSide
+        for plant in plants:
+          nearest = min(nearest, chebyshev(tile2(x, y), plant))
+        doAssert nearest <= 8,
+          &"seed {seed}: town grass at {x},{y} is {nearest} tiles from meadow planting"
 
 block foliageReachesForest:
   let middle = tile2(GridSide div 2, GridSide div 2)

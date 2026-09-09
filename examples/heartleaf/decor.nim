@@ -50,14 +50,18 @@ type
 
 const
   DecorSalt = 0xDEC0'u64
-  MeadowPatchCount = 16
-  MeadowPatchAttempts = 600
-  MeadowPatchSpacing = 7'i32
-  MeadowPatchRadius = 38'i32
+  MeadowRadius = 36'i32
+  MeadowCellSize = 8'i32
+  MeadowPlantsPerCell = 3
+  MeadowRockCount = 5
+  MeadowTreeCount = 6
+  MeadowTreeHeight = 2.4'f32
+  MeadowTreeAttempts = 80
+  MeadowTreeSpacing = 12'i32
+  MeadowTreeMinRadius = 16'i32
   MeadowBushHeight = 0.8'f32
   MeadowRockHeight = 1.0'f32
-  MeadowRockEvery = 3
-  ForestFloorStart = MeadowPatchRadius - 2
+  ForestFloorStart = MeadowRadius
   ForestFloorBandWidth = 8'i32
   ForestFloorSlots = 4'i32
   ForestFloorAttempts = 20
@@ -150,7 +154,7 @@ const
     @["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a",
       "flower_bush_01a", "bush_01a", "grass_patch_01a", "grass_patch_02a",
       "grass_patch_03a", "grass_patch_04a", "grass_patch_05a",
-      "plant_04a", "plant_05a", "plant_06a"],
+      "plant_04a", "plant_05a", "plant_06a", "tree_05a", "tree_06a"],
     @["wood_bench_01a", "wood_table_01a"],
     @["rock_small_01a", "rock_small_02a", "rock_small_03a", "rock_small_04a",
       "rock_medium_01a", "rock_medium_02a", "rock_medium_03a"],
@@ -165,6 +169,7 @@ const
   SmallRocks = ["rock_small_01a", "rock_small_02a", "rock_small_03a",
     "rock_small_04a"]
   MediumRocks = ["rock_medium_01a", "rock_medium_02a", "rock_medium_03a"]
+  SmallTrees = ["tree_05a", "tree_06a"]
   FlowerBeds = ["flowers_patch_01a", "flowers_patch_02a", "flowers_patch_03a"]
   Sides = [(1'i32, 0'i32), (0'i32, 1'i32), (-1'i32, 0'i32), (0'i32, -1'i32)]
 
@@ -488,54 +493,92 @@ proc dressOutskirts(p: var Placer) =
             x, y, yaw, SmallRockHeight, 0.3, NaturalVariance,
             p.rng.rockTint())
 
+proc meadowTileFree(p: Placer, x, y: int32): bool =
+  ## Low plants leave the plaza, roads, crops, and doorways clear.
+  let
+    middle = int32(GridSide div 2)
+    dx = x - middle
+    dy = y - middle
+  if dx * dx + dy * dy <= (PlazaStoneRadius + 2) * (PlazaStoneRadius + 2) or
+      not p.tileFree(x, y) or p.nearRoad(x, y) or p.nearHouseDoor(x, y):
+    return false
+  for garden in p.map.gardenTiles:
+    if chebyshev(tile2(x, y), garden) <= 1:
+      return false
+  true
+
+proc dressMeadowTrees(p: var Placer) =
+  ## A handful of small trees have clear space beneath their crowns.
+  let middle = int32(GridSide div 2)
+  var trees: seq[Tile2]
+  for sector in 0 ..< MeadowTreeCount:
+    for attempt in 0 ..< MeadowTreeAttempts:
+      let
+        angle = (float32(sector) + p.rng.unit()) * 2 * PI / float32(MeadowTreeCount)
+        radius = MeadowTreeMinRadius + p.rng.below(MeadowRadius - MeadowTreeMinRadius)
+        x = middle + int32(round(cos(angle) * float32(radius)))
+        y = middle + int32(round(sin(angle) * float32(radius)))
+        tile = tile2(x, y)
+      var clear = true
+      for tree in trees:
+        if chebyshev(tile, tree) < MeadowTreeSpacing:
+          clear = false
+      for dy in -1'i32 .. 1'i32:
+        for dx in -1'i32 .. 1'i32:
+          if not p.meadowTileFree(x + dx, y + dy):
+            clear = false
+      if not clear:
+        continue
+      discard p.claim(MeadowVegetation, p.rng.pick(SmallTrees), MeadowArea,
+        x, y, p.rng.unit() * 2 * PI, MeadowTreeHeight, tint = p.rng.plantTint())
+      trees.add tile
+      break
+
 proc dressMeadow(p: var Placer) =
-  ## A few low flower beds occupy gaps between the village's paths.
-  let middle = tile2(GridSide div 2, GridSide div 2)
-  var centres: seq[Tile2]
-  for attempt in 0 ..< MeadowPatchAttempts:
-    if centres.len >= MeadowPatchCount:
+  ## Each small area gets planting, including the spaces between town roads.
+  let middle = int32(GridSide div 2)
+  var rockSites: seq[Tile2]
+  for cy in countup(-MeadowRadius, MeadowRadius - 1, MeadowCellSize):
+    for cx in countup(-MeadowRadius, MeadowRadius - 1, MeadowCellSize):
+      var candidates: seq[Tile2]
+      for dy in 0'i32 ..< MeadowCellSize:
+        for dx in 0'i32 ..< MeadowCellSize:
+          let
+            x = middle + cx + dx
+            y = middle + cy + dy
+          if p.meadowTileFree(x, y):
+            candidates.add tile2(x, y)
+      for plant in 0 ..< MeadowPlantsPerCell:
+        if candidates.len == 0:
+          break
+        let
+          tile = candidates[p.rng.below(int32(candidates.len))]
+          yaw = p.rng.unit() * 2 * PI
+        case plant
+        of 0:
+          discard p.claim(MeadowVegetation, "bush_01a", MeadowArea,
+            int32(tile.x), int32(tile.y), yaw, MeadowBushHeight, tint = p.rng.plantTint())
+        of 1:
+          discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), MeadowArea,
+            int32(tile.x), int32(tile.y), yaw, FlowerHeight, tint = p.rng.plantTint())
+        else:
+          discard p.claim(MeadowVegetation, p.rng.pick(Tufts), MeadowArea,
+            int32(tile.x), int32(tile.y), yaw, TuftHeight, tint = p.rng.plantTint())
+        for i in countdown(candidates.high, 0):
+          if chebyshev(candidates[i], tile) < 2:
+            candidates.del(i)
+      if candidates.len > 0:
+        rockSites.add candidates[p.rng.below(int32(candidates.len))]
+  for rock in 0 ..< MeadowRockCount:
+    if rockSites.len == 0:
       break
     let
-      x = int32(middle.x) + p.rng.below(MeadowPatchRadius * 2 + 1) - MeadowPatchRadius
-      y = int32(middle.y) + p.rng.below(MeadowPatchRadius * 2 + 1) - MeadowPatchRadius
-      tile = tile2(x, y)
-    if chebyshev(tile, middle) < 13:
-      continue
-    var clear = true
-    for centre in centres:
-      if chebyshev(tile, centre) < MeadowPatchSpacing:
-        clear = false
-    for garden in p.map.gardenTiles:
-      if chebyshev(tile, garden) <= 3:
-        clear = false
-    for dy in -1'i32 .. 1'i32:
-      for dx in -1'i32 .. 1'i32:
-        if not p.tileFree(x + dx, y + dy) or
-            p.nearRoad(x + dx, y + dy) or
-            p.nearHouseDoor(x + dx, y + dy):
-          clear = false
-    if not clear:
-      continue
-    centres.add tile
-    let yaw = p.rng.unit() * 2 * PI
-    discard p.claim(MeadowVegetation, "flower_bush_01a", MeadowArea,
-      x, y, yaw, MeadowBushHeight, tint = p.rng.plantTint())
-    for side in [-1'i32, 1'i32]:
-      discard p.claim(MeadowVegetation, p.rng.pick(FlowerBeds), MeadowArea,
-        x + side, y + side, yaw, FlowerHeight, tint = p.rng.plantTint())
-
-  for i, centre in centres:
-    let
-      x = int32(centre.x)
-      y = int32(centre.y)
-      yaw = p.rng.unit() * 2 * PI
-    discard p.claim(MeadowVegetation, "bush_01a", MeadowArea,
-      x - 1, y, yaw, MeadowBushHeight, tint = p.rng.plantTint())
-    discard p.claim(MeadowVegetation, p.rng.pick(Tufts), MeadowArea,
-      x, y + 1, yaw, TuftHeight, tint = p.rng.plantTint())
-    if (i + 1) mod MeadowRockEvery == 0:
-      discard p.claim(MeadowRocks, p.rng.pick(MediumRocks), MeadowArea,
-        x + 1, y - 1, yaw, MeadowRockHeight, tint = p.rng.rockTint())
+      index = int(p.rng.below(int32(rockSites.len)))
+      tile = rockSites[index]
+    rockSites.del(index)
+    discard p.claim(MeadowRocks, p.rng.pick(MediumRocks), MeadowArea,
+      int32(tile.x), int32(tile.y), p.rng.unit() * 2 * PI,
+      MeadowRockHeight, tint = p.rng.rockTint())
 
 proc dressForestFloor(p: var Placer) =
   ## Low foliage bridges the open meadow and the forest's clearings.
@@ -581,6 +624,7 @@ proc placeDecor*(map: MapData, seed: int32): seq[Decoration] =
   p.dressGardens()
   p.dressVerges()
   p.dressOutskirts()
+  p.dressMeadowTrees()
   p.dressMeadow()
   p.dressForestFloor()
   p.placed

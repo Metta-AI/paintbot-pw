@@ -174,10 +174,12 @@ into the terrain mesh once with the houses.
 - Road verges: lamp posts spaced along the roads, and tufts, bushes,
   small rocks, and flowers on every other grass tile. Everything that
   grew or was left lying varies in size; everything gnomes made does not.
-- Meadow: up to sixteen low flower beds in open grass, each with a
-  flowering bush, two flower patches, a small leafy bush, and a grass tuft.
-  Every third bed also gets one medium rock, capped at five rocks.
-  The meadow adds at most 85 props after the existing decorations.
+- Meadow: each eight-by-eight tile area gets up to three low plants,
+  spreading bushes, flowers, and tufts between the town roads as well as
+  outside the houses. Only the actual plaza and local road, crop, and
+  doorway clearances are excluded. At most 243 low plants and five medium
+  rocks cover the meadow, with up to six small trees spaced twelve tiles
+  apart and set back from roads. Trees are 2.4 tiles tall.
 - Outskirts: small rocks at the feet of the forest trees and the odd
   medium one.
 - Forest floor: low bushes and grass tufts bridge the outer meadow and
