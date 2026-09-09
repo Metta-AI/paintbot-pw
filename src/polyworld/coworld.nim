@@ -1,5 +1,5 @@
 import
-  std/[os, strutils, times, uri],
+  std/[os, posix, strutils, times, uri],
   jsony, mummy,
   basic, cli
 
@@ -323,6 +323,10 @@ proc coworldOptions*(slotCount: int): GameOptions =
     port: Port(port)
   ))
 
+proc completedSignal(signal: cint) {.noconv.} =
+  ## Exits successfully when the runner terminates a completed episode.
+  exitnow(QuitSuccess)
+
 proc finishCoworld*(results: CoworldResults) =
   ## Finalizes private outputs before publishing the successful result marker.
   if results.scores.len != logs.len or not fileExists(replayPath):
@@ -331,6 +335,12 @@ proc finishCoworld*(results: CoworldResults) =
     playerLog(slot, "\nPlayer slot " & $slot & " completed.\n")
   closePlayerLogs()
   writePlayerStatus()
-  writeAtomic(resultsPath, results.toJson())
   echo "Coworld episode completed after ", results.ticks, " ticks."
+  try:
+    stdout.flushFile()
+    stderr.flushFile()
+  except IOError as error:
+    raise newException(CoworldError, "Cannot flush game logs: " & error.msg)
+  writeAtomic(resultsPath, results.toJson())
+  discard posix.signal(SIGTERM, completedSignal)
   waitForCollection()

@@ -88,6 +88,9 @@ def episode(game, count, scripts, failure=False, ticks=240):
                     assert 'BASIC error:' in logs[0]
                     status = json.loads((root / 'status.json').read_text())
                     assert status['players'][0]['exit_code'] == 1
+                if not failure:
+                    proc.terminate()
+                    assert proc.wait(timeout=5) == 0, 'completed game shutdown failed'
             finally:
                 proc.terminate()
                 proc.wait(timeout=5)
