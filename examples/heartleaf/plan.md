@@ -46,20 +46,23 @@ puts it back on the doorstep.
 The spectator starts at a fixed distance of 40, following the outdoor
 villager nearest the town centre. It stays with that villager through
 gathering, walking, and conversation, framing their house while indoors.
-After arriving, each shot lasts at least 60 real seconds. Three seconds
+Each shot lasts at least 60 real seconds. Three seconds
 idle or indoors allow a handoff after that minimum; at 90 seconds, any
 activity permits a handoff. The next outdoor villager is the least recently
 followed, with distance and slot breaking ties. With nobody else outdoors,
-the camera stays put. Transitions finish before the next shot timer starts.
+the camera stays put. Focus changes snap immediately to the next subject.
 
-Movement is critically damped with a 1.5-second smoothing time and a
-six-tile-per-second speed limit. Automatic zoom is fixed; playback speed
-does not accelerate the camera. Pausing freezes automatic movement and
-shot timers. Seeking keeps the subject and eases toward their restored
-position. Pan, zoom, minimap input, and clicking a villager take manual
-control; C or the camera button resume the demo from a selected villager
-or the nearest outdoor villager, preserving the current zoom. Human-player
-mode retains its existing camera behavior.
+The camera tracks the same interpolated position used to draw the gnome,
+centred at body height, without additional camera damping or a speed cap.
+Automatic zoom is fixed; shot timing uses real seconds at every playback
+speed. Pausing freezes automatic tracking and shot timers. Seeking snaps
+to the selected subject at the restored position. Pan, zoom, minimap input,
+and clicking a villager take manual control; C or the camera button resume
+the demo by snapping to a selected or nearby outdoor villager, preserving
+zoom. Clicking any speed button, including the already selected speed,
+recentres the manual or last demo subject without changing camera ownership
+or restarting the shot. Manual villager following also tracks body position
+without lag. The human-player action camera remains unchanged.
 
 ## The map
 

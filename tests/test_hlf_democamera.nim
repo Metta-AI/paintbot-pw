@@ -13,12 +13,14 @@ block initialSelection:
   let subjects = [DemoSubject(position: vec3(20, 0, 0)),
     DemoSubject(position: vec3(2, 0, 0), indoors: true),
     DemoSubject(position: vec3(5, 0, 0))]
-  var cam = initDemoCamera(subjects.len)
-  cam.activate(subjects, vec3(0))
-  doAssert cam.subject == 2
+  var
+    cam = initDemoCamera(subjects.len)
+    target = vec3(0)
+  cam.activate(subjects, target)
+  doAssert cam.subject == 2 and target == subjects[2].position
   cam.deactivate()
-  cam.activate(subjects, vec3(0), preferred = 1)
-  doAssert cam.subject == 1
+  cam.activate(subjects, target, preferred = 1)
+  doAssert cam.subject == 1 and target == subjects[1].position
 
 block minimumHoldAndRotation:
   let subjects = [DemoSubject(position: vec3(0), quiet: true),
@@ -31,7 +33,7 @@ block minimumHoldAndRotation:
   cam.advance(subjects, target, 59)
   doAssert cam.subject == 0
   cam.advance(subjects, target, 2)
-  doAssert cam.subject == 1
+  doAssert cam.subject == 1 and target == subjects[1].position
   cam.advance(subjects, target, 75)
   doAssert cam.subject == 2
 
@@ -77,9 +79,9 @@ block housesAndNoAlternative:
   doAssert cam.subject == 1
 
 block pauseManualAndSeek:
-  let subjects = [DemoSubject(position: vec3(30, 0, 0)),
-    DemoSubject(position: vec3(-30, 0, 0))]
   var
+    subjects = [DemoSubject(position: vec3(30, 0, 0)),
+      DemoSubject(position: vec3(-30, 0, 0))]
     cam = initDemoCamera(subjects.len)
     target = vec3(0)
   cam.activate(subjects, target)
@@ -90,42 +92,46 @@ block pauseManualAndSeek:
   cam.update(subjects, target, 100, false)
   doAssert target == pausedPosition and cam.elapsed == pausedTime
   cam.deactivate()
+  target = vec3(100)
   cam.advance(subjects, target, 100)
-  doAssert target == pausedPosition
+  doAssert target == vec3(100)
   cam.activate(subjects, target, preferred = 1)
-  doAssert cam.subject == 1 and target == pausedPosition
-  cam.advance(subjects, target, 2)
-  let beforeSeek = target
+  doAssert cam.subject == 1 and target == subjects[1].position
+  subjects[1].position = vec3(-80, 2, 20)
   cam.resetMotion()
-  doAssert target == beforeSeek and cam.subject == 1 and cam.elapsed == 0
-  cam.update(subjects, target, 1'f32 / 60, true)
-  doAssert (target - beforeSeek).length <= 6'f32 / 60 + 0.0001
+  cam.update(subjects, target, 0, false)
+  doAssert target == subjects[1].position and cam.elapsed == 0
 
-block boundedTravelAndNoPrematureHold:
-  let subjects = [DemoSubject(position: vec3(500, 20, 0), quiet: true),
-    DemoSubject(position: vec3(-500, 0, 0), quiet: true)]
+block speedControlRecentresWithoutChangingShotOrOwnership:
+  let subjects = [DemoSubject(position: vec3(5, 1, 9))]
+  var
+    cam = initDemoCamera(subjects.len)
+    target = vec3(0)
+  cam.activate(subjects, target)
+  cam.advance(subjects, target, 20)
+  let elapsed = cam.elapsed
+  for repeatClick in 0 ..< 3:
+    target = vec3(100)
+    cam.snapToSubject(subjects, target)
+    doAssert target == subjects[0].position
+    doAssert cam.active and cam.elapsed == elapsed
+  cam.deactivate()
+  target = vec3(100)
+  cam.snapToSubject(subjects, target)
+  doAssert target == subjects[0].position
+  doAssert not cam.active and cam.elapsed == elapsed
+
+block distantFocusChangeSnapsEvenWhilePaused:
+  let subjects = [DemoSubject(position: vec3(500, 20, 0)),
+    DemoSubject(position: vec3(-500, 0, 0))]
   var
     cam = initDemoCamera(subjects.len)
     target = vec3(0)
   cam.activate(subjects, target, preferred = 0)
-  for frame in 0 ..< 60 * 70:
-    let before = target
-    cam.update(subjects, target, 1'f32 / 60, true)
-    doAssert (target - before).length <= 6'f32 / 60 + 0.0001
-  doAssert cam.subject == 0 and cam.transitioning and cam.elapsed == 0
-
-block frameRateIndependence:
-  let subjects = [DemoSubject(position: vec3(30, 4, 12))]
-  var endpoints: seq[Vec3]
-  for hz in [30, 60, 144]:
-    var
-      cam = initDemoCamera(subjects.len)
-      target = vec3(0)
-    cam.activate(subjects, target)
-    cam.advance(subjects, target, 5, hz)
-    endpoints.add target
-  for target in endpoints:
-    doAssert (target - endpoints[0]).length < 0.02
+  doAssert target == subjects[0].position
+  cam.activate(subjects, target, preferred = 1)
+  cam.update(subjects, target, 0, false)
+  doAssert target == subjects[1].position
 
 block shotTimingAcrossFrameRatesAndSimulationSpeeds:
   for hz in [30, 60, 144]:
@@ -138,9 +144,11 @@ block shotTimingAcrossFrameRatesAndSimulationSpeeds:
       cam.activate(subjects, target)
       for frame in 0 ..< hz * 59:
         let simulationTime = float32(frame * speed) / float32(hz)
+        subjects[0].position = vec3(simulationTime * 4, 0.85, sin(simulationTime))
         subjects[1].position.x = 10 + sin(simulationTime) * 5
         subjects[1].quiet = frame mod hz == 0
         cam.update(subjects, target, 1'f32 / float32(hz), true)
+        doAssert target == subjects[0].position
       doAssert cam.subject == 0
       cam.advance(subjects, target, 2, hz)
       doAssert cam.subject == 1

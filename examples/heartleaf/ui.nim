@@ -254,8 +254,8 @@ proc drawUi*(
     followSlot: var int32,
     actionCam: var ActionCam,
     preserveFollowOnAuto = false
-) =
-  ## Draws every Silky HUD panel for the current frame.
+): bool =
+  ## Draws the HUD and reports clicks on any playback-speed button.
   let
     chrome = currentChrome(window)
     roster = sk.beginPanel(chrome.roster)
@@ -468,6 +468,9 @@ proc drawUi*(
     actionCam,
     following
   )
+  for button in chrome.layout.transportPanel.transportPanels().speeds:
+    if window.clicked(sk, button):
+      result = true
   if not following and not (preserveFollowOnAuto and actionCam.enabled):
     followSlot = -1
 

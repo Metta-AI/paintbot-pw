@@ -482,14 +482,18 @@ proc runGraphics*() =
             48
           )
 
+  proc followPoint(v: Villager): Vec3 =
+    ## Frames an outdoor gnome at body height, or their house while indoors.
+    if v.inHouse >= 0:
+      tileWorldPoint(run.world.map.houses[v.inHouse].center)
+    else:
+      renderPoint(v) + vec3(0, VillagerHeight * 0.5'f32, 0)
+
   proc demoSubjects(): array[VillagerCount, DemoSubject] =
     ## Supplies interpolated viewer positions without modifying the simulation.
     for slot, v in run.world.villagers:
       result[slot] = DemoSubject(
-        position: if v.inHouse >= 0:
-          tileWorldPoint(run.world.map.houses[v.inHouse].center)
-        else:
-          renderPoint(v),
+        position: followPoint(v),
         indoors: v.inHouse >= 0,
         quiet: v.animation == IdleAnimation
       )
@@ -541,11 +545,8 @@ proc runGraphics*() =
       if actionCam.enabled:
         let subjects = demoSubjects()
         if not demoCamera.active:
-          let initial = demoCamera.subject < 0
           demoCamera.activate(subjects, cameraTarget, int(followSlot))
           followSlot = -1
-          if initial:
-            cameraTarget = subjects[demoCamera.subject].position
         demoCamera.update(subjects, cameraTarget, dt, transport.playing and not run.world.over)
         return
       demoCamera.deactivate()
@@ -560,13 +561,14 @@ proc runGraphics*() =
       )
       return
     if followSlot >= 0:
-      let v = run.world.villagers[followSlot]
-      let focus =
-        if v.inHouse >= 0:
-          tileWorldPoint(run.world.map.houses[v.inHouse].center)
-        else:
-          renderPoint(v)
-      cameraTarget = mix(cameraTarget, focus, damping(5.0'f32, dt))
+      cameraTarget = followPoint(run.world.villagers[followSlot])
+
+  proc snapFollowCamera() =
+    ## Speed controls recenter the current manual or last demo subject.
+    if followSlot >= 0:
+      cameraTarget = followPoint(run.world.villagers[followSlot])
+    elif demoMode:
+      demoCamera.snapToSubject(demoSubjects(), cameraTarget)
 
   proc updateSelection(viewProjection: Mat4) =
     ## A left click on a villager follows them; empty ground lets go.
@@ -652,8 +654,6 @@ proc runGraphics*() =
       let dt = frameDelta(lastFrameTime, Step)
       sk.uiScale = hudUiScale(window)
       sk.mousePos = window.mousePos.vec2 / sk.uiScale
-      profileBlock "camera":
-        updateCamera(dt)
       let recorded =
         if run.recorder != nil: int32(run.recorder.data.hashes.len)
         else: int32(run.replayPlayer.data.hashes.len)
@@ -683,6 +683,8 @@ proc runGraphics*() =
           0.0'f32
       if active:
         clickMarks.advanceClickMarks(dt)
+      profileBlock "camera":
+        updateCamera(dt)
       let
         aspect = window.size.x.float32 / max(window.size.y.float32, 1)
         view = cameraView()
@@ -818,7 +820,7 @@ proc runGraphics*() =
             vec2(20)
           )
 
-        drawUi(
+        let speedClicked = drawUi(
           sk,
           window,
           transport,
@@ -829,6 +831,8 @@ proc runGraphics*() =
           actionCam,
           preserveFollowOnAuto = demoMode
         )
+        if speedClicked:
+          snapFollowCamera()
         sk.endUi()
       when defined(takeScreenshot):
         captureScreenshot(
