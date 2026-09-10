@@ -8,3 +8,6 @@ when defined(emscripten):
 when defined(emscripten):
   for team in ["red", "blue"]:
     switch("passL", "--preload-file " & thisDir() / ("../../tmp/paintbot-cog-" & team & ".glb") & "@/paintbot-cog-" & team & ".glb")
+
+when defined(emscripten):
+  switch("passL", "--preload-file " & thisDir() / "../../tmp/round-village.glb" & "@/round-village.glb")

@@ -34,7 +34,12 @@ def clear(w, a, b):
         x = a["x"] + (b["x"] - a["x"]) * i // steps
         z = a["z"] + (b["z"] - a["z"]) * i // steps
         if any(
-            c["x"] < x < c["x"] + c["w"] and c["z"] < z < c["z"] + c["h"]
+            (
+                (x - c["x"] - c["w"] / 2) ** 2 + (z - c["z"] - c["w"] / 2) ** 2
+                < (c["w"] / 2) ** 2
+            )
+            if c["h"] == 0
+            else (c["x"] < x < c["x"] + c["w"] and c["z"] < z < c["z"] + c["h"])
             for c in w["cover"]
         ):
             return False
@@ -73,6 +78,19 @@ def walkability(cover):
         start = (z * 1280 + 11) * 4 + 3
         raw[start : (z * 1280 + 1269) * 4 : 4] = b"\xff" * 1258
     for cx, cz, cw, ch in cover:
+        if ch == 0:
+            r = cw / 2
+            for z in range(max(0, cz // 5), min(800, (cz + cw) // 5 + 1)):
+                dz = z * 5 - cz - r
+                if abs(dz) >= r:
+                    continue
+                half = math.sqrt(r * r - dz * dz)
+                left = max(0, math.ceil((cx + r - half) / 5))
+                right = min(1280, math.ceil((cx + r + half) / 5))
+                raw[(z * 1280 + left) * 4 + 3 : (z * 1280 + right) * 4 : 4] = (
+                    b"\x00" * (right - left)
+                )
+            continue
         left, right = max(0, cx // 5), min(1280, (cx + cw) // 5 + 1)
         for z in range(max(0, cz // 5), min(800, (cz + ch) // 5 + 1)):
             raw[(z * 1280 + left) * 4 + 3 : (z * 1280 + right) * 4 : 4] = b"\x00" * (

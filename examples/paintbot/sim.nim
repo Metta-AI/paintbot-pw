@@ -91,6 +91,10 @@ proc blocked*(w: World, p: Point, radius = Radius): bool =
   if p.x < radius or p.z < radius or p.x > Width-radius or p.z >
       Height-radius: return true
   for c in w.cover:
+    if c.h == 0:
+      let r = c.w div 2
+      if distance2(p, point(c.x.int+r.int, c.z.int+r.int)) < (r+radius).int64*(r+radius): return true
+      continue
     if p.x > c.x-radius and p.x < c.x+c.w+radius and p.z > c.z-radius and p.z <
         c.z+c.h+radius: return true
 proc lineClear*(w: World, a, b: Point): bool =
@@ -99,7 +103,7 @@ proc lineClear*(w: World, a, b: Point): bool =
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
     if w.blocked(p, 0): return false
   true
-var visionRulesVersion* = 7
+var visionRulesVersion* = 8
 proc canSeePoint*(w: World, slot: int, p: Point): bool =
   if slot notin 0..<Seats or w.cogs[slot].hp <= 0: return false
   let c = w.cogs[slot]
@@ -155,7 +159,11 @@ proc resetHeart*(w: var World, side: int) =
 proc initializeEquipment(w: var World)
 proc newWorld*(seed: int32): World =
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
-  if visionRulesVersion >= 7:
+  if visionRulesVersion >= 8:
+    for lot in roundVillage():
+      result.cover.add Cover(x: (lot.x-lot.radius).int32,
+          z: (lot.z-lot.radius).int32, w: (lot.radius*2).int32, h: 0)
+  elif visionRulesVersion >= 7:
     for lot in VillageLots:
       result.cover.add Cover(x: lot.x.int32, z: lot.z.int32,
           w: lot.w.int32, h: lot.h.int32)

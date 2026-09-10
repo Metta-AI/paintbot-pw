@@ -112,6 +112,12 @@ proc runGraphics*() =
             abs(gx-21) < 2 or abs(gx-43) < 2 or
             (gx > 10 and gx < 54 and (abs(gz-11) < 2 or abs(gz-29) < 2)):
           tile.kind = RoadTile
+      if replayRulesVersion >= 8 and gx >= 0 and gz >= 0 and gx < 64 and gz < 40:
+        tile.kind = GrassTile
+        let winding = 20.0+2.7*sin(gx.float/7.0)
+        let plaza = sqrt((gx.float-32)*(gx.float-32)+(gz.float-20)*(gz.float-20))
+        if abs(gz.float-winding) < 2 or (plaza > 5.0 and plaza < 7.2):
+          tile.kind = RoadTile
       ground.tiles[z*80+x] = tile
   layers = @[ground]
   amplitude = 1.2
@@ -120,7 +126,9 @@ proc runGraphics*() =
   computeWalkable()
   scatterGrass(1500, recording.seed, matchTerrain = true)
   bakeTerrain(rebuildWalkability = false)
-  if replayRulesVersion >= 7:
+  if replayRulesVersion >= 8:
+    placeRoundVillage()
+  elif replayRulesVersion >= 7:
     placeVillage(world)
   else:
     let coverPack = loadPropPack(when defined(

@@ -433,8 +433,19 @@
     ctx.fillStyle = "#294835";
     ctx.fillRect(0, 0, 320, 200);
     ctx.fillStyle = "#c0b68b";
-    for (const c of w.cover)
-      ctx.fillRect(c.x / 20, c.z / 20, c.w / 20, c.h / 20);
+    for (const c of w.cover) {
+      if (c.h === 0) {
+        ctx.beginPath();
+        ctx.arc(
+          (c.x + c.w / 2) / 20,
+          (c.z + c.w / 2) / 20,
+          c.w / 40,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fill();
+      } else ctx.fillRect(c.x / 20, c.z / 20, c.w / 20, c.h / 20);
+    }
     for (let i = 0; i < 16; i++) {
       const c = w.cogs[i];
       if (c.hp <= 0) continue;

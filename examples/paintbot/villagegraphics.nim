@@ -4,6 +4,15 @@ import vmath
 import polyworld/[common, quadterrain]
 import sim, village
 
+proc placeRoundVillage*() =
+  let pack = loadPropPack(when defined(emscripten): "/round-village.glb" else: "tmp/round-village.glb",
+      unitHeight = false, textured = false)
+  for i, lot in roundVillage():
+    pack.placeProp(if lot.house: "round-cottage" else: "round-garden",
+        vec3(lot.x.float32/100-32, 0, lot.z.float32/100-20),
+        if i mod 2 == 0: -0.22'f32 else: PI.float32-0.22,
+        lot.radius.float32/100, vec3(1, 1, 1))
+
 proc placeVillage*(world: World) =
   let homes = loadPropPack(DataRoot & "/terrain/toon_golden_valley/presets.glb",
       unitHeight = false, textured = true, only = @["house_02", "house_03", "bakery"])
