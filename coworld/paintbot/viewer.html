@@ -542,7 +542,7 @@
     background: #3b2322;
   }
   #status:before {
-    content: "PAINTBOT / POLYWORLD";
+    content: "HEARTWICK";
     font: 12px Rubik;
     letter-spacing: 0.25em;
     margin-bottom: 18px;
@@ -974,12 +974,256 @@
       line-height: 6px;
     }
   }
+
+  /* Compact viewer: the arena occupies the full width. */
+  body {
+    margin: 0;
+  }
+  #canvas {
+    left: 0;
+    top: 44px;
+    width: 100% !important;
+    height: calc(100% - 128px) !important;
+  }
+  header {
+    height: 44px;
+    padding: 0 14px;
+    gap: 18px;
+  }
+  header .place {
+    display: block;
+    border: 0;
+    padding: 0;
+    line-height: 1;
+  }
+  header .place .eyebrow {
+    font:
+      600 16px Georgia,
+      serif;
+    letter-spacing: 0.03em;
+    text-transform: none;
+    color: var(--ink);
+  }
+  #modehint {
+    display: none;
+  }
+  header .right {
+    gap: 4px;
+  }
+  #match-score {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: 15px;
+  }
+  #match-score .divider {
+    color: var(--muted);
+    font-size: 11px;
+  }
+  #verification {
+    width: 18px;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+  .icon-button,
+  header button,
+  #viewbar button,
+  .transport button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 5px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+  }
+  button svg,
+  summary svg,
+  label svg {
+    width: 17px;
+    height: 17px;
+    flex-shrink: 0;
+  }
+  #viewbar {
+    left: 12px;
+    top: 54px;
+    max-width: calc(100% - 65px);
+    gap: 2px;
+    padding: 4px;
+    border-radius: 10px;
+    backdrop-filter: blur(14px);
+    flex-wrap: wrap;
+  }
+  #viewbar .optional {
+    display: inline-flex;
+  }
+  #viewbar select {
+    max-width: 125px;
+    padding: 5px;
+    font-size: 11px;
+    height: 28px;
+  }
+  #territorytoggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  #territorytoggle[hidden] {
+    display: none;
+  }
+  #territory {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+  }
+  #territorytoggle:has(:checked) {
+    background: #a28a3735;
+    color: #fff0c6;
+  }
+  #territorytoggle:has(:focus-visible) {
+    outline: 2px solid var(--gold);
+  }
+  #bottom {
+    height: 84px;
+    padding: 7px 14px;
+  }
+  .transport {
+    height: 28px;
+    gap: 3px;
+  }
+  .transport #play {
+    min-width: 30px;
+    width: 30px;
+  }
+  #clock {
+    font-size: 11px;
+    margin-left: 6px;
+  }
+  #tickread {
+    display: none;
+  }
+  #speed {
+    padding: 3px;
+    font-size: 11px;
+  }
+  #timeline {
+    margin-top: 5px;
+    height: 30px;
+  }
+  #momentum {
+    height: 22px;
+  }
+  #scrub {
+    bottom: 0;
+  }
+  .scene-caption {
+    display: none;
+  }
+  #map-panel {
+    position: absolute;
+    top: 54px;
+    right: 12px;
+    z-index: 4;
+  }
+  #map-panel summary {
+    list-style: none;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  #map-panel summary::-webkit-details-marker {
+    display: none;
+  }
+  .map-content {
+    position: absolute;
+    right: 0;
+    top: 42px;
+    width: 240px;
+    padding: 12px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+  #inspect {
+    position: absolute;
+    right: 12px;
+    top: 100px;
+    bottom: auto;
+    left: auto;
+    width: 230px;
+    max-height: calc(100% - 200px);
+    overflow: auto;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px;
+    z-index: 3;
+  }
+  #inspect:not(:has(.name)) {
+    display: none;
+  }
+  #comms,
+  body:has(#inspect .name) #comms {
+    left: auto;
+    right: 12px;
+    bottom: 94px;
+    width: 230px;
+    max-width: calc(100% - 24px);
+  }
+  #comms summary {
+    padding: 7px 10px;
+    font-size: 10px;
+  }
+  #feed {
+    top: 100px;
+  }
+  @media (max-width: 600px) {
+    #viewbar select {
+      max-width: 90px;
+    }
+    header {
+      gap: 12px;
+    }
+    #verification {
+      display: none;
+    }
+    .transport {
+      gap: 1px;
+    }
+    .transport button {
+      width: 24px;
+      min-width: 24px;
+      padding: 4px;
+    }
+  }
 </style>
 <header>
-  <div class="brand">PAINT<span>BOT</span></div>
   <div class="place">
     <div class="eyebrow">Heartwick</div>
     <small id="modehint">Territory control · Claim all 10 hearts</small>
+  </div>
+  <div id="match-score">
+    <span class="red" title="Ember">♥ <b id="score0">1</b></span
+    ><span class="divider">:</span
+    ><span class="blue" title="Azure"><b id="score1">1</b> ♥</span>
   </div>
   <div class="right">
     <span class="verified" id="verification">◌ VERIFYING REPLAY</span
@@ -988,11 +1232,10 @@
     ><button id="fullscreen" aria-label="Fullscreen">⛶</button>
   </div>
 </header>
-<aside id="rail">
+<div hidden>
   <section class="teamblock" id="team0">
     <div class="teamhead red">
-      <span class="crest">♥</span><strong>EMBER</strong
-      ><span class="score" id="score0">0</span>
+      <span class="crest">♥</span><strong>EMBER</strong>
     </div>
     <div class="heartstate">
       <span id="heart0">Heart at home</span><span id="alive0">8 alive</span>
@@ -1001,40 +1244,45 @@
   </section>
   <section class="teamblock" id="team1">
     <div class="teamhead blue">
-      <span class="crest">♥</span><strong>AZURE</strong
-      ><span class="score" id="score1">0</span>
+      <span class="crest">♥</span><strong>AZURE</strong>
     </div>
     <div class="heartstate">
       <span id="heart1">Heart at home</span><span id="alive1">8 alive</span>
     </div>
     <div class="squad" id="squad1"></div>
   </section>
-  <p class="railtitle">Tactical map</p>
-  <canvas
-    id="minimap"
-    width="320"
-    height="200"
-    aria-label="Tactical minimap. Click or drag to move the camera."
-  ></canvas>
-  <div id="zoomrow">
-    <button id="zoomout" aria-label="Zoom out">−</button
-    ><input
-      id="zoom"
-      type="range"
-      min="6"
-      max="100"
-      value="60"
-      aria-label="Camera distance"
-    /><button id="zoomin" aria-label="Zoom in">+</button>
+</div>
+<details id="map-panel">
+  <summary aria-label="Tactical map" title="Tactical map">◇</summary>
+  <div class="map-content">
+    <p class="railtitle">Tactical map</p>
+    <canvas
+      id="minimap"
+      width="320"
+      height="200"
+      aria-label="Tactical minimap. Click or drag to move the camera."
+    ></canvas>
+    <div id="zoomrow">
+      <button id="zoomout" aria-label="Zoom out">−</button
+      ><input
+        id="zoom"
+        type="range"
+        min="6"
+        max="100"
+        value="60"
+        aria-label="Camera distance"
+      /><button id="zoomin" aria-label="Zoom in">+</button>
+    </div>
   </div>
-  <section id="inspect">
-    <p class="railtitle">Squad inspection</p>
-    <p class="hint">
-      Select a bot in the arena or a portrait to inspect its status and follow
-      its perspective.
-    </p>
-  </section>
-</aside>
+</details>
+<section id="inspect">
+  <p class="railtitle">Squad inspection</p>
+  <p class="hint">
+    Select a bot in the arena or a portrait to inspect its status and follow its
+    perspective.
+  </p>
+</section>
+
 <div id="viewbar">
   <select id="lens" aria-label="Visibility perspective">
     <option value="-1">All-seeing</option>

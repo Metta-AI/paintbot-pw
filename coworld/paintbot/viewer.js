@@ -3,6 +3,47 @@
   "use strict";
   const $ = (id) => document.getElementById(id),
     colors = ["#ff8069", "#71cfff"];
+  const paths = {
+    stats: "M4 20V12h3v8M10 20V4h3v16M16 20V8h3v12",
+    events: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01",
+    help: "M9 8a3 3 0 1 1 5 2c-2 1-2 2-2 4M12 18h.01",
+    fullscreen: "M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5",
+    fit: "M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4M9 9h6v6H9z",
+    topdown: "M12 3 3 8l9 5 9-5-9-5ZM3 13l9 5 9-5M3 18l9 5 9-5",
+    bars: "M12 20S3 14 3 8a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 6-9 12-9 12Z",
+    eventtoasts: "M5 17h14l-2-3V9a5 5 0 0 0-10 0v5l-2 3ZM10 21h4",
+    trails: "M4 20V9a5 5 0 0 1 10 0v6a3 3 0 0 0 6 0V4M17 7l3-3 3 3",
+    download: "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5",
+    restart: "M5 8a8 8 0 1 1-1 8M5 3v5h5",
+    back: "M5 5v14M18 5l-9 7 9 7V5Z",
+    step: "M19 5v14M6 5l9 7-9 7V5Z",
+    forward: "M3 5l8 7-8 7V5ZM13 5l8 7-8 7V5Z",
+    end: "M19 5v14M5 5l9 7-9 7V5Z",
+    loop: "M4 9V5h14l3 3-3 3M20 15v4H6l-3-3 3-3",
+    skip: "M5 5l9 7-9 7V5ZM19 5v14",
+    spoilers:
+      "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6",
+    play: "M7 4l13 8-13 8V4Z",
+    pause: "M8 4v16M16 4v16",
+    map: "M3 5l6-2 6 2 6-2v16l-6 2-6-2-6 2V5ZM9 3v16M15 5v16",
+  };
+  const icon = (key) =>
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[key]}"/></svg>`;
+  for (const id of Object.keys(paths)) {
+    const button = $(id);
+    if (!button) continue;
+    const label =
+      button.getAttribute("aria-label") || button.textContent.trim();
+    button.setAttribute("aria-label", label);
+    if (!button.title) button.title = label;
+    button.innerHTML = icon(id);
+  }
+  const mapSummary = $("map-panel").querySelector("summary");
+  mapSummary.innerHTML = icon("map");
+  $("territorytoggle").lastChild.textContent = "";
+  $("territorytoggle").insertAdjacentHTML("beforeend", icon("map"));
+  $("territorytoggle").title = "Territory overlay";
+  $("territory").setAttribute("aria-label", "Territory overlay");
   let started = false;
   let state = null,
     index = null,
@@ -241,7 +282,7 @@
   });
   function show(title, html) {
     $("dialogbody").innerHTML =
-      `<div class="eyebrow">Paintbot / replay analysis</div><h2>${title}</h2>${html}`;
+      `<div class="eyebrow">Heartwick / replay analysis</div><h2>${title}</h2>${html}`;
     if (!$("dialog").open) $("dialog").showModal();
   }
   $("dialog").querySelector(".close").onclick = () => $("dialog").close();
@@ -710,7 +751,9 @@
       option.textContent = `${i + 1} · ${name(i)}`;
       $("lens").append(option);
     }
-    $("verification").textContent = "✓ HASH VERIFIED";
+    $("verification").textContent = "✓";
+    $("verification").title = "Replay hash verified";
+    $("verification").setAttribute("aria-label", "Replay hash verified");
   };
   Module.paintbotState = (data) => {
     state = data;
@@ -731,7 +774,8 @@
       : "Capture the heart · Three lives";
     $("povsight").style.visibility =
       selected >= 0 && w.cogs[selected].hp > 0 ? "visible" : "hidden";
-    $("play").textContent = data.paused ? "Play" : "Pause";
+    $("play").innerHTML = icon(data.paused ? "play" : "pause");
+    $("play").setAttribute("aria-label", data.paused ? "Play" : "Pause");
     $("scrub").max = data.total;
     $("scrub").value = t;
     $("clock").textContent = `${clock(t)} / ${clock(data.total)}`;
