@@ -59,3 +59,9 @@ See `VIEWER.md` for the CTF feature map, keyboard controls, pinned artwork, and 
 ### Solid-body rules release: 0.1.3
 
 `cow_305225aa-9917-4453-8f3f-4acb865a1530` is certified and canonical for the existing ladder. Certification `ac620e9e-eb63-47e6-8b3c-3b55ca64184a` completed under `main-ddac040c18fb` on 2026-09-10. The published v3 replay viewer was verified against hosted episode `eaff93c7-ce7b-4719-8f80-d5eb5ccbf6c9`. Living cogs now collide and weapons fire once per second. Existing episodes preserve their original physics; newly scheduled episodes use 0.1.3.
+
+### Paint Crew and equipment: 0.1.6
+
+`cow_67b21f5a-2540-4330-b84d-331af4fe81b3` is certified and canonical for the existing ladder. Certification `7c614b81-88f6-48c7-8306-343a796f61de` passed all 10 checks under `main-ddac040c18fb` at 2026-09-10T17:53:18.228993Z. The production viewer loaded hosted replay `91fc37cc-545c-49ec-8cc2-1e75891db89f` and displayed HASH VERIFIED. All sixteen hosted seats exited cleanly and the native verifier reproduced each downloaded replay.
+
+The release includes the approved B Paint Crew cogs, grenades, spray cans, trenches, shields, med kits, finite lives and capture/wipe victories. BASIC and WASM policies remain supported. Ladder mode remains enabled, campaign disabled, and a new ladder run was triggered after canonical publication. Historical episodes retain their pinned viewers and rules.
