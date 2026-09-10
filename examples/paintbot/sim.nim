@@ -88,7 +88,7 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 10
+var visionRulesVersion* = 11
 proc elevation*(w: World, p: Point): int =
   if visionRulesVersion < 9: return 0
   result = terrainHeight(p.x.int, p.z.int)
@@ -184,6 +184,7 @@ proc resetHeart*(w: var World, side: int) =
   w.hearts[side] = Heart(pos: home(side), carrier: -1)
 proc initializeEquipment(w: var World)
 proc newWorld*(seed: int32): World =
+  wideRamps = visionRulesVersion >= 11
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
   if visionRulesVersion >= 8:
     for lot in roundVillage():

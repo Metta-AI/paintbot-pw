@@ -700,6 +700,38 @@
             ? "Heart dropped"
             : "Heart at home";
     }
+    let bubbles = document.getElementById("speech-bubbles");
+    if (!bubbles) {
+      bubbles = document.createElement("div");
+      bubbles.id = "speech-bubbles";
+      bubbles.style.cssText =
+        "position:fixed;inset:0;pointer-events:none;z-index:5";
+      document.body.appendChild(bubbles);
+    }
+    const canvasRect = $("canvas").getBoundingClientRect();
+    bubbles.replaceChildren();
+    const latestSpeech = new Map();
+    for (const message of index.communications || []) {
+      if (message.tick <= t && message.tick > t - 72)
+        latestSpeech.set(message.slot, message);
+    }
+    for (const [slot, message] of latestSpeech) {
+      const p = data.screen[slot];
+      if (
+        !data.visible[slot] ||
+        w.cogs[slot].hp <= 0 ||
+        !p ||
+        p[0] < 0 ||
+        p[0] > 1 ||
+        p[1] < 0 ||
+        p[1] > 1
+      )
+        continue;
+      const bubble = document.createElement("div");
+      bubble.textContent = message.text;
+      bubble.style.cssText = `position:absolute;left:${canvasRect.left + p[0] * canvasRect.width}px;top:${canvasRect.top + p[1] * canvasRect.height}px;transform:translate(-50%,-130%);max-width:160px;padding:5px 8px;border-radius:12px;background:#fff9df;color:#263c30;font:12px sans-serif;box-shadow:0 2px 5px #0005`;
+      bubbles.appendChild(bubble);
+    }
     const recent = index.events
       .filter((e) => e.tick <= t && e.tick > t - 120 && e.kind !== "down")
       .slice(-4);

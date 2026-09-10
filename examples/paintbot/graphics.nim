@@ -111,14 +111,17 @@ proc runGraphics*() =
   let window = newWindow("Paintbot · Gnomewick Village", ivec2(1440, 900))
   makeContextCurrent(window)
   loadExtensions()
-  # The playable surface stays perfectly flat. Scenic elevation is outside it.
-  let ground = QuadLayer(originX: 24, originZ: 36, width: 80, depth: 56,
-      tiles: newSeq[Tile](80*56))
-  let terraces = QuadLayer(originX: 24, originZ: 36, width: 80, depth: 56,
-      slab: true, tiles: newSeq[Tile](80*56))
-  for z in 0..<56:
-    for x in 0..<80:
-      let gx = x-8; let gz = z-8
+  # Keep only a narrow scenic strip around the playable arena.
+  const border = 3
+  const terrainWidth = 64+2*border
+  const terrainDepth = 40+2*border
+  let ground = QuadLayer(originX: 32-border, originZ: 44-border, width: terrainWidth, depth: terrainDepth,
+      tiles: newSeq[Tile](terrainWidth*terrainDepth))
+  let terraces = QuadLayer(originX: 32-border, originZ: 44-border, width: terrainWidth, depth: terrainDepth,
+      slab: true, tiles: newSeq[Tile](terrainWidth*terrainDepth))
+  for z in 0..<terrainDepth:
+    for x in 0..<terrainWidth:
+      let gx = x-border; let gz = z-border
       var tile = Tile(flags: TileExists or TileConnectedEast or
           TileConnectedSouth, kind: GrassTile)
       if gx < 0 or gz < 0 or gx >= 64 or gz >= 40:
@@ -171,13 +174,13 @@ proc runGraphics*() =
           var deck = tile
           deck.tops = pack(heights)
           deck.bottoms = pack([-0.1'f32, -0.1, -0.1, -0.1])
-          terraces.tiles[z*80+x] = deck
+          terraces.tiles[z*terrainWidth+x] = deck
           tile.tops = pack([-0.125'f32, -0.125, -0.125, -0.125])
           tile.flags = tile.flags or TileImpassable
           tile.kind = RockTile
         else:
           tile.tops = pack(heights)
-      ground.tiles[z*80+x] = tile
+      ground.tiles[z*terrainWidth+x] = tile
   layers = if replayRulesVersion >= 9: @[ground, terraces] else: @[ground]
   amplitude = 1.2
   treeHeight = 5.5

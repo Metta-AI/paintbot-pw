@@ -29,14 +29,14 @@ def literal_snappy(raw):
 
 
 @lru_cache(maxsize=65536)
-def terrain_height(x, z):
+def terrain_height(x, z, wide=False):
     def raised(x, z):
         if 1000 <= x <= 2200 and 200 <= z <= 1200:
             dx = max(abs(x - 1600) - 450, 0)
             dz = max(abs(z - 700) - 350, 0)
             if dx * dx + dz * dz <= 150 * 150:
                 return 250
-        if 750 <= z <= 950:
+        if (500 if wide else 750) <= z <= (1100 if wide else 950):
             if 600 <= x < 1000:
                 return (x - 600) * 250 // 400
             if 2200 < x <= 2800:
@@ -55,7 +55,7 @@ def terrain_height(x, z):
 def elevation(w, p):
     if w.get("rulesVersion", 0) < 9:
         return 0
-    h = terrain_height(p["x"], p["z"])
+    h = terrain_height(p["x"], p["z"], w.get("rulesVersion", 0) >= 11)
     for t in w.get("trenches", []):
         if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
             return h - 60
@@ -121,7 +121,7 @@ def can_see_point(w, slot, b):
 
 
 @lru_cache(maxsize=4)
-def walkability(cover, layered=False):
+def walkability(cover, layered=False, wide=False):
     raw = bytearray(1280 * 800 * 4)
     for z in range(11, 789):
         start = (z * 1280 + 11) * 4 + 3
@@ -149,9 +149,9 @@ def walkability(cover, layered=False):
         for z in range(11, 789):
             for x in range(11, 1269):
                 px, pz = x * 5, z * 5
-                h = terrain_height(px, pz)
+                h = terrain_height(px, pz, wide)
                 if any(
-                    abs(terrain_height(px + dx, pz + dz) - h) > 80
+                    abs(terrain_height(px + dx, pz + dz, wide) - h) > 80
                     for dx, dz in [(55, 0), (-55, 0), (0, 55), (0, -55)]
                 ):
                     raw[(z * 1280 + x) * 4 + 3] = 0
@@ -205,6 +205,7 @@ class SpriteView:
                 walkability(
                     tuple((c["x"], c["z"], c["w"], c["h"]) for c in w["cover"]),
                     w.get("rulesVersion", 0) >= 9,
+                    w.get("rulesVersion", 0) >= 11,
                 ),
             )
             sprite(1, "map", 1280, 800)
@@ -323,6 +324,10 @@ class SpriteView:
             item(
                 f"endzone {color} rect {x - 40},360 {x + 40},440",
                 {"x": x * 5, "z": 2000},
+            )
+        for message in w.get("heard", [[] for _ in range(16)])[self.slot]:
+            item(
+                "shout " + str(message["slot"]) + " " + message["text"], message["pos"]
             )
         return bytes(out)
 

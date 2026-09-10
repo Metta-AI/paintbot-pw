@@ -37,7 +37,7 @@ proc convertFrames(frames: seq[LegacyFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
           goal: c.goal, aim: c.aim)
     result.add next
-var replayRulesVersion* = 10
+var replayRulesVersion* = 11
 proc loadRecording*(path: string): Recording =
   replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
   visionRulesVersion = replayRulesVersion
@@ -49,7 +49,7 @@ proc loadRecording*(path: string): Recording =
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, LegacyMetadataRecording)
     result = Recording(seed: old.seed, frames: convertFrames(old.frames),
         names: old.names, communications: old.communications)
-  elif replayRulesVersion in [6, 7, 8, 9, 10]:
+  elif replayRulesVersion in [6, 7, 8, 9, 10, 11]:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
@@ -111,17 +111,20 @@ proc advance*() =
     if bridge != nil:
       let snapshot = world.toJson()
       bridge.writeLine("{\"rulesVersion\":" & $replayRulesVersion & "," &
-          snapshot[1..^1]); bridge.flushFile()
+          "\"heard\":" & heard.toJson() & "," & snapshot[1..^1]); bridge.flushFile()
       let external = bridge.readLine().fromJson(seq[tuple[slot: int,
           command: Command, chat: seq[string]]])
       for item in external:
         if item.slot < 0 or item.slot >= Seats: raise newException(ValueError, "Invalid WASM slot")
         commands[item.slot] = item.command
-        for message in item.chat:
+        shouts[item.slot] = @[]
+        for message in item.chat[0..<min(4,item.chat.len)]:
           if message.len > 1024: raise newException(ValueError, "Communication too long")
+          shouts[item.slot].add message[0..<min(256,message.len)]
           if recording.communications.len < 20000:
             recording.communications.add Communication(tick: world.tick+1,
                 slot: item.slot, text: message)
+    deliverSpeech(world)
     world.step(commands)
     recording.frames.add Frame(commands: commands, hash: world.stateHash())
 proc runHeadless*() =
@@ -130,7 +133,7 @@ proc runHeadless*() =
   while world.tick < limit and world.winner == -1: advance()
   if replayMode and world.tick != limit: raise newException(ReplayError, "Replay has frames after victory")
   if not replayMode and options.recordPath.len > 0: saveReplayFile(
-      options.recordPath, "paintbot_pw", 10, recording)
+      options.recordPath, "paintbot_pw", 11, recording)
   echo "ticks=", world.tick, " captures=", world.captures, " hash=",
       world.stateHash()
   when defined(coworld):

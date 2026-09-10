@@ -1,5 +1,5 @@
 import std/[unittest, deques, sets]
-import ../examples/paintbot/sim
+import ../examples/paintbot/[sim,bots]
 suite "Layered village":
   setup: visionRulesVersion = 9
   test "terraces, ramps and lower lane have symmetric elevations":
@@ -46,3 +46,32 @@ suite "Layered village":
     check w.gunSpreadPercent(point(500,720), point(500,900)) == 100
     visionRulesVersion = 9
     check w.gunSpreadPercent(point(1550,720), point(500,720)) == 100
+  test "wide ramps carry cogs from the floor onto both terraces":
+    visionRulesVersion = 11
+    for mirrored in [false,true]:
+      var w = newWorld(2026)
+      for i in 1..<Seats:w.cogs[i].hp=0
+      w.cogs[0].pos=if mirrored:point(3600,3200) else:point(2800,800)
+      w.cogs[0].goal=w.cogs[0].pos
+      let goal=if mirrored:point(4250,3200) else:point(2250,800)
+      var commands:array[Seats,Command]
+      commands[0]=Command(walk:true,goal:goal,aim:goal)
+      for tick in 0..<100:w.step(commands)
+      check w.elevation(w.cogs[0].pos)>200
+      check distance2(w.cogs[0].pos,goal)<10000
+
+  test "hearing reaches nearby enemies behind the listener but not distant cogs":
+    visionRulesVersion=11
+    var w=newWorld(2026)
+    w.cogs[0].pos=point(1000,2000)
+    w.cogs[1].pos=point(2000,2000)
+    w.cogs[2].pos=point(3000,2000)
+    shouts=default(array[Seats,seq[string]])
+    shouts[0] = @["Contact"]
+    deliverSpeech(w)
+    check heard[1].len==1
+    check heard[1][0].text=="Contact"
+    check heard[2].len==0
+    shouts=default(array[Seats,seq[string]])
+    deliverSpeech(w)
+    check heard[1].len==0
