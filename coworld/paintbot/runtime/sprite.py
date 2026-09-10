@@ -57,13 +57,8 @@ def visible(w, slot, other):
     distance = dx * dx + dz * dz
     dot = fx * dx + fz * dz
     return (
-        distance <= 2000**2
-        and (
-            distance == 0
-            or (dot > 0 and 4 * dot * dot >= (fx * fx + fz * fz) * distance)
-        )
-        and clear(w, a, b)
-    )
+        distance == 0 or (dot > 0 and 4 * dot * dot >= (fx * fx + fz * fz) * distance)
+    ) and clear(w, a, b)
 
 
 @lru_cache(maxsize=4)

@@ -120,3 +120,13 @@ suite "Paintbot rules":
     w.step(commands)
     check w.visible(0, 1)
     check w.balls.len == 0
+
+  test "forward vision spans the arena but never penetrates cover":
+    var w = newWorld(1)
+    w.cover = @[]
+    w.cogs[0].pos = point(200, 2000)
+    w.cogs[0].aim = point(6200, 2000)
+    w.cogs[1].pos = point(6200, 2000)
+    check w.visible(0, 1)
+    w.cover = @[Cover(x: 3000, z: 1800, w: 200, h: 400)]
+    check not w.visible(0, 1)

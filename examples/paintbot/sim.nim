@@ -75,12 +75,12 @@ proc lineClear*(w: World, a, b: Point): bool =
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
     if w.blocked(p, 0): return false
   true
-var visionRulesVersion* = 4
+var visionRulesVersion* = 5
 proc canSeePoint*(w: World, slot: int, p: Point): bool =
   if slot notin 0..<Seats or w.cogs[slot].hp <= 0: return false
   let c = w.cogs[slot]
   let distance = distance2(c.pos, p)
-  if distance > VisionRange.int64*VisionRange: return false
+  if visionRulesVersion < 5 and distance > VisionRange.int64*VisionRange: return false
   if visionRulesVersion >= 4 and distance > 0:
     let facing = if c.aim == Point(): home(1-team(slot)) else: c.aim
     let fx = int64(facing.x)-c.pos.x

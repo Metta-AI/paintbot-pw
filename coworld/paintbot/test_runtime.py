@@ -30,7 +30,7 @@ class RuntimeTests(unittest.TestCase):
                 (3000, 2500, False),
                 (3500, 2800, True),
                 (3500, 2900, False),
-                (5100, 2000, False),
+                (5100, 2000, True),
             ]:
                 w["cogs"][other]["pos"] = {"x": x, "z": z}
                 self.assertEqual(visible(w, 0, other), expected)
