@@ -10,11 +10,31 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
-from sprite import SpriteView
+from sprite import SpriteView, visible
 from wasm_policy import decode_replies, verified_policy
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_forward_cone_hides_allies_and_enemies_behind(self):
+        w = {
+            "cover": [],
+            "cogs": [
+                {"hp": 3, "pos": {"x": 3000, "z": 2000}, "aim": {"x": 4000, "z": 2000}}
+                for _ in range(3)
+            ],
+        }
+        for other in (1, 2):
+            for x, z, expected in [
+                (3500, 2000, True),
+                (2500, 2000, False),
+                (3000, 2500, False),
+                (3500, 2800, True),
+                (3500, 2900, False),
+                (5100, 2000, False),
+            ]:
+                w["cogs"][other]["pos"] = {"x": x, "z": z}
+                self.assertEqual(visible(w, 0, other), expected)
+
     def test_hash_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "policy"
@@ -76,7 +96,12 @@ class RuntimeTests(unittest.TestCase):
         view.initial = False
         w = dict(
             cogs=[
-                dict(pos=dict(x=500 if i % 2 == 0 else 6000, z=2000), hp=3, cooldown=0)
+                dict(
+                    pos=dict(x=500 if i % 2 == 0 else 6000, z=2000),
+                    aim=dict(x=0, z=0),
+                    hp=3,
+                    cooldown=0,
+                )
                 for i in range(16)
             ],
             cover=[],

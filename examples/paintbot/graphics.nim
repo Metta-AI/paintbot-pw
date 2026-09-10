@@ -189,9 +189,7 @@ proc runGraphics*() =
           if not lit:
             for s in 0..<Seats:
               if (s == lens or lens >= Seats and team(s) == lens-Seats) and
-                  world.cogs[s].hp > 0 and distance2(world.cogs[s].pos, p) <=
-                  VisionRange.int64*VisionRange and world.lineClear(world.cogs[
-                  s].pos, p): lit = true; break
+                  world.canSeePoint(s, p): lit = true; break
           visibility[z*GridTiles+x] = if lit: 255'u8 else: 65'u8
       uploadTerrainVisibility(visibility)
       visibilityTick = world.tick; visibilityLens = lens

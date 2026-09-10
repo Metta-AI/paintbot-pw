@@ -8,6 +8,6 @@ for f in r.frames:
   for i,c in f.commands:
     if c.walk and c.goal!=w.cogs[i].pos:inc moves[i]
     if c.shoot:inc shots[i]
-  w.step(f.commands, replayRulesVersion >= 3)
+  w.step(f.commands, replayRulesVersion)
 echo "moves=",moves," shots=",shots
 for i,c in w.cogs:echo i," ",c.pos," hp=",c.hp

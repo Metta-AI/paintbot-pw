@@ -75,12 +75,27 @@ proc lineClear*(w: World, a, b: Point): bool =
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
     if w.blocked(p, 0): return false
   true
+var visionRulesVersion* = 4
+proc canSeePoint*(w: World, slot: int, p: Point): bool =
+  if slot notin 0..<Seats or w.cogs[slot].hp <= 0: return false
+  let c = w.cogs[slot]
+  let distance = distance2(c.pos, p)
+  if distance > VisionRange.int64*VisionRange: return false
+  if visionRulesVersion >= 4 and distance > 0:
+    let facing = if c.aim == Point(): home(1-team(slot)) else: c.aim
+    let fx = int64(facing.x)-c.pos.x
+    let fz = int64(facing.z)-c.pos.z
+    let dx = int64(p.x)-c.pos.x
+    let dz = int64(p.z)-c.pos.z
+    let dot = fx*dx+fz*dz
+    if dot <= 0 or 4*dot*dot < (fx*fx+fz*fz)*distance: return false
+  w.lineClear(c.pos, p)
 proc visible*(w: World, slot, other: int): bool =
-  other >= 0 and other < Seats and w.cogs[other].hp > 0 and
-    (team(slot) == team(other) or
-      (distance2(w.cogs[slot].pos, w.cogs[other].pos) <=
-          VisionRange.int64*VisionRange and
-       w.lineClear(w.cogs[slot].pos, w.cogs[other].pos)))
+  if slot notin 0..<Seats or other notin 0..<Seats or w.cogs[other].hp <= 0:
+    return false
+  if slot == other: return true
+  if visionRulesVersion < 4 and team(slot) == team(other): return true
+  w.canSeePoint(slot, w.cogs[other].pos)
 proc occupied(w: World, p: Point, slot: int): bool =
   for other in 0..<Seats:
     if other != slot and w.cogs[other].hp > 0 and
@@ -164,7 +179,8 @@ proc waypoint*(w: World, start, goal: Point): Point =
   var n = b
   while prev[n] >= 0 and prev[n] != a: n = prev[n]
   point(n mod nx*200+100, n div nx*200+100)
-proc step*(w: var World, commands: array[Seats, Command], solid = true) =
+proc step*(w: var World, commands: array[Seats, Command], rulesVersion = 4) =
+  let solid = rulesVersion >= 3
   if w.winner >= 0: return
   for i in 0..<Seats:
     if w.cogs[i].hp <= 0:
@@ -177,7 +193,10 @@ proc step*(w: var World, commands: array[Seats, Command], solid = true) =
     if cmd.walk: w.cogs[i].goal = Point(x: clamp(cmd.goal.x, 100, Width-100),
         z: clamp(cmd.goal.z, 100, Height-100))
     w.cogs[i].firing = cmd.shoot
-    if cmd.shoot: w.cogs[i].aim = cmd.aim
+    if cmd.shoot or (rulesVersion >= 4 and cmd.aim != Point()):
+      w.cogs[i].aim = cmd.aim
+    elif rulesVersion >= 4 and cmd.walk and cmd.goal != w.cogs[i].pos:
+      w.cogs[i].aim = cmd.goal
     let dest = if cmd.direct: w.cogs[i].goal else: w.waypoint(w.cogs[i].pos,
         w.cogs[i].goal)
     let speed = if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed

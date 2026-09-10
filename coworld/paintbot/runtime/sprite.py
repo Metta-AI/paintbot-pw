@@ -45,12 +45,24 @@ def visible(w, slot, other):
     a = w["cogs"][slot]["pos"]
     cog = w["cogs"][other]
     b = cog["pos"]
-    return cog["hp"] > 0 and (
-        slot % 2 == other % 2
-        or (
-            (a["x"] - b["x"]) ** 2 + (a["z"] - b["z"]) ** 2 <= 2000**2
-            and clear(w, a, b)
+    if cog["hp"] <= 0 or w["cogs"][slot]["hp"] <= 0:
+        return False
+    if slot == other:
+        return True
+    aim = w["cogs"][slot]["aim"]
+    if aim == {"x": 0, "z": 0}:
+        aim = {"x": 5440 if slot % 2 == 0 else 960, "z": 2000}
+    fx, fz = aim["x"] - a["x"], aim["z"] - a["z"]
+    dx, dz = b["x"] - a["x"], b["z"] - a["z"]
+    distance = dx * dx + dz * dz
+    dot = fx * dx + fz * dz
+    return (
+        distance <= 2000**2
+        and (
+            distance == 0
+            or (dot > 0 and 4 * dot * dot >= (fx * fx + fz * fz) * distance)
         )
+        and clear(w, a, b)
     )
 
 

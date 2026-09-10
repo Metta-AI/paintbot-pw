@@ -37,6 +37,8 @@ proc host(slot:int, strings:StringPool): Host =
     if active.visible(slot,a[0].int):active.cogs[a[0]].carrying.int32 else:0,4)
   discard result.addFunction("walkTo",2,proc(a:openArray[int32]):int32 =
     commands[slot].walk=true;commands[slot].goal=Point(x:a[0],z:a[1]);1,4)
+  discard result.addFunction("lookAt",2,proc(a:openArray[int32]):int32 =
+    commands[slot].aim=Point(x:clamp(a[0],0,Width),z:clamp(a[1],0,Height));1,4)
   discard result.addFunction("shootAt",2,proc(a:openArray[int32]):int32 =
     commands[slot].shoot=true;commands[slot].aim=Point(x:clamp(a[0],0,Width),z:clamp(a[1],0,Height));1,4)
 proc loadBots*(groups:seq[BotGroup]):array[Seats,Bot] =

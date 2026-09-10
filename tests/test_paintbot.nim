@@ -87,3 +87,36 @@ suite "Paintbot rules":
       w.step(commands)
       if w.cogs[0].cooldown == FireCooldownTicks: inc shots
     check shots == 3
+
+  test "vision is a forward cone for allies and enemies":
+    var w = newWorld(1)
+    w.cover = @[]
+    w.cogs[0].pos = point(3000, 2000)
+    w.cogs[0].aim = point(4000, 2000)
+    for other in [1, 2]:
+      w.cogs[other].pos = point(3500, 2000)
+      check w.visible(0, other)
+      w.cogs[other].pos = point(2500, 2000)
+      check not w.visible(0, other)
+      w.cogs[other].pos = point(3000, 2500)
+      check not w.visible(0, other)
+      w.cogs[other].pos = point(3500, 2800)
+      check w.visible(0, other)
+      w.cogs[other].pos = point(3500, 2900)
+      check not w.visible(0, other)
+    check w.visible(0, 0)
+
+  test "turning without shooting changes vision":
+    var w = newWorld(1)
+    w.cover = @[]
+    w.cogs[0].pos = point(3000, 2000)
+    w.cogs[0].goal = w.cogs[0].pos
+    w.cogs[0].aim = point(4000, 2000)
+    w.cogs[1].pos = point(2500, 2000)
+    w.cogs[1].goal = w.cogs[1].pos
+    check not w.visible(0, 1)
+    var commands: array[Seats, Command]
+    commands[0].aim = point(2000, 2000)
+    w.step(commands)
+    check w.visible(0, 1)
+    check w.balls.len == 0
