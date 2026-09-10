@@ -1,5 +1,5 @@
 ## Painted Polyworld arena with hash-verified spectator analysis.
-import std/[math, times]
+import std/[math, times, algorithm]
 import windy, opengl, vmath, chroma, jsony
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing]
 import game, sim, analysis, villagegraphics
@@ -94,25 +94,47 @@ proc gem(r: var ShapeRenderer, p: Vec3, s: float32, c: ColorRGBX) =
     r.addTriangle(top, ring[i], ring[(i+1) mod 4], c)
     r.addTriangle(bottom, ring[(i+1) mod 4], ring[i], c)
 
-proc heartMarker(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX) =
-  # Camera-facing silhouette stays legible from above and at oblique angles.
-  let front = normalize(eye-p)
-  let right = normalize(cross(vec3(0,1,0),front))
-  let up = cross(front,right)
-  for layer in 0..1:
-    let scale = if layer==0:1.45'f32 else:1.25'f32
-    let center = p+front*(layer.float32*0.025)
-    # Alpha 254 bypasses ShapeRenderer's implicit half-alpha for 255.
-    let tint = if layer==0:rgbx(25,36,40,254)
-      else:rgbx(color.r,color.g,color.b,254)
-    var points:array[48,Vec3]
-    for i in 0..<48:
-      let t=i.float32*2*PI.float32/48
-      let x=16*pow(sin(t),3'f32)/17
-      let y=(13*cos(t)-5*cos(2*t)-2*cos(3*t)-cos(4*t))/17
-      points[i]=center+(right*x+up*y)*scale
-    for i in 0..<48:
-      r.addTriangle(center,points[(i+1) mod 48],points[i],tint)
+proc crystalMarker(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX,
+    spin: float32) =
+  # Solid world-space hexagonal crystal with individually lit facets.
+  var lower, upper: array[6, Vec3]
+  for i in 0..<6:
+    let angle = spin+i.float32*PI.float32/3
+    let radial = vec3(cos(angle), 0, sin(angle))*0.95
+    lower[i] = p+radial-vec3(0,0.55,0)
+    upper[i] = p+radial+vec3(0,0.45,0)
+  let top = p+vec3(0,1.65,0)
+  let bottom = p-vec3(0,1.2,0)
+  type Facet = tuple[a,b,c: Vec3, tint: ColorRGBX, depth: float32]
+  var facets: seq[Facet]
+  proc facet(a,b,c: Vec3, brightness: float32) =
+    let tint = rgbx(
+      uint8(clamp(color.r.float32*brightness,0,255)),
+      uint8(clamp(color.g.float32*brightness,0,255)),
+      uint8(clamp(color.b.float32*brightness,0,255)),254)
+    let delta = (a+b+c)/3-eye
+    facets.add((a,b,c,tint,dot(delta,delta)))
+  for i in 0..<6:
+    let j = (i+1) mod 6
+    let light = 0.65'f32+0.3*cos(spin+(i.float32+0.5)*PI.float32/3-0.8)
+    facet(top,upper[i],upper[j],light+0.35)
+    facet(upper[i],lower[i],lower[j],light)
+    facet(upper[i],lower[j],upper[j],light)
+    facet(bottom,lower[j],lower[i],light*0.7)
+  # ShapeRenderer does not write depth, so order the opaque facets explicitly.
+  facets.sort(proc(a,b: Facet): int = cmp(b.depth,a.depth))
+  for face in facets:
+    r.addTriangle(face.a,face.b,face.c,face.tint)
+  # Highlight only the camera-facing edges; ribbons work at every camera angle.
+  for i in 0..<6:
+    let j = (i+1) mod 6
+    let normal = normalize((upper[i]+upper[j])/2-p-vec3(0,0.45,0))
+    if dot(normal,eye-p)<=0: continue
+    for edge in [(top,upper[i]),(upper[i],upper[j]),
+        (upper[i],lower[i]),(lower[i],bottom)]:
+      let side = normalize(cross(edge[1]-edge[0],eye-(edge[0]+edge[1])/2))*0.025
+      r.addQuad(edge[0]-side,edge[1]-side,edge[1]+side,edge[0]+side,
+        rgbx(235,249,255,220))
 
 proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
     color: ColorRGBX) =
@@ -459,14 +481,14 @@ proc runGraphics*() =
         let color=if heart.owner<0:rgbx(220,229,238,255)
           elif heart.owner==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)
         let p=position(heart.pos,1.8+sin((world.tick.float32+alpha)/12)*0.12)
-        shapes.heartMarker(p,eye,color)
+        shapes.crystalMarker(p,eye,color,(world.tick.float32+alpha)/90)
     else:
       for side in 0..1:
         let heart = world.hearts[side]
         if heart.carrier < 0 or seen(heart.carrier):
           let p = position(heart.pos, if heart.carrier < 0: 1.8+sin(
               world.tick.float32/12)*0.12 else: 3.1)
-          shapes.heartMarker(p,eye,if side==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255))
+          shapes.crystalMarker(p,eye,(if side==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)),(world.tick.float32+alpha)/90)
     for i, c in world.cogs:
       if c.hp <= 0 or not seen(i): continue
       let p = poses[i]
