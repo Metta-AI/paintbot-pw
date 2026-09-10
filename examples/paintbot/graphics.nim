@@ -22,7 +22,7 @@ type
     footprint: array[4, array[2, float32]]
 var
   paused = false
-  speed = 1
+  speed = 1'f32
   seek = -1
   selected = -1
   lens = -1
@@ -39,8 +39,8 @@ var
   tilt = 0.92'f32
 proc setPlaying(value: cint) {.exportc: "pw_play", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = paused = value == 0
-proc setSpeed(value: cint) {.exportc: "pw_speed", cdecl,
-    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = speed = clamp(value.int, 1, 32)
+proc setSpeed(value: cfloat) {.exportc: "pw_speed", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = speed = clamp(value, 0.25'f32, 32'f32)
 proc setTick(value: cint) {.exportc: "pw_seek", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = seek = max(0, value.int)
 proc selectSeat(value: cint) {.exportc: "pw_select", cdecl,

@@ -392,7 +392,7 @@
     cameraUpdate();
   };
   $("speed").onchange = (e) => {
-    if (ready()) Module._pw_speed(parseInt(e.target.value));
+    if (ready()) Module._pw_speed(Number(e.target.value));
   };
   $("scrub").oninput = (e) => seek(+e.target.value);
   $("lens").onchange = (e) => setLens(e.target.value);
