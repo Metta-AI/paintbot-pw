@@ -1,5 +1,9 @@
 ' BASIC translation of the Paintbot baseline's objective and combat priorities.
 ' Persistent tracks supply short lead prediction; every enemy query is fog gated.
+dim pickupMemoryX(32)
+dim pickupMemoryY(32)
+dim pickupMemoryKind(32)
+dim pickupMemoryTick(32)
 dim oldX(16)
 dim oldY(16)
 dim lastSeen(16)
@@ -37,7 +41,7 @@ else
     role = (selfId / 2) mod 8
     gx = heartX
     gy = heartY
-    if role < 2 then
+    if role < 2 and worldTick mod 720 < 480 then
       gx = 1950 + role * 200
       gy = 1000
       if selfTeam = 1 then
@@ -114,31 +118,126 @@ while i < 16
   end if
   i = i + 1
 wend
-' Collect nearby equipment and use charged grenades within throwing distance.
-if not carrying then
+
+' Remember seen supplies and deliberately equip before taking a fighting position.
+i = 0
+while i < pickupCount() and i < 32
+  if pickupVisible(i) then
+    pickupMemoryX(i) = pickupX(i)
+    pickupMemoryY(i) = pickupY(i)
+    pickupMemoryKind(i) = pickupKind(i)
+    pickupMemoryTick(i) = worldTick + 1
+  end if
+  i = i + 1
+wend
+if not carrying and thief < 0 then
   nearest = -1
-  nearestCost = 490000
+  nearestCost = 4840000
   j = 0
-  while j < pickupCount()
-    if pickupVisible(j) then
-      kind = pickupKind(j)
-      wanted = (kind = 0 and not hasGrenade) or (kind = 1 and not hasSpray) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3)
+  while j < pickupCount() and j < 32
+    if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
+      kind = pickupMemoryKind(j)
+      wanted = (kind = 0 and not hasGrenade) or (kind = 1 and not hasSpray and (selfId / 2) mod 2 = 0) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3)
       if wanted then
-        dx = pickupX(j) - selfX
-        dy = pickupY(j) - selfY
+        dx = pickupMemoryX(j) - selfX
+        dy = pickupMemoryY(j) - selfY
         cost = dx * dx + dy * dy
-        if cost < nearestCost then
-          nearest = j
-          nearestCost = cost
+        if cost < 10000 and not pickupVisible(j) then
+          pickupMemoryTick(j) = 0
+        else
+          if cost < nearestCost then
+            nearest = j
+            nearestCost = cost
+          end if
         end if
       end if
     end if
     j = j + 1
   wend
-  if nearest >= 0 then
-    walkTo(pickupX(nearest), pickupY(nearest))
+  if nearest >= 0 and (best < 0 or bestCost > 1440000 or selfHp = 1) then
+    walkTo(pickupMemoryX(nearest), pickupMemoryY(nearest))
   end if
 end if
-if hasGrenade and best >= 0 and bestCost < 1638400 then
-  chargeGrenade(grenadeCharge < 24)
+' Match charge to distance rather than overshooting every close target.
+if hasGrenade and best >= 0 then
+  nx = playerX(best)
+  ny = playerY(best)
+  dx = nx - selfX
+  dy = ny - selfY
+  d2 = dx * dx + dy * dy
+  safe = 1
+  i = 0
+  while i < 16
+    if i mod 2 = selfTeam and visible(i) then
+      fx = playerX(i) - nx
+      fy = playerY(i) - ny
+      if fx * fx + fy * fy < 122500 then
+        safe = 0
+      end if
+    end if
+    i = i + 1
+  wend
+  if safe and d2 > 160000 and d2 < 1638400 then
+    lo = 0
+    hi = 1280
+    while hi - lo > 1
+      mid = (hi + lo) / 2
+      if mid * mid < d2 then
+        lo = mid
+      else
+        hi = mid
+      end if
+    wend
+    need = (hi - 150) * 24 / 1130
+    if need < 1 then
+      need = 1
+    end if
+    lookAt(nx, ny)
+    chargeGrenade(grenadeCharge < need)
+    if grenadeCharge >= need then
+      shout(strNew("Grenade out!"))
+    end if
+  end if
+end if
+
+' Two quartermasters scout the back corners before joining the fight.
+if not carrying and not hasGrenade and worldTick mod 960 < 240 then
+  role = (selfId / 2) mod 8
+  if role = 2 or role = 3 then
+    sx = 300
+    sy = 300
+    if role = 3 then
+      sy = 3700
+    end if
+    if selfTeam = 1 then
+      sx = 6400 - sx
+      sy = 4000 - sy
+    end if
+    walkTo(sx,sy)
+    if best < 0 then
+      lookAt(sx,sy)
+    end if
+  end if
+end if
+
+' The close-assault cog scouts the spray supply before approaching enemies.
+if not carrying and not hasSpray and (selfId / 2) mod 8 = 0 and worldTick mod 960 < 240 then
+  sx = 600
+  sy = 1000
+  if selfTeam = 1 then
+    sx = 5800
+    sy = 3000
+  end if
+  walkTo(sx,sy)
+  lookAt(sx,sy)
+end if
+
+' Equipped assault cogs leave supply routes and close with the opposing team.
+if not carrying and (hasSpray or hasGrenade) then
+  if best >= 0 then
+    walkTo(playerX(best), playerY(best))
+  else
+    walkTo(heartX,heartY)
+    lookAt(heartX,heartY)
+  end if
 end if

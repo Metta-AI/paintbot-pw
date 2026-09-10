@@ -67,13 +67,15 @@ proc seen(i: int): bool =
   for s in 0..<Seats:
     if team(s) == lens-Seats and world.cogs[s].hp > 0 and world.visible(s,
         i): return true
-proc box(r: var ShapeRenderer, x, y, z, dx, dy, dz: float32, c: ColorRGBX) =
+proc box(r: var ShapeRenderer, x, y, z, dx, dy, dz: float32, c: ColorRGBX, yaw: float32 = 0) =
   let light = rgbx(uint8(c.r.float*0.78), uint8(c.g.float*0.78), uint8(
       c.b.float*0.78), c.a)
   let dark = rgbx(uint8(c.r.float*0.55), uint8(c.g.float*0.55), uint8(
       c.b.float*0.55), c.a)
-  let a = vec3(x-dx, y, z-dz); let b = vec3(x+dx, y, z-dz)
-  let d = vec3(x-dx, y, z+dz); let e = vec3(x+dx, y, z+dz)
+  proc corner(u,v:float32):Vec3 =
+    vec3(x+cos(yaw)*u-sin(yaw)*v,y,z+sin(yaw)*u+cos(yaw)*v)
+  let a=corner(-dx,-dz);let b=corner(dx,-dz)
+  let d=corner(-dx,dz);let e=corner(dx,dz)
   let up = vec3(0, dy, 0)
   r.addQuad(a, b, e, d, c)
   r.addQuad(a+up, d+up, e+up, b+up, c)
@@ -314,19 +316,27 @@ proc runGraphics*() =
           if (seat == lens or lens >= Seats and team(seat) == lens-Seats) and
               world.canSeePoint(seat, item.pos): lit = true
         if not lit: continue
-      let p = position(item.pos, 0.28)
+      let special = item.kind in {grenadePickup,sprayPickup}
+      let spin = (world.tick.float32+alpha)*0.045
+      let p = position(item.pos, if special: 0.7+0.15*sin(spin*1.7) else: 0.28)
       let color = case item.kind
         of grenadePickup: rgbx(148, 165, 73, 255)
         of sprayPickup: rgbx(243, 160, 57, 255)
         of armorPickup: rgbx(96, 191, 241, 255)
         of medkitPickup: rgbx(243, 238, 207, 255)
-      shapes.addCircle(position(item.pos, 0.04), 0.55, color)
-      shapes.box(p.x, p.y, p.z, 0.4, 0.48, 0.32, color)
+      shapes.addCircle(position(item.pos, 0.04), if special: 1.0 else: 0.55, color)
+      if special:
+        shapes.box(p.x,p.y,p.z,0.55,1.05,0.4,color,spin)
+        shapes.box(p.x,p.y+1.05,p.z,0.24,0.22,0.18,rgbx(234,240,224,255),spin)
+        # An offset nozzle/lever makes rotation readable from above.
+        shapes.box(p.x+cos(spin)*0.32,p.y+1.24,p.z+sin(spin)*0.32,
+            0.35,0.13,0.12,rgbx(61,77,67,255),spin)
+      else:
+        shapes.box(p.x, p.y, p.z, 0.4, 0.48, 0.32, color)
       if item.kind == medkitPickup:
         shapes.box(p.x, p.y+0.49, p.z, 0.26, 0.03, 0.08, rgbx(215, 69, 66, 255))
         shapes.box(p.x, p.y+0.49, p.z, 0.08, 0.03, 0.26, rgbx(215, 69, 66, 255))
-      elif item.kind == sprayPickup: shapes.box(p.x, p.y+0.5, p.z, 0.13, 0.12,
-          0.13, rgbx(222, 232, 228, 255))
+
     for g in world.grenades:
       let f = clamp((world.tick-g.releasedAt).float32/max(1,
           g.landsAt-g.releasedAt).float32, 0, 1)
@@ -401,8 +411,14 @@ proc runGraphics*() =
       let start = point(b.pos.x-b.velocity.x, b.pos.z-b.velocity.z)
       let duration = if replayRulesVersion >= 9: 6'f32 else: 2'f32
       let f = clamp((duration-b.life.float32+alpha)/duration, 0'f32, 1'f32)
-      let ball = mix(position(start, 1.05), position(b.pos, 1.05), f)
-      shapes.paintball(ball, 0.18, teamColors[team(b.owner.int)])
+      # Four visible beads represent one shot; hit resolution stays unchanged.
+      for bead in 0..3:
+        let travel=f-bead.float32*0.055
+        if travel<0:continue
+        let ball=mix(position(start,1.05),position(b.pos,1.05),travel)
+        let color=if team(b.owner.int)==0:rgbx(255,108,74,255) else:rgbx(89,220,255,255)
+        shapes.paintball(ball,0.32-bead.float32*0.035,color)
+        shapes.paintball(ball+vec3(-0.07,0.12,-0.04),0.085,rgbx(255,250,214,255))
     shapes.draw(vp)
     # A real second 3D camera gives the selected bot's eye-level view.
     if firstPerson and selected >= 0 and world.cogs[selected].hp > 0:

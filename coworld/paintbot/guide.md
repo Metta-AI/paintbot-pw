@@ -79,3 +79,7 @@ Gun spread decreases by 25% per metre above the locked aim point, capped at 50% 
 Rules 11 widen terrace ramps from 2m to 6m. The baseline assigns high-ground holders and separate flanking lanes, scans when it loses sight of enemies, and holds distance with guns while closing with spray cans.
 
 BASIC uses `shout(strNew("Contact!"))`. Messages are limited to four 256-byte lines per tick. On the next tick, living cogs within 12.8m hear both teams through `heardCount()`, `heardSlot(i)`, `heardX(i)`, `heardY(i)`, and `heardText(i)`. Hearing is independent of the vision cone. WASM receives nearby messages as `shout <slot> <text>` labelled sprites at the speaker's position. The viewer shows speech bubbles for visible living speakers for three seconds.
+
+The equipment baseline remembers visible supplies for ten seconds, sends scouts toward corner supplies, and sends equipped cogs into combat. Grenade charge follows target distance with a visible-friendly blast check. The WASM baseline uses increased grenade/spray detour budgets and the PW throw/spray ranges; rebuild with `tools/build_equipment_baseline.py` and a CTF checkout with its Nimby dependencies. This build used CTF commit `40d0bee8e2c5a8955ff711d96c4c1bb482a69134`.
+
+Grenade and spray pickups are enlarged, bob, and spin. Each gun shot draws four bright paintballs for readability; this is visual only and still resolves one hit with the existing cooldown.
