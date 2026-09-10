@@ -45,6 +45,101 @@
   $("territorytoggle").insertAdjacentHTML("beforeend", icon("map"));
   $("territorytoggle").title = "Territory overlay";
   $("territory").setAttribute("aria-label", "Territory overlay");
+  const controlHints = {
+    stats: "Scoreboard",
+    events: "Match events",
+    help: "Keyboard shortcuts (?)",
+    fullscreen: "Toggle fullscreen",
+    lens: "Choose whose vision to show",
+    fit: "Fit the whole arena",
+    topdown: "View from above",
+    bars: "Show / hide health bars",
+    speech: "Show / hide speech bubbles",
+    eventtoasts: "Show / hide event notifications",
+    trails: "Show / hide movement orders",
+    territory: "Show / hide territory colors",
+    download: "Download replay",
+    zoom: "Camera distance",
+    zoomin: "Zoom in",
+    zoomout: "Zoom out",
+    speed: "Playback speed",
+    scrub: "Seek through the replay",
+    follow: "Follow this agent",
+    eyes: "Toggle first-person view",
+    botlens: "Show this agent's vision",
+    clear: "Clear agent selection",
+    commsteam: "Filter communications by team",
+    commslive: "Jump to the latest communication",
+    povresize: "Drag to resize first-person view",
+  };
+  const controlTip = document.createElement("div");
+  controlTip.id = "control-tooltip";
+  controlTip.setAttribute("role", "tooltip");
+  controlTip.hidden = true;
+  document.body.appendChild(controlTip);
+  let tippedControl = null,
+    originalTitle = null,
+    originalDescription = null;
+  function hideControlTip() {
+    if (tippedControl) {
+      if (originalTitle !== null)
+        tippedControl.setAttribute("title", originalTitle);
+      if (originalDescription === null)
+        tippedControl.removeAttribute("aria-describedby");
+      else tippedControl.setAttribute("aria-describedby", originalDescription);
+    }
+    tippedControl = null;
+    controlTip.hidden = true;
+  }
+  function showControlTip(event) {
+    const control = event.target.closest?.("button,select,input,summary");
+    if (control === tippedControl) return;
+    hideControlTip();
+    if (!control) return;
+    const text =
+      controlHints[control.id] ||
+      control.title ||
+      control.getAttribute("aria-label") ||
+      control.textContent.trim();
+    if (!text) return;
+    tippedControl = control;
+    originalTitle = control.getAttribute("title");
+    originalDescription = control.getAttribute("aria-describedby");
+    control.removeAttribute("title");
+    control.setAttribute(
+      "aria-describedby",
+      [originalDescription, controlTip.id].filter(Boolean).join(" "),
+    );
+    (control.closest("dialog") || document.body).appendChild(controlTip);
+    controlTip.textContent = text;
+    controlTip.hidden = false;
+    const r = control.getBoundingClientRect(),
+      tip = controlTip.getBoundingClientRect();
+    controlTip.style.left =
+      Math.max(
+        8,
+        Math.min(
+          innerWidth - tip.width - 8,
+          r.left + (r.width - tip.width) / 2,
+        ),
+      ) + "px";
+    controlTip.style.top =
+      (r.bottom + tip.height + 12 < innerHeight
+        ? r.bottom + 7
+        : r.top - tip.height - 7) + "px";
+  }
+  document.addEventListener("pointerover", showControlTip);
+  document.addEventListener("focusin", showControlTip);
+  document.addEventListener("pointerout", (event) => {
+    if (tippedControl && !tippedControl.contains(event.relatedTarget))
+      hideControlTip();
+  });
+  document.addEventListener("focusout", hideControlTip);
+  document.addEventListener("pointerdown", hideControlTip);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") hideControlTip();
+  });
+  window.addEventListener("resize", hideControlTip);
   let started = false;
   let state = null,
     index = null,
