@@ -285,6 +285,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     if w.equipment[i].burst > 0 and w.cogs[i].hp > 0:
       for j in 0..<Seats:
         let bit = 1'u32 shl j
+        if visionRulesVersion >= 18 and w.cogs[j].shield > 0: continue
         if (w.equipment[i].sprayHits and bit) == 0 and w.sprayTouches(i, j):
           w.equipment[i].sprayHits = w.equipment[i].sprayHits or bit
           w.damage(j, i, SprayDamage)

@@ -155,3 +155,23 @@ suite "Original Paintbot equipment":
     commands[0] = Command(shoot:true,aim:point(4000,2000))
     w.step(commands)
     check w.cogs[1].hp == 0
+
+  test "spray hits when respawn protection expires during a burst":
+    var w = arena()
+    visionRulesVersion = 18
+    w.cogs[0].pos = point(3000,2000)
+    w.cogs[0].goal = w.cogs[0].pos
+    w.cogs[1].pos = point(3400,2000)
+    w.cogs[1].goal = w.cogs[1].pos
+    w.cogs[1].shield = 2
+    w.equipment[0].sprayCan = true
+    var commands: array[Seats,Command]
+    commands[0] = Command(shoot:true,aim:point(4000,2000))
+    w.step(commands)
+    check w.cogs[1].hp == 3
+    check (w.equipment[0].sprayHits and 2'u32) == 0
+    commands[0].shoot = false
+    w.step(commands)
+    check w.cogs[1].shield == 0
+    check w.cogs[1].hp == 0
+    check (w.equipment[0].sprayHits and 2'u32) != 0
