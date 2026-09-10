@@ -83,7 +83,7 @@ proc grenadeTarget*(w: World, slot: int): Point =
   let reach = 150+(Width div 5-150)*charge.int div GrenadeChargeTicks
   let aim = if c.aim == Point(): home(1-team(slot)) else: c.aim
   let v = direction(c.pos, aim, reach)
-  Point(x: clamp(c.pos.x+v.x, 0, Width), z: clamp(c.pos.z+v.z, 0, Height))
+  Point(x: clamp(c.pos.x+v.x,minX().int32,maxX().int32), z: clamp(c.pos.z+v.z,minZ().int32,maxZ().int32))
 
 proc explode*(w: var World, p: Point, owner: int) =
   let trench = w.trenchAt(p)
@@ -160,8 +160,8 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     if w.cogs[i].cooldown > 0: dec w.cogs[i].cooldown
     if w.equipment[i].sprayCooldown > 0: dec w.equipment[i].sprayCooldown
     let cmd = commands[i]
-    if cmd.walk: w.cogs[i].goal = Point(x: clamp(cmd.goal.x, 100, Width-100),
-        z: clamp(cmd.goal.z, 100, Height-100))
+    if cmd.walk: w.cogs[i].goal = Point(x: clamp(cmd.goal.x, (minX()+100).int32, (maxX()-100).int32),
+        z: clamp(cmd.goal.z, (minZ()+100).int32, (maxZ()-100).int32))
     if cmd.aim != Point(): w.cogs[i].aim = cmd.aim
     elif cmd.walk and cmd.goal != w.cogs[i].pos: w.cogs[i].aim = cmd.goal
     w.cogs[i].firing = cmd.shoot

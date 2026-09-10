@@ -119,7 +119,14 @@
     $(id).setAttribute("aria-pressed", String(value));
   }
   function fit() {
-    camera = { x: 0, z: 0, d: 60, yaw: 0, tilt: 0.92 };
+    const b = state?.bounds || [0, 0, 6400, 4000];
+    camera = {
+      x: 0,
+      z: 0,
+      d: 60 * Math.max((b[2] - b[0]) / 6400, (b[3] - b[1]) / 4000),
+      yaw: 0,
+      tilt: 0.92,
+    };
     following = false;
     cameraUpdate();
     options();
@@ -439,6 +446,10 @@
       w = state.world;
     ctx.fillStyle = "#294835";
     ctx.fillRect(0, 0, 320, 200);
+    const bounds = state.bounds || [0, 0, 6400, 4000];
+    ctx.save();
+    ctx.scale(6400 / (bounds[2] - bounds[0]), 4000 / (bounds[3] - bounds[1]));
+    ctx.translate(-bounds[0] / 20, -bounds[1] / 20);
     ctx.fillStyle = "#c0b68b";
     for (const c of w.cover) {
       if (c.h === 0) {
@@ -498,12 +509,16 @@
     });
     ctx.closePath();
     ctx.stroke();
+    ctx.restore();
   }
   let mapDrag = false;
   function mapMove(e) {
     const r = $("minimap").getBoundingClientRect();
-    camera.x = ((e.clientX - r.left) / r.width) * 64 - 32;
-    camera.z = ((e.clientY - r.top) / r.height) * 40 - 20;
+    const b = state.bounds || [0, 0, 6400, 4000];
+    camera.x =
+      (b[0] + ((e.clientX - r.left) / r.width) * (b[2] - b[0])) / 100 - 32;
+    camera.z =
+      (b[1] + ((e.clientY - r.top) / r.height) * (b[3] - b[1])) / 100 - 20;
     camera.d = Math.min(camera.d, 35);
     following = false;
     cameraUpdate();
@@ -677,6 +692,7 @@
     if (!index) return;
     if (!started) {
       started = true;
+      fit();
       layoutInset();
       const t = new URLSearchParams(location.search).get("t");
       if (t !== null && Number.isFinite(Number(t))) seek(Number(t), true);

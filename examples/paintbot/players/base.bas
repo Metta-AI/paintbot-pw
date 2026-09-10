@@ -241,3 +241,37 @@ if not carrying and (hasSpray or hasGrenade) then
     lookAt(heartX,heartY)
   end if
 end if
+
+' Alternate wilderness wings approach the heart from behind the village.
+role = (selfId / 2) mod 8
+if mapMinX() < 0 and (role = 4 or role = 5) and not carrying then
+  if worldTick mod 1200 = 0 then
+    flankStage = 0
+  end if
+  fy = mapMinY() + 200
+  if role = 5 then
+    fy = mapMaxY() - 200
+  end if
+  if flankStage = 0 then
+    fx = mapMinX() + 400
+    if selfTeam = 1 then
+      fx = mapMaxX() - 400
+    end if
+  else
+    fx = mapMaxX() - 400
+    if selfTeam = 1 then
+      fx = mapMinX() + 400
+    end if
+  end if
+  dx = selfX - fx
+  dy = selfY - fy
+  if dx * dx + dy * dy < 90000 then
+    flankStage = flankStage + 1
+  end if
+  if flankStage < 2 then
+    walkTo(fx,fy)
+    if best < 0 then
+      lookAt(fx,fy)
+    end if
+  end if
+end if

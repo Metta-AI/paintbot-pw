@@ -29,7 +29,21 @@ def literal_snappy(raw):
 
 
 @lru_cache(maxsize=65536)
-def terrain_height(x, z, wide=False):
+def terrain_height(x, z, wide=False, wilderness=False):
+    if wilderness and (x < 0 or x > 6400 or z < 0 or z > 4000):
+        h = max(
+            max(0, 180 - (abs(x - cx) + abs(z - cz)) // 3)
+            for cx, cz in [
+                (-500, 900),
+                (-500, 3100),
+                (6900, 900),
+                (6900, 3100),
+                (1700, -250),
+                (4700, 4250),
+            ]
+        )
+        return min(h, min(abs(x), abs(x - 6400), abs(z), abs(z - 4000)) // 2)
+
     def raised(x, z):
         if 1000 <= x <= 2200 and 200 <= z <= 1200:
             dx = max(abs(x - 1600) - 450, 0)
@@ -55,7 +69,9 @@ def terrain_height(x, z, wide=False):
 def elevation(w, p):
     if w.get("rulesVersion", 0) < 9:
         return 0
-    h = terrain_height(p["x"], p["z"], w.get("rulesVersion", 0) >= 11)
+    h = terrain_height(
+        p["x"], p["z"], w.get("rulesVersion", 0) >= 11, w.get("rulesVersion", 0) >= 12
+    )
     for t in w.get("trenches", []):
         if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
             return h - 60
@@ -121,40 +137,43 @@ def can_see_point(w, slot, b):
 
 
 @lru_cache(maxsize=4)
-def walkability(cover, layered=False, wide=False):
-    raw = bytearray(1280 * 800 * 4)
-    for z in range(11, 789):
-        start = (z * 1280 + 11) * 4 + 3
-        raw[start : (z * 1280 + 1269) * 4 : 4] = b"\xff" * 1258
+def walkability(cover, layered=False, wide=False, wilderness=False):
+    width, height = (1600, 960) if wilderness else (1280, 800)
+    ox, oz = (800, 400) if wilderness else (0, 0)
+    raw = bytearray(width * height * 4)
+    for z in range(11, height - 11):
+        start = (z * width + 11) * 4 + 3
+        raw[start : (z * width + width - 11) * 4 : 4] = b"\xff" * (width - 22)
     for cx, cz, cw, ch in cover:
+        cx, cz = cx + ox, cz + oz
         if ch == 0:
             r = cw / 2
-            for z in range(max(0, cz // 5), min(800, (cz + cw) // 5 + 1)):
+            for z in range(max(0, cz // 5), min(height, (cz + cw) // 5 + 1)):
                 dz = z * 5 - cz - r
                 if abs(dz) >= r:
                     continue
                 half = math.sqrt(r * r - dz * dz)
                 left = max(0, math.ceil((cx + r - half) / 5))
-                right = min(1280, math.ceil((cx + r + half) / 5))
-                raw[(z * 1280 + left) * 4 + 3 : (z * 1280 + right) * 4 : 4] = (
+                right = min(width, math.ceil((cx + r + half) / 5))
+                raw[(z * width + left) * 4 + 3 : (z * width + right) * 4 : 4] = (
                     b"\x00" * (right - left)
                 )
             continue
-        left, right = max(0, cx // 5), min(1280, (cx + cw) // 5 + 1)
-        for z in range(max(0, cz // 5), min(800, (cz + ch) // 5 + 1)):
-            raw[(z * 1280 + left) * 4 + 3 : (z * 1280 + right) * 4 : 4] = b"\x00" * (
+        left, right = max(0, cx // 5), min(width, (cx + cw) // 5 + 1)
+        for z in range(max(0, cz // 5), min(height, (cz + ch) // 5 + 1)):
+            raw[(z * width + left) * 4 + 3 : (z * width + right) * 4 : 4] = b"\x00" * (
                 right - left
             )
     if layered:
-        for z in range(11, 789):
-            for x in range(11, 1269):
-                px, pz = x * 5, z * 5
-                h = terrain_height(px, pz, wide)
+        for z in range(11, height - 11):
+            for x in range(11, width - 11):
+                px, pz = x * 5 - ox, z * 5 - oz
+                h = terrain_height(px, pz, wide, wilderness)
                 if any(
-                    abs(terrain_height(px + dx, pz + dz, wide) - h) > 80
+                    abs(terrain_height(px + dx, pz + dz, wide, wilderness) - h) > 80
                     for dx, dz in [(55, 0), (-55, 0), (0, 55), (0, -55)]
                 ):
-                    raw[(z * 1280 + x) * 4 + 3] = 0
+                    raw[(z * width + x) * 4 + 3] = 0
     return literal_snappy(raw)
 
 
@@ -166,6 +185,9 @@ class SpriteView:
         self.initial = True
 
     def frame(self, w):
+        wilderness = w.get("rulesVersion", 0) >= 12
+        ox, oz = (160, 80) if wilderness else (0, 0)
+        width, height = (1600, 960) if wilderness else (1280, 800)
         out = bytearray(b"\x04")
         obj = 0
 
@@ -188,8 +210,8 @@ class SpriteView:
                     "<BHhhhBH",
                     2,
                     obj + 10,
-                    p["x"] // 5 - width // 2,
-                    p["z"] // 5 - height // 2,
+                    p["x"] // 5 + ox - width // 2,
+                    p["z"] // 5 + oz - height // 2,
                     0,
                     0,
                     sid,
@@ -200,15 +222,16 @@ class SpriteView:
             sprite(
                 2,
                 "walkability map",
-                1280,
-                800,
+                width,
+                height,
                 walkability(
                     tuple((c["x"], c["z"], c["w"], c["h"]) for c in w["cover"]),
                     w.get("rulesVersion", 0) >= 9,
                     w.get("rulesVersion", 0) >= 11,
+                    wilderness,
                 ),
             )
-            sprite(1, "map", 1280, 800)
+            sprite(1, "map", width, height)
             self.initial = False
         out.extend(struct.pack("<BHhhhBH", 2, 1, 0, 0, 0, 0, 1))
         me = w["cogs"][self.slot]
@@ -308,7 +331,7 @@ class SpriteView:
                     104,
                 )
         item("own aim " + str(self.angle), me["pos"])
-        item("game teams 2 map 1280x800", me["pos"])
+        item(f"game teams 2 map {width}x{height}", me["pos"])
         item("fire icon" if me["cooldown"] <= 1 else "fire icon cooldown", me["pos"])
         for side, color in enumerate(COLORS):
             h = w["hearts"][side]
@@ -322,7 +345,7 @@ class SpriteView:
                 )
             x = 192 if side == 0 else 1088
             item(
-                f"endzone {color} rect {x - 40},360 {x + 40},440",
+                f"endzone {color} rect {x + ox - 40},{360 + oz} {x + ox + 40},{440 + oz}",
                 {"x": x * 5, "z": 2000},
             )
         for message in w.get("heard", [[] for _ in range(16)])[self.slot]:

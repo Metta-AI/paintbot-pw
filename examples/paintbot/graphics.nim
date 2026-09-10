@@ -14,6 +14,7 @@ type
     seed: int32
   ViewerState = object
     world: World
+    bounds: array[4,int]
     total: int
     paused: bool
     screen: array[Seats, array[2, float32]]
@@ -115,18 +116,18 @@ proc runGraphics*() =
   loadExtensions()
   # Keep only a narrow scenic strip around the playable arena.
   const border = 3
-  const terrainWidth = 64+2*border
-  const terrainDepth = 40+2*border
-  let ground = QuadLayer(originX: 32-border, originZ: 44-border, width: terrainWidth, depth: terrainDepth,
+  let terrainWidth = (maxX()-minX()) div 100+2*border
+  let terrainDepth = (maxZ()-minZ()) div 100+2*border
+  let ground = QuadLayer(originX: 32-border+minX() div 100, originZ: 44-border+minZ() div 100, width: terrainWidth, depth: terrainDepth,
       tiles: newSeq[Tile](terrainWidth*terrainDepth))
-  let terraces = QuadLayer(originX: 32-border, originZ: 44-border, width: terrainWidth, depth: terrainDepth,
+  let terraces = QuadLayer(originX: 32-border+minX() div 100, originZ: 44-border+minZ() div 100, width: terrainWidth, depth: terrainDepth,
       slab: true, tiles: newSeq[Tile](terrainWidth*terrainDepth))
   for z in 0..<terrainDepth:
     for x in 0..<terrainWidth:
-      let gx = x-border; let gz = z-border
+      let gx = x-border+minX() div 100; let gz = z-border+minZ() div 100
       var tile = Tile(flags: TileExists or TileConnectedEast or
           TileConnectedSouth, kind: GrassTile)
-      if gx < 0 or gz < 0 or gx >= 64 or gz >= 40:
+      if gx < minX() div 100 or gz < minZ() div 100 or gx >= maxX() div 100 or gz >= maxZ() div 100:
         let height = (sin(x.float*0.43)*cos(z.float*0.39)*0.8+0.3).float32
         tile.tops = pack([height, height, height, height])
         if (x*17+z*31) mod 13 == 0: tile.kind = TreeTile
@@ -144,6 +145,10 @@ proc runGraphics*() =
         let plaza = sqrt((gx.float-32)*(gx.float-32)+(gz.float-20)*(gz.float-20))
         if abs(gz.float-winding) < 2 or (plaza > 5.0 and plaza < 7.2):
           tile.kind = RoadTile
+      if wilderness and (gx<0 or gx>=64 or gz<0 or gz>=40):
+        # A continuous perimeter loop, plus open links into village streets.
+        if abs(gz+2)<=1 or abs(gz-42)<=1 or abs(gx+4)<=1 or abs(gx-68)<=1:
+          tile.kind=RoadTile
       # Dig into the terrain itself; the rim and floor share textured earth.
       for t in world.trenches:
         let cx = (t.x.float32+t.w.float32/2)/100
@@ -320,9 +325,9 @@ proc runGraphics*() =
             sin(angle*2)*0.18)
         shapes.paintball(front+offset,(0.11+(drop mod 3).float32*0.035)*fade,color)
     # Brass boundary rails make the playable rectangle explicit within the grove.
-    for z in [-20'f32, 20'f32]: shapes.box(0, 0, z, 32, 0.16, 0.07, rgbx(217,
+    for z in [minZ().float32/100-20, maxZ().float32/100-20]: shapes.box(0, 0, z, (maxX()-minX()).float32/200, 0.16, 0.07, rgbx(217,
         187, 111, 255))
-    for x in [-32'f32, 32'f32]: shapes.box(x, 0, 0, 0.07, 0.16, 20, rgbx(217,
+    for x in [minX().float32/100-32, maxX().float32/100-32]: shapes.box(x, 0, 0, 0.07, 0.16, (maxZ()-minZ()).float32/200, rgbx(217,
         187, 111, 255))
     for item in world.pickups:
       if item.readyAt > world.tick: continue
@@ -507,7 +512,7 @@ proc runGraphics*() =
           let clip = vp*vec4(poses[i]+vec3(0, 1, 0), 1)
           screens[i] = [(clip.x/clip.w*0.5+0.5).float32, (
               0.5-clip.y/clip.w*0.5).float32]
-        let payload = ViewerState(world: world, total: recording.frames.len,
+        let payload = ViewerState(world: world, bounds: [minX(),minZ(),maxX(),maxZ()], total: recording.frames.len,
             paused: paused, screen: screens, visible: visibility,
             footprint: footprint).toJson()
         let data = payload.cstring

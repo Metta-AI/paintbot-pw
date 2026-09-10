@@ -64,13 +64,20 @@ proc placeRoundVillage*() =
   # Distinct broadleaf silhouettes break up the conifer boundary.
   for i in 0..<6:
     let x = 700+i*1000
-    let z = if i mod 2 == 0: -100 else: 4100
+    let z = if i mod 2 == 0: minZ()-100 else: maxZ()+100
     grove.placeProp(trees[i], at(x.float32, z.float32), i.float32, 7.5)
   for i in 0..<38:
     let x = 350+(i*157 mod 5600)
     let z = if i mod 2 == 0: 100+(i*31 mod 130) else: 3750+(i*17 mod 100)
     grove.placeProp("flowers_patch_0" & $(1+i mod 3) & "a", at(x.float32,
         z.float32), i.float32, 0.5)
+
+  if wilderness:
+    for i,p in [point(-620,300),point(-620,1700),point(-620,3500),point(1200,-320),point(3100,-320),point(5400,-320)]:
+      for q in [p,point(6400-p.x.int,4000-p.z.int)]:
+        let base=at(q.x.float32,q.z.float32)
+        grove.placeProp(trees[i mod trees.len],base,i.float32*1.2,3.2)
+        grove.placeProp(bushes[i mod bushes.len],base+vec3(0.5,0,0.3),i.float32,0.65)
 
 proc placeVillage*(world: World) =
   let homes = loadPropPack(DataRoot & "/terrain/toon_golden_valley/presets.glb",

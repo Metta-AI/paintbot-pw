@@ -67,14 +67,18 @@ proc host(slot:int, strings:StringPool): Host =
       if field==0:active.pickups[i].pos.x
       elif field==1:active.pickups[i].pos.z
       else:active.pickups[i].kind.int32,4)
+  discard result.addFunction("mapMinX",0,proc(a:openArray[int32]):int32 = minX().int32,4)
+  discard result.addFunction("mapMinY",0,proc(a:openArray[int32]):int32 = minZ().int32,4)
+  discard result.addFunction("mapMaxX",0,proc(a:openArray[int32]):int32 = maxX().int32,4)
+  discard result.addFunction("mapMaxY",0,proc(a:openArray[int32]):int32 = maxZ().int32,4)
   discard result.addFunction("terrainHeight",2,proc(a:openArray[int32]):int32 =
-    if visionRulesVersion >= 9: terrainHeight(clamp(a[0].int,0,Width),clamp(a[1].int,0,Height)).int32 else: 0'i32,4)
+    if visionRulesVersion >= 9: terrainHeight(clamp(a[0].int,minX(),maxX()),clamp(a[1].int,minZ(),maxZ())).int32 else: 0'i32,4)
   discard result.addFunction("walkTo",2,proc(a:openArray[int32]):int32 =
     commands[slot].walk=true;commands[slot].goal=Point(x:a[0],z:a[1]);1,4)
   discard result.addFunction("lookAt",2,proc(a:openArray[int32]):int32 =
-    commands[slot].aim=Point(x:clamp(a[0],0,Width),z:clamp(a[1],0,Height));1,4)
+    commands[slot].aim=Point(x:clamp(a[0],minX().int32,maxX().int32),z:clamp(a[1],minZ().int32,maxZ().int32));1,4)
   discard result.addFunction("shootAt",2,proc(a:openArray[int32]):int32 =
-    commands[slot].shoot=true;commands[slot].aim=Point(x:clamp(a[0],0,Width),z:clamp(a[1],0,Height));1,4)
+    commands[slot].shoot=true;commands[slot].aim=Point(x:clamp(a[0],minX().int32,maxX().int32),z:clamp(a[1],minZ().int32,maxZ().int32));1,4)
 proc loadBots*(groups:seq[BotGroup]):array[Seats,Bot] =
   let sources=groups.expandBotSources(controllerKinds(Seats,0))
   for slot in 0..<Seats:

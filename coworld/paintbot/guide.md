@@ -83,3 +83,7 @@ BASIC uses `shout(strNew("Contact!"))`. Messages are limited to four 256-byte li
 The equipment baseline remembers visible supplies for ten seconds, sends scouts toward corner supplies, and sends equipped cogs into combat. Grenade charge follows target distance with a visible-friendly blast check. The WASM baseline uses increased grenade/spray detour budgets and the PW throw/spray ranges; rebuild with `tools/build_equipment_baseline.py` and a CTF checkout with its Nimby dependencies. This build used CTF commit `40d0bee8e2c5a8955ff711d96c4c1bb482a69134`.
 
 Grenade and spray pickups are enlarged, bob, and spin. Each gun shot draws four bright paintballs for readability; this is visual only and still resolves one hit with the existing cooldown.
+
+### Wilderness flanks (rules 12)
+
+Heartwick now has 80m × 48m of playable terrain, 50% more area than the original 64m × 40m village. Coordinates extend from (-800,-400) to (7200,4400) cm, preserving the village, hearts, and equipment positions. Wooded rolling hills and a continuous perimeter trail connect back into the village on all sides. Two BASIC flankers per team use the upper and lower wilderness wings. `mapMinX/Y()` and `mapMaxX/Y()` expose the bounds; WASM sprites use a translated 1600×960 pixel map with the same five-cm scale. Older recordings retain their original boundaries.

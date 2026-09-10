@@ -88,7 +88,11 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 11
+var visionRulesVersion* = 12
+proc minX*():int = (if visionRulesVersion>=12: -800 else: 0)
+proc minZ*():int = (if visionRulesVersion>=12: -400 else: 0)
+proc maxX*():int = Width-minX()
+proc maxZ*():int = Height-minZ()
 proc elevation*(w: World, p: Point): int =
   if visionRulesVersion < 9: return 0
   result = terrainHeight(p.x.int, p.z.int)
@@ -108,8 +112,8 @@ proc traversable*(w: World, a, b: Point): bool =
     last = h
   true
 proc blocked*(w: World, p: Point, radius = Radius): bool =
-  if p.x < radius or p.z < radius or p.x > Width-radius or p.z >
-      Height-radius: return true
+  if p.x < minX()+radius or p.z < minZ()+radius or p.x > maxX()-radius or p.z >
+      maxZ()-radius: return true
   for c in w.cover:
     if c.h == 0:
       let r = c.w div 2
@@ -185,6 +189,7 @@ proc resetHeart*(w: var World, side: int) =
 proc initializeEquipment(w: var World)
 proc newWorld*(seed: int32): World =
   wideRamps = visionRulesVersion >= 11
+  wilderness = visionRulesVersion >= 12
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
   if visionRulesVersion >= 8:
     for lot in roundVillage():
@@ -208,6 +213,10 @@ proc newWorld*(seed: int32): World =
             w: c.w, h: c.h)
   for side in 0..1: result.resetHeart(side)
   for i in 0..<Seats: result.spawn(i)
+  if wilderness:
+    for p in [point(-620,300),point(-620,1700),point(-620,3500),point(1200,-320),point(3100,-320),point(5400,-320)]:
+      for q in [p,point(6400-p.x.int,4000-p.z.int)]:
+        result.cover.add Cover(x:q.x-65,z:q.z-65,w:130,h:0)
   if visionRulesVersion >= 6: result.initializeEquipment()
 proc scores*(w: World): seq[int] =
   for i in 0..<Seats: result.add int(w.winner == team(i).int32)
@@ -247,12 +256,12 @@ proc hit*(w: var World, victim, attacker: int) =
 proc waypoint*(w: World, start, goal: Point): Point =
   ## Bounded breadth-first navigation over a 32x20 arena grid.
   if w.lineClear(start, goal) and w.traversable(start, goal): return goal
-  const nx = Width div 200; const nz = Height div 200
-  var prev: array[nx*nz, int]
+  let nx = (maxX()-minX()) div 200; let nz = (maxZ()-minZ()) div 200
+  var prev: array[960, int]
   for x in prev.mitems: x = -2
-  let a = clamp(start.z.int div 200, 0, nz-1)*nx+clamp(start.x.int div 200, 0, nx-1)
-  let b = clamp(goal.z.int div 200, 0, nz-1)*nx+clamp(goal.x.int div 200, 0, nx-1)
-  var q: array[nx*nz, int]; var head = 0; var tail = 1
+  let a = clamp((start.z.int-minZ()) div 200, 0, nz-1)*nx+clamp((start.x.int-minX()) div 200, 0, nx-1)
+  let b = clamp((goal.z.int-minZ()) div 200, 0, nz-1)*nx+clamp((goal.x.int-minX()) div 200, 0, nx-1)
+  var q: array[960, int]; var head = 0; var tail = 1
   q[0] = a; prev[a] = -1
   while head < tail and prev[b] == -2:
     let n = q[head]; inc head
@@ -260,14 +269,14 @@ proc waypoint*(w: World, start, goal: Point): Point =
       let x = n mod nx+delta[0]; let z = n div nx+delta[1]
       if x < 0 or x >= nx or z < 0 or z >= nz: continue
       let j = z*nx+x
-      if prev[j] != -2 or w.blocked(point(x*200+100, z*200+100), 90): continue
-      if not w.traversable(point(n mod nx*200+100, n div nx*200+100), point(
-          x*200+100, z*200+100)): continue
+      if prev[j] != -2 or w.blocked(point(minX()+x*200+100, minZ()+z*200+100), 90): continue
+      if not w.traversable(point(minX()+n mod nx*200+100, minZ()+n div nx*200+100), point(
+          minX()+x*200+100, minZ()+z*200+100)): continue
       prev[j] = n; q[tail] = j; inc tail
   if prev[b] == -2: return start
   var n = b
   while prev[n] >= 0 and prev[n] != a: n = prev[n]
-  point(n mod nx*200+100, n div nx*200+100)
+  point(minX()+n mod nx*200+100, minZ()+n div nx*200+100)
 proc stepEquipment(w: var World, commands: array[Seats, Command])
 proc step*(w: var World, commands: array[Seats, Command],
     rulesVersion = visionRulesVersion) =
@@ -284,8 +293,8 @@ proc step*(w: var World, commands: array[Seats, Command],
     if w.cogs[i].shield > 0: dec w.cogs[i].shield
     if w.cogs[i].cooldown > 0: dec w.cogs[i].cooldown
     let cmd = commands[i]
-    if cmd.walk: w.cogs[i].goal = Point(x: clamp(cmd.goal.x, 100, Width-100),
-        z: clamp(cmd.goal.z, 100, Height-100))
+    if cmd.walk: w.cogs[i].goal = Point(x: clamp(cmd.goal.x, (minX()+100).int32, (maxX()-100).int32),
+        z: clamp(cmd.goal.z, (minZ()+100).int32, (maxZ()-100).int32))
     w.cogs[i].firing = cmd.shoot
     if cmd.shoot or (rulesVersion >= 4 and cmd.aim != Point()):
       w.cogs[i].aim = cmd.aim
