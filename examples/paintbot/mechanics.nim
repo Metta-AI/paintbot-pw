@@ -10,6 +10,11 @@ const
   GunRange* = 5250
   StartingLives* = 3
 
+proc gunSpreadPercent*(w: World, origin, target: Point): int =
+  ## 25% less spread per metre downhill, capped at 50% less or 50% more spread.
+  if visionRulesVersion < 10: return 100
+  clamp(100 - (w.elevation(origin)-w.elevation(target)) div 4, 50, 150)
+
 proc trenchAt*(w: World, p: Point): int =
   for i, t in w.trenches:
     if p.x >= t.x and p.x < t.x+t.w and p.z >= t.z and p.z < t.z+t.h:
@@ -200,7 +205,11 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           let origin = w.cogs[i].pos
           var aim = w.equipment[i].gunAim
           # Bounded triangular jitter approximates the original small angular spread.
-          let jitter = w.rng.between(-32, 32)+w.rng.between(-32, 32)
+          var jitter = w.rng.between(-32, 32)+w.rng.between(-32, 32)
+          if visionRulesVersion >= 10:
+            let target = Point(x: origin.x+aim.x, z: origin.z+aim.z)
+            jitter = jitter*w.gunSpreadPercent(origin, target).int32 div 100
+            aim = direction(Point(), aim, GunRange)
           aim = Point(x: aim.x-int32(int64(aim.z)*jitter div GunRange),
               z: aim.z+int32(int64(aim.x)*jitter div GunRange))
           let ray = direction(Point(), aim, GunRange)
@@ -227,7 +236,10 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
               x: endPoint.x-origin.x, z: endPoint.z-origin.z), owner: i.int32, life: (if visionRulesVersion >= 9: 6 else: 2))
       elif cmd.shoot and w.cogs[i].cooldown == 0:
         w.equipment[i].windup = GunWindupTicks
-        w.equipment[i].gunAim = direction(w.cogs[i].pos, w.cogs[i].aim, GunRange)
+        w.equipment[i].gunAim = if visionRulesVersion >= 10:
+          Point(x: w.cogs[i].aim.x-w.cogs[i].pos.x,
+              z: w.cogs[i].aim.z-w.cogs[i].pos.z)
+        else: direction(w.cogs[i].pos, w.cogs[i].aim, GunRange)
         let slow = w.equipment[i].armor > 0 or w.cogs[i].carrying or w.trenchAt(
             w.cogs[i].pos) >= 0
         w.cogs[i].cooldown = int32(FireCooldownTicks*(if slow: 3 else: 1))

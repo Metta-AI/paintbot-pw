@@ -35,3 +35,14 @@ suite "Layered village":
         visited.incl(n); q.addLast(n)
     for p in w.pickups: check (p.pos.x.int div 50, p.pos.z.int div 50) in visited
     check (home(1).x.int div 50, home(1).z.int div 50) in visited
+
+  test "height advantage narrows spread and uphill widens it":
+    visionRulesVersion = 10
+    var w = newWorld(2026)
+    w.trenches = @[]
+    check w.gunSpreadPercent(point(1550,720), point(500,720)) == 50
+    check w.gunSpreadPercent(point(500,720), point(1550,720)) == 150
+    check w.gunSpreadPercent(point(800,900), point(500,900)) == 69
+    check w.gunSpreadPercent(point(500,720), point(500,900)) == 100
+    visionRulesVersion = 9
+    check w.gunSpreadPercent(point(1550,720), point(500,720)) == 100

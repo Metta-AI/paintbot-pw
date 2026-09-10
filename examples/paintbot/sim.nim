@@ -88,7 +88,7 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 9
+var visionRulesVersion* = 10
 proc elevation*(w: World, p: Point): int =
   if visionRulesVersion < 9: return 0
   result = terrainHeight(p.x.int, p.z.int)
