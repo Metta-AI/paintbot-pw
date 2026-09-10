@@ -69,3 +69,7 @@ The release includes the approved B Paint Crew cogs, grenades, spray cans, trenc
 ### Gnomewick Village: 0.1.7
 
 `cow_756c3045-584b-46ed-b122-0dea7af31e61` is certified and canonical. Certification `2cc2d149-42f0-4cef-9577-a8047b9559f7` passed all ten checks under `main-3ea7eef64761` at 2026-09-10T18:02:28.059203Z. Hosted replay `88ae803e-f57d-4da5-a4aa-63a5ed8bbe32` loaded through the production replay-session API with Gnomewick Village and HASH VERIFIED. All sixteen hosted policy seats exited cleanly. The existing ladder configuration was verified and a new run triggered after publication.
+
+### Raised vegetable beds: 0.1.8
+
+`cow_1e2c39f7-5653-4f36-b984-67d057ecb744` is certified and canonical; all ten checks passed in `d87b560b-89c3-43a9-bcad-4665c306cb49`. Timber beds with carrots and tomatoes replace the garden-wall visuals using identical collision footprints. The production viewer loaded hosted replay `4c0261b5-99df-4aeb-805e-db8bfaebe0a7` with HASH VERIFIED, and a ladder run was triggered.
