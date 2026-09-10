@@ -836,15 +836,24 @@
     pointers.delete(e.pointerId);
     drag = null;
   });
-  // Ordinary scrolling belongs to the surrounding Observatory page; deliberate control-scroll zooms.
+  // Mouse wheels and trackpads zoom directly over the arena.
   $("canvas").addEventListener(
     "wheel",
     (e) => {
-      if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
+      const delta =
+        e.deltaY *
+        (e.deltaMode === 1
+          ? 16
+          : e.deltaMode === 2
+            ? $("canvas").clientHeight
+            : 1);
       camera.d = Math.max(
         6,
-        Math.min(160, camera.d * Math.exp(e.deltaY * 0.002)),
+        Math.min(
+          160,
+          camera.d * Math.exp(Math.max(-300, Math.min(300, delta)) * 0.002),
+        ),
       );
       cameraUpdate();
     },
