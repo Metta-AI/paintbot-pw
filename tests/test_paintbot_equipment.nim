@@ -116,3 +116,62 @@ suite "Original Paintbot equipment":
     for tick in 0..<GunWindupTicks:w.step(c)
     check w.cogs[0].hp==0
     check w.cogs[2].hp==0
+  test "paint impacts include armor and nonlethal damage but exclude spawn shields":
+    var w=arena()
+    var impacts=0
+    observeHit=proc(tick:int32,victim,attacker:int,pos:Point)=
+      inc impacts
+      check victim==0
+      check attacker==1
+    defer:observeHit=nil
+    w.equipment[0].armor=2
+    w.damage(0,1,1)
+    check impacts==1
+    check w.cogs[0].hp==3
+    w.equipment[0].armor=0
+    w.damage(0,1,1)
+    check impacts==2
+    check w.cogs[0].hp==2
+    w.cogs[0].shield=10
+    w.damage(0,1,1)
+    check impacts==2
+
+  test "wide spray hits off-axis enemies for three HP":
+    var w = arena()
+    visionRulesVersion = 17
+    w.cogs[0].pos = point(3000,2000)
+    w.cogs[0].goal = w.cogs[0].pos
+    w.cogs[1].pos = point(3500,2250)
+    w.cogs[1].goal = w.cogs[1].pos
+    w.equipment[0].sprayAim = point(850,0)
+    check w.sprayTouches(0,1)
+    visionRulesVersion = 16
+    check not w.sprayTouches(0,1)
+    visionRulesVersion = 17
+    w.cogs[2].pos = point(3500,2450)
+    check not w.sprayTouches(0,2)
+    w.equipment[0].sprayCan = true
+    var commands: array[Seats,Command]
+    commands[0] = Command(shoot:true,aim:point(4000,2000))
+    w.step(commands)
+    check w.cogs[1].hp == 0
+
+  test "spray hits when respawn protection expires during a burst":
+    var w = arena()
+    visionRulesVersion = 18
+    w.cogs[0].pos = point(3000,2000)
+    w.cogs[0].goal = w.cogs[0].pos
+    w.cogs[1].pos = point(3400,2000)
+    w.cogs[1].goal = w.cogs[1].pos
+    w.cogs[1].shield = 2
+    w.equipment[0].sprayCan = true
+    var commands: array[Seats,Command]
+    commands[0] = Command(shoot:true,aim:point(4000,2000))
+    w.step(commands)
+    check w.cogs[1].hp == 3
+    check (w.equipment[0].sprayHits and 2'u32) == 0
+    commands[0].shoot = false
+    w.step(commands)
+    check w.cogs[1].shield == 0
+    check w.cogs[1].hp == 0
+    check (w.equipment[0].sprayHits and 2'u32) != 0

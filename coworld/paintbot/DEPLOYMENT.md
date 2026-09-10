@@ -73,3 +73,33 @@ The release includes the approved B Paint Crew cogs, grenades, spray cans, trenc
 ### Raised vegetable beds: 0.1.8
 
 `cow_1e2c39f7-5653-4f36-b984-67d057ecb744` is certified and canonical; all ten checks passed in `d87b560b-89c3-43a9-bcad-4665c306cb49`. Timber beds with carrots and tomatoes replace the garden-wall visuals using identical collision footprints. The production viewer loaded hosted replay `4c0261b5-99df-4aeb-805e-db8bfaebe0a7` with HASH VERIFIED, and a ladder run was triggered.
+
+## Heartwick territory release — 2026-09-10
+
+Published **0.2.0**, Coworld `cow_8f19610c-fd09-4051-b30f-4007c6520550`,
+manifest `sha256:91851596d1359b7474b6a8007a77cd6c9e792de0e7d98690003208e12882b3a9`.
+Confirmed canonical with all ten certification checks and five hosted smoke
+matches passing. This replaces the old capture-the-heart game with rules v18:
+ten territory towers, the woodland island, current equipment rules, and the
+complete compact Heartwick viewer. Both BASIC and WASM file policies work.
+
+The existing paintbot-pw league remains in ladder mode, every 10 minutes,
+with its existing $432/day budget. League ID:
+`league_b9458ff8-0854-4e21-82b8-3c99942902e0`.
+
+The platform again completed certification without recording its replay URL.
+On retry, the real replay/results and sixteen clean player statuses were fetched,
+the replay hash was verified natively, and the normal lifecycle endpoint received
+the verified artifact URLs. The certification checks then passed normally.
+Verified hosted replay job: `dd4fab30-1a27-4cb4-8236-f4afa0a06c6f`, hash 2109017010.
+The published viewer was opened and visually checked, including its island,
+territory overlay, heart towers, equipment events, and fractional speed controls.
+
+Validation: all nine `test_paintbot_*` suites and five Python runtime tests pass.
+The v8 round-cover fixture now explicitly selects v8; current terrain otherwise
+changes its line-of-sight premise. Walkability reuses a height raster rather than
+computing every slope probe's terrain independently. Vet was unavailable because
+its Anthropic credentials were not configured.
+
+Player source and validation remain private in `daveey/cogamer`; they are not
+included in this public package.

@@ -227,33 +227,6 @@
   #zoomrow button {
     padding: 4px 9px;
   }
-  #inspect {
-    margin-top: 20px;
-    line-height: 1.8;
-  }
-  #inspect .name {
-    font-weight: 700;
-    color: var(--gold);
-  }
-  #inspect dl {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    margin: 5px 0;
-  }
-  #inspect dt {
-    color: var(--muted);
-  }
-  #inspect dd {
-    margin: 0;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .inspection-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    margin-top: 8px;
-  }
   #viewbar {
     position: absolute;
     top: 90px;
@@ -542,7 +515,7 @@
     background: #3b2322;
   }
   #status:before {
-    content: "PAINTBOT / POLYWORLD";
+    content: "HEARTWICK";
     font: 12px Rubik;
     letter-spacing: 0.25em;
     margin-bottom: 18px;
@@ -561,6 +534,10 @@
   }
   body.pov #feed {
     top: 38%;
+  }
+  #feed[hidden],
+  #banner[hidden] {
+    display: none;
   }
   #toast {
     position: absolute;
@@ -667,9 +644,6 @@
     .heartstate {
       font-size: 9px;
       display: block;
-    }
-    #inspect {
-      display: none;
     }
     #canvas {
       top: 58px;
@@ -800,26 +774,6 @@
     .railtitle {
       margin-bottom: 7px;
     }
-    #inspect {
-      position: fixed;
-      right: 20px;
-      top: 145px;
-      width: 215px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      padding: 14px;
-      border-radius: 7px;
-      z-index: 3;
-    }
-    #inspect:has(.hint) {
-      display: none;
-    }
-    body:has(#inspect .name) #feed {
-      top: 465px;
-    }
-    body.pov #inspect {
-      top: 340px;
-    }
   }
 
   @media (min-width: 701px) {
@@ -840,21 +794,6 @@
     #minimap {
       height: 100px;
     }
-    #inspect {
-      font-size: 11px;
-      line-height: 1.5;
-      padding: 10px;
-    }
-    #inspect dl {
-      margin: 3px 0;
-    }
-    body:has(#inspect .name) #comms {
-      right: 255px;
-      width: 250px;
-    }
-    body:has(#inspect .name) #feed {
-      display: none;
-    }
   }
 
   #povframe {
@@ -866,6 +805,25 @@
   }
   body.pov #povframe {
     display: block;
+  }
+  #povstatic {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    background: #171717;
+  }
+  #povsight {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    transform: translate(-50%, -50%);
+    color: #fff5d7;
+
+    pointer-events: none;
   }
   #povresize {
     position: absolute;
@@ -881,12 +839,6 @@
   }
 
   @media (min-width: 701px) {
-    #inspect {
-      max-height: calc(100% - 345px);
-      overflow: auto;
-      bottom: 145px;
-      top: auto !important;
-    }
     .seat .pips {
       padding-bottom: 0;
       line-height: 6px;
@@ -947,9 +899,6 @@
     flex: 0 0 8px;
     line-height: 8px;
   }
-  #inspect .name {
-    overflow-wrap: anywhere;
-  }
   @media (max-width: 700px) {
     #lens {
       width: 100px;
@@ -959,12 +908,294 @@
       line-height: 6px;
     }
   }
+
+  /* Compact viewer: the arena occupies the full width. */
+  body {
+    margin: 0;
+  }
+  #canvas {
+    left: 0;
+    top: 44px;
+    width: 100% !important;
+    height: calc(100% - 128px) !important;
+  }
+  header {
+    height: 44px;
+    padding: 0 14px;
+    gap: 18px;
+  }
+  header .place {
+    display: block;
+    border: 0;
+    padding: 0;
+    line-height: 1;
+  }
+  header .place .eyebrow {
+    font:
+      600 16px Georgia,
+      serif;
+    letter-spacing: 0.03em;
+    text-transform: none;
+    color: var(--ink);
+  }
+  #modehint {
+    display: none;
+  }
+  header .right {
+    gap: 4px;
+  }
+  #match-score {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: 15px;
+  }
+  #match-score .divider {
+    color: var(--muted);
+    font-size: 11px;
+  }
+  #verification {
+    width: 18px;
+    overflow: hidden;
+    white-space: nowrap;
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+  .icon-button,
+  header button,
+  #viewbar button,
+  .transport button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    padding: 5px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+  }
+  button svg {
+    pointer-events: none;
+  }
+  button svg,
+  summary svg,
+  label svg {
+    width: 17px;
+    height: 17px;
+    flex-shrink: 0;
+  }
+  #viewbar {
+    left: 12px;
+    top: 54px;
+    max-width: calc(100% - 65px);
+    gap: 2px;
+    padding: 4px;
+    border-radius: 10px;
+    backdrop-filter: blur(14px);
+    flex-wrap: wrap;
+  }
+  #viewbar .optional {
+    display: inline-flex;
+  }
+  #viewbar select {
+    max-width: 125px;
+    padding: 5px;
+    font-size: 11px;
+    height: 28px;
+  }
+  #territorytoggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  #territorytoggle[hidden] {
+    display: none;
+  }
+  #territory {
+    position: absolute;
+    opacity: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+  }
+  #viewbar button[aria-pressed="true"],
+  header button[aria-pressed="true"],
+  .transport button[aria-pressed="true"],
+  #map-panel[open] > summary,
+  #territorytoggle:has(:checked) {
+    background: #e8cf88;
+    color: #17382e;
+    box-shadow: inset 0 0 0 1px #fff0bb;
+  }
+  #viewbar button[aria-pressed="false"],
+  #territorytoggle:not(:has(:checked)) {
+    color: #b8c6c0;
+  }
+  #territorytoggle:has(:focus-visible) {
+    outline: 2px solid var(--gold);
+  }
+  #bottom {
+    height: 84px;
+    padding: 7px 14px;
+  }
+  .transport {
+    height: 28px;
+    gap: 3px;
+  }
+  .transport #play {
+    min-width: 30px;
+    width: 30px;
+  }
+  #clock {
+    font-size: 11px;
+    margin-left: 6px;
+  }
+  #tickread {
+    display: none;
+  }
+  #speed {
+    padding: 3px;
+    font-size: 11px;
+  }
+  #timeline {
+    margin-top: 5px;
+    height: 30px;
+  }
+  #momentum {
+    height: 22px;
+  }
+  #scrub {
+    bottom: 0;
+  }
+  .scene-caption {
+    display: none;
+  }
+  #map-panel {
+    position: absolute;
+    top: 54px;
+    right: 12px;
+    z-index: 4;
+  }
+  #map-panel summary {
+    list-style: none;
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  #map-panel summary::-webkit-details-marker {
+    display: none;
+  }
+  .map-content {
+    position: absolute;
+    right: 0;
+    top: 42px;
+    width: 240px;
+    padding: 12px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+  #comms summary {
+    padding: 7px 10px;
+    font-size: 10px;
+  }
+  #feed {
+    top: 100px;
+  }
+  @media (max-width: 600px) {
+    #viewbar select {
+      max-width: 90px;
+    }
+    header {
+      gap: 12px;
+    }
+    #verification {
+      display: none;
+    }
+    .transport {
+      gap: 1px;
+    }
+    .transport button {
+      width: 24px;
+      min-width: 24px;
+      padding: 4px;
+    }
+  }
+  #control-tooltip {
+    position: fixed;
+    z-index: 100;
+    max-width: min(280px, calc(100vw - 16px));
+    padding: 7px 10px;
+    border: 1px solid #ddc58d55;
+    border-radius: 7px;
+    background: #10231ff5;
+    color: #fff3d8;
+    font:
+      11px/1.4 Rubik,
+      sans-serif;
+    box-shadow: 0 3px 12px #0004;
+    pointer-events: none;
+  }
+  #agent-menu {
+    position: fixed;
+    z-index: 100;
+    min-width: 130px;
+    padding: 5px;
+    border: 1px solid #81998b66;
+    border-radius: 10px;
+    background: #17342ef5;
+    box-shadow: 0 8px 25px #0006;
+    backdrop-filter: blur(12px);
+  }
+  #agent-menu[hidden] {
+    display: none;
+  }
+  #agent-menu button {
+    display: block;
+    width: 100%;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+    padding: 8px 12px;
+    color: #edf1e5;
+  }
+  #agent-menu button::before {
+    content: "";
+    display: inline-block;
+    width: 18px;
+  }
+  #agent-menu button[aria-checked="true"]::before {
+    content: "✓";
+  }
+  #agent-menu button:hover,
+  #agent-menu button:focus-visible {
+    background: #e8cf88;
+    color: #17382e;
+  }
 </style>
 <header>
-  <div class="brand">PAINT<span>BOT</span></div>
   <div class="place">
-    <div class="eyebrow">Gnomewick village</div>
-    <small>Capture the heart · Three lives</small>
+    <div class="eyebrow">Heartwick</div>
+    <small id="modehint">Territory control · Claim all 10 hearts</small>
+  </div>
+  <div id="match-score">
+    <span class="red" title="Ember">♥ <b id="score0">1</b></span
+    ><span class="divider">:</span
+    ><span class="blue" title="Azure"><b id="score1">1</b> ♥</span>
   </div>
   <div class="right">
     <span class="verified" id="verification">◌ VERIFYING REPLAY</span
@@ -973,11 +1204,10 @@
     ><button id="fullscreen" aria-label="Fullscreen">⛶</button>
   </div>
 </header>
-<aside id="rail">
+<div hidden>
   <section class="teamblock" id="team0">
     <div class="teamhead red">
-      <span class="crest">♥</span><strong>EMBER</strong
-      ><span class="score" id="score0">0</span>
+      <span class="crest">♥</span><strong>EMBER</strong>
     </div>
     <div class="heartstate">
       <span id="heart0">Heart at home</span><span id="alive0">8 alive</span>
@@ -986,40 +1216,37 @@
   </section>
   <section class="teamblock" id="team1">
     <div class="teamhead blue">
-      <span class="crest">♥</span><strong>AZURE</strong
-      ><span class="score" id="score1">0</span>
+      <span class="crest">♥</span><strong>AZURE</strong>
     </div>
     <div class="heartstate">
       <span id="heart1">Heart at home</span><span id="alive1">8 alive</span>
     </div>
     <div class="squad" id="squad1"></div>
   </section>
-  <p class="railtitle">Tactical map</p>
-  <canvas
-    id="minimap"
-    width="320"
-    height="200"
-    aria-label="Tactical minimap. Click or drag to move the camera."
-  ></canvas>
-  <div id="zoomrow">
-    <button id="zoomout" aria-label="Zoom out">−</button
-    ><input
-      id="zoom"
-      type="range"
-      min="6"
-      max="100"
-      value="60"
-      aria-label="Camera distance"
-    /><button id="zoomin" aria-label="Zoom in">+</button>
+</div>
+<details id="map-panel">
+  <summary aria-label="Tactical map" title="Tactical map">◇</summary>
+  <div class="map-content">
+    <p class="railtitle">Tactical map</p>
+    <canvas
+      id="minimap"
+      width="320"
+      height="200"
+      aria-label="Tactical minimap. Click or drag to move the camera."
+    ></canvas>
+    <div id="zoomrow">
+      <button id="zoomout" aria-label="Zoom out">−</button
+      ><input
+        id="zoom"
+        type="range"
+        min="6"
+        max="160"
+        value="60"
+        aria-label="Camera distance"
+      /><button id="zoomin" aria-label="Zoom in">+</button>
+    </div>
   </div>
-  <section id="inspect">
-    <p class="railtitle">Squad inspection</p>
-    <p class="hint">
-      Select a bot in the arena or a portrait to inspect its status and follow
-      its perspective.
-    </p>
-  </section>
-</aside>
+</details>
 <div id="viewbar">
   <select id="lens" aria-label="Visibility perspective">
     <option value="-1">All-seeing</option>
@@ -1027,17 +1254,34 @@
     <option value="17">Azure vision</option></select
   ><button id="fit">Fit arena</button><button id="topdown">Top down</button
   ><button id="bars" aria-pressed="true">Health</button
+  ><button id="speech" aria-pressed="true" aria-controls="speech-bubbles">
+    Speech bubbles</button
+  ><button id="eventtoasts" aria-pressed="false" aria-controls="feed banner">
+    Toasts</button
+  ><label id="territorytoggle"
+    ><input id="territory" type="checkbox" checked /> Territory</label
   ><button id="trails" aria-pressed="false" class="optional">Orders</button
   ><button id="download" class="optional">↓ Replay</button>
 </div>
 <div class="scene-caption">
   <div class="eyebrow">Polyworld arena / 01</div>
-  <strong>Gnomewick Village</strong>
-  <p>Sixteen minds. Two hearts. One arena.</p>
+  <strong>Heartwick</strong>
+  <p>Sixteen minds. Ten hearts. One territory.</p>
 </div>
-<div id="feed"></div>
-<div id="banner"></div>
+
+<div id="feed" hidden></div>
+<div id="banner" hidden></div>
 <div id="povframe">
+  <canvas
+    id="povstatic"
+    width="160"
+    height="100"
+    aria-label="Respawning — no camera signal"
+    hidden
+  ></canvas>
+  <svg id="povsight" viewBox="0 0 6 6" aria-hidden="true">
+    <circle cx="3" cy="3" r="2" fill="#ff3030" />
+  </svg>
   <button
     id="povresize"
     aria-label="Resize first-person view"
@@ -1085,12 +1329,14 @@
     ><span id="skipping"></span><span class="spacer"></span
     ><span id="clock">0:00 / 0:00</span
     ><select id="speed" aria-label="Playback speed">
-      <option>1×</option>
-      <option>2×</option>
-      <option>4×</option>
-      <option>8×</option>
-      <option>16×</option>
-      <option>32×</option></select
+      <option value="0.25">¼×</option>
+      <option value="0.5">½×</option>
+      <option value="1" selected>1×</option>
+      <option value="2">2×</option>
+      <option value="4">4×</option>
+      <option value="8">8×</option>
+      <option value="16">16×</option>
+      <option value="32">32×</option></select
     ><span id="tickread">0 / 0 ticks</span>
   </div>
   <div id="timeline">

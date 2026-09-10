@@ -1,11 +1,22 @@
 # Paintbot PW
 
-Sixteen wheeled cogs fight on a symmetric Polyworld arena. Red uses even slots;
-Blue uses odd slots. Capture the enemy heart in your home endzone or exhaust the
-other team's lives to win. One capture wins, even if your own heart is stolen.
-Each cog has three lives and three base HP. Death returns a carried heart home,
-loses equipment, and respawns at a fresh endzone position after 72 ticks if lives
-remain. Spawn protection lasts 36 ticks. A time-limit draw gives both teams zero.
+Sixteen wheeled cogs fight for territory in Heartwick. Red uses even slots;
+Blue uses odd slots. Ten stationary hearts divide the entire map into nearest-heart
+regions. Each team starts with its base heart; eight hearts start neutral gray.
+Touch a heart within 140 units on connected terrain to claim it instantly. If both
+teams touch at once, its ownership stays unchanged. Claim all ten to win.
+
+The default-on territory overlay colors each region by its heart owner, including
+neutral gray. Toggle it off for an unobstructed terrain view. Heart locations and
+ownership are public. BASIC exposes `heartCount()`, `controlX(i)`, `controlY(i)`,
+and `controlOwner(i)` (-1 neutral, 0 red, 1 blue). WASM sprite observations include
+`control heart <index> owner <owner>`; the legacy enemy-flag target points to an
+unowned objective so existing Paintbot WASM policies can play territory control.
+
+Cogs have three base HP and unlimited respawns. Death loses equipment and respawns
+after 72 ticks; spawn protection lasts 36 ticks. Scores are the team's number of
+owned hearts (0–10), also at timeout. A timeout without full control has no winner.
+Older replays retain their original capture-the-heart rules.
 
 ## Combat and equipment
 
@@ -66,6 +77,40 @@ seeking, individual cone visibility, first-person view, event filtering, invento
 armor/lives inspection, grenade arcs/blasts, spray effects and trench markers.
 Earlier replay versions retain their original rules and hashes.
 
-## Gnomewick Village arena
+## Heartwick arena
 
 Cottages, garden walls, carts, supply stacks and the market well are solid cover: they block movement, sight and direct fire. Grenades still lob over them. The village is symmetric under a half turn, with a market square, cross streets and side lanes. Flower patches are walkable decoration. Trenches retain their existing movement and damage rules.
+
+### High ground accuracy
+
+Gun spread decreases by 25% per metre above the locked aim point, capped at 50% less spread. Shooting uphill increases spread by up to 50%; level shots are unchanged. Terrain and trench depth both count. This applies to BASIC and WASM policies, starting with replay rules version 10.
+
+### Village navigation and nearby speech
+
+Rules 11 widen terrace ramps from 2m to 6m. The baseline assigns high-ground holders and separate flanking lanes, scans when it loses sight of enemies, and holds distance with guns while closing with spray cans.
+
+BASIC uses `shout(strNew("Contact!"))`. Messages are limited to four 256-byte lines per tick. On the next tick, living cogs within 12.8m hear both teams through `heardCount()`, `heardSlot(i)`, `heardX(i)`, `heardY(i)`, and `heardText(i)`. Hearing is independent of the vision cone. WASM receives nearby messages as `shout <slot> <text>` labelled sprites at the speaker's position. The viewer shows speech bubbles for visible living speakers for three seconds.
+
+The equipment baseline remembers visible supplies for ten seconds, sends scouts toward corner supplies, and sends equipped cogs into combat. Grenade charge follows target distance with a visible-friendly blast check. The WASM baseline uses increased grenade/spray detour budgets and the PW throw/spray ranges; rebuild with `tools/build_equipment_baseline.py` and a CTF checkout with its Nimby dependencies. This build used CTF commit `40d0bee8e2c5a8955ff711d96c4c1bb482a69134`.
+
+Grenade and spray pickups are enlarged, bob, and spin. Each gun shot draws four bright paintballs for readability; this is visual only and still resolves one hit with the existing cooldown.
+
+### Wilderness flanks (rules 12)
+
+Heartwick now has 80m × 48m of playable terrain, 50% more area than the original 64m × 40m village. Coordinates extend from (-800,-400) to (7200,4400) cm, preserving the village, hearts, and equipment positions. Wooded rolling hills and a continuous perimeter trail connect back into the village on all sides. Two BASIC flankers per team use the upper and lower wilderness wings. `mapMinX/Y()` and `mapMaxX/Y()` expose the bounds; WASM sprites use a translated 1600×960 pixel map with the same five-cm scale. Older recordings retain their original boundaries.
+
+Heartwick now spans 120 × 64 metres (twice the preceding wilderness map area).
+The original village sits inside wooded hill country with broad saddles, outer
+trails, six outlying territory hearts, and four extra medkit stations. Terrain
+heights and tree/bush collision bounds are shared by native and WASM policies.
+
+Baseline routine callouts are staggered across seats every 15 seconds.
+
+New matches use meandering paths with varying widths and curved terrain banks.
+The same deterministic land deformation drives heights, ramps, navigation,
+and vegetation placement; older recordings keep their original terrain.
+
+Heartwick now occupies an irregular island. The sandy coast slopes into water;
+policies and movement respect the shoreline, while all objectives remain connected.
+
+Spray covers a roughly 62-degree cone and deals 3 damage per target per burst; armor absorbs damage first.

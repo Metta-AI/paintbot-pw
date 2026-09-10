@@ -1362,7 +1362,8 @@ proc buildTextureArray(layers: seq[seq[Image]], wrap: GLint): GLuint =
 
 proc loadPropPack*(
     path: string, unitHeight = true, brightness = 1.0'f32,
-    only: seq[string] = @[], textured = false, repeatTexture = false
+    only: seq[string] = @[], textured = false, repeatTexture = false,
+    maxTextureSize = 0
 ): PropPack =
   ## Loads named glTF props, scaled to unit height unless disabled.
   ## Brightness adjusts baked colors; textured keeps material images.
@@ -1377,6 +1378,7 @@ proc loadPropPack*(
     var size = 1
     for image in images:
       size = max(size, max(image.width, image.height))
+    if maxTextureSize > 0: size = min(size, maxTextureSize)
     var chains: seq[seq[Image]]
     for image in images:
       let square =

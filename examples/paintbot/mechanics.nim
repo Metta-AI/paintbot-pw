@@ -4,11 +4,17 @@ const
   GrenadeFlightTicks* = 10
   GrenadeBlastRadius* = 260
   SprayReach* = 850
+  SprayDamage* = 3
   SprayTicks* = 5
   SprayRecoveryTicks* = 20
   GunWindupTicks* = 5
   GunRange* = 5250
   StartingLives* = 3
+
+proc gunSpreadPercent*(w: World, origin, target: Point): int =
+  ## 25% less spread per metre downhill, capped at 50% less or 50% more spread.
+  if visionRulesVersion < 10: return 100
+  clamp(100 - (w.elevation(origin)-w.elevation(target)) div 4, 50, 150)
 
 proc trenchAt*(w: World, p: Point): int =
   for i, t in w.trenches:
@@ -42,14 +48,51 @@ proc initializeEquipment(w: var World) =
   for z in [Height div 3, Height*2 div 3]:
     w.pickups.add Pickup(pos: w.freePickup(point(Width div 2, z)),
         kind: medkitPickup)
-  for p in [point(1100, 1100), point(2100, 2350), point(3000, 700)]:
+  let pits = if visionRulesVersion >= 9:
+      [point(1950, 650), point(2600, 2050), point(900, 2850)]
+    else: [point(1100, 1100), point(2100, 2350), point(3000, 700)]
+  for p in pits:
     let q = w.freePickup(p)
     w.trenches.add Cover(x: q.x-140, z: q.z-140, w: 280, h: 280)
     w.trenches.add Cover(x: Width.int32-q.x-140, z: Height.int32-q.z-140,
         w: 280, h: 280)
 
+  if visionRulesVersion>=13:
+    for i,p in [home(0),home(1),point(2050,950),point(4350,3050),
+        point(1800,-200),point(4600,4200),point(-400,3000),point(6800,1000),
+        point(3200,1250),point(3200,2750)]:
+      w.controlHearts.add ControlHeart(pos:w.freePickup(p),owner:(if i<2:i.int32 else: -1'i32))
+    if deepWilderness:
+      for i,p in [point(-1700,700),point(8100,3300),point(1200,-650),point(5200,4650),
+          point(-1700,3300),point(8100,700)]:
+        w.controlHearts[i+2].pos=w.freePickup(p)
+      for p in [point(-1700,2000),point(8100,2000),point(3200,-650),point(3200,4650)]:
+        w.pickups.add Pickup(pos:w.freePickup(p),kind:medkitPickup)
+    w.captures=[1'i32,1'i32]
+
+proc updateTerritory*(w:var World) =
+  for heart in w.controlHearts.mitems:
+    var touching:array[2,bool]
+    for i,c in w.cogs:
+      if c.hp>0 and distance2(c.pos,heart.pos)<=140*140 and w.traversable(c.pos,heart.pos):
+        touching[team(i)]=true
+    if touching[0] != touching[1]:
+      let owner=(if touching[0]:0'i32 else:1'i32)
+      if heart.owner!=owner:
+        for i,c in w.cogs:
+          if team(i)==owner.int and c.hp>0 and distance2(c.pos,heart.pos)<=140*140 and w.traversable(c.pos,heart.pos):
+            inc w.cogs[i].captures
+            break
+        heart.owner=owner
+  w.captures=[0'i32,0'i32]
+  for heart in w.controlHearts:
+    if heart.owner>=0:inc w.captures[heart.owner]
+  for side in 0..1:
+    if w.captures[side]==10:w.winner=side.int32
+
 proc damage*(w: var World, victim, attacker, amount: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
+  if observeHit != nil: observeHit(w.tick, victim, attacker, w.cogs[victim].pos)
   let absorbed = min(w.equipment[victim].armor, amount.int32)
   w.equipment[victim].armor-=absorbed
   w.cogs[victim].hp = max(0'i32, w.cogs[victim].hp-(amount.int32-absorbed))
@@ -60,7 +103,7 @@ proc damage*(w: var World, victim, attacker, amount: int) =
   if w.cogs[victim].hp > 0: return
   if w.cogs[victim].carrying:
     w.resetHeart(1-team(victim)); w.cogs[victim].carrying = false
-  let lives = max(0'i32, w.equipment[victim].lives-1)
+  let lives = if visionRulesVersion>=13:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
   w.equipment[victim] = Equipment(lives: lives)
   w.cogs[victim].respawn = RespawnTicks
   w.cogs[victim].cooldown = 0
@@ -74,7 +117,7 @@ proc grenadeTarget*(w: World, slot: int): Point =
   let reach = 150+(Width div 5-150)*charge.int div GrenadeChargeTicks
   let aim = if c.aim == Point(): home(1-team(slot)) else: c.aim
   let v = direction(c.pos, aim, reach)
-  Point(x: clamp(c.pos.x+v.x, 0, Width), z: clamp(c.pos.z+v.z, 0, Height))
+  Point(x: clamp(c.pos.x+v.x,minX().int32,maxX().int32), z: clamp(c.pos.z+v.z,minZ().int32,maxZ().int32))
 
 proc explode*(w: var World, p: Point, owner: int) =
   let trench = w.trenchAt(p)
@@ -96,7 +139,8 @@ proc sprayTouches*(w: World, slot, victim: int): bool =
   let length = max(1'i64, isqrt(int64(v.x)*v.x+int64(v.z)*v.z))
   let along = (dx*v.x+dz*v.z) div length
   let across = abs(dx*v.z-dz*v.x) div length
-  along > 0 and along <= SprayReach+Radius and across <= along div 4+Radius and
+  let halfWidth = if visionRulesVersion >= 17: along*3 div 5 else: along div 4
+  along > 0 and along <= SprayReach+Radius and across <= halfWidth+Radius and
     w.lineClear(c.pos, w.cogs[victim].pos)
 
 proc pickupEquipment(w: var World) =
@@ -151,8 +195,8 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     if w.cogs[i].cooldown > 0: dec w.cogs[i].cooldown
     if w.equipment[i].sprayCooldown > 0: dec w.equipment[i].sprayCooldown
     let cmd = commands[i]
-    if cmd.walk: w.cogs[i].goal = Point(x: clamp(cmd.goal.x, 100, Width-100),
-        z: clamp(cmd.goal.z, 100, Height-100))
+    if cmd.walk: w.cogs[i].goal = Point(x: clamp(cmd.goal.x, (minX()+100).int32, (maxX()-100).int32),
+        z: clamp(cmd.goal.z, (minZ()+100).int32, (maxZ()-100).int32))
     if cmd.aim != Point(): w.cogs[i].aim = cmd.aim
     elif cmd.walk and cmd.goal != w.cogs[i].pos: w.cogs[i].aim = cmd.goal
     w.cogs[i].firing = cmd.shoot
@@ -197,7 +241,11 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           let origin = w.cogs[i].pos
           var aim = w.equipment[i].gunAim
           # Bounded triangular jitter approximates the original small angular spread.
-          let jitter = w.rng.between(-32, 32)+w.rng.between(-32, 32)
+          var jitter = w.rng.between(-32, 32)+w.rng.between(-32, 32)
+          if visionRulesVersion >= 10:
+            let target = Point(x: origin.x+aim.x, z: origin.z+aim.z)
+            jitter = jitter*w.gunSpreadPercent(origin, target).int32 div 100
+            aim = direction(Point(), aim, GunRange)
           aim = Point(x: aim.x-int32(int64(aim.z)*jitter div GunRange),
               z: aim.z+int32(int64(aim.x)*jitter div GunRange))
           let ray = direction(Point(), aim, GunRange)
@@ -212,6 +260,8 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
               for j in 0..<Seats:
                 if j == i or w.cogs[j].hp <= 0 or (checked and (1'u32 shl j)) != 0: continue
                 if distance2(p, w.cogs[j].pos) > Radius.int64*Radius: continue
+                if visionRulesVersion >= 9 and not w.lineClear(origin, w.cogs[
+                    j].pos): continue
                 checked = checked or (1'u32 shl j)
                 let trench = w.trenchAt(w.cogs[j].pos)
                 if trench >= 0 and trench != w.trenchAt(origin) and
@@ -219,10 +269,13 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
                 gunTargets.add (i, j)
                 break trace
           w.balls.add Paintball(pos: endPoint, velocity: Point(
-              x: endPoint.x-origin.x, z: endPoint.z-origin.z), owner: i.int32, life: 2)
+              x: endPoint.x-origin.x, z: endPoint.z-origin.z), owner: i.int32, life: (if visionRulesVersion >= 9: 6 else: 2))
       elif cmd.shoot and w.cogs[i].cooldown == 0:
         w.equipment[i].windup = GunWindupTicks
-        w.equipment[i].gunAim = direction(w.cogs[i].pos, w.cogs[i].aim, GunRange)
+        w.equipment[i].gunAim = if visionRulesVersion >= 10:
+          Point(x: w.cogs[i].aim.x-w.cogs[i].pos.x,
+              z: w.cogs[i].aim.z-w.cogs[i].pos.z)
+        else: direction(w.cogs[i].pos, w.cogs[i].aim, GunRange)
         let slow = w.equipment[i].armor > 0 or w.cogs[i].carrying or w.trenchAt(
             w.cogs[i].pos) >= 0
         w.cogs[i].cooldown = int32(FireCooldownTicks*(if slow: 3 else: 1))
@@ -232,9 +285,10 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     if w.equipment[i].burst > 0 and w.cogs[i].hp > 0:
       for j in 0..<Seats:
         let bit = 1'u32 shl j
+        if visionRulesVersion >= 18 and w.cogs[j].shield > 0: continue
         if (w.equipment[i].sprayHits and bit) == 0 and w.sprayTouches(i, j):
           w.equipment[i].sprayHits = w.equipment[i].sprayHits or bit
-          w.damage(j, i, 3)
+          w.damage(j, i, SprayDamage)
       dec w.equipment[i].burst
   var airborne: seq[Lob]
   for g in w.grenades:
@@ -242,6 +296,10 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     else: airborne.add g
   w.grenades = airborne
   w.pickupEquipment()
+  if visionRulesVersion>=13:
+    w.updateTerritory()
+    inc w.tick
+    return
   for i in 0..<Seats:
     if w.cogs[i].hp <= 0: continue
     let side = team(i); let enemy = 1-side
