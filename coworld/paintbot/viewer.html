@@ -871,6 +871,14 @@
   body.pov #povframe {
     display: block;
   }
+  #povstatic {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+    background: #171717;
+  }
   #povsight {
     position: absolute;
     left: 50%;
@@ -1306,6 +1314,13 @@
 <div id="feed" hidden></div>
 <div id="banner" hidden></div>
 <div id="povframe">
+  <canvas
+    id="povstatic"
+    width="160"
+    height="100"
+    aria-label="Respawning — no camera signal"
+    hidden
+  ></canvas>
   <svg id="povsight" viewBox="0 0 6 6" aria-hidden="true">
     <circle cx="3" cy="3" r="2" fill="#ff3030" />
   </svg>

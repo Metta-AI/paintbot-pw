@@ -112,9 +112,43 @@
       Module._pw_camera(camera.x, camera.z, camera.d, camera.yaw, camera.tilt);
     $("zoom").value = camera.d;
   }
+  const signalCanvas = $("povstatic");
+  const signalContext = signalCanvas.getContext("2d");
+  const signalPixels = signalContext.createImageData(160, 100);
+  let signalFrame = 0,
+    signalTime = -Infinity;
+  function animateStatic(time) {
+    signalFrame = 0;
+    if (signalCanvas.hidden) return;
+    if (time - signalTime >= 65) {
+      signalTime = time;
+      for (let i = 0; i < signalPixels.data.length; i += 4) {
+        const shade = Math.floor(Math.random() * 180) + 25;
+        signalPixels.data[i] =
+          signalPixels.data[i + 1] =
+          signalPixels.data[i + 2] =
+            shade;
+        signalPixels.data[i + 3] = 255;
+      }
+      signalContext.putImageData(signalPixels, 0, 0);
+    }
+    signalFrame = requestAnimationFrame(animateStatic);
+  }
+  function updatePovSignal() {
+    const alive = selected >= 0 && state?.world.cogs[selected]?.hp > 0;
+    signalCanvas.hidden = !(pov && selected >= 0 && !alive);
+    $("povsight").style.visibility = alive ? "visible" : "hidden";
+    if (!signalCanvas.hidden && !signalFrame)
+      signalFrame = requestAnimationFrame(animateStatic);
+    if (signalCanvas.hidden && signalFrame) {
+      cancelAnimationFrame(signalFrame);
+      signalFrame = 0;
+    }
+  }
   function options() {
     if (ready()) Module._pw_options(+following, +pov, +bars, +trails);
     document.body.classList.toggle("pov", pov);
+    updatePovSignal();
     layoutInset();
   }
   function layoutInset() {
@@ -772,8 +806,7 @@
     $("modehint").textContent = control
       ? "Territory control · Claim all 10 hearts"
       : "Capture the heart · Three lives";
-    $("povsight").style.visibility =
-      selected >= 0 && w.cogs[selected].hp > 0 ? "visible" : "hidden";
+    updatePovSignal();
     $("play").innerHTML = icon(data.paused ? "play" : "pause");
     $("play").setAttribute("aria-label", data.paused ? "Play" : "Pause");
     $("scrub").max = data.total;
