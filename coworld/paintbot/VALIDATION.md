@@ -22,3 +22,9 @@ These checks establish the new Polyworld game's determinism and policy compatibi
 - Browser checks: old mixed replay, exact tick stepping, restart/end, final score, spoiler protection, capture filtering, bot selection, visibility, first-person inset, and desktop/mobile layouts.
 - Art uses Gods of the Arena's Polyworld terrain, characters, toon lighting, and sun-shadow components, with pinned assets and generated masonry geometry.
 - `VIEWER.md` maps CTF spectator features to this implementation and identifies game mechanics absent from PW.
+
+## Solid cogs and deliberate firing (0.1.3)
+
+Living cogs block both teammates and opponents using their combined collision radii. Axis sliding still permits movement along obstacles, and occupied spawn points search nearby free space. Firing now has a 24-tick cooldown (one shot per second), with a two-tick muzzle flash. Replay format v3 selects these rules; v1/v2 recordings retain their original movement and eight-tick cooldown.
+
+Validation: all ten rule tests and three replay-analysis tests passed, including opposing/allied head-on collisions, occupied respawns, and sustained shot cadence. The full 7,200-tick BASIC/WASM match replay verified with hash `3624204313`. Original v1 (3,984 ticks, hash `1977552757`) and hosted v2 (1,300 ticks, hash `1314699705`) replays reproduced exactly. Optional vet review was unavailable because its API credentials were not configured.
