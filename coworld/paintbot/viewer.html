@@ -931,6 +931,34 @@
       display: block;
     }
   }
+  #lens {
+    width: 150px;
+    min-width: 0;
+    max-width: 40vw;
+    text-overflow: ellipsis;
+  }
+  .seat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .seat .pips {
+    flex: 0 0 8px;
+    line-height: 8px;
+  }
+  #inspect .name {
+    overflow-wrap: anywhere;
+  }
+  @media (max-width: 700px) {
+    #lens {
+      width: 100px;
+    }
+    .seat .pips {
+      flex-basis: 6px;
+      line-height: 6px;
+    }
+  }
 </style>
 <header>
   <div class="brand">PAINT<span>BOT</span></div>
