@@ -65,6 +65,7 @@ proc placeRoundVillage*() =
   for i in 0..<6:
     let x = 700+i*1000
     let z = if i mod 2 == 0: minZ()-100 else: maxZ()+100
+    if islandTerrain:continue
     grove.placeProp(trees[i], at(x.float32, z.float32), i.float32, 7.5)
   for i in 0..<38:
     let x = 350+(i*157 mod 5600)

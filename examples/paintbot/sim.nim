@@ -106,7 +106,7 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 15
+var visionRulesVersion* = 16
 proc minX*():int = (if visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
 proc minZ*():int = (if visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
@@ -132,6 +132,7 @@ proc traversable*(w: World, a, b: Point): bool =
 proc blocked*(w: World, p: Point, radius = Radius): bool =
   if p.x < minX()+radius or p.z < minZ()+radius or p.x > maxX()-radius or p.z >
       maxZ()-radius: return true
+  if islandTerrain and islandMargin(p.x.int,p.z.int)<radius div 3+40: return true
   for c in w.cover:
     if c.h == 0:
       let r = c.w div 2
@@ -210,6 +211,7 @@ proc newWorld*(seed: int32): World =
   wilderness = visionRulesVersion >= 12
   deepWilderness = visionRulesVersion >= 14
   organicTerrain = visionRulesVersion >= 15
+  islandTerrain = visionRulesVersion >= 16
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
   if visionRulesVersion >= 8:
     for lot in roundVillage():

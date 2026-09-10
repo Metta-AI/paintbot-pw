@@ -1,15 +1,23 @@
 ## Centimetre terrain heights, shared by simulation and the Polyworld layers.
+import std/math
 const TerraceHeight* = 250
 var wideRamps* = false
 var wilderness* = false
 var deepWilderness* = false
 var organicTerrain* = false
+var islandTerrain* = false
 proc landWave*(value,period,amplitude:int):int =
   let phase=((value mod period)+period) mod period
   let half=period div 2
   let t=phase mod half
   let magnitude=int(4'i64*t.int64*(half-t).int64*amplitude.int64 div (half*half).int64)
   if phase<half:magnitude else: -magnitude
+proc islandMargin*(x,z:int):int =
+  # Rounded headlands with asymmetric coves, in normalized coast units.
+  let nx=abs(x-3200).int64*1000 div 5800
+  let nz=abs(z-2000).int64*1000 div 3050
+  let radius=int(sqrt(sqrt((nx*nx*nx*nx+nz*nz*nz*nz).float64)))
+  980-radius+landWave(x+z,2600,28)+landWave(x-z+1100,3700,22)
 proc landCoordinates*(x,z:int):tuple[x,z:int] =
   if not organicTerrain:return (x,z)
   (x+landWave(z+350,2900,360)+landWave(x+z,1700,70),
@@ -53,6 +61,7 @@ proc forestLots*():seq[tuple[x,z,radius:int]] =
       if x>= -800 and x<=7200 and z>= -400 and z<=4400:continue
       let px=x+((x+3000)*17+(z+1400)*11) mod 161-80
       let pz=z+((x+3000)*7+(z+1400)*19) mod 181-90
+      if islandTerrain and islandMargin(px,pz)<75:continue
       if forestRouteDistance(px,pz)<220:continue
       if (if organicTerrain:villageLaneDistance(px,pz) else:abs(pz-2000))<240:continue
       if (x+z) mod 3==0:continue
@@ -83,4 +92,7 @@ proc raisedHeight*(x,z:int):int =
   baseRaisedHeight(p.x,p.z)
 proc terrainHeight*(x,z:int):int =
   let p=landCoordinates(x,z)
-  baseTerrainHeight(p.x,p.z)
+  result=baseTerrainHeight(p.x,p.z)
+  if islandTerrain:
+    let coast=islandMargin(x,z)
+    result=min(result,(coast-35)*5)

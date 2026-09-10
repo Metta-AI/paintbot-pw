@@ -622,11 +622,28 @@
       )
       .join("");
   }
+  function islandMargin(x, z) {
+    function wave(value, period, amplitude) {
+      const phase = ((value % period) + period) % period,
+        half = period / 2,
+        t = phase % half;
+      const m = Math.floor((4 * t * (half - t) * amplitude) / (half * half));
+      return phase < half ? m : -m;
+    }
+    const nx = Math.floor((Math.abs(x - 3200) * 1000) / 5800),
+      nz = Math.floor((Math.abs(z - 2000) * 1000) / 3050);
+    return (
+      980 -
+      Math.floor(Math.sqrt(Math.sqrt(nx ** 4 + nz ** 4))) +
+      wave(x + z, 2600, 28) +
+      wave(x - z + 1100, 3700, 22)
+    );
+  }
   function minimap() {
     const canvas = $("minimap"),
       ctx = canvas.getContext("2d"),
       w = state.world;
-    ctx.fillStyle = "#294835";
+    ctx.fillStyle = w.rulesVersion >= 16 ? "#398b96" : "#294835";
     ctx.fillRect(0, 0, 320, 200);
     const bounds = state.bounds || [0, 0, 6400, 4000];
     ctx.save();
@@ -635,6 +652,8 @@
     if ((w.controlHearts || []).length) {
       for (let z = bounds[1]; z < bounds[3]; z += 100)
         for (let x = bounds[0]; x < bounds[2]; x += 100) {
+          if (w.rulesVersion >= 16 && islandMargin(x + 50, z + 50) < 40)
+            continue;
           let nearest = w.controlHearts[0],
             distance = Infinity;
           for (const h of w.controlHearts) {

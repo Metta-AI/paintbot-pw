@@ -241,6 +241,13 @@ proc runGraphics*() =
           tile.kind = RockTile
         else:
           tile.tops = pack(heights)
+      if islandTerrain:
+        let coast=islandMargin(gx*100+50,gz*100+50)
+        if coast< -25:
+          tile.flags=0
+          terraces.tiles[z*terrainWidth+x].flags=0
+        elif coast<85:
+          tile.kind=RoadTile
       ground.tiles[z*terrainWidth+x] = tile
   layers = if replayRulesVersion >= 9: @[ground, terraces] else: @[ground]
   amplitude = 1.2
@@ -344,6 +351,9 @@ proc runGraphics*() =
     beginCharacters(scene, window, view, projection, eye)
     actors(); finishCharacters(scene)
     shapes.clear()
+    if islandTerrain:
+      shapes.addQuad(vec3(-400,-2.8,-400),vec3(-400,-2.8,400),
+        vec3(400,-2.8,400),vec3(400,-2.8,-400),rgbx(57,139,150,254))
     # Low stone courses exactly match collision bounds; capstones and stripes read at a glance.
     # Paint splashes and short bursts follow recorded tags, so seeking reconstructs them.
     for event in index.events:
@@ -378,11 +388,12 @@ proc runGraphics*() =
         let offset=vec3(cos(angle)*spread,sin(angle)*spread-age*0.025,
             sin(angle*2)*0.18)
         shapes.paintball(front+offset,(0.11+(drop mod 3).float32*0.035)*fade,color)
-    # Brass boundary rails make the playable rectangle explicit within the grove.
-    for z in [minZ().float32/100-20, maxZ().float32/100-20]: shapes.box(0, 0, z, (maxX()-minX()).float32/200, 0.16, 0.07, rgbx(217,
-        187, 111, 255))
-    for x in [minX().float32/100-32, maxX().float32/100-32]: shapes.box(x, 0, 0, 0.07, 0.16, (maxZ()-minZ()).float32/200, rgbx(217,
-        187, 111, 255))
+    if not islandTerrain:
+      # Brass boundary rails make the playable rectangle explicit within the grove.
+      for z in [minZ().float32/100-20, maxZ().float32/100-20]: shapes.box(0, 0, z, (maxX()-minX()).float32/200, 0.16, 0.07, rgbx(217,
+          187, 111, 255))
+      for x in [minX().float32/100-32, maxX().float32/100-32]: shapes.box(x, 0, 0, 0.07, 0.16, (maxZ()-minZ()).float32/200, rgbx(217,
+          187, 111, 255))
     for item in world.pickups:
       if item.readyAt > world.tick: continue
       if lens >= 0:
@@ -470,6 +481,7 @@ proc runGraphics*() =
         for z in countup(minZ(),maxZ()-200,200):
           for x in countup(minX(),maxX()-200,200):
             let center=point(x+100,z+100)
+            if islandTerrain and islandMargin(center.x.int,center.z.int)<60:continue
             var nearest=0
             for i,h in world.controlHearts:
               if distance2(center,h.pos)<distance2(center,world.controlHearts[nearest].pos):nearest=i

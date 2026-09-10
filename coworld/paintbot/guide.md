@@ -109,3 +109,6 @@ Baseline routine callouts are staggered across seats every 15 seconds.
 New matches use meandering paths with varying widths and curved terrain banks.
 The same deterministic land deformation drives heights, ramps, navigation,
 and vegetation placement; older recordings keep their original terrain.
+
+Heartwick now occupies an irregular island. The sandy coast slopes into water;
+policies and movement respect the shoreline, while all objectives remain connected.

@@ -36,6 +36,16 @@ def land_wave(value, period, amplitude):
     return magnitude if phase < half else -magnitude
 
 
+def island_margin(x, z):
+    nx, nz = abs(x - 3200) * 1000 // 5800, abs(z - 2000) * 1000 // 3050
+    return (
+        980
+        - int(math.sqrt(math.sqrt(nx**4 + nz**4)))
+        + land_wave(x + z, 2600, 28)
+        + land_wave(x - z + 1100, 3700, 22)
+    )
+
+
 def land_coordinates(x, z):
     return (
         x + land_wave(z + 350, 2900, 360) + land_wave(x + z, 1700, 70),
@@ -62,7 +72,14 @@ def forest_height(x, z):
 
 
 @lru_cache(maxsize=65536)
-def terrain_height(x, z, wide=False, wilderness=False, deep=False, organic=False):
+def terrain_height(
+    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False
+):
+    if island:
+        return min(
+            terrain_height(x, z, wide, wilderness, deep, organic),
+            (island_margin(x, z) - 35) * 5,
+        )
     if organic:
         x, z = land_coordinates(x, z)
     if wilderness and (x < 0 or x > 6400 or z < 0 or z > 4000):
@@ -113,6 +130,7 @@ def elevation(w, p):
         w.get("rulesVersion", 0) >= 12,
         w.get("rulesVersion", 0) >= 14,
         w.get("rulesVersion", 0) >= 15,
+        w.get("rulesVersion", 0) >= 16,
     )
     for t in w.get("trenches", []):
         if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
@@ -180,7 +198,13 @@ def can_see_point(w, slot, b):
 
 @lru_cache(maxsize=4)
 def walkability(
-    cover, layered=False, wide=False, wilderness=False, deep=False, organic=False
+    cover,
+    layered=False,
+    wide=False,
+    wilderness=False,
+    deep=False,
+    organic=False,
+    island=False,
 ):
     width, height = (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
     ox, oz = (2800, 1200) if deep else (800, 400) if wilderness else (0, 0)
@@ -208,15 +232,20 @@ def walkability(
             raw[(z * width + left) * 4 + 3 : (z * width + right) * 4 : 4] = b"\x00" * (
                 right - left
             )
+    if island:
+        for z in range(height):
+            for x in range(width):
+                if island_margin(x * 5 - ox, z * 5 - oz) < 59:
+                    raw[(z * width + x) * 4 + 3] = 0
     if layered:
         for z in range(11, height - 11):
             for x in range(11, width - 11):
                 px, pz = x * 5 - ox, z * 5 - oz
-                h = terrain_height(px, pz, wide, wilderness, deep, organic)
+                h = terrain_height(px, pz, wide, wilderness, deep, organic, island)
                 if any(
                     abs(
                         terrain_height(
-                            px + dx, pz + dz, wide, wilderness, deep, organic
+                            px + dx, pz + dz, wide, wilderness, deep, organic, island
                         )
                         - h
                     )
@@ -285,6 +314,7 @@ class SpriteView:
                     wilderness,
                     deep,
                     organic,
+                    w.get("rulesVersion", 0) >= 16,
                 ),
             )
             sprite(1, "map", width, height)
