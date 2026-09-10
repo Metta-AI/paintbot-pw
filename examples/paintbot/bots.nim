@@ -35,14 +35,15 @@ proc host(slot:int, strings:StringPool): Host =
     let i=a[0].int
     if i<0 or i>=heard[slot].len:return strings.putString("")
     strings.putString(heard[slot][i].text),4)
-  for axis in 0..2:
-    let field=axis
-    discard result.addFunction(["heardSlot","heardX","heardY"][field],1,proc(a:openArray[int32]):int32 =
+  proc getHeard(field:int):HostProc =
+    result = proc(a:openArray[int32]):int32 =
       let i=a[0].int
       if i<0 or i>=heard[slot].len:return -1
       if field==0:heard[slot][i].slot.int32
       elif field==1:heard[slot][i].pos.x
-      else:heard[slot][i].pos.z,4)
+      else:heard[slot][i].pos.z
+  for axis in 0..2:
+    discard result.addFunction(["heardSlot","heardX","heardY"][axis],1,getHeard(axis),4)
   for name in DataNames:discard result.addData(name)
   discard result.addFunction("visible",1,proc(a:openArray[int32]):int32 = int32(active.visible(slot,a[0].int)),4)
   discard result.addFunction("playerX",1,proc(a:openArray[int32]):int32 =
@@ -59,14 +60,25 @@ proc host(slot:int, strings:StringPool): Host =
   discard result.addFunction("pickupVisible",1,proc(a:openArray[int32]):int32 =
     let i=a[0].int
     int32(i>=0 and i<active.pickups.len and active.pickups[i].readyAt<=active.tick and active.canSeePoint(slot,active.pickups[i].pos)),4)
-  for axis in 0..2:
-    let field=axis
-    discard result.addFunction(["pickupX","pickupY","pickupKind"][field],1,proc(a:openArray[int32]):int32 =
+  proc getPickup(field:int):HostProc =
+    result = proc(a:openArray[int32]):int32 =
       let i=a[0].int
       if i<0 or i>=active.pickups.len or active.pickups[i].readyAt>active.tick or not active.canSeePoint(slot,active.pickups[i].pos):return -1
       if field==0:active.pickups[i].pos.x
       elif field==1:active.pickups[i].pos.z
-      else:active.pickups[i].kind.int32,4)
+      else:active.pickups[i].kind.int32
+  for axis in 0..2:
+    discard result.addFunction(["pickupX","pickupY","pickupKind"][axis],1,getPickup(axis),4)
+  discard result.addFunction("heartCount",0,proc(a:openArray[int32]):int32 = active.controlHearts.len.int32,4)
+  proc getControl(field:int):HostProc =
+    result = proc(a:openArray[int32]):int32 =
+      let i=a[0].int
+      if i<0 or i>=active.controlHearts.len:return -1
+      if field==0:active.controlHearts[i].pos.x
+      elif field==1:active.controlHearts[i].pos.z
+      else:active.controlHearts[i].owner
+  for axis in 0..2:
+    discard result.addFunction(["controlX","controlY","controlOwner"][axis],1,getControl(axis),4)
   discard result.addFunction("mapMinX",0,proc(a:openArray[int32]):int32 = minX().int32,4)
   discard result.addFunction("mapMinY",0,proc(a:openArray[int32]):int32 = minZ().int32,4)
   discard result.addFunction("mapMaxX",0,proc(a:openArray[int32]):int32 = maxX().int32,4)

@@ -106,10 +106,8 @@
           "maxItems": 16,
           "items": {
             "type": "integer",
-            "enum": [
-              0,
-              1
-            ]
+            "minimum": 0,
+            "maximum": 10
           }
         },
         "ticks": {

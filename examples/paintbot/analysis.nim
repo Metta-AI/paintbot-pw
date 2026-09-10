@@ -20,6 +20,8 @@ type
 proc snapshot(w: World): World =
   result = w
   # Explicit copies keep checkpoint storage independent of mutable sequences.
+  result.controlHearts = @[]
+  for h in w.controlHearts:result.controlHearts.add h
   result.pickups = @[]
   for x in w.pickups: result.pickups.add x
   result.trenches = @[]
@@ -49,7 +51,13 @@ proc indexReplay*(): ReplayIndex =
     let previous = world.cogs
     let equipment = world.equipment
     let hearts = world.hearts
+    var owners:seq[int32]
+    for h in world.controlHearts:owners.add h.owner
     advance()
+    for i,h in world.controlHearts:
+      if h.owner!=owners[i] and h.owner>=0:
+        result.events.add Moment(tick:world.tick,slot: -1,side:h.owner.int,
+          kind:"territory",victim:i,x:h.pos.x,z:h.pos.z)
     result.hits.add hits
     hits.setLen(0)
     result.events.add tags
@@ -65,7 +73,7 @@ proc indexReplay*(): ReplayIndex =
       if cog.hp > previous[i].hp and previous[i].hp > 0: event("heal")
       if cog.hp == 0 and previous[i].hp > 0:
         event("down")
-      if cog.captures > previous[i].captures: event("capture")
+      if visionRulesVersion<13 and cog.captures > previous[i].captures: event("capture")
       if cog.carrying and not previous[i].carrying: event("pickup")
     for g in world.grenades:
       if g.releasedAt == world.tick-1:
@@ -88,6 +96,7 @@ proc indexReplay*(): ReplayIndex =
     if world.tick mod 24 == 0 or world.tick == recording.frames.len:
       var glory: array[2, int32]
       for i, c in world.cogs: glory[team(i)] += c.tags + c.captures * 10
+      if visionRulesVersion>=13:glory=world.captures
       result.momentum.add Sample(tick: world.tick, red: glory[0], blue: glory[1])
     if world.tick mod 240 == 0:
       result.checkpoints.add Checkpoint(state: snapshot(world))

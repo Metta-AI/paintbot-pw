@@ -53,7 +53,25 @@ type
   Blast* = object
     pos*: Point
     tick*, owner*, trench*: int32
+  ControlHeart* = object
+    pos*: Point
+    owner*: int32 # -1 neutral, 0 Ember, 1 Azure
   World* = object
+    seed*, tick*: int32
+    rng*: Rng
+    cogs*: array[Seats, Cog]
+    hearts*: array[2, Heart]
+    captures*: array[2, int32]
+    cover*: seq[Cover]
+    balls*: seq[Paintball]
+    winner*: int32 # -1 before a capture victory
+    equipment*: array[Seats, Equipment]
+    trenches*: seq[Cover]
+    pickups*: seq[Pickup]
+    grenades*: seq[Lob]
+    blasts*: seq[Blast]
+    controlHearts*: seq[ControlHeart]
+  CombatWorld = object
     seed*, tick*: int32
     rng*: Rng
     cogs*: array[Seats, Cog]
@@ -88,7 +106,7 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 12
+var visionRulesVersion* = 13
 proc minX*():int = (if visionRulesVersion>=12: -800 else: 0)
 proc minZ*():int = (if visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
@@ -219,7 +237,8 @@ proc newWorld*(seed: int32): World =
         result.cover.add Cover(x:q.x-65,z:q.z-65,w:130,h:0)
   if visionRulesVersion >= 6: result.initializeEquipment()
 proc scores*(w: World): seq[int] =
-  for i in 0..<Seats: result.add int(w.winner == team(i).int32)
+  for i in 0..<Seats:
+    result.add (if visionRulesVersion>=13:w.captures[team(i)].int else:int(w.winner == team(i).int32))
 type LegacyWorld = object
   seed, tick: int32
   rng: Rng
@@ -230,7 +249,11 @@ type LegacyWorld = object
   balls: seq[Paintball]
   winner: int32
 proc stateHash*(w: World): uint32 =
-  if visionRulesVersion >= 6: return hashy(w)
+  if visionRulesVersion >= 13: return hashy(w)
+  if visionRulesVersion >= 6:
+    return hashy(CombatWorld(seed:w.seed,tick:w.tick,rng:w.rng,cogs:w.cogs,
+      hearts:w.hearts,captures:w.captures,cover:w.cover,balls:w.balls,winner:w.winner,
+      equipment:w.equipment,trenches:w.trenches,pickups:w.pickups,grenades:w.grenades,blasts:w.blasts))
   hashy(LegacyWorld(seed: w.seed, tick: w.tick, rng: w.rng, cogs: w.cogs,
       hearts: w.hearts, captures: w.captures, cover: w.cover, balls: w.balls,
       winner: w.winner))

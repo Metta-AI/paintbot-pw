@@ -121,6 +121,38 @@ wend
 
 ' Remember seen supplies and deliberately equip before taking a fighting position.
 i = 0
+' Territory replaces flag errands: spread across neutral and enemy hearts.
+if heartCount() > 0 then
+  objective = -1
+  objectiveCost = 2147483647
+  j = 0
+  while j < heartCount()
+    if controlOwner(j) <> selfTeam then
+      dx = controlX(j) - selfX
+      dy = controlY(j) - selfY
+      cost = dx * dx + dy * dy
+      if j = 2 + (selfId / 2) mod 8 then
+        cost = cost - 12000000
+      end if
+      if controlOwner(j) = -1 then
+        cost = cost - 1000000
+      end if
+      if cost < objectiveCost then
+        objective = j
+        objectiveCost = cost
+      end if
+    end if
+    j = j + 1
+  wend
+  if objective >= 0 then
+    walkTo(controlX(objective),controlY(objective))
+    if best < 0 then
+      lookAt(controlX(objective),controlY(objective))
+    end if
+  end if
+end if
+
+i = 0
 while i < pickupCount() and i < 32
   if pickupVisible(i) then
     pickupMemoryX(i) = pickupX(i)
@@ -201,7 +233,7 @@ if hasGrenade and best >= 0 then
 end if
 
 ' Two quartermasters scout the back corners before joining the fight.
-if not carrying and not hasGrenade and worldTick mod 960 < 240 then
+if heartCount() = 0 and not carrying and not hasGrenade and worldTick mod 960 < 240 then
   role = (selfId / 2) mod 8
   if role = 2 or role = 3 then
     sx = 300
@@ -221,7 +253,7 @@ if not carrying and not hasGrenade and worldTick mod 960 < 240 then
 end if
 
 ' The close-assault cog scouts the spray supply before approaching enemies.
-if not carrying and not hasSpray and (selfId / 2) mod 8 = 0 and worldTick mod 960 < 240 then
+if heartCount() = 0 and not carrying and not hasSpray and (selfId / 2) mod 8 = 0 and worldTick mod 960 < 240 then
   sx = 600
   sy = 1000
   if selfTeam = 1 then
@@ -233,7 +265,7 @@ if not carrying and not hasSpray and (selfId / 2) mod 8 = 0 and worldTick mod 96
 end if
 
 ' Equipped assault cogs leave supply routes and close with the opposing team.
-if not carrying and (hasSpray or hasGrenade) then
+if heartCount() = 0 and not carrying and (hasSpray or hasGrenade) then
   if best >= 0 then
     walkTo(playerX(best), playerY(best))
   else
@@ -244,7 +276,7 @@ end if
 
 ' Alternate wilderness wings approach the heart from behind the village.
 role = (selfId / 2) mod 8
-if mapMinX() < 0 and (role = 4 or role = 5) and not carrying then
+if heartCount() = 0 and mapMinX() < 0 and (role = 4 or role = 5) and not carrying then
   if worldTick mod 1200 = 0 then
     flankStage = 0
   end if

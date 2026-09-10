@@ -28,6 +28,7 @@ var
   lens = -1
   follow = false
   firstPerson = false
+  territoryOverlay = true
   insetSize = 0.25'f32
   bars = true
   trails = false
@@ -57,6 +58,8 @@ proc setInset(value: cfloat) {.exportc: "pw_inset", cdecl,
 proc setOptions(f, p, b, t: cint) {.exportc: "pw_options", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   follow = f != 0; firstPerson = p != 0; bars = b != 0; trails = t != 0
+proc setTerritory(value:cint) {.exportc:"pw_territory",cdecl,
+    codegenDecl:"EMSCRIPTEN_KEEPALIVE $# $#$#".} = territoryOverlay=value!=0
 const teamColors = [rgbx(255, 103, 81, 255), rgbx(74, 192, 255, 255)]
 proc position(p: Point, y = 0'f32): Vec3 = vec3(p.x.float32/100-32, y+(
     if replayRulesVersion >= 9: world.elevation(p).float32/100 else: 0'f32),
@@ -410,18 +413,40 @@ proc runGraphics*() =
           0.3, 0.5, 0.25, rgbx(241, 175, 70, 255))
       for hp in 0..<e.armor: shapes.box(poses[i].x-0.3+hp.float32*0.25, poses[
           i].y+2.1, poses[i].z, 0.16, 0.09, 0.09, rgbx(65, 203, 245, 255))
-    for side in 0..1:
-      let h = position(home(side))
-      shapes.addCircle(h+vec3(0, 0.04, 0), 2.3, rgbx(45, 69, 64, 255))
-      shapes.addCircle(h+vec3(0, 0.06, 0), 1.65, teamColors[side])
-      shapes.addCircle(h+vec3(0, 0.07, 0), 1.45, rgbx(56, 76, 71, 255))
-      let heart = world.hearts[side]
-      if heart.carrier < 0 or seen(heart.carrier):
-        let hp = position(heart.pos, if heart.carrier < 0: 1.45+sin(
-            world.tick.float32/12)*0.12 else: 3.1)
-        shapes.gem(hp, 0.62, teamColors[side])
-        shapes.gem(hp+vec3(-0.25, 0.3, 0), 0.36, teamColors[side])
-        shapes.gem(hp+vec3(0.25, 0.3, 0), 0.36, teamColors[side])
+    if world.controlHearts.len>0:
+      if territoryOverlay:
+        for z in countup(minZ(),maxZ()-200,200):
+          for x in countup(minX(),maxX()-200,200):
+            let center=point(x+100,z+100)
+            var nearest=0
+            for i,h in world.controlHearts:
+              if distance2(center,h.pos)<distance2(center,world.controlHearts[nearest].pos):nearest=i
+            let owner=world.controlHearts[nearest].owner
+            let color=if owner<0:rgbx(150,155,160,55) else:rgbx(teamColors[owner].r,teamColors[owner].g,teamColors[owner].b,85)
+            shapes.addQuad(position(point(x,z),0.09),position(point(x,z+200),0.09),
+              position(point(x+200,z+200),0.09),position(point(x+200,z),0.09),color)
+      for heart in world.controlHearts:
+        let color=if heart.owner<0:rgbx(170,179,188,255) else:teamColors[heart.owner]
+        let base=position(heart.pos,0.08)
+        shapes.addCircle(base,1.4,color)
+        shapes.addCircle(base+vec3(0,0.01,0),1.13,rgbx(47,63,58,255))
+        let p=position(heart.pos,1.4+sin((world.tick.float32+alpha)/12)*0.12)
+        shapes.gem(p,0.7,color)
+        shapes.gem(p+vec3(-0.28,0.32,0),0.4,color)
+        shapes.gem(p+vec3(0.28,0.32,0),0.4,color)
+    else:
+      for side in 0..1:
+        let h = position(home(side))
+        shapes.addCircle(h+vec3(0, 0.04, 0), 2.3, rgbx(45, 69, 64, 255))
+        shapes.addCircle(h+vec3(0, 0.06, 0), 1.65, teamColors[side])
+        shapes.addCircle(h+vec3(0, 0.07, 0), 1.45, rgbx(56, 76, 71, 255))
+        let heart = world.hearts[side]
+        if heart.carrier < 0 or seen(heart.carrier):
+          let hp = position(heart.pos, if heart.carrier < 0: 1.45+sin(
+              world.tick.float32/12)*0.12 else: 3.1)
+          shapes.gem(hp, 0.62, teamColors[side])
+          shapes.gem(hp+vec3(-0.25, 0.3, 0), 0.36, teamColors[side])
+          shapes.gem(hp+vec3(0.25, 0.3, 0), 0.36, teamColors[side])
     for i, c in world.cogs:
       if c.hp <= 0 or not seen(i): continue
       let p = poses[i]

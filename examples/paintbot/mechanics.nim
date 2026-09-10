@@ -56,6 +56,33 @@ proc initializeEquipment(w: var World) =
     w.trenches.add Cover(x: Width.int32-q.x-140, z: Height.int32-q.z-140,
         w: 280, h: 280)
 
+  if visionRulesVersion>=13:
+    for i,p in [home(0),home(1),point(2050,950),point(4350,3050),
+        point(1800,-200),point(4600,4200),point(-400,3000),point(6800,1000),
+        point(3200,1250),point(3200,2750)]:
+      w.controlHearts.add ControlHeart(pos:w.freePickup(p),owner:(if i<2:i.int32 else: -1'i32))
+    w.captures=[1'i32,1'i32]
+
+proc updateTerritory*(w:var World) =
+  for heart in w.controlHearts.mitems:
+    var touching:array[2,bool]
+    for i,c in w.cogs:
+      if c.hp>0 and distance2(c.pos,heart.pos)<=140*140 and w.traversable(c.pos,heart.pos):
+        touching[team(i)]=true
+    if touching[0] != touching[1]:
+      let owner=(if touching[0]:0'i32 else:1'i32)
+      if heart.owner!=owner:
+        for i,c in w.cogs:
+          if team(i)==owner.int and c.hp>0 and distance2(c.pos,heart.pos)<=140*140 and w.traversable(c.pos,heart.pos):
+            inc w.cogs[i].captures
+            break
+        heart.owner=owner
+  w.captures=[0'i32,0'i32]
+  for heart in w.controlHearts:
+    if heart.owner>=0:inc w.captures[heart.owner]
+  for side in 0..1:
+    if w.captures[side]==10:w.winner=side.int32
+
 proc damage*(w: var World, victim, attacker, amount: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
   if observeHit != nil: observeHit(w.tick, victim, attacker, w.cogs[victim].pos)
@@ -69,7 +96,7 @@ proc damage*(w: var World, victim, attacker, amount: int) =
   if w.cogs[victim].hp > 0: return
   if w.cogs[victim].carrying:
     w.resetHeart(1-team(victim)); w.cogs[victim].carrying = false
-  let lives = max(0'i32, w.equipment[victim].lives-1)
+  let lives = if visionRulesVersion>=13:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
   w.equipment[victim] = Equipment(lives: lives)
   w.cogs[victim].respawn = RespawnTicks
   w.cogs[victim].cooldown = 0
@@ -260,6 +287,10 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     else: airborne.add g
   w.grenades = airborne
   w.pickupEquipment()
+  if visionRulesVersion>=13:
+    w.updateTerritory()
+    inc w.tick
+    return
   for i in 0..<Seats:
     if w.cogs[i].hp <= 0: continue
     let side = team(i); let enemy = 1-side

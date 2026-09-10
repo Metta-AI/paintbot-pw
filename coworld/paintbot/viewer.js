@@ -43,6 +43,7 @@
       tag: `tagged ${escape(name(e.victim))}`,
       down: "was tagged out",
       capture: "captured a heart",
+      territory: "claimed a territory heart",
       pickup: "picked up the enemy heart",
       drop: "dropped the heart",
       return: "heart returned home",
@@ -87,6 +88,9 @@
     });
     $("fpvcap").style.top = r.top + 85 + "px";
   }
+  $("territory").onchange = () => {
+    if (ready()) Module._pw_territory(+$("territory").checked);
+  };
   let resizing = false;
   $("povresize").onpointerdown = (e) => {
     resizing = true;
@@ -261,7 +265,7 @@
           ? "Match drawn"
           : `${w.winner ? "Azure" : "Ember"} wins`
         : "Match scoreboard",
-      `<p class="hint">${clock(w.tick)} · Ember ${w.captures[0]} — ${w.captures[1]} Azure · Seed ${index.seed}<br>Glory = tags + 10 × captures. Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th><th>Glory</th></tr></thead><tbody>${rows}</tbody></table>`,
+      `<p class="hint">${clock(w.tick)} · Ember ${w.captures[0]} — ${w.captures[1]} Azure · Seed ${index.seed}<br>Glory = tags + 10 × captures. ${w.controlHearts?.length ? "Captures count heart claims; the team score is current ownership." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th><th>Glory</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
     $("dialogbody")
       .querySelectorAll("[data-seat]")
@@ -285,7 +289,7 @@
     );
     show(
       "The match, moment by moment",
-      `<div class="toolbar"><select id="eventfilter" aria-label="Event type">${["all", "capture", "pickup", "drop", "return", "tag", "down", "grenade throw", "grenade blast", "spray", "grenade pickup", "spray pickup", "shield pickup", "heal"].map((x) => `<option ${x === eventFilter ? "selected" : ""}>${x}</option>`).join("")}</select><span class="hint">${list.length} events · ${spoilers ? "Future events visible" : "Future events hidden"}</span></div><div class="eventlist">${list.map((e) => `<button data-tick="${e.tick}"><span class="${e.side ? "blue" : "red"}">${clock(e.tick)} · ${escape(e.slot < 0 ? (e.side ? "Azure" : "Ember") : name(e.slot))}</span> ${eventTitle(e)}</button>`).join("") || '<p class="hint">No matching events at this point in the replay.</p>'}</div>`,
+      `<div class="toolbar"><select id="eventfilter" aria-label="Event type">${["all", "territory", "capture", "pickup", "drop", "return", "tag", "down", "grenade throw", "grenade blast", "spray", "grenade pickup", "spray pickup", "shield pickup", "heal"].map((x) => `<option ${x === eventFilter ? "selected" : ""}>${x}</option>`).join("")}</select><span class="hint">${list.length} events · ${spoilers ? "Future events visible" : "Future events hidden"}</span></div><div class="eventlist">${list.map((e) => `<button data-tick="${e.tick}"><span class="${e.side ? "blue" : "red"}">${clock(e.tick)} · ${escape(e.slot < 0 ? (e.side ? "Azure" : "Ember") : name(e.slot))}</span> ${eventTitle(e)}</button>`).join("") || '<p class="hint">No matching events at this point in the replay.</p>'}</div>`,
     );
     $("eventfilter").onchange = (e) => {
       eventFilter = e.target.value;
@@ -392,7 +396,7 @@
           e.slot === selected &&
           e.tick <= state.world.tick,
       ).length;
-    const markup = `<p class="railtitle">Bot ${selected + 1} / ${team(selected) ? "Azure" : "Ember"}</p><div class="name">${escape(name(selected))}</div><dl><dt>Health</dt><dd>${c.hp} / 3</dd><dt>Lives</dt><dd>${state.world.equipment?.[selected]?.lives ?? "∞"}</dd><dt>Armor</dt><dd>${state.world.equipment?.[selected]?.armor ?? 0}</dd><dt>Equipment</dt><dd>${[state.world.equipment?.[selected]?.grenade ? "Grenade" : "", state.world.equipment?.[selected]?.sprayCan ? "Spray can" : ""].filter(Boolean).join(" · ") || "Paintball gun"}</dd><dt>Tags / outs</dt><dd>${c.tags} / ${d}</dd><dt>Captures</dt><dd>${c.captures}</dd><dt>Respawn</dt><dd>${c.hp ? "—" : (c.respawn / 24).toFixed(1) + "s"}</dd><dt>Shield</dt><dd>${(c.shield / 24).toFixed(1)}s</dd><dt>Carrying</dt><dd>${c.carrying ? "♥ Enemy heart" : "—"}</dd><dt>Position</dt><dd>${(c.pos.x / 100).toFixed(1)}, ${(c.pos.z / 100).toFixed(1)}</dd></dl><div class="inspection-actions"><button id="follow" aria-pressed="${following}">Follow</button><button id="eyes" aria-pressed="${pov}">Eyes</button><button id="botlens">Vision</button><button id="clear">Clear</button></div>`;
+    const markup = `<p class="railtitle">Bot ${selected + 1} / ${team(selected) ? "Azure" : "Ember"}</p><div class="name">${escape(name(selected))}</div><dl><dt>Health</dt><dd>${c.hp} / 3</dd><dt>Lives</dt><dd>${state.world.controlHearts?.length ? "∞" : (state.world.equipment?.[selected]?.lives ?? "∞")}</dd><dt>Armor</dt><dd>${state.world.equipment?.[selected]?.armor ?? 0}</dd><dt>Equipment</dt><dd>${[state.world.equipment?.[selected]?.grenade ? "Grenade" : "", state.world.equipment?.[selected]?.sprayCan ? "Spray can" : ""].filter(Boolean).join(" · ") || "Paintball gun"}</dd><dt>Tags / outs</dt><dd>${c.tags} / ${d}</dd><dt>Captures</dt><dd>${c.captures}</dd><dt>Respawn</dt><dd>${c.hp ? "—" : (c.respawn / 24).toFixed(1) + "s"}</dd><dt>Shield</dt><dd>${(c.shield / 24).toFixed(1)}s</dd><dt>Carrying</dt><dd>${c.carrying ? "♥ Enemy heart" : "—"}</dd><dt>Position</dt><dd>${(c.pos.x / 100).toFixed(1)}, ${(c.pos.z / 100).toFixed(1)}</dd></dl><div class="inspection-actions"><button id="follow" aria-pressed="${following}">Follow</button><button id="eyes" aria-pressed="${pov}">Eyes</button><button id="botlens">Vision</button><button id="clear">Clear</button></div>`;
     if (stable) {
       const temp = document.createElement("div");
       temp.innerHTML = markup;
@@ -450,6 +454,24 @@
     ctx.save();
     ctx.scale(6400 / (bounds[2] - bounds[0]), 4000 / (bounds[3] - bounds[1]));
     ctx.translate(-bounds[0] / 20, -bounds[1] / 20);
+    if ((w.controlHearts || []).length) {
+      for (let z = bounds[1]; z < bounds[3]; z += 100)
+        for (let x = bounds[0]; x < bounds[2]; x += 100) {
+          let nearest = w.controlHearts[0],
+            distance = Infinity;
+          for (const h of w.controlHearts) {
+            const d = (h.pos.x - x - 50) ** 2 + (h.pos.z - z - 50) ** 2;
+            if (d < distance) {
+              nearest = h;
+              distance = d;
+            }
+          }
+          ctx.fillStyle = nearest.owner < 0 ? "#747e80" : colors[nearest.owner];
+          ctx.globalAlpha = 0.45;
+          ctx.fillRect(x / 20, z / 20, 5, 5);
+          ctx.globalAlpha = 1;
+        }
+    }
     ctx.fillStyle = "#c0b68b";
     for (const c of w.cover) {
       if (c.h === 0) {
@@ -496,10 +518,13 @@
         ctx.fill();
       }
     }
-    for (let s = 0; s < 2; s++) {
-      ctx.fillStyle = colors[s];
-      ctx.font = "13px serif";
-      ctx.fillText("♥", w.hearts[s].pos.x / 20 - 5, w.hearts[s].pos.z / 20 + 4);
+    const hearts = (w.controlHearts || []).length
+      ? w.controlHearts
+      : w.hearts.map((h, owner) => ({ ...h, owner }));
+    for (const h of hearts) {
+      ctx.fillStyle = h.owner < 0 ? "#d7dddf" : colors[h.owner];
+      ctx.font = "15px serif";
+      ctx.fillText("♥", h.pos.x / 20 - 5, h.pos.z / 20 + 4);
     }
     ctx.strokeStyle = "#ffffff88";
     ctx.beginPath();
@@ -699,6 +724,11 @@
     }
     const w = data.world,
       t = w.tick;
+    const control = (w.controlHearts || []).length > 0;
+    $("territorytoggle").hidden = !control;
+    $("modehint").textContent = control
+      ? "Territory control · Claim all 10 hearts"
+      : "Capture the heart · Three lives";
     $("povsight").style.visibility =
       selected >= 0 && w.cogs[selected].hp > 0 ? "visible" : "hidden";
     $("play").textContent = data.paused ? "Play" : "Pause";
@@ -711,8 +741,9 @@
       $(`alive${s}`).textContent =
         `${w.cogs.filter((c, i) => team(i) === s && c.hp > 0).length} alive`;
       const h = w.hearts[s];
-      $(`heart${s}`).textContent =
-        h.carrier >= 0
+      $(`heart${s}`).textContent = control
+        ? `${w.captures[s]} / 10 hearts controlled`
+        : h.carrier >= 0
           ? `Stolen · bot ${h.carrier + 1}`
           : h.returnAt > 0
             ? "Heart dropped"

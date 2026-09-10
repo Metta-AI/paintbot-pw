@@ -1,11 +1,22 @@
 # Paintbot PW
 
-Sixteen wheeled cogs fight on a symmetric Polyworld arena. Red uses even slots;
-Blue uses odd slots. Capture the enemy heart in your home endzone or exhaust the
-other team's lives to win. One capture wins, even if your own heart is stolen.
-Each cog has three lives and three base HP. Death returns a carried heart home,
-loses equipment, and respawns at a fresh endzone position after 72 ticks if lives
-remain. Spawn protection lasts 36 ticks. A time-limit draw gives both teams zero.
+Sixteen wheeled cogs fight for territory in Heartwick. Red uses even slots;
+Blue uses odd slots. Ten stationary hearts divide the entire map into nearest-heart
+regions. Each team starts with its base heart; eight hearts start neutral gray.
+Touch a heart within 140 units on connected terrain to claim it instantly. If both
+teams touch at once, its ownership stays unchanged. Claim all ten to win.
+
+The default-on territory overlay colors each region by its heart owner, including
+neutral gray. Toggle it off for an unobstructed terrain view. Heart locations and
+ownership are public. BASIC exposes `heartCount()`, `controlX(i)`, `controlY(i)`,
+and `controlOwner(i)` (-1 neutral, 0 red, 1 blue). WASM sprite observations include
+`control heart <index> owner <owner>`; the legacy enemy-flag target points to an
+unowned objective so existing Paintbot WASM policies can play territory control.
+
+Cogs have three base HP and unlimited respawns. Death loses equipment and respawns
+after 72 ticks; spawn protection lasts 36 ticks. Scores are the team's number of
+owned hearts (0–10), also at timeout. A timeout without full control has no winner.
+Older replays retain their original capture-the-heart rules.
 
 ## Combat and equipment
 

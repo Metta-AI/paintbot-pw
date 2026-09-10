@@ -333,8 +333,27 @@ class SpriteView:
         item("own aim " + str(self.angle), me["pos"])
         item(f"game teams 2 map {width}x{height}", me["pos"])
         item("fire icon" if me["cooldown"] <= 1 else "fire icon cooldown", me["pos"])
+        controls = w.get("controlHearts", [])
+        for i, heart in enumerate(controls):
+            owner = heart["owner"]
+            item(f"control heart {i} owner {owner}", heart["pos"], 20, 20)
         for side, color in enumerate(COLORS):
             h = w["hearts"][side]
+            if controls and side != self.slot % 2:
+                candidates = [
+                    (i, h)
+                    for i, h in enumerate(controls)
+                    if h["owner"] != self.slot % 2
+                ]
+                if candidates:
+                    _, target = min(
+                        candidates,
+                        key=lambda pair: (pair[1]["pos"]["x"] - me["pos"]["x"]) ** 2
+                        + (pair[1]["pos"]["z"] - me["pos"]["z"]) ** 2
+                        - (12000000 if pair[0] == 2 + (self.slot // 2) % 8 else 0),
+                    )
+                    h = {"pos": target["pos"], "carrier": -1}
+
             carrier = h["carrier"]
             if carrier < 0 or visible(w, self.slot, carrier):
                 item(

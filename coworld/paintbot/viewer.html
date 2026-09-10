@@ -979,7 +979,7 @@
   <div class="brand">PAINT<span>BOT</span></div>
   <div class="place">
     <div class="eyebrow">Heartwick</div>
-    <small>Capture the heart · Three lives</small>
+    <small id="modehint">Territory control · Claim all 10 hearts</small>
   </div>
   <div class="right">
     <span class="verified" id="verification">◌ VERIFYING REPLAY</span
@@ -1044,14 +1044,17 @@
   ><button id="bars" aria-pressed="true">Health</button
   ><button id="eventtoasts" aria-pressed="false" aria-controls="feed banner">
     Toasts</button
+  ><label id="territorytoggle"
+    ><input id="territory" type="checkbox" checked /> Territory</label
   ><button id="trails" aria-pressed="false" class="optional">Orders</button
   ><button id="download" class="optional">↓ Replay</button>
 </div>
 <div class="scene-caption">
   <div class="eyebrow">Polyworld arena / 01</div>
   <strong>Heartwick</strong>
-  <p>Sixteen minds. Two hearts. One arena.</p>
+  <p>Sixteen minds. Ten hearts. One territory.</p>
 </div>
+
 <div id="feed" hidden></div>
 <div id="banner" hidden></div>
 <div id="povframe">
