@@ -21,3 +21,35 @@ suite "Heartwick outside-in barrage":
       if team(slot) == 0: w.damage(slot,1,3)
     w.step(commands)
     check w.winner == 1
+
+  test "bombardment cancels pending respawns and removes spare lives":
+    visionRulesVersion = 21
+    var w = newWorld(2026)
+    var commands: array[Seats,Command]
+    w.tick = BarrageStartTick
+    w.cogs[0].hp = 0
+    w.cogs[0].respawn = 1
+    w.step(commands)
+    check w.cogs[0].hp == 0
+    check w.cogs[0].respawn == 0
+    check w.equipment[0].lives == 0
+    check w.equipment[1].lives == 1
+    w.cogs[1].shield = 0
+    w.equipment[1].armor = 0
+    w.damage(1,2,3)
+    for tick in 0..RespawnTicks: w.step(commands)
+    check w.cogs[1].hp == 0
+    check w.equipment[1].lives == 0
+
+  test "a respawn immediately before bombardment still happens":
+    visionRulesVersion = 21
+    var w = newWorld(2026)
+    var commands: array[Seats,Command]
+    w.tick = BarrageStartTick-1
+    w.cogs[0].hp = 0
+    w.cogs[0].respawn = 1
+    w.step(commands)
+    check w.cogs[0].hp > 0
+    check w.equipment[0].lives == 4
+    w.step(commands)
+    check w.equipment[0].lives == 1
