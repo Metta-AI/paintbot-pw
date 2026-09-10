@@ -34,3 +34,7 @@ Validation: all ten rule tests and three replay-analysis tests passed, including
 BASIC and WASM observations now use a 120-degree forward cone around aim, with the existing distance and cover checks. Other cogs, including allies, are hidden outside the cone. BASIC `lookAt(x, y)` turns without firing; walking turns toward the destination unless explicit aim is supplied. WASM aim buttons update facing without requiring the trigger. POV terrain fog uses the same visibility predicate. Spectator all-seeing mode remains available.
 
 All twelve rule tests, three replay-analysis tests, and five Python runtime tests passed. A full mixed BASIC/WASM episode finished at 6,758 ticks (3–0), and replay verification reproduced hash `2173305639`. Previously published v2 and v3 replays retain their original hashes. Replay format v4 selects the new facing rules.
+
+## Unlimited forward sight (0.1.5)
+
+The 120-degree cone now extends across the entire arena without a distance cap. Walls still occlude sight. BASIC, WASM, and POV fog share this behavior. Thirteen rule tests, three replay-analysis tests, and five runtime tests passed; the v4 mixed-policy replay still reproduces hash `2173305639`. Replay format v5 retains unlimited visibility for new recordings while earlier recordings preserve their original fog rules.
