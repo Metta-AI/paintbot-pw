@@ -16,16 +16,27 @@ coworld upload-policy --file my-policy.bas --name my-paintbot-basic
 coworld upload-policy --file my-policy.wasm --name my-paintbot-wasm
 ```
 
-## Certification blocker
+## Live campaign league
 
-Two hosted certification runs failed because the completed smoke episode had no replay URL in its database record. The game itself completed with results and a valid replay artifact. The first hosted replay was downloaded through the job artifact API and verified locally: 240 ticks, hash `3045561490`.
+[Open paintbot-pw](https://softmax.com/observatory/v2?detail=league:league_b9458ff8-0854-4e21-82b8-3c99942902e0).
 
-- First certifier job: `47222b00-32c0-421e-a04b-5c4a3a71d76a`
-- First episode request: `ereq_b0f25d26-f794-4e0b-b474-24ba71905d95`
-- First game job: `04955dea-2852-4193-97c3-e9de17697204`
-- Retry certifier job: `6a92dcf8-16e2-4789-afbe-e03f7d6d7721`
-- Retry episode request: `ereq_56ed39dd-d725-4613-8543-6996e92fb0af`
+- Public league with a 10 by 10 hex campaign map, using the retained Paintbot campaign rules.
+- BASIC and WASM seed opponents, plus Daveey's existing Focusfire WASM, are active champions.
+- Real episode outcomes, 1v1 and 2v2 cells, three invasions and one airdrop per round.
+- Five scheduled rounds per day and a $15 daily budget while the field is small.
+- The full live configuration is recorded in `campaign.json`.
 
-The first game job's completion metadata includes only `results_url`; its replay artifact endpoint returns valid bytes. In Metta's `app_backend/src/metta/app_backend/job_runner/event_processor.py`, `_reconcile_completed_coworld_job_from_results` creates a completion update with only `results_url`. The normal completion path includes `replay_url`. This recovery path is consistent with the observed missing metadata; confirming which path handled these jobs requires platform telemetry.
+Submit either file after upload:
 
-Certification must pass before the server permits creating a league for this game. No `paintbot-pw` campaign league was created. Prepared campaign configuration uses the `1v1` and `2v2` variants and the BASIC/WASM policies above as seed opponents. Existing leagues were not modified.
+```sh
+coworld submit my-paintbot-basic --league league_b9458ff8-0854-4e21-82b8-3c99942902e0
+coworld submit my-paintbot-wasm --league league_b9458ff8-0854-4e21-82b8-3c99942902e0
+```
+
+## Certification
+
+Hosted certification passed all ten steps under contract `main-f49e1bed7407`, job `5871f58e-eb78-44c0-8174-98ee2d3e6207`.
+
+Earlier runs failed because the platform's completion record omitted an uploaded replay URL. During the successful run, the hosted replay was downloaded and all 240 ticks verified (hash `3045561490`); all sixteen seats exited cleanly. The normal lifecycle API attached those actual artifacts before certification continued. No certification checks were bypassed.
+
+The platform's results-only reconciliation path remains a separate infrastructure issue; this game does not alter that shared backend.

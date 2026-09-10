@@ -1,0 +1,115 @@
+{
+  "league_id": "league_b9458ff8-0854-4e21-82b8-3c99942902e0",
+  "coworld_id": "cow_0c533f82-e6bf-4298-8810-9ee1ccfe76c6",
+  "division_id": "div_d1053eaf-6e7d-4266-950a-a740d0b9bd7b",
+  "settings": {
+    "ladder": {
+      "enabled": false,
+      "ranking": {
+        "k_factor": 32.0,
+        "algorithm": "elo",
+        "initial_rating": 1500.0,
+        "round_scoring_rule": "mean"
+      },
+      "divisions": [
+        {
+          "name": "Competition",
+          "division_id": "div_d1053eaf-6e7d-4266-950a-a740d0b9bd7b",
+          "disqualify_after_consecutive_failures": 3
+        }
+      ],
+      "scheduler": {
+        "strategy": "team_n",
+        "team_count": 4,
+        "team_layout": "interleaved",
+        "allied_teams": [
+          [
+            0,
+            2
+          ],
+          [
+            1,
+            3
+          ]
+        ],
+        "num_episodes": 3,
+        "variant_rotation": [
+          "2v2"
+        ],
+        "insufficient_players": "filler_policy"
+      },
+      "fulfillment": {
+        "retry_times": 2,
+        "allowed_failures": 0.0
+      }
+    },
+    "campaign": {
+      "board": {
+        "blobs": false,
+        "width": 10,
+        "height": 10,
+        "mode_mix": {
+          "1v1": 0.5,
+          "2v2": 0.5
+        },
+        "board_shape": "hex",
+        "mode_layout": "scattered",
+        "board_outline": "grid"
+      },
+      "best_of": 1,
+      "enabled": true,
+      "outcomes": "episodes",
+      "emulation": {
+        "seed": 1,
+        "ratings": {},
+        "filler_elo": 800.0,
+        "style_sigma": 100.0,
+        "red_advantage": 60.0,
+        "default_rating": 1200.0
+      },
+      "max_frames": 500,
+      "strategist": {
+        "model": "us.anthropic.claude-sonnet-5",
+        "aws_region": "us-east-1",
+        "max_tokens": 1500,
+        "default_prompt": "Expand cautiously. Prefer weak neighbors and empty cells; avoid fights you keep losing.",
+        "max_tool_calls": 16,
+        "timeout_seconds": 90.0
+      },
+      "variant_ids": [
+        "1v1",
+        "2v2"
+      ],
+      "max_airdrops": 1,
+      "min_airdrops": 1,
+      "max_invasions": 3,
+      "conversation_rounds": 10,
+      "round_interval_seconds": 17280,
+      "episode_timeout_seconds": 1800,
+      "baseline_policy_version_id": "947bc78f-622d-405e-9bc9-4bf9627c7b67"
+    },
+    "round_interval_minutes": 288
+  },
+  "seeded_opponents": [
+    {
+      "name": "paintbot-pw-basic",
+      "player_id": "ply_04ee3d06-25e9-4105-8912-b2ccfbd6e8a8",
+      "policy_version_id": "947bc78f-622d-405e-9bc9-4bf9627c7b67"
+    },
+    {
+      "name": "paintbot-pw-wasm",
+      "player_id": "ply_7d6e1a01-b324-441c-945b-c32f78388971",
+      "policy_version_id": "3d27fe95-be94-4aab-bdc0-899ad2f27994"
+    }
+  ],
+  "daveey_policy_version_id": "66b8dd17-672b-4708-84b7-49fc15f1a5f8",
+  "first_campaign_verification": {
+    "round": 1,
+    "round_id": "round_7a1f9676-d264-4bdf-a22e-9626c51257e9",
+    "episode_request_id": "ereq_f4828955-358d-4c19-a03b-45d7ac1fa40e",
+    "job_id": "a4914859-f890-4363-ae8a-2dc589ffd3e6",
+    "successful_seats": 16,
+    "ticks": 3773,
+    "replay_hash": 143330339
+  }
+}
