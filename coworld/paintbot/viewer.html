@@ -1186,16 +1186,31 @@
     background: #e8cf88;
     color: #17382e;
   }
+
+  #match-score { gap: 20px; }
+  .team-summary { min-width: 168px; }
+  .team-scoreline { display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12px; line-height:16px; }
+  .team-scoreline strong { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; letter-spacing:.12em; }
+  .team-scoreline small { font-size:7px; letter-spacing:.08em; opacity:.7; }
+  .agent-lives { display:flex; gap:3px; }
+  .agent-life { width:19px; height:17px; display:flex; align-items:center; justify-content:center; gap:2px; border:1px solid currentColor; border-radius:3px; background:color-mix(in srgb,currentColor 12%,transparent); font-size:10px; font-variant-numeric:tabular-nums; }
+  .agent-life .agent-number { font-size:7px; opacity:.75; }
+  .agent-life.respawning { border-style:dashed; opacity:.55; }
+  .agent-life.eliminated { opacity:.25; }
+  @media(max-width:700px) { header .place { display:none; } #match-score { gap:10px; } header { gap:8px; padding:0 8px; } }
+  @media(max-width:520px) { .team-summary { min-width:128px; } .agent-life { width:14px; gap:1px; } .agent-life .agent-number { font-size:6px; } #match-score { gap:6px; } header .right { gap:0; } }
 </style>
 <header>
-  <div class="place">
-    <div class="eyebrow">Heartwick</div>
-    <small id="modehint">Territory control · Claim all 10 hearts</small>
-  </div>
+  <small id="modehint" hidden></small>
   <div id="match-score">
-    <span class="red" title="Ember">♥ <b id="score0">1</b></span
-    ><span class="divider">:</span
-    ><span class="blue" title="Azure"><b id="score1">1</b> ♥</span>
+    <section class="team-summary red" aria-label="Ember team">
+      <div class="team-scoreline"><strong id="policy0">Policies</strong><span title="Hearts owned">♥ <b id="score0">1</b><small> HEARTS</small></span></div>
+      <div id="lives0" class="agent-lives" aria-label="Ember agent lives"></div>
+    </section>
+    <section class="team-summary blue" aria-label="Azure team">
+      <div class="team-scoreline"><strong id="policy1">Policies</strong><span title="Hearts owned">♥ <b id="score1">1</b><small> HEARTS</small></span></div>
+      <div id="lives1" class="agent-lives" aria-label="Azure agent lives"></div>
+    </section>
   </div>
   <div class="right">
     <span class="verified" id="verification">◌ VERIFYING REPLAY</span
@@ -1207,7 +1222,7 @@
 <div hidden>
   <section class="teamblock" id="team0">
     <div class="teamhead red">
-      <span class="crest">♥</span><strong>EMBER</strong>
+      <span class="crest">♥</span><strong id="policy0">Policies</strong>
     </div>
     <div class="heartstate">
       <span id="heart0">Heart at home</span><span id="alive0">8 alive</span>
@@ -1216,7 +1231,7 @@
   </section>
   <section class="teamblock" id="team1">
     <div class="teamhead blue">
-      <span class="crest">♥</span><strong>AZURE</strong>
+      <span class="crest">♥</span><strong id="policy1">Policies</strong>
     </div>
     <div class="heartstate">
       <span id="heart1">Heart at home</span><span id="alive1">8 alive</span>
