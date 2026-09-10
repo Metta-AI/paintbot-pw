@@ -55,3 +55,7 @@ See `VIEWER.md` for the CTF feature map, keyboard controls, pinned artwork, and 
 ### Final layout follow-up: 0.1.2
 
 `cow_14b61d5e-ae26-4171-b93e-c5c6d8738bab` is now canonical. This follows 0.1.1 with bounded selector width for real hosted player names and unclipped portrait health pips. Hosted certification `b81745e4-8d37-4f57-a593-c0d1e413a65d` passed all ten checks under `main-195cc9d7ba28`. The production replay-session API serves the final static bundle for hosted episode `b2b0572c-c681-4376-bc4e-3e5c93a1d9ce`.
+
+### Solid-body rules release: 0.1.3
+
+`cow_305225aa-9917-4453-8f3f-4acb865a1530` is certified and canonical for the existing ladder. Certification `ac620e9e-eb63-47e6-8b3c-3b55ca64184a` completed under `main-ddac040c18fb` on 2026-09-10. The published v3 replay viewer was verified against hosted episode `eaff93c7-ce7b-4719-8f80-d5eb5ccbf6c9`. Living cogs now collide and weapons fire once per second. Existing episodes preserve their original physics; newly scheduled episodes use 0.1.3.
