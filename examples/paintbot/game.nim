@@ -37,7 +37,7 @@ proc convertFrames(frames: seq[LegacyFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
           goal: c.goal, aim: c.aim)
     result.add next
-var replayRulesVersion* = 8
+var replayRulesVersion* = 9
 proc loadRecording*(path: string): Recording =
   replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
   visionRulesVersion = replayRulesVersion
@@ -49,7 +49,7 @@ proc loadRecording*(path: string): Recording =
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, LegacyMetadataRecording)
     result = Recording(seed: old.seed, frames: convertFrames(old.frames),
         names: old.names, communications: old.communications)
-  elif replayRulesVersion in [6, 7, 8]:
+  elif replayRulesVersion in [6, 7, 8, 9]:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
@@ -109,7 +109,9 @@ proc advance*() =
           recording.communications.add Communication(tick: world.tick+1,
               slot: slot, text: message)
     if bridge != nil:
-      bridge.writeLine(world.toJson()); bridge.flushFile()
+      let snapshot = world.toJson()
+      bridge.writeLine("{\"rulesVersion\":" & $replayRulesVersion & "," &
+          snapshot[1..^1]); bridge.flushFile()
       let external = bridge.readLine().fromJson(seq[tuple[slot: int,
           command: Command, chat: seq[string]]])
       for item in external:
@@ -128,7 +130,7 @@ proc runHeadless*() =
   while world.tick < limit and world.winner == -1: advance()
   if replayMode and world.tick != limit: raise newException(ReplayError, "Replay has frames after victory")
   if not replayMode and options.recordPath.len > 0: saveReplayFile(
-      options.recordPath, "paintbot_pw", 8, recording)
+      options.recordPath, "paintbot_pw", 9, recording)
   echo "ticks=", world.tick, " captures=", world.captures, " hash=",
       world.stateHash()
   when defined(coworld):

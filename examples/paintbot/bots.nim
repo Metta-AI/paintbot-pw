@@ -49,6 +49,8 @@ proc host(slot:int, strings:StringPool): Host =
       if field==0:active.pickups[i].pos.x
       elif field==1:active.pickups[i].pos.z
       else:active.pickups[i].kind.int32,4)
+  discard result.addFunction("terrainHeight",2,proc(a:openArray[int32]):int32 =
+    if visionRulesVersion >= 9: terrainHeight(clamp(a[0].int,0,Width),clamp(a[1].int,0,Height)).int32 else: 0'i32,4)
   discard result.addFunction("walkTo",2,proc(a:openArray[int32]):int32 =
     commands[slot].walk=true;commands[slot].goal=Point(x:a[0],z:a[1]);1,4)
   discard result.addFunction("lookAt",2,proc(a:openArray[int32]):int32 =

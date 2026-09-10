@@ -28,11 +28,61 @@ def literal_snappy(raw):
     return bytes(out)
 
 
+@lru_cache(maxsize=65536)
+def terrain_height(x, z):
+    def raised(x, z):
+        if 1000 <= x <= 2200 and 200 <= z <= 1200:
+            dx = max(abs(x - 1600) - 450, 0)
+            dz = max(abs(z - 700) - 350, 0)
+            if dx * dx + dz * dz <= 150 * 150:
+                return 250
+        if 750 <= z <= 950:
+            if 600 <= x < 1000:
+                return (x - 600) * 250 // 400
+            if 2200 < x <= 2800:
+                return (2800 - x) * 250 // 600
+        return 0
+
+    h = max(raised(x, z), raised(6400 - x, 4000 - z))
+    if h:
+        return h
+    along = max(0, min(400, x - 1400, 5000 - x))
+    across = max(0, min(250, 500 - abs(z - 2000)))
+    crossing = max(0, min(240, abs(x - 3200) - 160))
+    return -(150 * along * across * crossing // (400 * 250 * 240))
+
+
+def elevation(w, p):
+    if w.get("rulesVersion", 0) < 9:
+        return 0
+    h = terrain_height(p["x"], p["z"])
+    for t in w.get("trenches", []):
+        if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
+            return h - 60
+    return h
+
+
 def clear(w, a, b):
+    # The sprite frame queries the same pair for body, equipment and effects.
+    cache = w.setdefault("_los_cache", {})
+    key = (a["x"], a["z"], b["x"], b["z"])
+    if key not in cache:
+        cache[key] = _clear(w, a, b)
+    return cache[key]
+
+
+def _clear(w, a, b):
+    layered = w.get("rulesVersion", 0) >= 9
+    origin_height = elevation(w, a) + 120 if layered else 0
+    height_delta = elevation(w, b) - elevation(w, a) if layered else 0
     steps = max(abs(b["x"] - a["x"]), abs(b["z"] - a["z"])) // 25 + 1
     for i in range(1, steps + 1):
         x = a["x"] + (b["x"] - a["x"]) * i // steps
         z = a["z"] + (b["z"] - a["z"]) * i // steps
+        if layered:
+            eye = origin_height + int(height_delta * i / steps)
+            if elevation(w, {"x": x, "z": z}) > eye:
+                return False
         if any(
             (
                 (x - c["x"] - c["w"] / 2) ** 2 + (z - c["z"] - c["w"] / 2) ** 2
@@ -47,7 +97,6 @@ def clear(w, a, b):
 
 
 def visible(w, slot, other):
-    a = w["cogs"][slot]["pos"]
     cog = w["cogs"][other]
     b = cog["pos"]
     if cog["hp"] <= 0 or w["cogs"][slot]["hp"] <= 0:
@@ -72,7 +121,7 @@ def can_see_point(w, slot, b):
 
 
 @lru_cache(maxsize=4)
-def walkability(cover):
+def walkability(cover, layered=False):
     raw = bytearray(1280 * 800 * 4)
     for z in range(11, 789):
         start = (z * 1280 + 11) * 4 + 3
@@ -96,6 +145,16 @@ def walkability(cover):
             raw[(z * 1280 + left) * 4 + 3 : (z * 1280 + right) * 4 : 4] = b"\x00" * (
                 right - left
             )
+    if layered:
+        for z in range(11, 789):
+            for x in range(11, 1269):
+                px, pz = x * 5, z * 5
+                h = terrain_height(px, pz)
+                if any(
+                    abs(terrain_height(px + dx, pz + dz) - h) > 80
+                    for dx, dz in [(55, 0), (-55, 0), (0, 55), (0, -55)]
+                ):
+                    raw[(z * 1280 + x) * 4 + 3] = 0
     return literal_snappy(raw)
 
 
@@ -144,7 +203,8 @@ class SpriteView:
                 1280,
                 800,
                 walkability(
-                    tuple((c["x"], c["z"], c["w"], c["h"]) for c in w["cover"])
+                    tuple((c["x"], c["z"], c["w"], c["h"]) for c in w["cover"]),
+                    w.get("rulesVersion", 0) >= 9,
                 ),
             )
             sprite(1, "map", 1280, 800)

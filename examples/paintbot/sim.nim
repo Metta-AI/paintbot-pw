@@ -1,4 +1,5 @@
-import village
+import village, topography
+export topography
 ## Integer-only Paintbot simulation; Polyworld RNG and portable state hashes.
 import polyworld/[rngs, hashes]
 
@@ -87,13 +88,33 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
+var visionRulesVersion* = 9
+proc elevation*(w: World, p: Point): int =
+  if visionRulesVersion < 9: return 0
+  result = terrainHeight(p.x.int, p.z.int)
+  for t in w.trenches:
+    if p.x >= t.x and p.x < t.x+t.w and p.z >= t.z and p.z < t.z+t.h:
+      result -= 60
+      break
+proc traversable*(w: World, a, b: Point): bool =
+  if visionRulesVersion < 9: return true
+  let steps = max(abs(b.x-a.x), abs(b.z-a.z)).int div 20+1
+  var last = terrainHeight(a.x.int, a.z.int)
+  for i in 1..steps:
+    let x = a.x.int+(b.x-a.x).int*i div steps
+    let z = a.z.int+(b.z-a.z).int*i div steps
+    let h = terrainHeight(x, z)
+    if abs(h-last) > 25: return false
+    last = h
+  true
 proc blocked*(w: World, p: Point, radius = Radius): bool =
   if p.x < radius or p.z < radius or p.x > Width-radius or p.z >
       Height-radius: return true
   for c in w.cover:
     if c.h == 0:
       let r = c.w div 2
-      if distance2(p, point(c.x.int+r.int, c.z.int+r.int)) < (r+radius).int64*(r+radius): return true
+      if distance2(p, point(c.x.int+r.int, c.z.int+r.int)) < (r+radius).int64*(
+          r+radius): return true
       continue
     if p.x > c.x-radius and p.x < c.x+c.w+radius and p.z > c.z-radius and p.z <
         c.z+c.h+radius: return true
@@ -102,8 +123,11 @@ proc lineClear*(w: World, a, b: Point): bool =
   for i in 1..steps:
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
     if w.blocked(p, 0): return false
+    if visionRulesVersion >= 9:
+      let eye = w.elevation(a)+120+(w.elevation(b)-w.elevation(
+          a))*i.int div steps.int
+      if w.elevation(p) > eye: return false
   true
-var visionRulesVersion* = 8
 proc canSeePoint*(w: World, slot: int, p: Point): bool =
   if slot notin 0..<Seats or w.cogs[slot].hp <= 0: return false
   let c = w.cogs[slot]
@@ -131,7 +155,9 @@ proc occupied(w: World, p: Point, slot: int): bool =
         distance2(p, w.cogs[other].pos) < (2*Radius).int64*(2*Radius):
       return true
 proc movementBlocked(w: World, p: Point, slot: int, solid: bool): bool =
-  w.blocked(p) or (solid and w.occupied(p, slot))
+  w.blocked(p) or (solid and w.occupied(p, slot)) or
+    (distance2(w.cogs[slot].pos, p) < 10000 and not w.traversable(w.cogs[
+        slot].pos, p))
 proc spawn(w: var World, slot: int, solid = true) =
   var p = point(if team(slot) == 0: 350+(slot div 2 mod 2)*160 else: Width-350-(
       slot div 2 mod 2)*160,
@@ -216,7 +242,7 @@ proc hit*(w: var World, victim, attacker: int) =
     if observeTag != nil: observeTag(w.tick, victim, attacker, w.cogs[victim].pos)
 proc waypoint*(w: World, start, goal: Point): Point =
   ## Bounded breadth-first navigation over a 32x20 arena grid.
-  if w.lineClear(start, goal): return goal
+  if w.lineClear(start, goal) and w.traversable(start, goal): return goal
   const nx = Width div 200; const nz = Height div 200
   var prev: array[nx*nz, int]
   for x in prev.mitems: x = -2
@@ -231,6 +257,8 @@ proc waypoint*(w: World, start, goal: Point): Point =
       if x < 0 or x >= nx or z < 0 or z >= nz: continue
       let j = z*nx+x
       if prev[j] != -2 or w.blocked(point(x*200+100, z*200+100), 90): continue
+      if not w.traversable(point(n mod nx*200+100, n div nx*200+100), point(
+          x*200+100, z*200+100)): continue
       prev[j] = n; q[tail] = j; inc tail
   if prev[b] == -2: return start
   var n = b

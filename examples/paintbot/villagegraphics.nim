@@ -1,5 +1,5 @@
 ## Heartleaf's Golden Valley and Enchanted Meadow art, fitted to solid lots.
-import std/math
+import std/[math, sequtils]
 import vmath
 import polyworld/[common, quadterrain]
 import sim, village
@@ -7,11 +7,70 @@ import sim, village
 proc placeRoundVillage*() =
   let pack = loadPropPack(when defined(emscripten): "/round-village.glb" else: "tmp/round-village.glb",
       unitHeight = false, textured = false)
+  let grove = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/vegetation.glb",
+      unitHeight = true, textured = true)
+  let rocks = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/rocks.glb",
+      unitHeight = true, textured = true)
+  let trees = ["tree_01a", "tree_02a", "tree_03a", "tree_04a", "tree_05a", "tree_06a"]
+  let bushes = ["bush_01a", "bush_02a", "flower_bush_01a", "flower_bush_02a"]
+  proc at(x, z: float32): Vec3 =
+    vec3(x/100-32, (if visionRulesVersion >= 9: terrainHeight(x.int,
+        z.int).float32/100 else: 0'f32), z/100-20)
   for i, lot in roundVillage():
-    pack.placeProp(if lot.house: "round-cottage" else: "round-garden",
-        vec3(lot.x.float32/100-32, 0, lot.z.float32/100-20),
-        if i mod 2 == 0: -0.22'f32 else: PI.float32-0.22,
-        lot.radius.float32/100, vec3(1, 1, 1))
+    let p = at(lot.x.float32, lot.z.float32)
+    let r = lot.radius.float32/100
+    if i in [0, 1, 4, 5]:
+      let node = case i
+        of 0: "round-cottage"
+        of 1: "mushroom-house"
+        of 4: "stump-house"
+        else: "spiral-house"
+      pack.placeProp(node, p, i.float32*0.5, r)
+      if i != 1:
+        for j in 0..<3:
+          let a=j.float32*2.1
+          grove.placeProp("flowers_patch_0" & $(j+1) & "a",
+              p+vec3(cos(a)*r*0.65,r*1.65,sin(a)*r*0.65),a,0.38)
+      # Trailing moss and flower beds soften the foundations.
+      for j in 0..<4:
+        let a = j.float32*1.6+i.float32
+        grove.placeProp("flowers_patch_0" & $(1+j mod 3) & "a",
+            p+vec3(cos(a)*r, 0, sin(a)*r), a, 0.38)
+    elif i in [2, 3, 8, 9, 12, 13]:
+      let treeIndex = [2, 3, 8, 9, 12, 13].find(i)
+      grove.placeProp(trees[treeIndex], p, i.float32, if i <
+          6: 8'f32 else: 5.5'f32)
+      grove.placeProp(bushes[treeIndex mod 4], p, treeIndex.float32, r*1.8)
+      for j in 0..<5:
+        let a = i.float32+j.float32*1.3
+        grove.placeProp("flowers_patch_0" & $(1+j mod 3) & "a",
+            p+vec3(cos(a)*r, 0, sin(a)*r), a, 0.6)
+    elif i in [6, 7]:
+      pack.placeProp("round-garden", p, i.float32, r)
+    else:
+      grove.placeProp(bushes[(i-10) mod 4], p, i.float32, r*2.2)
+      grove.placeProp("flowers_patch_0" & $(1+i mod 3) & "a", p, 0, r*0.5)
+  if visionRulesVersion >= 9:
+    # Mossy exposed stone on terrace banks. Ramp mouths remain clear.
+    for side in 0..1:
+      for j in 0..<11:
+        let x = 1060+j*108
+        let z = if j mod 2 == 0: 245 else: 1170
+        let px = if side == 0: x else: 6400-x
+        let pz = if side == 0: z else: 4000-z
+        let p = vec3(px.float32/100-32, 0.25, pz.float32/100-20)
+        rocks.placeProp("rock_medium_0" & $(1+j mod 3) & "a", p, j.float32, 2.2)
+        grove.placeProp("ivy_01a", p+vec3(0, 1.5, 0), j.float32, 1.1)
+  # Distinct broadleaf silhouettes break up the conifer boundary.
+  for i in 0..<6:
+    let x = 700+i*1000
+    let z = if i mod 2 == 0: -100 else: 4100
+    grove.placeProp(trees[i], at(x.float32, z.float32), i.float32, 7.5)
+  for i in 0..<38:
+    let x = 350+(i*157 mod 5600)
+    let z = if i mod 2 == 0: 100+(i*31 mod 130) else: 3750+(i*17 mod 100)
+    grove.placeProp("flowers_patch_0" & $(1+i mod 3) & "a", at(x.float32,
+        z.float32), i.float32, 0.5)
 
 proc placeVillage*(world: World) =
   let homes = loadPropPack(DataRoot & "/terrain/toon_golden_valley/presets.glb",

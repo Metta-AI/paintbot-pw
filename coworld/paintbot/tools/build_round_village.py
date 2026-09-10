@@ -1,6 +1,8 @@
 """Hand-shaped round cottages and planted circular beds for the local art review."""
 
-import json, math, struct
+import json
+import math
+import struct
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[3]
@@ -13,9 +15,9 @@ colors = [
     (0.83, 0.68, 0.42),
     (0.91, 0.79, 0.53),
     (0.63, 0.38, 0.19),
-    (0.24, 0.39, 0.22),
-    (0.34, 0.49, 0.24),
-    (0.42, 0.55, 0.27),
+    (0.80, 0.95, 0.70),
+    (0.88, 1.0, 0.76),
+    (0.96, 1.0, 0.82),
     (0.16, 0.24, 0.16),
     (0.27, 0.15, 0.09),
     (0.96, 0.65, 0.22),
@@ -46,13 +48,14 @@ def addbuf(values, kind, components):
 
 
 def indices(count):
-    while len(blob)%4: blob.append(0)
-    data=struct.pack('<'+'I'*count,*range(count))
-    view=len(views)
-    views.append(dict(buffer=0,byteOffset=len(blob),byteLength=len(data)))
+    while len(blob) % 4:
+        blob.append(0)
+    data = struct.pack("<" + "I" * count, *range(count))
+    view = len(views)
+    views.append(dict(buffer=0, byteOffset=len(blob), byteLength=len(data)))
     blob.extend(data)
-    access.append(dict(bufferView=view,componentType=5125,count=count,type='SCALAR'))
-    return len(access)-1
+    access.append(dict(bufferView=view, componentType=5125, count=count, type="SCALAR"))
+    return len(access) - 1
 
 
 def model(name):
@@ -66,13 +69,20 @@ def model(name):
             u[2] * v[0] - u[0] * v[2],
             u[0] * v[1] - u[1] * v[0],
         ]
-        l = math.sqrt(sum(x * x for x in n)) or 1
-        n = tuple(x / l for x in n)
+        length = math.sqrt(sum(x * x for x in n)) or 1
+        n = tuple(x / length for x in n)
         p, ns = batches.setdefault(col, ([], []))
         p.extend([a, b, c])
         ns.extend([n] * 3)
 
     def loft(rings, col, segments=48, offset=(0, 0, 0), wobble=0):
+        dense = []
+        for a, b in zip(rings, rings[1:]):
+            for j in range(5):
+                f = j / 5
+                dense.append((a[0] * (1 - f) + b[0] * f, a[1] * (1 - f) + b[1] * f))
+        rings = dense + [rings[-1]]
+
         def p(k, j):
             r, y = rings[k]
             t = 2 * math.pi * j / segments
@@ -86,7 +96,7 @@ def model(name):
         for k in range(len(rings) - 1):
             for j in range(segments):
                 a, b, c, d = p(k, j), p(k, j + 1), p(k + 1, j + 1), p(k + 1, j)
-                tone = col + (j % 3 if col == 3 else 0)
+                tone = col
                 tri(a, c, b, tone)
                 tri(a, d, c, tone)
 
@@ -101,39 +111,93 @@ def model(name):
                 col,
             )
 
-    if name == "round-cottage":
+    if name != "round-garden":
+        bark = name == "stump-house"
         loft(
-            [(0, 0), (1.02, 0), (1.05, 0.18), (0.99, 0.28), (0.94, 1.35), (0.90, 1.65)],
-            0,
-            wobble=0.025,
+            [(0, 0), (1.03, 0), (1.06, 0.15), (0.99, 0.28), (0.92, 1.20), (0.86, 1.45)],
+            10 if bark else 0,
+            wobble=0.06,
         )
-        # Swept, layered moss roof with a bent peak; no rectangular roof planes.
-        for level, (r, y) in enumerate(
-            [
-                (1.20, 1.38),
-                (1.10, 1.62),
-                (0.94, 1.87),
-                (0.73, 2.13),
-                (0.48, 2.38),
-                (0.25, 2.59),
-            ]
-        ):
+        if name == "mushroom-house":
             loft(
-                [(r, y), (r * 1.035, y + 0.04), (r * 0.76, y + 0.30)],
-                3,
-                wobble=0.035,
-                offset=(level * 0.018, 0, 0),
+                [
+                    (0, 1.30),
+                    (1.38, 1.30),
+                    (1.48, 1.45),
+                    (1.30, 1.78),
+                    (0.91, 2.03),
+                    (0.42, 2.18),
+                    (0, 2.22),
+                ],
+                2,
+                wobble=0.025,
             )
-        loft([(0.22, 2.57), (0.07, 2.83), (0, 2.94)], 3, offset=(0.13, 0, 0))
-        # Tall rounded door and circular, honey-lit windows facing the lane.
-        disk(0, 0.64, 0.987, 0.33, 0.61, 2)
-        disk(0, 0.64, 0.994, 0.265, 0.54, 7)
-        disk(0.16, 0.61, 1.003, 0.035, 0.035, 8)
+            for j in range(9):
+                a = j * 2.4
+                r = 0.40 + 0.1 * (j % 6)
+                loft(
+                    [(0, 0), (0.12, 0.025), (0, 0.05)],
+                    1,
+                    offset=(r * math.cos(a), 2.17 - r * 0.26, r * math.sin(a)),
+                )
+        elif name == "spiral-house":
+            loft(
+                [
+                    (1.25, 1.24),
+                    (1.35, 1.35),
+                    (1.18, 1.62),
+                    (0.8, 1.92),
+                    (0.4, 2.16),
+                    (0.1, 2.35),
+                ],
+                3,
+                wobble=0.07,
+            )
+            for j in range(26):
+                a = j * 0.30
+                r = 0.5 * (1 - j / 30)
+                loft(
+                    [(0.10, 0), (0.08, 0.08)],
+                    3,
+                    segments=10,
+                    offset=(0.3 + r * math.cos(a), 2.2 + j * 0.025, r * math.sin(a)),
+                )
+        elif bark:
+            for j in range(13):
+                a = j * 2 * math.pi / 13
+                loft(
+                    [(0.16, 0), (0.12, 0.75), (0.08, 1.5)],
+                    2,
+                    segments=7,
+                    offset=(0.86 * math.cos(a), 0, 0.86 * math.sin(a)),
+                )
+            loft(
+                [(1.17, 1.25), (1.22, 1.36), (1.05, 1.58), (0.65, 1.82), (0, 1.98)],
+                3,
+                wobble=0.08,
+            )
+        else:
+            loft(
+                [
+                    (1.18, 1.23),
+                    (1.28, 1.33),
+                    (1.25, 1.48),
+                    (1.03, 1.74),
+                    (0.68, 1.91),
+                    (0, 2.03),
+                ],
+                3,
+                wobble=0.065,
+            )
+            loft(
+                [(0.23, 0), (0.22, 0.6), (0.28, 0.65)],
+                0,
+                segments=14,
+                offset=(-0.35, 1.67, -0.25),
+            )
         for x in [-0.60, 0.60]:
-            disk(x, 1.03, 0.80, 0.255, 0.27, 2)
-            disk(x, 1.03, 0.815, 0.19, 0.20, 8)
-            disk(x, 1.03, 0.825, 0.12, 0.13, 9)
-        loft([(0, 0), (0.45, 0), (0.45, 0.14), (0, 0.14)], 10, offset=(0, 0, 1.0))
+            disk(x, 0.91, 0.80, 0.23, 0.25, 2)
+            disk(x, 0.91, 0.815, 0.165, 0.185, 8)
     else:
         loft(
             [(0, 0), (1, 0), (1, 0.25), (0.93, 0.30), (0, 0.30)],
@@ -170,7 +234,23 @@ def model(name):
         prim.append(
             dict(
                 attributes=dict(
-                    POSITION=addbuf(p, "VEC3", 3), NORMAL=addbuf(n, "VEC3", 3)
+                    POSITION=addbuf(p, "VEC3", 3),
+                    NORMAL=addbuf(n, "VEC3", 3),
+                    TEXCOORD_0=addbuf(
+                        [
+                            (
+                                (v[0] * 0.32 + 0.5, v[2] * 0.32 + 0.5)
+                                if color in [3, 4, 5]
+                                else (
+                                    math.atan2(v[2], v[0]) / (2 * math.pi) + 0.5,
+                                    v[1] / 3,
+                                )
+                            )
+                            for v in p
+                        ],
+                        "VEC2",
+                        2,
+                    ),
                 ),
                 indices=indices(len(p)),
                 material=color,
@@ -181,22 +261,39 @@ def model(name):
     nodes.append(dict(name=name, mesh=len(meshes) - 1))
 
 
-for name in ["round-cottage", "round-garden"]:
+for name in [
+    "round-cottage",
+    "mushroom-house",
+    "stump-house",
+    "spiral-house",
+    "round-garden",
+]:
     model(name)
+images = []
+for name in ["mossy-building-stone-1.rgb.png", "grass-2.rgb.png"]:
+    while len(blob) % 4:
+        blob.append(0)
+    data = (root.parent / "polyworld_data/terrain/tiles" / name).read_bytes()
+    images.append(dict(bufferView=len(views), mimeType="image/png"))
+    views.append(dict(buffer=0, byteOffset=len(blob), byteLength=len(data)))
+    blob.extend(data)
+materials = []
+for i, c in enumerate(colors):
+    pbr = dict(baseColorFactor=[*c, 1], metallicFactor=0, roughnessFactor=1)
+    if i in [0, 1]:
+        pbr["baseColorTexture"] = dict(index=0)
+    if i in [3, 4, 5]:
+        pbr["baseColorTexture"] = dict(index=1)
+    materials.append(dict(pbrMetallicRoughness=pbr, doubleSided=True))
 doc = dict(
     asset=dict(version="2.0"),
     buffers=[dict(byteLength=len(blob))],
     bufferViews=views,
     accessors=access,
-    materials=[
-        dict(
-            pbrMetallicRoughness=dict(
-                baseColorFactor=[*c, 1], metallicFactor=0, roughnessFactor=1
-            ),
-            doubleSided=True,
-        )
-        for c in colors
-    ],
+    materials=materials,
+    images=images,
+    samplers=[dict(wrapS=10497, wrapT=10497)],
+    textures=[dict(source=0, sampler=0), dict(source=1, sampler=0)],
     meshes=meshes,
     nodes=nodes,
     scenes=[dict(nodes=list(range(len(nodes))))],

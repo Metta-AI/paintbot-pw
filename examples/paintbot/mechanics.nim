@@ -42,7 +42,10 @@ proc initializeEquipment(w: var World) =
   for z in [Height div 3, Height*2 div 3]:
     w.pickups.add Pickup(pos: w.freePickup(point(Width div 2, z)),
         kind: medkitPickup)
-  for p in [point(1100, 1100), point(2100, 2350), point(3000, 700)]:
+  let pits = if visionRulesVersion >= 9:
+      [point(1950, 650), point(2600, 2050), point(900, 2850)]
+    else: [point(1100, 1100), point(2100, 2350), point(3000, 700)]
+  for p in pits:
     let q = w.freePickup(p)
     w.trenches.add Cover(x: q.x-140, z: q.z-140, w: 280, h: 280)
     w.trenches.add Cover(x: Width.int32-q.x-140, z: Height.int32-q.z-140,
@@ -212,6 +215,8 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
               for j in 0..<Seats:
                 if j == i or w.cogs[j].hp <= 0 or (checked and (1'u32 shl j)) != 0: continue
                 if distance2(p, w.cogs[j].pos) > Radius.int64*Radius: continue
+                if visionRulesVersion >= 9 and not w.lineClear(origin, w.cogs[
+                    j].pos): continue
                 checked = checked or (1'u32 shl j)
                 let trench = w.trenchAt(w.cogs[j].pos)
                 if trench >= 0 and trench != w.trenchAt(origin) and
@@ -219,7 +224,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
                 gunTargets.add (i, j)
                 break trace
           w.balls.add Paintball(pos: endPoint, velocity: Point(
-              x: endPoint.x-origin.x, z: endPoint.z-origin.z), owner: i.int32, life: 2)
+              x: endPoint.x-origin.x, z: endPoint.z-origin.z), owner: i.int32, life: (if visionRulesVersion >= 9: 6 else: 2))
       elif cmd.shoot and w.cogs[i].cooldown == 0:
         w.equipment[i].windup = GunWindupTicks
         w.equipment[i].gunAim = direction(w.cogs[i].pos, w.cogs[i].aim, GunRange)

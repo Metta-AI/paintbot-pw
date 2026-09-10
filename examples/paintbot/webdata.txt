@@ -80,3 +80,6 @@ terrain/toon_enchanted_meadow/atlas_1a.png
 terrain/toon_enchanted_meadow/vegetation.glb
 terrain/toon_enchanted_meadow/atlas_vegetation_1a.png
 terrain/low_poly_village.glb
+terrain/handpainted_trees/tree_fir_03.glb
+terrain/handpainted_trees/tree_leafy_simple.glb
+terrain/handpainted_trees/tree_leafy_double.glb

@@ -57,8 +57,10 @@ proc setOptions(f, p, b, t: cint) {.exportc: "pw_options", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   follow = f != 0; firstPerson = p != 0; bars = b != 0; trails = t != 0
 const teamColors = [rgbx(255, 103, 81, 255), rgbx(74, 192, 255, 255)]
-proc position(p: Point, y = 0'f32): Vec3 = vec3(p.x.float32/100-32, y,
-    p.z.float32/100-20)
+proc position(p: Point, y = 0'f32): Vec3 = vec3(p.x.float32/100-32, y+(
+    if replayRulesVersion >= 9: world.elevation(p).float32/100 else: 0'f32),
+
+p.z.float32/100-20)
 proc seen(i: int): bool =
   if lens < 0: return true
   if lens < Seats: return world.visible(lens, i)
@@ -86,6 +88,23 @@ proc gem(r: var ShapeRenderer, p: Vec3, s: float32, c: ColorRGBX) =
     r.addTriangle(top, ring[i], ring[(i+1) mod 4], c)
     r.addTriangle(bottom, ring[(i+1) mod 4], ring[i], c)
 
+proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
+    color: ColorRGBX) =
+  for ring in 0..<6:
+    let a = -PI.float32/2+PI.float32*ring.float32/6
+    let b = -PI.float32/2+PI.float32*(ring+1).float32/6
+    for j in 0..<10:
+      let c = 2*PI.float32*j.float32/10
+      let d = 2*PI.float32*(j+1).float32/10
+      let p0 = p+vec3(cos(a)*cos(c), sin(a), cos(a)*sin(c))*radius
+      let p1 = p+vec3(cos(a)*cos(d), sin(a), cos(a)*sin(d))*radius
+      let p2 = p+vec3(cos(b)*cos(d), sin(b), cos(b)*sin(d))*radius
+      let p3 = p+vec3(cos(b)*cos(c), sin(b), cos(b)*sin(c))*radius
+      let shade = 0.65+0.35*(ring.float32/6)
+      let col = rgbx(uint8(color.r.float32*shade), uint8(color.g.float32*shade),
+          uint8(color.b.float32*shade), 255)
+      r.addQuad(p0, p3, p2, p1, col)
+
 proc runGraphics*() =
   setup()
   let index = if replayMode: indexReplay() else: ReplayIndex()
@@ -95,6 +114,8 @@ proc runGraphics*() =
   # The playable surface stays perfectly flat. Scenic elevation is outside it.
   let ground = QuadLayer(originX: 24, originZ: 36, width: 80, depth: 56,
       tiles: newSeq[Tile](80*56))
+  let terraces = QuadLayer(originX: 24, originZ: 36, width: 80, depth: 56,
+      slab: true, tiles: newSeq[Tile](80*56))
   for z in 0..<56:
     for x in 0..<80:
       let gx = x-8; let gz = z-8
@@ -118,11 +139,49 @@ proc runGraphics*() =
         let plaza = sqrt((gx.float-32)*(gx.float-32)+(gz.float-20)*(gz.float-20))
         if abs(gz.float-winding) < 2 or (plaza > 5.0 and plaza < 7.2):
           tile.kind = RoadTile
+      # Dig into the terrain itself; the rim and floor share textured earth.
+      for t in world.trenches:
+        let cx = (t.x.float32+t.w.float32/2)/100
+        let cz = (t.z.float32+t.h.float32/2)/100
+        let hx = t.w.float32/200
+        let hz = t.h.float32/200
+        if abs(gx.float32+0.5-cx) < hx+0.65 and abs(gz.float32+0.5-cz) < hz+0.65:
+          tile.kind = RoadTile
+          var heights: array[4, float32]
+          for corner in 0..3:
+            let px = gx.float32+(corner and 1).float32
+            let pz = gz.float32+(corner shr 1).float32
+            # Rounded, gently irregular banks rather than a square wooden outline.
+            let dx = abs(px-cx)/hx
+            let dz = abs(pz-cz)/hz
+            let edge = pow(pow(dx, 4)+pow(dz, 4), 0.25'f32)
+            let bank = clamp((1.15'f32-edge)*2.5, 0'f32, 1'f32)
+            heights[corner] = -0.6'f32*bank
+          tile.tops = pack(heights)
+      if replayRulesVersion >= 9:
+        var heights = tile.tops.unpack
+        var elevated = false
+        for corner in 0..3:
+          let px = gx+(corner and 1)
+          let pz = gz+(corner shr 1)
+          let base = terrainHeight(px*100, pz*100).float32/100
+          heights[corner] += base
+          if raisedHeight(px*100, pz*100) > 0: elevated = true
+        if elevated:
+          var deck = tile
+          deck.tops = pack(heights)
+          deck.bottoms = pack([-0.1'f32, -0.1, -0.1, -0.1])
+          terraces.tiles[z*80+x] = deck
+          tile.tops = pack([-0.125'f32, -0.125, -0.125, -0.125])
+          tile.flags = tile.flags or TileImpassable
+          tile.kind = RockTile
+        else:
+          tile.tops = pack(heights)
       ground.tiles[z*80+x] = tile
-  layers = @[ground]
+  layers = if replayRulesVersion >= 9: @[ground, terraces] else: @[ground]
   amplitude = 1.2
   treeHeight = 5.5
-  initTerrain(DenseTrees, GeneratedTerrain, PaintedRocks)
+  initTerrain(MixedTrees, GeneratedTerrain, PaintedRocks)
   computeWalkable()
   scatterGrass(1500, recording.seed, matchTerrain = true)
   bakeTerrain(rebuildWalkability = false)
@@ -194,7 +253,8 @@ proc runGraphics*() =
         let facing = arctan2(delta.x.float32, delta.y.float32)
         let rolling = if c.pos != previous[i].pos: (
             world.tick.float32+alpha)/24 else: 0
-        let lowered = if world.trenchAt(c.pos) >= 0: 0.38'f32 else: 0'f32
+        let lowered = if replayRulesVersion < 9 and world.trenchAt(c.pos) >=
+            0: 0.55'f32 else: 0'f32
         drawCharacter(scene, models[team(i)], poses[i]-vec3(0, lowered, 0),
             facing, 0, rolling)
     if visibilityTick != world.tick or visibilityLens != lens:
@@ -243,15 +303,6 @@ proc runGraphics*() =
         187, 111, 255))
     for x in [-32'f32, 32'f32]: shapes.box(x, 0, 0, 0.07, 0.16, 20, rgbx(217,
         187, 111, 255))
-    for t in world.trenches:
-      let p = position(Point(x: t.x+t.w div 2, z: t.z+t.h div 2))
-      shapes.box(p.x, 0.01, p.z, t.w.float32/100, 0.03, t.h.float32/100, rgbx(
-          42, 35, 27, 255))
-      for offset in [-1'f32, 1'f32]:
-        shapes.box(p.x+offset*t.w.float32/200, 0.06, p.z, 0.12, 0.13,
-            t.h.float32/100, rgbx(130, 104, 65, 255))
-        shapes.box(p.x, 0.06, p.z+offset*t.h.float32/200, t.w.float32/100, 0.13,
-            0.12, rgbx(130, 104, 65, 255))
     for item in world.pickups:
       if item.readyAt > world.tick: continue
       if lens >= 0:
@@ -285,7 +336,7 @@ proc runGraphics*() =
       if b.trench >= 0:
         let t = world.trenches[b.trench]
         let p = position(Point(x: t.x+t.w div 2, z: t.z+t.h div 2))
-        shapes.box(p.x, 0.05, p.z, t.w.float32/100, 0.06, t.h.float32/100,
+        shapes.box(p.x, p.y+0.05, p.z, t.w.float32/200, 0.06, t.h.float32/200,
             teamColors[team(b.owner.int)])
       else: shapes.addCircle(position(b.pos, 0.07),
           GrenadeBlastRadius.float32/100, teamColors[team(b.owner.int)])
@@ -305,10 +356,10 @@ proc runGraphics*() =
           shapes.gem(position(p, 0.9), 0.14+f*1.0, teamColors[team(i)])
       if e.grenade: shapes.gem(poses[i]+vec3(-0.45, 1.0, -0.3), 0.19, rgbx(157,
           175, 66, 255))
-      if e.sprayCan: shapes.box(poses[i].x+0.5, 0.75, poses[i].z, 0.3, 0.5,
-          0.25, rgbx(241, 175, 70, 255))
-      for hp in 0..<e.armor: shapes.box(poses[i].x-0.3+hp.float32*0.25, 2.1,
-          poses[i].z, 0.16, 0.09, 0.09, rgbx(65, 203, 245, 255))
+      if e.sprayCan: shapes.box(poses[i].x+0.5, poses[i].y+0.75, poses[i].z,
+          0.3, 0.5, 0.25, rgbx(241, 175, 70, 255))
+      for hp in 0..<e.armor: shapes.box(poses[i].x-0.3+hp.float32*0.25, poses[
+          i].y+2.1, poses[i].z, 0.16, 0.09, 0.09, rgbx(65, 203, 245, 255))
     for side in 0..1:
       let h = position(home(side))
       shapes.addCircle(h+vec3(0, 0.04, 0), 2.3, rgbx(45, 69, 64, 255))
@@ -340,16 +391,15 @@ proc runGraphics*() =
         shapes.addLine(p+vec3(0, 0.08, 0), position(c.goal, 0.08), teamColors[
             team(i)], halfWidth = 0.035)
       if bars:
-        for hp in 0..<c.hp: shapes.box(p.x-0.35+hp.float32*0.28, 2.5, p.z, 0.1,
-            0.09, 0.09, rgbx(221, 253, 180, 255))
+        for hp in 0..<c.hp: shapes.box(p.x-0.35+hp.float32*0.28, p.y+2.5, p.z,
+            0.1, 0.09, 0.09, rgbx(221, 253, 180, 255))
     for b in world.balls:
       if lens >= 0 and not seen(b.owner.int): continue
-      shapes.addLine(position(b.pos, 1), position(point(
-          b.pos.x-b.velocity.x div (if replayRulesVersion >= 6: 1 else: 2),
-              b.pos.z-b.velocity.z div (if replayRulesVersion >= 6: 1 else: 2)),
-              1),
-          teamColors[team(b.owner.int)], halfWidth = 0.06)
-      shapes.gem(position(b.pos, 1), 0.14, teamColors[team(b.owner.int)])
+      let start = point(b.pos.x-b.velocity.x, b.pos.z-b.velocity.z)
+      let duration = if replayRulesVersion >= 9: 6'f32 else: 2'f32
+      let f = clamp((duration-b.life.float32+alpha)/duration, 0'f32, 1'f32)
+      let ball = mix(position(start, 1.05), position(b.pos, 1.05), f)
+      shapes.paintball(ball, 0.18, teamColors[team(b.owner.int)])
     shapes.draw(vp)
     # A real second 3D camera gives the selected bot's eye-level view.
     if firstPerson and selected >= 0 and world.cogs[selected].hp > 0:
