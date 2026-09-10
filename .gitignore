@@ -43,3 +43,5 @@ coworld/evidence/
 !Dockerfile
 !.dockerignore
 coworld/**/__pycache__/
+
+/examples/paintbot/emscripten/

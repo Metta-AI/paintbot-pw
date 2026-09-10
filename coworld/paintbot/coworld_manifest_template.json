@@ -1,0 +1,663 @@
+{
+  "tags": [
+    "paintball",
+    "capture-the-flag",
+    "polyworld",
+    "basic",
+    "wasm",
+    "single-pod"
+  ],
+  "game": {
+    "name": "paintbot-pw",
+    "description": "Paintbot in Polyworld: sixteen BASIC or WASM file policies fight over hearts in a deterministic 3D paintball arena.",
+    "owner": "daveey",
+    "player_runtime": "game-hosted",
+    "runnable": {
+      "type": "game",
+      "image": "{{GAME_IMAGE}}",
+      "source_url": "https://github.com/Metta-AI/paintbot-pw",
+      "resources": {
+        "requests": {
+          "cpu": "2",
+          "memory": "2Gi"
+        },
+        "limits": {
+          "cpu": "6",
+          "memory": "12Gi"
+        }
+      }
+    },
+    "config_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players",
+        "seed",
+        "max_ticks"
+      ],
+      "properties": {
+        "tokens": {
+          "type": "array",
+          "minItems": 16,
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "type": "array",
+          "minItems": 16,
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        },
+        "max_ticks": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 28800
+        },
+        "slots": {
+          "type": "array",
+          "minItems": 16,
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "properties": {
+              "team": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "results_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scores",
+        "ticks",
+        "seed",
+        "outcome"
+      ],
+      "properties": {
+        "scores": {
+          "type": "array",
+          "minItems": 16,
+          "maxItems": 16,
+          "items": {
+            "type": "integer",
+            "enum": [
+              0,
+              1
+            ]
+          }
+        },
+        "ticks": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 28800
+        },
+        "seed": {
+          "type": "integer"
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "banked_gold": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "returned": {
+          "type": "array",
+          "items": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "replay_viewer": {
+      "bundle": "replay-viewer",
+      "replay_compression": "gzip"
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "Submit one raw BASIC file or Paintbot-CDX ABI WASM reactor. Even slots are Red, odd slots Blue. See the readme for the BASIC API and WASM compatibility contract."
+      },
+      "global": {
+        "type": "text",
+        "value": "GET /client/global returns a static status page. /global sends one JSON status message after WebSocket upgrade and echoes Ping frames with Pong. No gameplay traffic uses WebSockets. Other legacy endpoints return explicit stubs."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "# Paintbot PW\n\nPaintbot on Polyworld: a deterministic 3D paintball arena for sixteen agents.\nRed controls even slots and Blue controls odd slots. Capture the enemy heart\nand bring it home while your own heart is home. Three captures win. A time\nlimit without a capture victory is a draw; all agents receive zero.\n\nPlayers move through a symmetric seeded bunker arena. Paintballs travel and\ncollide with cover; three hits tag a player out. Tagged players drop the heart\nand respawn after 72 ticks, with 36 ticks of spawn protection. A dropped heart\nreturns after 240 ticks, or when its team touches it. Carrying slows movement\nto 70 percent. Matches run at 24 deterministic ticks per simulated second,\nwith no wall-clock pacing on the server.\n\n## Submit either file type\n\nUpload one raw BASIC source file or one Paintbot reactor WASM file. File type\nis detected from the WASM magic bytes, not its extension. The game runs both\ninside its pod; there are no player pods. BASIC uses Polyworld's bounded VM.\nWASM uses Wasmtime with no filesystem/network/environment grants, 256 MiB\nmemory per seat, bounded fuel, and an epoch deadline. Mixed rosters work.\n\nThe WASM entrypoints and Sprite-v1 packets match `cogame-paintbot-cdx`:\n`paintbot_init`, `paintbot_buffer`, `paintbot_step`, `paintbot_output_size`,\nexported memory, and optional WASI `_initialize`. The unchanged CDX baseline\nis bundled as `players/baseline.wasm`. Observations contain the walkability\nmap, fog-gated avatars and HP, hearts, endzones, and own aim. Movement, fire,\nand aim masks are translated to Polyworld actions. Chat is accepted but has\nno gameplay effect. This version has no grenade, pickup, battle-royale, or\nSeason 2 play-call mechanics. It preserves the file interface, not identical\ncombat trajectories or old replay files.\n\n## BASIC interface\n\nCoordinates are integer hundredths of a Polyworld tile, with x right and y\ndown on a 6400\u00d74000 map. Slots are zero-based, Red=0 and Blue=1.\n\nRead-only data: `selfId`, `selfTeam`, `selfX`, `selfY`, `selfHp`, `carrying`,\n`homeX`, `homeY`, `heartX`, `heartY`, `ownHeartX`, `ownHeartY`,\n`ownHeartStolen`, `worldTick`.\n\nQueries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,\n`playerCarrying(slot)`. Hidden enemies yield no coordinates. Enemy heart\ncoordinates fall back to its home when its carrier is not visible.\n\nActions: `walkTo(x,y)` uses bounded cover navigation; `shootAt(x,y)` fires\nwhen the gun is ready. Source is limited to 64 KiB, VM memory to 2 MiB,\nand each decision to 20,000 instructions/50,000 work units. PRINT stays in\nprivate seat logs. A BASIC runtime error disables its VM.\n\n`players/base.bas` reimplements the baseline's carrier-first objectives,\nheart recovery, defensive roles, wounded-target focus and short movement\nlead in BASIC. It is a strategic translation, not an action-identical port\nof every tuning flag in the larger Nim policy. Use the original WASM file\nfor the original policy code.\n\n## Replays\n\nAction-only Polyworld tapes contain accepted commands and portable per-tick\nhashes, never policy source. The native verifier and browser replay renderer\nresimulate those actions. The viewer has play/pause, speed and seeking.\n"
+      }
+    }
+  },
+  "player": [
+    {
+      "id": "baseline",
+      "name": "BASIC Baseline",
+      "type": "player",
+      "file": "players/base.bas",
+      "description": "BASIC translation of the Paintbot objective and combat strategy."
+    },
+    {
+      "id": "wasm-baseline",
+      "name": "WASM Baseline",
+      "type": "player",
+      "file": "players/baseline.wasm",
+      "description": "Unchanged Paintbot CDX baseline reactor."
+    }
+  ],
+  "variants": [
+    {
+      "id": "competition",
+      "name": "Competition",
+      "description": "Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 7200
+      }
+    },
+    {
+      "id": "1v1",
+      "name": "Two policy teams",
+      "description": "Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 7200
+      }
+    },
+    {
+      "id": "2v2",
+      "name": "Two captains per team",
+      "description": "Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 7200
+      }
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Player 0"
+        },
+        {
+          "name": "Player 1"
+        },
+        {
+          "name": "Player 2"
+        },
+        {
+          "name": "Player 3"
+        },
+        {
+          "name": "Player 4"
+        },
+        {
+          "name": "Player 5"
+        },
+        {
+          "name": "Player 6"
+        },
+        {
+          "name": "Player 7"
+        },
+        {
+          "name": "Player 8"
+        },
+        {
+          "name": "Player 9"
+        },
+        {
+          "name": "Player 10"
+        },
+        {
+          "name": "Player 11"
+        },
+        {
+          "name": "Player 12"
+        },
+        {
+          "name": "Player 13"
+        },
+        {
+          "name": "Player 14"
+        },
+        {
+          "name": "Player 15"
+        }
+      ],
+      "slots": [
+        {
+          "team": "red"
+        },
+        {
+          "team": "blue"
+        },
+        {
+          "team": "red"
+        },
+        {
+          "team": "blue"
+        },
+        {
+          "team": "red"
+        },
+        {
+          "team": "blue"
+        },
+        {
+          "team": "red"
+        },
+        {
+          "team": "blue"
+        },
+        {
+          "team": "red"
+        },
+        {
+          "team": "blue"
+        },
+        {
+          "team": "red"
+        },
+        {
+          "team": "blue"
+        },
+        {
+          "team": "red"
+        },
+        {
+          "team": "blue"
+        },
+        {
+          "team": "red"
+        },
+        {
+          "team": "blue"
+        }
+      ],
+      "seed": 2026,
+      "max_ticks": 240
+    },
+    "players": [
+      {
+        "player_id": "wasm-baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      },
+      {
+        "player_id": "baseline"
+      }
+    ]
+  }
+}

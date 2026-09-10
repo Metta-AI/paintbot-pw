@@ -1,0 +1,7 @@
+services:
+  game:
+    image: paintbot-pw:latest
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: coworld/paintbot/Dockerfile
