@@ -94,47 +94,51 @@ proc gem(r: var ShapeRenderer, p: Vec3, s: float32, c: ColorRGBX) =
     r.addTriangle(top, ring[i], ring[(i+1) mod 4], c)
     r.addTriangle(bottom, ring[(i+1) mod 4], ring[i], c)
 
-proc crystalMarker(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX,
+proc heartSculpture(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX,
     spin: float32) =
-  # Solid world-space hexagonal crystal with individually lit facets.
-  var lower, upper: array[6, Vec3]
-  for i in 0..<6:
-    let angle = spin+i.float32*PI.float32/3
-    let radial = vec3(cos(angle), 0, sin(angle))*0.95
-    lower[i] = p+radial-vec3(0,0.55,0)
-    upper[i] = p+radial+vec3(0,0.45,0)
-  let top = p+vec3(0,1.65,0)
-  let bottom = p-vec3(0,1.2,0)
+  # A closed, inflated heart surface: rounded front and back meet at the rim.
+  const segments = 48
+  const rings = 8
   type Facet = tuple[a,b,c: Vec3, tint: ColorRGBX, depth: float32]
   var facets: seq[Facet]
-  proc facet(a,b,c: Vec3, brightness: float32) =
-    let tint = rgbx(
-      uint8(clamp(color.r.float32*brightness,0,255)),
-      uint8(clamp(color.g.float32*brightness,0,255)),
-      uint8(clamp(color.b.float32*brightness,0,255)),254)
-    let delta = (a+b+c)/3-eye
-    facets.add((a,b,c,tint,dot(delta,delta)))
-  for i in 0..<6:
-    let j = (i+1) mod 6
-    let light = 0.65'f32+0.3*cos(spin+(i.float32+0.5)*PI.float32/3-0.8)
-    facet(top,upper[i],upper[j],light+0.35)
-    facet(upper[i],lower[i],lower[j],light)
-    facet(upper[i],lower[j],upper[j],light)
-    facet(bottom,lower[j],lower[i],light*0.7)
-  # ShapeRenderer does not write depth, so order the opaque facets explicitly.
-  facets.sort(proc(a,b: Facet): int = cmp(b.depth,a.depth))
-  for face in facets:
-    r.addTriangle(face.a,face.b,face.c,face.tint)
-  # Highlight only the camera-facing edges; ribbons work at every camera angle.
-  for i in 0..<6:
-    let j = (i+1) mod 6
-    let normal = normalize((upper[i]+upper[j])/2-p-vec3(0,0.45,0))
-    if dot(normal,eye-p)<=0: continue
-    for edge in [(top,upper[i]),(upper[i],upper[j]),
-        (upper[i],lower[i]),(lower[i],bottom)]:
-      let side = normalize(cross(edge[1]-edge[0],eye-(edge[0]+edge[1])/2))*0.025
-      r.addQuad(edge[0]-side,edge[1]-side,edge[1]+side,edge[0]+side,
-        rgbx(235,249,255,220))
+  proc vertex(i,j,side:int):Vec3 =
+    let t=i.float32*2*PI.float32/segments.float32
+    let latitude=j.float32*PI.float32/(2*rings).float32
+    let radius=sin(latitude)
+    let x=1.5'f32*radius*pow(sin(t),3'f32)
+    let y=1.5'f32*radius*(13*cos(t)-5*cos(2*t)-2*cos(3*t)-cos(4*t))/17
+    let z=side.float32*0.8'f32*cos(latitude)
+    # A gentle backwards lean shows the sculpted face from the arena camera.
+    let yy=y*cos(0.45'f32)+z*sin(0.45'f32)
+    let zz = -y*sin(0.45'f32)+z*cos(0.45'f32)
+    p+vec3(x*cos(spin)+zz*sin(spin),yy,-x*sin(spin)+zz*cos(spin))
+  proc facet(a,b,c:Vec3) =
+    let center=(a+b+c)/3
+    var normal=cross(b-a,c-a)
+    if dot(normal,normal)<0.0000001:return
+    normal=normalize(normal)
+    if dot(normal,center-p)<0:normal= -normal
+    let light=normalize(vec3(-0.45,0.8,0.65))
+    let view=normalize(eye-center)
+    let diffuse=0.48'f32+0.52*max(0'f32,dot(normal,light))
+    let gloss=pow(max(0'f32,dot(normal,normalize(light+view))),36'f32)*0.8
+    let rim=pow(1-abs(dot(normal,view)),3'f32)*0.22
+    proc channel(c:uint8):uint8 =
+      uint8(clamp(c.float32*diffuse+255*(gloss+rim),0,255))
+    let delta=center-eye
+    facets.add((a,b,c,rgbx(channel(color.r),channel(color.g),channel(color.b),254),dot(delta,delta)))
+  for side in [-1,1]:
+    for j in 0..<rings:
+      for i in 0..<segments:
+        let a=vertex(i,j,side)
+        let b=vertex(i+1,j,side)
+        let c=vertex(i+1,j+1,side)
+        let d=vertex(i,j+1,side)
+        if j>0:facet(a,b,c)
+        facet(a,c,d)
+  # The shared shape batch does not write depth; sort the closed mesh faces.
+  facets.sort(proc(a,b:Facet):int=cmp(b.depth,a.depth))
+  for face in facets:r.addTriangle(face.a,face.b,face.c,face.tint)
 
 proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
     color: ColorRGBX) =
@@ -493,14 +497,14 @@ proc runGraphics*() =
         let color=if heart.owner<0:rgbx(220,229,238,255)
           elif heart.owner==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)
         let p=position(heart.pos,1.8+sin((world.tick.float32+alpha)/12)*0.12)
-        shapes.crystalMarker(p,eye,color,(world.tick.float32+alpha)/90)
+        shapes.heartSculpture(p,eye,color,(world.tick.float32+alpha)/160)
     else:
       for side in 0..1:
         let heart = world.hearts[side]
         if heart.carrier < 0 or seen(heart.carrier):
           let p = position(heart.pos, if heart.carrier < 0: 1.8+sin(
               world.tick.float32/12)*0.12 else: 3.1)
-          shapes.crystalMarker(p,eye,(if side==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)),(world.tick.float32+alpha)/90)
+          shapes.heartSculpture(p,eye,(if side==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)),(world.tick.float32+alpha)/160)
     for i, c in world.cogs:
       if c.hp <= 0 or not seen(i): continue
       let p = poses[i]
