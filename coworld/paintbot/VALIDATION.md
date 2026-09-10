@@ -28,3 +28,9 @@ These checks establish the new Polyworld game's determinism and policy compatibi
 Living cogs block both teammates and opponents using their combined collision radii. Axis sliding still permits movement along obstacles, and occupied spawn points search nearby free space. Firing now has a 24-tick cooldown (one shot per second), with a two-tick muzzle flash. Replay format v3 selects these rules; v1/v2 recordings retain their original movement and eight-tick cooldown.
 
 Validation: all ten rule tests and three replay-analysis tests passed, including opposing/allied head-on collisions, occupied respawns, and sustained shot cadence. The full 7,200-tick BASIC/WASM match replay verified with hash `3624204313`. Original v1 (3,984 ticks, hash `1977552757`) and hosted v2 (1,300 ticks, hash `1314699705`) replays reproduced exactly. Optional vet review was unavailable because its API credentials were not configured.
+
+## Forward vision (0.1.4)
+
+BASIC and WASM observations now use a 120-degree forward cone around aim, with the existing distance and cover checks. Other cogs, including allies, are hidden outside the cone. BASIC `lookAt(x, y)` turns without firing; walking turns toward the destination unless explicit aim is supplied. WASM aim buttons update facing without requiring the trigger. POV terrain fog uses the same visibility predicate. Spectator all-seeing mode remains available.
+
+All twelve rule tests, three replay-analysis tests, and five Python runtime tests passed. A full mixed BASIC/WASM episode finished at 6,758 ticks (3–0), and replay verification reproduced hash `2173305639`. Previously published v2 and v3 replays retain their original hashes. Replay format v4 selects the new facing rules.
