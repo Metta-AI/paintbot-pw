@@ -95,7 +95,7 @@ proc gem(r: var ShapeRenderer, p: Vec3, s: float32, c: ColorRGBX) =
     r.addTriangle(bottom, ring[(i+1) mod 4], ring[i], c)
 
 proc heartSculpture(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX,
-    spin: float32) =
+    spin: float32, scale = 1'f32) =
   # A closed, inflated heart surface: rounded front and back meet at the rim.
   const segments = 48
   const rings = 8
@@ -111,7 +111,7 @@ proc heartSculpture(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX,
     # A gentle backwards lean shows the sculpted face from the arena camera.
     let yy=y*cos(0.45'f32)+z*sin(0.45'f32)
     let zz = -y*sin(0.45'f32)+z*cos(0.45'f32)
-    p+vec3(x*cos(spin)+zz*sin(spin),yy,-x*sin(spin)+zz*cos(spin))
+    p+vec3(x*cos(spin)+zz*sin(spin),yy,-x*sin(spin)+zz*cos(spin))*scale
   proc facet(a,b,c:Vec3) =
     let center=(a+b+c)/3
     var normal=cross(b-a,c-a)
@@ -139,6 +139,43 @@ proc heartSculpture(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX,
   # The shared shape batch does not write depth; sort the closed mesh faces.
   facets.sort(proc(a,b:Facet):int=cmp(b.depth,a.depth))
   for face in facets:r.addTriangle(face.a,face.b,face.c,face.tint)
+
+proc heartTower(r: var ShapeRenderer, base, eye: Vec3, color: ColorRGBX,
+    time: float32) =
+  let heart=base+vec3(0,3.05+sin(time/24)*0.05,0)
+  let front=normalize(eye-heart)
+  let right=normalize(cross(vec3(0,1,0),front))
+  let up=cross(front,right)
+  # Layered translucent halos soften to nothing at the outer edge.
+  for layer in 0..<7:
+    let radius=2.15'f32-layer.float32*0.19
+    let center=heart-front*0.85
+    for i in 0..<32:
+      let a=i.float32*2*PI.float32/32
+      let b=(i+1).float32*2*PI.float32/32
+      r.addTriangle(center,center+(right*cos(a)+up*sin(a))*radius,
+        center+(right*cos(b)+up*sin(b))*radius,
+        rgbx(color.r,color.g,color.b,uint8(5+layer*2)))
+  proc course(r:var ShapeRenderer,y,height,bottomRadius,topRadius:float32,tint:ColorRGBX,offset=0'f32) =
+    let top=base+vec3(0,y+height,0)
+    for i in 0..<12:
+      let a=i.float32*2*PI.float32/12+offset
+      let b=(i+1).float32*2*PI.float32/12+offset
+      let va=vec3(cos(a),0,sin(a));let vb=vec3(cos(b),0,sin(b))
+      let mid=normalize(va+vb)
+      let shade=0.68'f32+0.26*max(0'f32,dot(mid,normalize(vec3(-1,0,1))))
+      let col=rgbx(uint8(tint.r.float32*shade),uint8(tint.g.float32*shade),uint8(tint.b.float32*shade),254)
+      if dot(mid,eye-base)>0:
+        r.addQuad(base+vec3(0,y,0)+va*bottomRadius,
+          base+vec3(0,y,0)+vb*bottomRadius,top+vb*topRadius,top+va*topRadius,col)
+      r.addTriangle(top,top+va*topRadius,top+vb*topRadius,rgbx(tint.r,tint.g,tint.b,254))
+  course(r,0,0.28,1.0,0.94,rgbx(155,165,137,254))
+  for row in 0..<4:
+    course(r,0.3+row.float32*0.34,0.31,0.71,0.69,
+      rgbx(uint8(177+row*5),uint8(182+row*4),uint8(153+row*5),254),row.float32*0.16)
+  course(r,1.68,0.12,0.74,0.74,color)
+  course(r,1.8,0.22,0.86,0.98,rgbx(209,193,142,254))
+  r.heartSculpture(heart,eye,color,time/160,0.72)
 
 proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
     color: ColorRGBX) =
@@ -500,8 +537,7 @@ proc runGraphics*() =
       for heart in world.controlHearts:
         let color=if heart.owner<0:rgbx(220,229,238,255)
           elif heart.owner==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)
-        let p=position(heart.pos,1.8+sin((world.tick.float32+alpha)/12)*0.12)
-        shapes.heartSculpture(p,eye,color,(world.tick.float32+alpha)/160)
+        shapes.heartTower(position(heart.pos),eye,color,world.tick.float32+alpha)
     else:
       for side in 0..1:
         let heart = world.hearts[side]
