@@ -995,7 +995,17 @@
     $("clock").textContent = `${clock(t)} / ${clock(data.total)}`;
     $("tickread").textContent = `${t} / ${data.total} ticks`;
     for (let s = 0; s < 2; s++) {
-      $(`score${s}`).textContent = w.captures[s];
+      const owned = control ? w.controlHearts.filter(h => h.owner === s).length : w.captures[s];
+      $(`score${s}`).textContent = owned;
+      $(`lives${s}`).innerHTML = w.cogs.map((c, i) => {
+        if (team(i) !== s) return "";
+        const unlimited = data.rulesVersion >= 13 && data.rulesVersion < 19;
+        const remaining = w.equipment?.[i]?.lives ?? 0;
+        const eliminated = !unlimited && remaining === 0 && c.hp <= 0;
+        const status = c.hp > 0 ? `${c.hp} HP` : eliminated ? "Eliminated" : `Respawning in ${Math.ceil(c.respawn / 24)}s`;
+        const label = `${name(i)} · Agent ${i + 1} · ${unlimited ? "Unlimited" : remaining} lives · ${status}`;
+        return `<span class="agent-life ${eliminated ? "eliminated" : c.hp <= 0 ? "respawning" : ""}" title="${escape(label)}" aria-label="${escape(label)}"><span class="agent-number">${i + 1}</span><b>${eliminated ? "×" : unlimited ? "∞" : remaining}</b></span>`;
+      }).join("");
       $(`alive${s}`).textContent =
         `${w.cogs.filter((c, i) => team(i) === s && c.hp > 0).length} alive`;
       const h = w.hearts[s];

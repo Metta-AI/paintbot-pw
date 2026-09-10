@@ -13,6 +13,7 @@ type
     communications: seq[Communication]
     seed: int32
   ViewerState = object
+    rulesVersion: int
     world: World
     bounds: array[4,int]
     total: int
@@ -144,7 +145,7 @@ proc heartSculpture(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX,
 
 proc heartTower(r: var ShapeRenderer, base, eye: Vec3, color: ColorRGBX,
     time: float32) =
-  let heart=base+vec3(0,3.05+sin(time/24)*0.05,0)
+  let heart=base+vec3(0,3.05+sin(time)*0.05,0)
   let front=normalize(eye-heart)
   let right=normalize(cross(vec3(0,1,0),front))
   let up=cross(front,right)
@@ -177,7 +178,37 @@ proc heartTower(r: var ShapeRenderer, base, eye: Vec3, color: ColorRGBX,
       rgbx(uint8(177+row*5),uint8(182+row*4),uint8(153+row*5),254),row.float32*0.16)
   course(r,1.68,0.12,0.74,0.74,color)
   course(r,1.8,0.22,0.86,0.98,rgbx(209,193,142,254))
-  r.heartSculpture(heart,eye,color,time/160,0.72)
+  r.heartSculpture(heart,eye,color,time*2*PI.float32/6,0.72)
+
+proc spawnBeam(r: var ShapeRenderer, p: Vec3, color: ColorRGBX,
+    progress: float32, slot: int) =
+  # Replay-clock animation: the spawn shield gives a seek-safe 1.5 second age.
+  let fade = 1-progress
+  let height = 7'f32
+  for segment in 0..<20:
+    let a = segment.float32*2*PI.float32/20
+    let b = (segment+1).float32*2*PI.float32/20
+    let pa = p+vec3(cos(a)*0.68,0.06,sin(a)*0.68)
+    let pb = p+vec3(cos(b)*0.68,0.06,sin(b)*0.68)
+    r.addQuad(pa,pb,pb+vec3(0,height,0),pa+vec3(0,height,0),
+      rgbx(color.r,color.g,color.b,uint8(48*fade)))
+  # Bright scanning rings descend through the cog and dissolve at its feet.
+  for ring in 0..<3:
+    let y = max(0.08'f32,height*(1-progress)-ring.float32*0.8)
+    for segment in 0..<24:
+      let a = segment.float32*2*PI.float32/24
+      let b = (segment+1).float32*2*PI.float32/24
+      r.addLine(p+vec3(cos(a)*0.73,y,sin(a)*0.73),
+        p+vec3(cos(b)*0.73,y,sin(b)*0.73),
+        rgbx(color.r,color.g,color.b,uint8(230*fade)),halfWidth=0.045)
+  for particle in 0..<28:
+    let phase = particle.float32*2.39996+slot.float32
+    let radius = 0.25+(particle mod 5).float32*0.13
+    let y = (1-progress)*(0.5+(particle mod 9).float32*0.72)
+    let center = p+vec3(cos(phase+progress*3)*radius,y+0.1,
+      sin(phase+progress*3)*radius)
+    r.gem(center,(0.065+(particle mod 3).float32*0.02)*fade,
+      rgbx(255,245,220,uint8(254*fade)))
 
 proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
     color: ColorRGBX) =
@@ -321,6 +352,7 @@ proc runGraphics*() =
   var shapes = initShapeRenderer()
   var last = epochTime()
   var accumulator = 0.0
+  var heartAnimationTime = 0'f32
   var previous = world.cogs
   var announced = false
   var lastHud = -1
@@ -328,6 +360,8 @@ proc runGraphics*() =
   var visibilityLens = -2
   window.onFrame = proc() =
     let now = epochTime(); let dt = min(now-last, 0.1); last = now
+    # Decorative hearts keep turning while playback is paused or slowed.
+    heartAnimationTime = (heartAnimationTime+dt.float32)
     if replayMode and seek >= 0:
       index.restore(seek); seek = -1; accumulator = 0; previous = world.cogs
       if world.tick == recording.frames.len: paused = true
@@ -539,14 +573,14 @@ proc runGraphics*() =
       for heart in world.controlHearts:
         let color=if heart.owner<0:rgbx(220,229,238,255)
           elif heart.owner==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)
-        shapes.heartTower(position(heart.pos),eye,color,world.tick.float32+alpha)
+        shapes.heartTower(position(heart.pos),eye,color,heartAnimationTime)
     else:
       for side in 0..1:
         let heart = world.hearts[side]
         if heart.carrier < 0 or seen(heart.carrier):
           let p = position(heart.pos, if heart.carrier < 0: 1.8+sin(
               world.tick.float32/12)*0.12 else: 3.1)
-          shapes.heartSculpture(p,eye,(if side==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)),(world.tick.float32+alpha)/160)
+          shapes.heartSculpture(p,eye,(if side==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)),heartAnimationTime*2*PI.float32/6)
     for i, c in world.cogs:
       if c.hp <= 0 or not seen(i): continue
       let p = poses[i]
@@ -560,8 +594,9 @@ proc runGraphics*() =
       if c.cooldown >= (if replayRulesVersion >=
           3: FireCooldownTicks-1 else: 7): shapes.gem(p+vec3(d.x.float32/100,
           1.05, d.z.float32/100), 0.23, rgbx(255, 239, 177, 255))
-      if c.shield > 0: shapes.addCircle(p+vec3(0, 0.09, 0), 0.75, rgbx(196, 241,
-          243, 95))
+      if c.shield > 0:
+        let spawnProgress = clamp((36-c.shield.float32+alpha)/36,0'f32,1'f32)
+        shapes.spawnBeam(p,teamColors[team(i)],spawnProgress,i)
       if trails:
         shapes.addLine(p+vec3(0, 0.08, 0), position(c.goal, 0.08), teamColors[
             team(i)], halfWidth = 0.035)
@@ -637,7 +672,7 @@ proc runGraphics*() =
           let clip = vp*vec4(poses[i]+vec3(0, 1, 0), 1)
           screens[i] = [(clip.x/clip.w*0.5+0.5).float32, (
               0.5-clip.y/clip.w*0.5).float32]
-        let payload = ViewerState(world: world, bounds: [minX(),minZ(),maxX(),maxZ()], total: recording.frames.len,
+        let payload = ViewerState(rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], total: recording.frames.len,
             paused: paused, screen: screens, visible: visibility,
             footprint: footprint).toJson()
         let data = payload.cstring

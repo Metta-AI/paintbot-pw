@@ -34,7 +34,7 @@ proc freePickup(w: World, p: Point): Point =
 
 proc initializeEquipment(w: var World) =
   for i in 0..<Seats:
-    w.equipment[i].lives = StartingLives
+    w.equipment[i].lives = (if visionRulesVersion >= 19: 4 else: StartingLives)
     w.cogs[i].aim = home(1-team(i))
   # Mirrors use the same symmetry as this arena's terrain (180-degree rotation).
   for p in [point(300, 300), point(300, Height-300)]:
@@ -103,7 +103,7 @@ proc damage*(w: var World, victim, attacker, amount: int) =
   if w.cogs[victim].hp > 0: return
   if w.cogs[victim].carrying:
     w.resetHeart(1-team(victim)); w.cogs[victim].carrying = false
-  let lives = if visionRulesVersion>=13:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
+  let lives = if visionRulesVersion in 13..18:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
   w.equipment[victim] = Equipment(lives: lives)
   w.cogs[victim].respawn = RespawnTicks
   w.cogs[victim].cooldown = 0

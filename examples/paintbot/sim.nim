@@ -106,7 +106,7 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 18
+var visionRulesVersion* = 19
 proc minX*():int = (if visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
 proc minZ*():int = (if visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()

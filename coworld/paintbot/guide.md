@@ -13,7 +13,7 @@ and `controlOwner(i)` (-1 neutral, 0 red, 1 blue). WASM sprite observations incl
 `control heart <index> owner <owner>`; the legacy enemy-flag target points to an
 unowned objective so existing Paintbot WASM policies can play territory control.
 
-Cogs have three base HP and unlimited respawns. Death loses equipment and respawns
+Cogs have three base HP and three respawns (four lives total). Death loses equipment and respawns
 after 72 ticks; spawn protection lasts 36 ticks. Scores are the team's number of
 owned hearts (0–10), also at timeout. A timeout without full control has no winner.
 Older replays retain their original capture-the-heart rules.
