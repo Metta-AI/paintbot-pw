@@ -11,6 +11,7 @@
     fit: "M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4M9 9h6v6H9z",
     topdown: "M12 3 3 8l9 5 9-5-9-5ZM3 13l9 5 9-5M3 18l9 5 9-5",
     bars: "M12 20S3 14 3 8a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 6-9 12-9 12Z",
+    speech: "M4 4h16v12H9l-5 4V4ZM8 8h8M8 12h5",
     eventtoasts: "M5 17h14l-2-3V9a5 5 0 0 0-10 0v5l-2 3ZM10 21h4",
     trails: "M4 20V9a5 5 0 0 1 10 0v6a3 3 0 0 0 6 0V4M17 7l3-3 3 3",
     download: "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5",
@@ -55,6 +56,7 @@
     pov = false,
     bars = true,
     eventToasts = false,
+    speechBubbles = true,
     trails = false,
     lastTick = -1,
     ended = false,
@@ -260,6 +262,12 @@
   bind("topdown", () => {
     camera.tilt = camera.tilt > 1.5 ? 0.92 : 1.55;
     cameraUpdate();
+  });
+  bind("speech", () => {
+    speechBubbles = !speechBubbles;
+    pressed("speech", speechBubbles);
+    const bubbles = $("speech-bubbles");
+    if (bubbles) bubbles.hidden = !speechBubbles;
   });
   bind("eventtoasts", () => {
     eventToasts = !eventToasts;
@@ -834,6 +842,7 @@
         "position:fixed;inset:0;pointer-events:none;z-index:5";
       document.body.appendChild(bubbles);
     }
+    bubbles.hidden = !speechBubbles;
     const canvasRect = $("canvas").getBoundingClientRect();
     bubbles.replaceChildren();
     const latestSpeech = new Map();
