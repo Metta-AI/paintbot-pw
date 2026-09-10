@@ -28,6 +28,21 @@ def literal_snappy(raw):
     return bytes(out)
 
 
+def land_wave(value, period, amplitude):
+    phase = value % period
+    half = period // 2
+    t = phase % half
+    magnitude = 4 * t * (half - t) * amplitude // (half * half)
+    return magnitude if phase < half else -magnitude
+
+
+def land_coordinates(x, z):
+    return (
+        x + land_wave(z + 350, 2900, 360) + land_wave(x + z, 1700, 70),
+        z + land_wave(x + 600, 3200, 230) + land_wave(z - x, 1900, 55),
+    )
+
+
 def forest_height(x, z):
     height = 0
     for cx, cz, h, r in [
@@ -47,7 +62,9 @@ def forest_height(x, z):
 
 
 @lru_cache(maxsize=65536)
-def terrain_height(x, z, wide=False, wilderness=False, deep=False):
+def terrain_height(x, z, wide=False, wilderness=False, deep=False, organic=False):
+    if organic:
+        x, z = land_coordinates(x, z)
     if wilderness and (x < 0 or x > 6400 or z < 0 or z > 4000):
         if deep:
             return forest_height(x, z)
@@ -95,6 +112,7 @@ def elevation(w, p):
         w.get("rulesVersion", 0) >= 11,
         w.get("rulesVersion", 0) >= 12,
         w.get("rulesVersion", 0) >= 14,
+        w.get("rulesVersion", 0) >= 15,
     )
     for t in w.get("trenches", []):
         if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
@@ -161,7 +179,9 @@ def can_see_point(w, slot, b):
 
 
 @lru_cache(maxsize=4)
-def walkability(cover, layered=False, wide=False, wilderness=False, deep=False):
+def walkability(
+    cover, layered=False, wide=False, wilderness=False, deep=False, organic=False
+):
     width, height = (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
     ox, oz = (2800, 1200) if deep else (800, 400) if wilderness else (0, 0)
     raw = bytearray(width * height * 4)
@@ -192,9 +212,14 @@ def walkability(cover, layered=False, wide=False, wilderness=False, deep=False):
         for z in range(11, height - 11):
             for x in range(11, width - 11):
                 px, pz = x * 5 - ox, z * 5 - oz
-                h = terrain_height(px, pz, wide, wilderness, deep)
+                h = terrain_height(px, pz, wide, wilderness, deep, organic)
                 if any(
-                    abs(terrain_height(px + dx, pz + dz, wide, wilderness, deep) - h)
+                    abs(
+                        terrain_height(
+                            px + dx, pz + dz, wide, wilderness, deep, organic
+                        )
+                        - h
+                    )
                     > 80
                     for dx, dz in [(55, 0), (-55, 0), (0, 55), (0, -55)]
                 ):
@@ -212,6 +237,7 @@ class SpriteView:
     def frame(self, w):
         wilderness = w.get("rulesVersion", 0) >= 12
         deep = w.get("rulesVersion", 0) >= 14
+        organic = w.get("rulesVersion", 0) >= 15
         ox, oz = (560, 240) if deep else (160, 80) if wilderness else (0, 0)
         width, height = (
             (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
@@ -258,6 +284,7 @@ class SpriteView:
                     w.get("rulesVersion", 0) >= 11,
                     wilderness,
                     deep,
+                    organic,
                 ),
             )
             sprite(1, "map", width, height)

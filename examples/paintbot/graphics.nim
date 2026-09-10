@@ -173,6 +173,14 @@ proc runGraphics*() =
         if (deepWilderness and (forestRouteDistance(gx*100,gz*100)<180 or abs(gz-20)<2)) or
             (not deepWilderness and (abs(gz+2)<=1 or abs(gz-42)<=1 or abs(gx+4)<=1 or abs(gx-68)<=1)):
           tile.kind=RoadTile
+      if organicTerrain and gx>=minX() div 100 and gx<maxX() div 100 and gz>=minZ() div 100 and gz<maxZ() div 100:
+        let px=gx*100+50;let pz=gz*100+50
+        let local=landCoordinates(px,pz)
+        let width=130+landWave(px+pz,1600,35)
+        let radius=sqrt(((local.x-3200)*(local.x-3200)+(local.z-2000)*(local.z-2000)).float)
+        tile.kind=GrassTile
+        if forestRouteDistance(px,pz)<width or villageLaneDistance(px,pz)<width or abs(radius-620)<110:
+          tile.kind=RoadTile
       # Dig into the terrain itself; the rim and floor share textured earth.
       for t in world.trenches:
         let cx = (t.x.float32+t.w.float32/2)/100
