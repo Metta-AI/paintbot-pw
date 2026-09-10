@@ -29,6 +29,7 @@ config = config.replace('--path:"', '--path:"' + str(source) + "/")
 p = stage / "players/baseline/baseline.nim"
 code = p.read_text()
 for old, new in {
+    "bot.tick - bot.lastShoutTick >= 26": "bot.tick - bot.lastShoutTick >= 78",
     "NadeMaxRange = 240.0": "NadeMaxRange = 256.0",
     "NadePickupDetour = 90.0": "NadePickupDetour = 220.0",
     "SpraypaintDetour = 70.0": "SpraypaintDetour = 180.0",

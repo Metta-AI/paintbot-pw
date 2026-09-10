@@ -103,3 +103,5 @@ Heartwick now spans 120 × 64 metres (twice the preceding wilderness map area).
 The original village sits inside wooded hill country with broad saddles, outer
 trails, six outlying territory hearts, and four extra medkit stations. Terrain
 heights and tree/bush collision bounds are shared by native and WASM policies.
+
+Baseline routine callouts are staggered across seats every 15 seconds.

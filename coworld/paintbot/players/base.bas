@@ -85,7 +85,7 @@ if best < 0 then
     lookAt(heardX(0), heardY(0))
   end if
 end if
-if worldTick mod 120 = selfId * 7 then
+if worldTick mod 360 = selfId * 21 then
   if best >= 0 then
     shout(strNew("Contact! Cover this lane."))
   else
