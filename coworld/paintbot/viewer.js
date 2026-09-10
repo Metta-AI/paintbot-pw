@@ -864,7 +864,7 @@
         continue;
       const bubble = document.createElement("div");
       bubble.textContent = message.text;
-      bubble.style.cssText = `position:absolute;left:${canvasRect.left + p[0] * canvasRect.width}px;top:${canvasRect.top + p[1] * canvasRect.height}px;transform:translate(-50%,-130%);max-width:160px;padding:5px 8px;border-radius:12px;background:#fff9df;color:#263c30;font:12px sans-serif;box-shadow:0 2px 5px #0005`;
+      bubble.style.cssText = `position:absolute;left:${canvasRect.left + p[0] * canvasRect.width}px;top:${canvasRect.top + p[1] * canvasRect.height}px;transform:translate(-50%,-130%);max-width:160px;padding:5px 8px;border-radius:12px;background:${team(slot) === 0 ? "#ffe3dd" : "#dff3ff"};color:#263c30;font:12px sans-serif;box-shadow:0 2px 5px #0005`;
       bubbles.appendChild(bubble);
     }
     const recent = index.events
