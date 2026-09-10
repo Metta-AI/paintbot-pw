@@ -106,7 +106,7 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 19
+var visionRulesVersion* = 20
 proc minX*():int = (if visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
 proc minZ*():int = (if visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
@@ -245,7 +245,7 @@ proc newWorld*(seed: int32): World =
   if visionRulesVersion >= 6: result.initializeEquipment()
 proc scores*(w: World): seq[int] =
   for i in 0..<Seats:
-    result.add (if visionRulesVersion>=13:w.captures[team(i)].int else:int(w.winner == team(i).int32))
+    result.add (if visionRulesVersion >= 20 and w.winner >= 0: (if w.winner == team(i).int32: 10 else: 0) elif visionRulesVersion>=13:w.captures[team(i)].int else:int(w.winner == team(i).int32))
 type LegacyWorld = object
   seed, tick: int32
   rng: Rng

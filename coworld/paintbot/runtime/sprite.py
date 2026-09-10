@@ -152,6 +152,12 @@ def _clear(w, a, b):
     origin_height = elevation(w, a) + 120 if layered else 0
     height_delta = elevation(w, b) - elevation(w, a) if layered else 0
     steps = max(abs(b["x"] - a["x"]), abs(b["z"] - a["z"])) // 25 + 1
+    # Only obstacles intersecting the ray bounds can block its samples.
+    min_x, max_x = sorted((a["x"], b["x"]))
+    min_z, max_z = sorted((a["z"], b["z"]))
+    obstacles = [c for c in w["cover"]
+                 if c["x"] <= max_x and c["x"] + c["w"] >= min_x
+                 and c["z"] <= max_z and c["z"] + (c["h"] or c["w"]) >= min_z]
     for i in range(1, steps + 1):
         x = a["x"] + (b["x"] - a["x"]) * i // steps
         z = a["z"] + (b["z"] - a["z"]) * i // steps
@@ -166,7 +172,7 @@ def _clear(w, a, b):
             )
             if c["h"] == 0
             else (c["x"] < x < c["x"] + c["w"] and c["z"] < z < c["z"] + c["h"])
-            for c in w["cover"]
+            for c in obstacles
         ):
             return False
     return True

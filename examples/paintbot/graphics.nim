@@ -370,7 +370,7 @@ proc runGraphics*() =
       var steps = 0
       while accumulator >= 1 and steps < 96:
         if (replayMode and world.tick >= recording.frames.len) or
-            (not replayMode and (world.tick >= options.maximumTicks or
+            (not replayMode and ((world.tick >= options.maximumTicks and (replayRulesVersion < 20 or options.maximumTicks < 7200)) or
                 world.winner != -1)): paused = true; accumulator = 0; break
         previous = world.cogs
         advance(); accumulator-=1; inc steps
@@ -504,7 +504,7 @@ proc runGraphics*() =
     for g in world.grenades:
       let f = clamp((world.tick-g.releasedAt).float32/max(1,
           g.landsAt-g.releasedAt).float32, 0, 1)
-      let p = mix(position(g.start, 1), position(g.target, 0.1), f)+vec3(0, sin(
+      let p = mix(position(g.start, if g.owner < 0: 14 else: 1), position(g.target, 0.1), f)+vec3(0, sin(
           f*PI.float32)*3, 0)
       shapes.gem(p, 0.4, rgbx(190, 211, 79, 254))
       shapes.addCircle(position(g.target, 0.05), 0.24, rgbx(192, 161, 85, 160))

@@ -111,6 +111,33 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     inc w.cogs[attacker].tags
     if observeTag != nil: observeTag(w.tick, victim, attacker, w.cogs[victim].pos)
 
+const
+  BarrageStartTick* = 5*60*24
+  BarrageRampTicks* = 30*24
+
+proc barrageDepth*(tick: int32): int =
+  let progress = clamp(tick.int-BarrageStartTick,0,BarrageRampTicks)
+  80+1000*progress div BarrageRampTicks
+
+proc updateBarrage*(w: var World) =
+  if visionRulesVersion < 20 or w.tick < BarrageStartTick: return
+  let age = w.tick.int-BarrageStartTick
+  # Integral launch count preserves the original fractional 4 -> 50/s pacing.
+  proc launches(t: int): int =
+    let ramp = min(t,BarrageRampTicks)
+    (4*ramp+46*ramp*ramp div (2*BarrageRampTicks)+50*max(0,t-BarrageRampTicks)) div 24
+  for shell in 0..<(launches(age+1)-launches(age)):
+    var target: Point
+    var found = false
+    for attempt in 0..<256:
+      target = point(w.rng.between(minX().int32,maxX().int32),w.rng.between(minZ().int32,maxZ().int32))
+      let margin = islandMargin(target.x.int,target.z.int)
+      if margin >= 40 and (age >= BarrageRampTicks or margin <= barrageDepth(w.tick)):
+        found = true; break
+    if found:
+      w.grenades.add Lob(start:target,target:target,owner: -1,
+        releasedAt:w.tick,landsAt:w.tick+GrenadeFlightTicks)
+
 proc grenadeTarget*(w: World, slot: int): Point =
   let c = w.cogs[slot]
   let charge = clamp(w.equipment[slot].charge, 1, GrenadeChargeTicks)
@@ -290,6 +317,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           w.equipment[i].sprayHits = w.equipment[i].sprayHits or bit
           w.damage(j, i, SprayDamage)
       dec w.equipment[i].burst
+  w.updateBarrage()
   var airborne: seq[Lob]
   for g in w.grenades:
     if w.tick >= g.landsAt: w.explode(g.target, g.owner.int)
@@ -298,6 +326,13 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
   w.pickupEquipment()
   if visionRulesVersion>=13:
     w.updateTerritory()
+    if visionRulesVersion >= 20:
+      var surviving: array[2,bool]
+      for i,c in w.cogs:
+        if c.hp > 0 or w.equipment[i].lives > 0: surviving[team(i)] = true
+      if not surviving[0] and not surviving[1]: w.winner = -2
+      elif not surviving[0]: w.winner = 1
+      elif not surviving[1]: w.winner = 0
     inc w.tick
     return
   for i in 0..<Seats:

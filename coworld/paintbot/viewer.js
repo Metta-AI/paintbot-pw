@@ -995,6 +995,9 @@
     $("clock").textContent = `${clock(t)} / ${clock(data.total)}`;
     $("tickread").textContent = `${t} / ${data.total} ticks`;
     for (let s = 0; s < 2; s++) {
+      const policyNames = [...new Set(index.names.filter((_, i) => team(i) === s).map(n => n.replace(/ \(\d+\)$/, "")))].join(" + ");
+      $(`policy${s}`).textContent = policyNames;
+      $(`policy${s}`).title = policyNames;
       const owned = control ? w.controlHearts.filter(h => h.owner === s).length : w.captures[s];
       $(`score${s}`).textContent = owned;
       $(`lives${s}`).innerHTML = w.cogs.map((c, i) => {
