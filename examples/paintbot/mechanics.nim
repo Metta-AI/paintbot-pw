@@ -193,6 +193,11 @@ proc pickupEquipment(w: var World) =
 
 proc stepEquipment(w: var World, commands: array[Seats, Command]) =
   if w.winner != -1: return
+  if visionRulesVersion >= 21 and w.tick >= BarrageStartTick:
+    # Only the life currently on the field survives the sudden-death cutoff.
+    for i in 0..<Seats:
+      w.equipment[i].lives = (if w.cogs[i].hp > 0: 1 else: 0)
+      if w.cogs[i].hp <= 0: w.cogs[i].respawn = 0
   var gunTargets: seq[tuple[attacker, victim: int]]
   var visual: seq[Paintball]
   for b in w.balls:

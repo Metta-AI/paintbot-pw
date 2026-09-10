@@ -116,3 +116,5 @@ policies and movement respect the shoreline, while all objectives remain connect
 Spray covers a roughly 62-degree cone and deals 3 damage per target per burst; armor absorbs damage first.
 
 After five minutes, environment paint grenades bombard the coastline. Over 30 seconds, the target band expands across the island and the rate rises from four to fifty grenades per second. The barrage continues until one team has lives remaining (or both are eliminated together). A decisive victory scores 10–0.
+
+Bombardment is sudden death: at five minutes all spare lives expire, pending respawns are cancelled, and agents already alive have only their current life.
