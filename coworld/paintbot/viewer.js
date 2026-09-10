@@ -502,6 +502,7 @@
         ["Z / X", "Zoom in / out"],
         ["Escape", "Clear selection and POV"],
         ["Arrow keys", "Pan camera"],
+        ["A / D", "Rotate map left / right (hold to continue)"],
         ["Drag", "Pan across the arena"],
         ["Shift + drag", "Orbit camera"],
         ["Pinch", "Zoom on touch screens"],
@@ -535,6 +536,15 @@
     if (keys[e.key.toLowerCase()]) {
       e.preventDefault();
       $(keys[e.key.toLowerCase()]).click();
+    } else if (
+      ["a", "d"].includes(e.key.toLowerCase()) &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
+      e.preventDefault();
+      camera.yaw += e.key.toLowerCase() === "a" ? -0.08 : 0.08;
+      cameraUpdate();
     } else if (e.key === "Escape") {
       select(-1);
       setLens(-1);
