@@ -208,6 +208,7 @@
     if (ready())
       Module._pw_camera(camera.x, camera.z, camera.d, camera.yaw, camera.tilt);
     $("zoom").value = camera.d;
+    pressed("topdown", camera.tilt > 1.5);
   }
   const signalCanvas = $("povstatic");
   const signalContext = signalCanvas.getContext("2d");
@@ -397,6 +398,9 @@
   };
   $("scrub").oninput = (e) => seek(+e.target.value);
   $("lens").onchange = (e) => setLens(e.target.value);
+  document.addEventListener("fullscreenchange", () =>
+    pressed("fullscreen", !!document.fullscreenElement),
+  );
   $("fullscreen").onclick = async () => {
     try {
       if (document.fullscreenElement) await document.exitFullscreen();

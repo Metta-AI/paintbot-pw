@@ -1096,9 +1096,18 @@
     height: 100%;
     cursor: pointer;
   }
+  #viewbar button[aria-pressed="true"],
+  header button[aria-pressed="true"],
+  .transport button[aria-pressed="true"],
+  #map-panel[open] > summary,
   #territorytoggle:has(:checked) {
-    background: #a28a3735;
-    color: #fff0c6;
+    background: #e8cf88;
+    color: #17382e;
+    box-shadow: inset 0 0 0 1px #fff0bb;
+  }
+  #viewbar button[aria-pressed="false"],
+  #territorytoggle:not(:has(:checked)) {
+    color: #b8c6c0;
   }
   #territorytoggle:has(:focus-visible) {
     outline: 2px solid var(--gold);
