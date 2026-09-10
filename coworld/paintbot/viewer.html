@@ -1193,10 +1193,13 @@
   .team-scoreline strong { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; letter-spacing:.12em; }
   .team-scoreline small { font-size:7px; letter-spacing:.08em; opacity:.7; }
   .agent-lives { display:flex; gap:3px; }
-  .agent-life { width:19px; height:17px; display:flex; align-items:center; justify-content:center; gap:2px; border:1px solid currentColor; border-radius:3px; background:color-mix(in srgb,currentColor 12%,transparent); font-size:10px; font-variant-numeric:tabular-nums; }
-  .agent-life .agent-number { font-size:7px; opacity:.75; }
-  .agent-life.respawning { border-style:dashed; opacity:.55; }
-  .agent-life.eliminated { opacity:.25; }
+  header .agent-life { width:17px; min-width:17px; height:17px; padding:0; display:block; border:0; border-radius:0; background:conic-gradient(currentColor calc(var(--fill,1)*1turn),transparent 0); box-shadow:inset 0 0 0 1px currentColor; opacity:.9; cursor:pointer; }
+  header .agent-life:hover { opacity:1; transform:translateY(-1px); }
+  header .agent-life[aria-pressed="true"] { outline:2px solid #fff3ce; outline-offset:2px; }
+  header .agent-life.respawning { opacity:.35; }
+  header .agent-life.eliminated { opacity:.15; }
+  .team-scoreline > span { white-space:nowrap; flex-shrink:0; }
+  .team-scoreline strong { min-width:0; }
   @media(max-width:700px) { header .place { display:none; } #match-score { gap:10px; } header { gap:8px; padding:0 8px; } }
   @media(max-width:520px) { .team-summary { min-width:128px; } .agent-life { width:14px; gap:1px; } .agent-life .agent-number { font-size:6px; } #match-score { gap:6px; } header .right { gap:0; } }
 </style>

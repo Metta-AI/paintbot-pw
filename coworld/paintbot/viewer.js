@@ -317,6 +317,9 @@
       options();
     }
     renderSeats();
+    document.querySelectorAll(".agent-life").forEach(button => {
+      button.setAttribute("aria-pressed", String(Number(button.dataset.agent) === selected));
+    });
   }
   function setLens(value) {
     if (!ready()) return;
@@ -755,10 +758,9 @@
     });
     return best;
   }
-  $("canvas").addEventListener("contextmenu", (e) => {
+  function openAgentMenu(e, i) {
     e.preventDefault();
     closeAgentMenu();
-    const i = agentAt(e);
     if (i < 0) return;
     select(i);
     menuAgent = i;
@@ -796,6 +798,15 @@
         Math.min(e.clientY, innerHeight - agentMenu.offsetHeight - 8),
       ) + "px";
     agentMenu.firstElementChild.focus();
+  }
+  $("canvas").addEventListener("contextmenu", e => openAgentMenu(e, agentAt(e)));
+  $("match-score").addEventListener("click", e => {
+    const button = e.target.closest(".agent-life");
+    if (button) select(Number(button.dataset.agent));
+  });
+  $("match-score").addEventListener("contextmenu", e => {
+    const button = e.target.closest(".agent-life");
+    if (button) openAgentMenu(e, Number(button.dataset.agent));
   });
   document.addEventListener("pointerdown", (e) => {
     if (!agentMenu.contains(e.target)) closeAgentMenu();
@@ -958,6 +969,12 @@
         }
       };
       $(`squad${team(i)}`).append(b);
+      const life = document.createElement("button");
+      life.id = `life${i}`;
+      life.className = `agent-life ${team(i) ? "blue" : "red"}`;
+      life.dataset.agent = i;
+      life.setAttribute("aria-pressed", "false");
+      $(`lives${team(i)}`).append(life);
       const option = document.createElement("option");
       option.value = i;
       option.textContent = `${i + 1} · ${name(i)}`;
@@ -1000,15 +1017,19 @@
       $(`policy${s}`).title = policyNames;
       const owned = control ? w.controlHearts.filter(h => h.owner === s).length : w.captures[s];
       $(`score${s}`).textContent = owned;
-      $(`lives${s}`).innerHTML = w.cogs.map((c, i) => {
-        if (team(i) !== s) return "";
+      w.cogs.forEach((c, i) => {
+        if (team(i) !== s) return;
         const unlimited = data.rulesVersion >= 13 && data.rulesVersion < 19;
         const remaining = w.equipment?.[i]?.lives ?? 0;
         const eliminated = !unlimited && remaining === 0 && c.hp <= 0;
         const status = c.hp > 0 ? `${c.hp} HP` : eliminated ? "Eliminated" : `Respawning in ${Math.ceil(c.respawn / 24)}s`;
         const label = `${name(i)} · Agent ${i + 1} · ${unlimited ? "Unlimited" : remaining} lives · ${status}`;
-        return `<span class="agent-life ${eliminated ? "eliminated" : c.hp <= 0 ? "respawning" : ""}" title="${escape(label)}" aria-label="${escape(label)}"><span class="agent-number">${i + 1}</span><b>${eliminated ? "×" : unlimited ? "∞" : remaining}</b></span>`;
-      }).join("");
+        const button = $(`life${i}`);
+        button.className = `agent-life ${s ? "blue" : "red"} ${eliminated ? "eliminated" : c.hp <= 0 ? "respawning" : ""}`;
+        button.title = label;
+        button.setAttribute("aria-label", label);
+        button.style.setProperty("--fill", unlimited ? 1 : Math.max(0, Math.min(1, remaining / (data.rulesVersion >= 19 ? 4 : 3))));
+      });
       $(`alive${s}`).textContent =
         `${w.cogs.filter((c, i) => team(i) === s && c.hp > 0).length} alive`;
       const h = w.hearts[s];
