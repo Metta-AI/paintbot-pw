@@ -227,33 +227,6 @@
   #zoomrow button {
     padding: 4px 9px;
   }
-  #inspect {
-    margin-top: 20px;
-    line-height: 1.8;
-  }
-  #inspect .name {
-    font-weight: 700;
-    color: var(--gold);
-  }
-  #inspect dl {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    margin: 5px 0;
-  }
-  #inspect dt {
-    color: var(--muted);
-  }
-  #inspect dd {
-    margin: 0;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .inspection-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
-    margin-top: 8px;
-  }
   #viewbar {
     position: absolute;
     top: 90px;
@@ -672,9 +645,6 @@
       font-size: 9px;
       display: block;
     }
-    #inspect {
-      display: none;
-    }
     #canvas {
       top: 58px;
       left: 106px;
@@ -804,26 +774,6 @@
     .railtitle {
       margin-bottom: 7px;
     }
-    #inspect {
-      position: fixed;
-      right: 20px;
-      top: 145px;
-      width: 215px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      padding: 14px;
-      border-radius: 7px;
-      z-index: 3;
-    }
-    #inspect:has(.hint) {
-      display: none;
-    }
-    body:has(#inspect .name) #feed {
-      top: 465px;
-    }
-    body.pov #inspect {
-      top: 340px;
-    }
   }
 
   @media (min-width: 701px) {
@@ -843,21 +793,6 @@
     }
     #minimap {
       height: 100px;
-    }
-    #inspect {
-      font-size: 11px;
-      line-height: 1.5;
-      padding: 10px;
-    }
-    #inspect dl {
-      margin: 3px 0;
-    }
-    body:has(#inspect .name) #comms {
-      right: 255px;
-      width: 250px;
-    }
-    body:has(#inspect .name) #feed {
-      display: none;
     }
   }
 
@@ -904,12 +839,6 @@
   }
 
   @media (min-width: 701px) {
-    #inspect {
-      max-height: calc(100% - 345px);
-      overflow: auto;
-      bottom: 145px;
-      top: auto !important;
-    }
     .seat .pips {
       padding-bottom: 0;
       line-height: 6px;
@@ -969,9 +898,6 @@
   .seat .pips {
     flex: 0 0 8px;
     line-height: 8px;
-  }
-  #inspect .name {
-    overflow-wrap: anywhere;
   }
   @media (max-width: 700px) {
     #lens {
@@ -1179,32 +1105,6 @@
     border: 1px solid var(--line);
     border-radius: 12px;
   }
-  #inspect {
-    position: absolute;
-    right: 12px;
-    top: 100px;
-    bottom: auto;
-    left: auto;
-    width: 230px;
-    max-height: calc(100% - 200px);
-    overflow: auto;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 14px;
-    z-index: 3;
-  }
-  #inspect:not(:has(.name)) {
-    display: none;
-  }
-  #comms,
-  body:has(#inspect .name) #comms {
-    left: auto;
-    right: 12px;
-    bottom: 94px;
-    width: 230px;
-    max-width: calc(100% - 24px);
-  }
   #comms summary {
     padding: 7px 10px;
     font-size: 10px;
@@ -1245,6 +1145,43 @@
       sans-serif;
     box-shadow: 0 3px 12px #0004;
     pointer-events: none;
+  }
+  #agent-menu {
+    position: fixed;
+    z-index: 100;
+    min-width: 130px;
+    padding: 5px;
+    border: 1px solid #81998b66;
+    border-radius: 10px;
+    background: #17342ef5;
+    box-shadow: 0 8px 25px #0006;
+    backdrop-filter: blur(12px);
+  }
+  #agent-menu[hidden] {
+    display: none;
+  }
+  #agent-menu button {
+    display: block;
+    width: 100%;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+    padding: 8px 12px;
+    color: #edf1e5;
+  }
+  #agent-menu button::before {
+    content: "";
+    display: inline-block;
+    width: 18px;
+  }
+  #agent-menu button[aria-checked="true"]::before {
+    content: "✓";
+  }
+  #agent-menu button:hover,
+  #agent-menu button:focus-visible {
+    background: #e8cf88;
+    color: #17382e;
   }
 </style>
 <header>
@@ -1307,14 +1244,6 @@
     </div>
   </div>
 </details>
-<section id="inspect">
-  <p class="railtitle">Squad inspection</p>
-  <p class="hint">
-    Select a bot in the arena or a portrait to inspect its status and follow its
-    perspective.
-  </p>
-</section>
-
 <div id="viewbar">
   <select id="lens" aria-label="Visibility perspective">
     <option value="-1">All-seeing</option>

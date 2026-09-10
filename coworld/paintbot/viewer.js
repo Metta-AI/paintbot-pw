@@ -156,8 +156,7 @@
     lastTick = -1,
     ended = false,
     commsPinned = true;
-  let inspectorKey = "",
-    commsKey = "";
+  let commsKey = "";
   let insetSize = 0.25;
   let camera = { x: 0, z: 0, d: 60, yaw: 0, tilt: 0.92 };
   const escape = (s) =>
@@ -317,7 +316,6 @@
       pov = false;
       options();
     }
-    renderInspector();
     renderSeats();
   }
   function setLens(value) {
@@ -507,7 +505,7 @@
         ["Drag", "Pan across the arena"],
         ["Shift + drag", "Orbit camera"],
         ["Pinch", "Zoom on touch screens"],
-        ["Click a bot", "Inspect; Follow and Eyes in the inspector"],
+        ["Right-click a bot", "Follow, View (first person), or Vision"],
       ]
         .map(([k, v]) => `<div><kbd>${k}</kbd> ${v}</div>`)
         .join(
@@ -560,47 +558,6 @@
       b.setAttribute("aria-label", b.title);
       b.querySelector(".pips").textContent = c.hp > 0 ? "●".repeat(c.hp) : "↻";
     }
-  }
-  function renderInspector() {
-    if (!state) return;
-    const key = [selected, following, pov].join();
-    const stable = inspectorKey === key && $("inspect").querySelector("dl");
-    inspectorKey = key;
-    if (selected < 0) {
-      $("inspect").innerHTML =
-        '<p class="railtitle">Squad inspection</p><p class="hint">Select a portrait or a bot in the arena.</p>';
-      return;
-    }
-    const c = state.world.cogs[selected],
-      d = index.events.filter(
-        (e) =>
-          e.kind === "down" &&
-          e.slot === selected &&
-          e.tick <= state.world.tick,
-      ).length;
-    const markup = `<p class="railtitle">Bot ${selected + 1} / ${team(selected) ? "Azure" : "Ember"}</p><div class="name">${escape(name(selected))}</div><dl><dt>Health</dt><dd>${c.hp} / 3</dd><dt>Lives</dt><dd>${state.world.controlHearts?.length ? "∞" : (state.world.equipment?.[selected]?.lives ?? "∞")}</dd><dt>Armor</dt><dd>${state.world.equipment?.[selected]?.armor ?? 0}</dd><dt>Equipment</dt><dd>${[state.world.equipment?.[selected]?.grenade ? "Grenade" : "", state.world.equipment?.[selected]?.sprayCan ? "Spray can" : ""].filter(Boolean).join(" · ") || "Paintball gun"}</dd><dt>Tags / outs</dt><dd>${c.tags} / ${d}</dd><dt>Captures</dt><dd>${c.captures}</dd><dt>Respawn</dt><dd>${c.hp ? "—" : (c.respawn / 24).toFixed(1) + "s"}</dd><dt>Shield</dt><dd>${(c.shield / 24).toFixed(1)}s</dd><dt>Carrying</dt><dd>${c.carrying ? "♥ Enemy heart" : "—"}</dd><dt>Position</dt><dd>${(c.pos.x / 100).toFixed(1)}, ${(c.pos.z / 100).toFixed(1)}</dd></dl><div class="inspection-actions"><button id="follow" aria-pressed="${following}">Follow</button><button id="eyes" aria-pressed="${pov}">Eyes</button><button id="botlens">Vision</button><button id="clear">Clear</button></div>`;
-    if (stable) {
-      const temp = document.createElement("div");
-      temp.innerHTML = markup;
-      const values = temp.querySelectorAll("dd");
-      $("inspect")
-        .querySelectorAll("dd")
-        .forEach((el, i) => (el.textContent = values[i].textContent));
-      return;
-    }
-    $("inspect").innerHTML = markup;
-    $("follow").onclick = () => {
-      following = !following;
-      options();
-      renderInspector();
-    };
-    $("eyes").onclick = () => {
-      pov = !pov;
-      options();
-      renderInspector();
-    };
-    $("botlens").onclick = () => setLens(selected);
-    $("clear").onclick = () => select(-1);
   }
   function renderTimeline() {
     if (!state || !index) return;
@@ -760,10 +717,98 @@
   };
   $("minimap").onpointerup = () => (mapDrag = false);
   $("minimap").onpointercancel = () => (mapDrag = false);
+  const agentMenu = document.createElement("div");
+  agentMenu.id = "agent-menu";
+  agentMenu.setAttribute("role", "menu");
+  agentMenu.hidden = true;
+  document.body.appendChild(agentMenu);
+  let menuAgent = -1;
+  function closeAgentMenu() {
+    agentMenu.hidden = true;
+    menuAgent = -1;
+  }
+  function agentAt(e) {
+    if (!state) return -1;
+    const rect = $("canvas").getBoundingClientRect();
+    let best = -1,
+      distance = 26;
+    state.screen.forEach((p, i) => {
+      if (state.world.cogs[i].hp <= 0 || !state.visible[i]) return;
+      const d = Math.hypot(
+        p[0] * rect.width + rect.left - e.clientX,
+        p[1] * rect.height + rect.top - e.clientY,
+      );
+      if (d < distance) {
+        best = i;
+        distance = d;
+      }
+    });
+    return best;
+  }
+  $("canvas").addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    closeAgentMenu();
+    const i = agentAt(e);
+    if (i < 0) return;
+    select(i);
+    menuAgent = i;
+    agentMenu.setAttribute("aria-label", name(i));
+    agentMenu.replaceChildren();
+    for (const [action, label, on] of [
+      ["follow", "Follow", following],
+      ["view", "View", pov],
+      ["vision", "Vision", $("lens").value === String(i)],
+    ]) {
+      const button = document.createElement("button");
+      button.textContent = label;
+      button.setAttribute("role", "menuitemcheckbox");
+      button.setAttribute("aria-checked", String(on));
+      button.onclick = () => {
+        if (menuAgent < 0) return;
+        select(menuAgent);
+        if (action === "follow") following = !following;
+        if (action === "view") pov = !pov;
+        if (action === "vision")
+          setLens($("lens").value === String(menuAgent) ? -1 : menuAgent);
+        options();
+        closeAgentMenu();
+        $("canvas").focus();
+      };
+      agentMenu.appendChild(button);
+    }
+    agentMenu.hidden = false;
+    agentMenu.style.left =
+      Math.max(8, Math.min(e.clientX, innerWidth - agentMenu.offsetWidth - 8)) +
+      "px";
+    agentMenu.style.top =
+      Math.max(
+        8,
+        Math.min(e.clientY, innerHeight - agentMenu.offsetHeight - 8),
+      ) + "px";
+    agentMenu.firstElementChild.focus();
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (!agentMenu.contains(e.target)) closeAgentMenu();
+  });
+  agentMenu.addEventListener("keydown", (e) => {
+    const buttons = [...agentMenu.querySelectorAll("button")];
+    const i = buttons.indexOf(document.activeElement);
+    if (e.key === "Escape") {
+      closeAgentMenu();
+      $("canvas").focus();
+    } else if (e.key === "ArrowDown") buttons[(i + 1) % buttons.length].focus();
+    else if (e.key === "ArrowUp")
+      buttons[(i + buttons.length - 1) % buttons.length].focus();
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  window.addEventListener("resize", closeAgentMenu);
   const pointers = new Map();
   let drag = null,
     pinch = 0;
   $("canvas").addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
     pointers.set(e.pointerId, [e.clientX, e.clientY]);
     $("canvas").setPointerCapture(e.pointerId);
     drag = {
@@ -813,22 +858,10 @@
     drag.y = e.clientY;
   });
   $("canvas").addEventListener("pointerup", (e) => {
+    if (e.button !== 0) return;
     pointers.delete(e.pointerId);
     if (drag && !drag.moved && state) {
-      const r = $("canvas").getBoundingClientRect(),
-        x = (e.clientX - r.left) / r.width,
-        y = (e.clientY - r.top) / r.height;
-      let best = -1,
-        dist = 26;
-      state.screen.forEach((p, i) => {
-        if (state.world.cogs[i].hp <= 0 || !state.visible[i]) return;
-        const d = Math.hypot((p[0] - x) * r.width, (p[1] - y) * r.height);
-        if (d < dist) {
-          best = i;
-          dist = d;
-        }
-      });
-      select(best);
+      select(agentAt(e));
     }
     drag = null;
   });
@@ -1010,7 +1043,6 @@
         : "";
     if (t !== lastTick) {
       renderSeats();
-      renderInspector();
       renderComms();
       if (t % 12 === 0 || Math.abs(t - lastTick) > 12 || t === data.total)
         renderTimeline();
