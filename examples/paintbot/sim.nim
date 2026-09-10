@@ -110,12 +110,15 @@ proc dropHeart(w: var World, slot: int) =
   w.hearts[enemy] = Heart(pos: w.cogs[slot].pos, carrier: -1,
       returnAt: w.tick+240)
   w.cogs[slot].carrying = false
+# Optional spectator instrumentation lives outside World and its hash.
+var observeTag*: proc(tick: int32, victim, attacker: int, pos: Point) {.closure.}
 proc hit*(w: var World, victim, attacker: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
   dec w.cogs[victim].hp
   if w.cogs[victim].hp == 0:
     w.dropHeart(victim); w.cogs[victim].respawn = RespawnTicks
     inc w.cogs[attacker].tags
+    if observeTag != nil: observeTag(w.tick, victim, attacker, w.cogs[victim].pos)
 proc waypoint*(w: World, start, goal: Point): Point =
   ## Bounded breadth-first navigation over a 32x20 arena grid.
   if w.lineClear(start, goal): return goal

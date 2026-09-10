@@ -7,7 +7,9 @@ type Bot* = ref object
   runtime*: Runtime
   failed*: bool
   output*: PrintProc
+  strings*: StringPool
 var
+  shouts*: array[Seats,seq[string]]
   active*: World
   commands*: array[Seats, Command]
 const DataNames = ["selfId","selfTeam","selfX","selfY","selfHp","carrying","homeX","homeY","heartX","heartY","worldTick","ownHeartX","ownHeartY","ownHeartStolen"]
@@ -17,8 +19,12 @@ proc limits*(): Limits =
   result.maxMemoryBytes=2*1024*1024; result.maxWorkUnits=50000
   result.maxArrayElements=4096;result.maxGlobals=256;result.maxCallDepth=16
   result.maxPrintBytes=1024;result.maxPrintEvents=128
-proc host(slot:int): Host =
+proc host(slot:int, strings:StringPool): Host =
   result=initHost()
+  result.addStringFunctions(strings)
+  discard result.addFunction("shout",1,proc(a:openArray[int32]):int32 =
+    if shouts[slot].len>=4:return 0
+    shouts[slot].add strings.getString(a[0]);1,68)
   for name in DataNames:discard result.addData(name)
   discard result.addFunction("visible",1,proc(a:openArray[int32]):int32 = int32(active.visible(slot,a[0].int)),4)
   discard result.addFunction("playerX",1,proc(a:openArray[int32]):int32 =
@@ -36,12 +42,15 @@ proc host(slot:int): Host =
 proc loadBots*(groups:seq[BotGroup]):array[Seats,Bot] =
   let sources=groups.expandBotSources(controllerKinds(Seats,0))
   for slot in 0..<Seats:
-    let h=host(slot)
+    let strings=initStringPool()
+    let h=host(slot,strings)
     let p=when defined(coworld):compilePlayer(sources[slot],h,limits(),slot)
       else:compile(sources[slot],h,limits())
-    result[slot]=Bot(runtime:initRuntime(p,h,limits()))
+    strings.bindProgram(p)
+    result[slot]=Bot(runtime:initRuntime(p,h,limits()),strings:strings)
     when defined(coworld):result[slot].output=playerPrinter(slot)
 proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
+  shouts=default(array[Seats,seq[string]])
   active=w;commands=default(array[Seats,Command])
   for slot in 0..<Seats:
     let b=bots[slot];let cog=w.cogs[slot];let home=home(team(slot));let enemyHeart=w.hearts[1-team(slot)];let own=w.hearts[team(slot)]
@@ -50,6 +59,7 @@ proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
     if b.isNil or b.failed or cog.hp<=0:continue
     let values=[slot.int32,team(slot).int32,cog.pos.x,cog.pos.z,cog.hp,cog.carrying.int32,home.x,home.z,heart.x,heart.z,w.tick,ownPos.x,ownPos.z,int32(own.carrier>=0)]
     b.runtime.restart()
+    b.strings.reset()
     try:
       for j,name in DataNames:b.runtime.setData(name,values[j])
       discard b.runtime.run(b.output)

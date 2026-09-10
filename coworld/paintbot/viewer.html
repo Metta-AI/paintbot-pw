@@ -1,0 +1,1091 @@
+<style>
+  @font-face {
+    font-family: Rubik;
+    src: url(Rubik-Regular.ttf);
+  }
+  @font-face {
+    font-family: Rubik;
+    src: url(Rubik-Bold.ttf);
+    font-weight: 700;
+  }
+  :root {
+    --ink: #e9e7da;
+    --muted: #93a59c;
+    --gold: #ddc58d;
+    --red: #ff8069;
+    --blue: #71cfff;
+    --line: #ffffff15;
+    --panel: #142723ee;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    font:
+      13px Rubik,
+      system-ui;
+    background: #10201d;
+    color: var(--ink);
+  }
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+  button,
+  select {
+    color: inherit;
+    background: #ffffff08;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 8px 10px;
+    cursor: pointer;
+  }
+  button:hover,
+  select:hover {
+    background: #ffffff18;
+    border-color: #ddc58d77;
+  }
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+  }
+  button[aria-pressed="true"] {
+    color: #fff0c6;
+    border-color: var(--gold);
+    background: #a28a3735;
+  }
+  button:disabled {
+    opacity: 0.4;
+    cursor: wait;
+  }
+  select option {
+    background: #142723;
+  }
+  small,
+  .muted {
+    color: var(--muted);
+  }
+  #canvas {
+    position: absolute;
+    left: 250px;
+    top: 74px;
+    width: calc(100% - 250px) !important;
+    height: calc(100% - 206px) !important;
+    touch-action: none;
+  }
+  header {
+    height: 74px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 0 25px;
+    border-bottom: 1px solid var(--line);
+    background: #10231f;
+  }
+  header .brand {
+    font-size: 23px;
+    letter-spacing: 0.1em;
+    font-weight: 700;
+  }
+  header .brand span {
+    color: var(--gold);
+  }
+  .eyebrow {
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  header .place {
+    border-left: 1px solid var(--line);
+    padding-left: 22px;
+    line-height: 1.65;
+  }
+  header .right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .verified {
+    font-size: 10px;
+    letter-spacing: 0.09em;
+    color: #b7d6b5;
+  }
+  #rail {
+    position: absolute;
+    left: 0;
+    top: 74px;
+    bottom: 132px;
+    width: 250px;
+    overflow: auto;
+    padding: 22px 18px;
+    background: linear-gradient(160deg, #1b3029, #11211e);
+    border-right: 1px solid var(--line);
+  }
+  .teamhead {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .teamhead .crest {
+    font-size: 23px;
+  }
+  .teamhead strong {
+    font-size: 14px;
+    letter-spacing: 0.1em;
+  }
+  .teamhead .score {
+    font-size: 36px;
+    font-weight: 700;
+    margin-left: auto;
+  }
+  .red {
+    color: var(--red);
+  }
+  .blue {
+    color: var(--blue);
+  }
+  .squad {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 5px;
+    margin: 12px 0;
+  }
+  .seat {
+    padding: 0;
+    overflow: hidden;
+    position: relative;
+    min-height: 50px;
+  }
+  .seat img {
+    width: 40px;
+    height: 40px;
+    object-fit: cover;
+    filter: saturate(0.6);
+  }
+  .seat .num {
+    position: absolute;
+    left: 4px;
+    top: 3px;
+    font-size: 9px;
+  }
+  .seat .pips {
+    display: block;
+    font-size: 9px;
+    line-height: 9px;
+    letter-spacing: 2px;
+    padding-bottom: 4px;
+  }
+  .seat.down img {
+    filter: grayscale(1);
+    opacity: 0.2;
+  }
+  .heartstate {
+    font-size: 11px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .teamblock {
+    padding-bottom: 22px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+  }
+  .railtitle {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+  #minimap {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #1e392d;
+    border: 1px solid #adbb8a44;
+    border-radius: 4px;
+    cursor: crosshair;
+    touch-action: none;
+  }
+  #zoomrow {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 8px;
+  }
+  #zoom {
+    min-width: 0;
+    width: 100%;
+    accent-color: var(--gold);
+  }
+  #zoomrow button {
+    padding: 4px 9px;
+  }
+  #inspect {
+    margin-top: 20px;
+    line-height: 1.8;
+  }
+  #inspect .name {
+    font-weight: 700;
+    color: var(--gold);
+  }
+  #inspect dl {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin: 5px 0;
+  }
+  #inspect dt {
+    color: var(--muted);
+  }
+  #inspect dd {
+    margin: 0;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .inspection-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 8px;
+  }
+  #viewbar {
+    position: absolute;
+    top: 90px;
+    left: 270px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    background: #142723d9;
+    padding: 5px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+  #viewbar button,
+  #viewbar select {
+    border: 0;
+    background: transparent;
+    font-size: 11px;
+  }
+  .scene-caption {
+    position: absolute;
+    left: 278px;
+    bottom: 155px;
+    pointer-events: none;
+    text-shadow: 0 2px 8px #000;
+  }
+  .scene-caption strong {
+    font-family: Georgia, serif;
+    font-size: 27px;
+    letter-spacing: 0.015em;
+    font-weight: 400;
+  }
+  .scene-caption p {
+    margin: 5px 0;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #f2e6be;
+  }
+  #feed {
+    position: absolute;
+    right: 20px;
+    top: 92px;
+    width: 245px;
+    max-height: 38%;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .feeditem {
+    margin-bottom: 5px;
+    padding: 8px 12px;
+    background: #142723db;
+    border-left: 2px solid var(--gold);
+    font-size: 11px;
+  }
+  .feeditem time {
+    color: var(--muted);
+    float: right;
+  }
+  .feeditem .red,
+  .feeditem .blue {
+    font-weight: 700;
+  }
+  #banner {
+    position: absolute;
+    top: 38%;
+    left: 50%;
+    transform: translateX(-35%);
+    font: italic 36px Georgia;
+    color: #fff0bf;
+    text-shadow: 0 3px 10px #12271c;
+    pointer-events: none;
+  }
+  #bottom {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 132px;
+    border-top: 1px solid #d5c39440;
+    background: #10231f;
+    padding: 15px 24px 12px;
+  }
+  .transport {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 34px;
+  }
+  .transport button {
+    padding: 6px 10px;
+  }
+  .transport #play {
+    min-width: 80px;
+    background: #d4bd84;
+    color: #14261e;
+    font-weight: 700;
+  }
+  .transport .spacer {
+    flex: 1;
+  }
+  #clock {
+    font-variant-numeric: tabular-nums;
+    margin-left: 12px;
+    white-space: nowrap;
+  }
+  #speed {
+    padding: 6px;
+  }
+  #timeline {
+    position: relative;
+    margin-top: 12px;
+    height: 48px;
+    border-top: 1px solid var(--line);
+  }
+  #momentum {
+    position: absolute;
+    width: 100%;
+    height: 42px;
+    opacity: 0.7;
+  }
+  #markers {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .marker {
+    position: absolute;
+    top: 4px;
+    width: 4px;
+    height: 13px;
+    pointer-events: auto;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    opacity: 0.7;
+  }
+  .marker.capture {
+    height: 23px;
+    width: 6px;
+    background: var(--gold) !important;
+  }
+  .marker:hover {
+    opacity: 1;
+  }
+  #scrub {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    margin: 0;
+    accent-color: var(--gold);
+    height: 15px;
+  }
+  #tickread {
+    font-size: 10px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  #skipping {
+    color: var(--gold);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+  }
+  #comms {
+    position: absolute;
+    right: 20px;
+    bottom: 152px;
+    width: 310px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: #142723e8;
+  }
+  #comms summary {
+    cursor: pointer;
+    padding: 11px 14px;
+    color: var(--gold);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+  }
+  #commsbody {
+    padding: 0 13px 10px;
+  }
+  #commslist {
+    max-height: 170px;
+    overflow: auto;
+    font-size: 11px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+  #commslist p {
+    border-top: 1px solid var(--line);
+    padding-top: 6px;
+  }
+  #commslive {
+    font-size: 10px;
+    margin-top: 6px;
+  }
+  .commsfilters {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .commsfilters select {
+    font-size: 10px;
+    width: 100%;
+  }
+  dialog {
+    background: #162b24;
+    color: var(--ink);
+    border: 1px solid #b4a47566;
+    border-radius: 12px;
+    max-height: 80vh;
+    width: min(850px, 92vw);
+    padding: 24px;
+    box-shadow: 0 24px 100px #0008;
+  }
+  dialog::backdrop {
+    background: #07120bc0;
+    backdrop-filter: blur(5px);
+  }
+  dialog h2 {
+    font: 32px Georgia;
+    color: var(--gold);
+    margin: 5px 0 20px;
+  }
+  dialog .close {
+    float: right;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  th {
+    text-align: left;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+  }
+  td,
+  th {
+    padding: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  .helpgrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  kbd {
+    background: #ffffff12;
+    padding: 3px 7px;
+    border-radius: 4px;
+  }
+  .hint {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .eventlist {
+    max-height: 50vh;
+    overflow: auto;
+  }
+  .eventlist button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    margin-bottom: 4px;
+  }
+  #status {
+    z-index: 50;
+    background: radial-gradient(ellipse at center, #294635, #10201d);
+    color: #e4d2a5;
+    text-align: center;
+    font: 24px Georgia;
+    line-height: 1.7;
+  }
+  #status.error {
+    font: 14px Rubik;
+    background: #3b2322;
+  }
+  #status:before {
+    content: "PAINTBOT / POLYWORLD";
+    font: 12px Rubik;
+    letter-spacing: 0.25em;
+    margin-bottom: 18px;
+  }
+  #fpvcap {
+    display: none;
+    position: absolute;
+    right: 38px;
+    top: 158px;
+    color: var(--gold);
+    font-size: 10px;
+    pointer-events: none;
+  }
+  body.pov #fpvcap {
+    display: block;
+  }
+  body.pov #feed {
+    top: 38%;
+  }
+  #toast {
+    position: absolute;
+    left: 50%;
+    top: 80px;
+    background: #20392e;
+    padding: 10px 18px;
+    border-radius: 6px;
+    z-index: 10;
+  }
+  #toast:empty {
+    display: none;
+  }
+  @media (max-width: 1050px) {
+    #rail {
+      width: 200px;
+      padding: 16px 12px;
+    }
+    #canvas {
+      left: 200px;
+      width: calc(100% - 200px) !important;
+    }
+    #viewbar {
+      left: 215px;
+    }
+    .scene-caption {
+      left: 220px;
+    }
+    header .place {
+      display: none;
+    }
+    .optional {
+      display: none;
+    }
+    #feed {
+      width: 190px;
+    }
+    .transport {
+      gap: 4px;
+    }
+    .transport button {
+      padding: 6px 8px;
+    }
+    #clock {
+      margin-left: 3px;
+    }
+    .seat img {
+      width: 34px;
+    }
+  }
+  @media (max-width: 700px) {
+    header {
+      height: 58px;
+      padding: 0 12px;
+      gap: 10px;
+    }
+    header .brand {
+      font-size: 18px;
+    }
+    .verified {
+      display: none;
+    }
+    header .right {
+      gap: 5px;
+    }
+    header button {
+      padding: 7px;
+    }
+    #rail {
+      top: 58px;
+      bottom: 150px;
+      width: 106px;
+      padding: 12px 7px;
+    }
+    .teamhead {
+      gap: 4px;
+      margin-bottom: 6px;
+    }
+    .teamhead strong {
+      font-size: 10px;
+    }
+    .teamhead .crest {
+      font-size: 16px;
+    }
+    .teamhead .score {
+      font-size: 25px;
+    }
+    .squad {
+      grid-template-columns: repeat(2, 1fr);
+      gap: 3px;
+      margin: 6px 0;
+    }
+    .seat {
+      min-height: 34px;
+    }
+    .seat img {
+      width: 28px;
+      height: 28px;
+    }
+    .teamblock {
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+    }
+    .heartstate {
+      font-size: 9px;
+      display: block;
+    }
+    #inspect {
+      display: none;
+    }
+    #canvas {
+      top: 58px;
+      left: 106px;
+      width: calc(100% - 106px) !important;
+      height: calc(100% - 208px) !important;
+    }
+    #viewbar {
+      left: 113px;
+      top: 66px;
+      max-width: calc(100% - 121px);
+      flex-wrap: wrap;
+      padding: 2px;
+      gap: 0;
+    }
+    #viewbar button,
+    #viewbar select {
+      font-size: 9px;
+      padding: 5px;
+    }
+    #viewbar .optional {
+      display: none;
+    }
+    #feed {
+      top: 126px;
+      width: 150px;
+      right: 8px;
+      font-size: 9px;
+    }
+    .feeditem {
+      padding: 5px;
+      font-size: 9px;
+    }
+    .scene-caption {
+      display: none;
+    }
+    #bottom {
+      height: 150px;
+      padding: 10px;
+    }
+    .transport {
+      height: auto;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .transport button {
+      font-size: 11px;
+      padding: 6px;
+    }
+    .transport #play {
+      min-width: 58px;
+    }
+    #clock {
+      font-size: 11px;
+    }
+    #tickread {
+      display: none;
+    }
+    #timeline {
+      margin-top: 8px;
+    }
+    #comms {
+      right: 8px;
+      bottom: 160px;
+      width: min(270px, calc(100% - 123px));
+    }
+    #comms summary {
+      font-size: 9px;
+      padding: 8px;
+    }
+    #banner {
+      font-size: 23px;
+      left: 58%;
+      width: 50%;
+      text-align: center;
+    }
+    #zoomrow {
+      gap: 0;
+    }
+    #zoomrow button {
+      padding: 3px 6px;
+    }
+    #zoom {
+      width: 40px;
+    }
+    .helpgrid {
+      grid-template-columns: 1fr;
+    }
+    td,
+    th {
+      padding: 6px;
+    }
+    #fpvcap {
+      top: 145px;
+      right: 20px;
+      font-size: 8px;
+    }
+  }
+
+  @media (min-width: 701px) {
+    #rail {
+      padding-top: 14px;
+    }
+    .teamhead {
+      margin-bottom: 8px;
+    }
+    .teamhead .score {
+      font-size: 28px;
+    }
+    .teamblock {
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .squad {
+      margin: 8px 0;
+      gap: 4px;
+    }
+    .seat {
+      min-height: 35px;
+    }
+    .seat img {
+      height: 28px;
+      width: 28px;
+    }
+    .seat .pips {
+      font-size: 8px;
+    }
+    .railtitle {
+      margin-bottom: 7px;
+    }
+    #inspect {
+      position: fixed;
+      right: 20px;
+      top: 145px;
+      width: 215px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 14px;
+      border-radius: 7px;
+      z-index: 3;
+    }
+    #inspect:has(.hint) {
+      display: none;
+    }
+    body:has(#inspect .name) #feed {
+      top: 465px;
+    }
+    body.pov #inspect {
+      top: 340px;
+    }
+  }
+
+  @media (min-width: 701px) {
+    .squad {
+      grid-auto-rows: 38px;
+    }
+    .seat {
+      height: 38px;
+      min-height: 38px;
+    }
+    .teamblock {
+      padding-bottom: 10px;
+      margin-bottom: 10px;
+    }
+    .teamhead {
+      height: 30px;
+    }
+    #minimap {
+      height: 100px;
+    }
+    #inspect {
+      font-size: 11px;
+      line-height: 1.5;
+      padding: 10px;
+    }
+    #inspect dl {
+      margin: 3px 0;
+    }
+    body:has(#inspect .name) #comms {
+      right: 255px;
+      width: 250px;
+    }
+    body:has(#inspect .name) #feed {
+      display: none;
+    }
+  }
+
+  #povframe {
+    display: none;
+    position: absolute;
+    pointer-events: none;
+    border: 1px solid #dbc48e88;
+    z-index: 2;
+  }
+  body.pov #povframe {
+    display: block;
+  }
+  #povresize {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    padding: 2px 6px;
+    border: 0;
+    color: var(--gold);
+    pointer-events: auto;
+    cursor: nesw-resize;
+    background: #142723d9;
+    touch-action: none;
+  }
+
+  @media (min-width: 701px) {
+    #inspect {
+      max-height: calc(100% - 345px);
+      overflow: auto;
+      bottom: 145px;
+      top: auto !important;
+    }
+    .seat .pips {
+      padding-bottom: 0;
+      line-height: 6px;
+    }
+    .seat img {
+      height: 25px;
+    }
+  }
+  @media (max-width: 700px) {
+    #feed {
+      max-height: 95px;
+      top: 103px;
+    }
+    .squad {
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .seat {
+      height: 29px;
+      min-height: 29px;
+    }
+    .seat img {
+      height: 17px;
+      width: 17px;
+    }
+    .seat .pips {
+      font-size: 6px;
+      letter-spacing: 0;
+      line-height: 6px;
+      padding: 0;
+    }
+    .seat .num {
+      font-size: 6px;
+      left: 1px;
+    }
+    .teamhead {
+      margin-bottom: 5px;
+    }
+    #minimap {
+      height: 70px;
+    }
+    .heartstate span {
+      display: block;
+    }
+  }
+</style>
+<header>
+  <div class="brand">PAINT<span>BOT</span></div>
+  <div class="place">
+    <div class="eyebrow">The painted grove</div>
+    <small>Capture the heart · First to three</small>
+  </div>
+  <div class="right">
+    <span class="verified" id="verification">◌ VERIFYING REPLAY</span
+    ><button id="stats">Scoreboard</button><button id="events">Events</button
+    ><button id="help" aria-label="Keyboard shortcuts">?</button
+    ><button id="fullscreen" aria-label="Fullscreen">⛶</button>
+  </div>
+</header>
+<aside id="rail">
+  <section class="teamblock" id="team0">
+    <div class="teamhead red">
+      <span class="crest">♥</span><strong>EMBER</strong
+      ><span class="score" id="score0">0</span>
+    </div>
+    <div class="heartstate">
+      <span id="heart0">Heart at home</span><span id="alive0">8 alive</span>
+    </div>
+    <div class="squad" id="squad0"></div>
+  </section>
+  <section class="teamblock" id="team1">
+    <div class="teamhead blue">
+      <span class="crest">♥</span><strong>AZURE</strong
+      ><span class="score" id="score1">0</span>
+    </div>
+    <div class="heartstate">
+      <span id="heart1">Heart at home</span><span id="alive1">8 alive</span>
+    </div>
+    <div class="squad" id="squad1"></div>
+  </section>
+  <p class="railtitle">Tactical map</p>
+  <canvas
+    id="minimap"
+    width="320"
+    height="200"
+    aria-label="Tactical minimap. Click or drag to move the camera."
+  ></canvas>
+  <div id="zoomrow">
+    <button id="zoomout" aria-label="Zoom out">−</button
+    ><input
+      id="zoom"
+      type="range"
+      min="6"
+      max="100"
+      value="60"
+      aria-label="Camera distance"
+    /><button id="zoomin" aria-label="Zoom in">+</button>
+  </div>
+  <section id="inspect">
+    <p class="railtitle">Squad inspection</p>
+    <p class="hint">
+      Select a bot in the arena or a portrait to inspect its status and follow
+      its perspective.
+    </p>
+  </section>
+</aside>
+<div id="viewbar">
+  <select id="lens" aria-label="Visibility perspective">
+    <option value="-1">All-seeing</option>
+    <option value="16">Ember vision</option>
+    <option value="17">Azure vision</option></select
+  ><button id="fit">Fit arena</button><button id="topdown">Top down</button
+  ><button id="bars" aria-pressed="true">Health</button
+  ><button id="trails" aria-pressed="false" class="optional">Orders</button
+  ><button id="download" class="optional">↓ Replay</button>
+</div>
+<div class="scene-caption">
+  <div class="eyebrow">Polyworld arena / 01</div>
+  <strong>The Painted Grove</strong>
+  <p>Sixteen minds. Two hearts. One arena.</p>
+</div>
+<div id="feed"></div>
+<div id="banner"></div>
+<div id="povframe">
+  <button
+    id="povresize"
+    aria-label="Resize first-person view"
+    title="Drag to resize"
+  >
+    ↙
+  </button>
+</div>
+<div id="fpvcap">BOT EYES · LIVE POV</div>
+<div id="toast" role="status"></div>
+<details id="comms">
+  <summary>COMMS <span id="commscount">0</span></summary>
+  <div id="commsbody">
+    <div class="commsfilters">
+      <select id="commsteam" aria-label="Filter communications">
+        <option value="-1">All squads</option>
+        <option value="0">Ember</option>
+        <option value="1">Azure</option>
+      </select>
+    </div>
+    <div id="commslist"></div>
+    <button id="commslive">Jump to live</button>
+  </div>
+</details>
+<div id="bottom">
+  <div class="transport">
+    <button id="restart" title="Restart (,)" aria-label="Restart">↶</button
+    ><button id="back" title="Back one tick (B)" aria-label="Back one tick">
+      ‹|</button
+    ><button id="play" title="Play / pause (Space)">Pause</button
+    ><button
+      id="step"
+      title="Forward one tick (N)"
+      aria-label="Forward one tick"
+    >
+      |›</button
+    ><button id="forward" title="Forward five seconds (.)">+5s</button
+    ><button id="end" title="Jump to end (E)" aria-label="Jump to end">
+      ›|</button
+    ><button id="loop" title="Loop (R)" aria-pressed="false">Loop</button
+    ><button id="skip" title="Skip lulls (F)" aria-pressed="false">
+      Skip lulls</button
+    ><button id="spoilers" title="Show future events (O)" aria-pressed="false">
+      Spoilers</button
+    ><span id="skipping"></span><span class="spacer"></span
+    ><span id="clock">0:00 / 0:00</span
+    ><select id="speed" aria-label="Playback speed">
+      <option>1×</option>
+      <option>2×</option>
+      <option>4×</option>
+      <option>8×</option>
+      <option>16×</option>
+      <option>32×</option></select
+    ><span id="tickread">0 / 0 ticks</span>
+  </div>
+  <div id="timeline">
+    <svg
+      id="momentum"
+      preserveAspectRatio="none"
+      viewBox="0 0 1000 45"
+      aria-label="Team momentum"
+    ></svg>
+    <div id="markers"></div>
+    <input
+      id="scrub"
+      type="range"
+      min="0"
+      max="1"
+      value="0"
+      step="1"
+      aria-label="Replay position"
+    />
+  </div>
+</div>
+<dialog id="dialog">
+  <button class="close" aria-label="Close dialog">×</button>
+  <div id="dialogbody"></div>
+</dialog>
+<script src="viewer.js"></script>

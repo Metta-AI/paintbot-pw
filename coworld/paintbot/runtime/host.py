@@ -99,7 +99,15 @@ def run(engine):
                             write_json(os.environ["COGAME_PLAYER_FAILURE_URI"], failure)
                             raise
                         commands.append(
-                            {"slot": slot, "command": views[slot].command(w, replies)}
+                            {
+                                "slot": slot,
+                                "command": views[slot].command(w, replies),
+                                "chat": [
+                                    r[3:].decode("utf-8", errors="replace")
+                                    for r in replies
+                                    if r[0] == 0x81
+                                ],
+                            }
                         )
                     stream.write(json.dumps(commands) + "\n")
                     stream.flush()

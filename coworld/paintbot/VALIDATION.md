@@ -13,3 +13,12 @@ Validated on 2026-09-09 with Nim 2.2.6, Wasmtime 48.0.0 and the unchanged CDX ba
 - Ruff checks pass. Vet was attempted after changes but could not run its review because Anthropic credentials were unavailable.
 
 These checks establish the new Polyworld game's determinism and policy compatibility. They do not establish action-level equivalence with the old Paintbot simulation or identical behavior between the BASIC translation and original Nim policy.
+
+## Viewer upgrade (0.1.1)
+
+- Repeated backward/forward checkpoint seeks reproduce every checked input hash.
+- New v2 mixed BASIC/WASM match reproduced 3,984 ticks, 3–0, hash `1977552757`.
+- Sixteen BASIC public shouts and hosted player names round-trip through v2; v1 still loads.
+- Browser checks: old mixed replay, exact tick stepping, restart/end, final score, spoiler protection, capture filtering, bot selection, visibility, first-person inset, and desktop/mobile layouts.
+- Art uses Gods of the Arena's Polyworld terrain, characters, toon lighting, and sun-shadow components, with pinned assets and generated masonry geometry.
+- `VIEWER.md` maps CTF spectator features to this implementation and identifies game mechanics absent from PW.

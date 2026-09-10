@@ -1,7 +1,7 @@
 import std/os
 import polyworld/tapes
 import game, sim
-let r=loadReplayFile(paramStr(1),"paintbot_pw",1,Recording)
+let r=loadRecording(paramStr(1))
 var w=newWorld(r.seed)
 var moves,shots:array[Seats,int]
 for f in r.frames:
