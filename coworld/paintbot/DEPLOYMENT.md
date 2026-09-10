@@ -65,3 +65,7 @@ See `VIEWER.md` for the CTF feature map, keyboard controls, pinned artwork, and 
 `cow_67b21f5a-2540-4330-b84d-331af4fe81b3` is certified and canonical for the existing ladder. Certification `7c614b81-88f6-48c7-8306-343a796f61de` passed all 10 checks under `main-ddac040c18fb` at 2026-09-10T17:53:18.228993Z. The production viewer loaded hosted replay `91fc37cc-545c-49ec-8cc2-1e75891db89f` and displayed HASH VERIFIED. All sixteen hosted seats exited cleanly and the native verifier reproduced each downloaded replay.
 
 The release includes the approved B Paint Crew cogs, grenades, spray cans, trenches, shields, med kits, finite lives and capture/wipe victories. BASIC and WASM policies remain supported. Ladder mode remains enabled, campaign disabled, and a new ladder run was triggered after canonical publication. Historical episodes retain their pinned viewers and rules.
+
+### Gnomewick Village: 0.1.7
+
+`cow_756c3045-584b-46ed-b122-0dea7af31e61` is certified and canonical. Certification `2cc2d149-42f0-4cef-9577-a8047b9559f7` passed all ten checks under `main-3ea7eef64761` at 2026-09-10T18:02:28.059203Z. Hosted replay `88ae803e-f57d-4da5-a4aa-63a5ed8bbe32` loaded through the production replay-session API with Gnomewick Village and HASH VERIFIED. All sixteen hosted policy seats exited cleanly. The existing ladder configuration was verified and a new run triggered after publication.
