@@ -297,16 +297,17 @@ proc runGraphics*() =
     # Low stone courses exactly match collision bounds; capstones and stripes read at a glance.
     # Paint splashes and short bursts follow recorded tags, so seeking reconstructs them.
     for event in index.events:
-      let age = world.tick-event.tick
-      if event.kind != "tag" or age < 0 or age > 480: continue
+      let age = world.tick.float32+alpha-event.tick.float32
+      if event.kind != "tag" or age < 0 or age >= 48: continue
+      let fade = 1-age/48
       if lens >= 0 and not seen(event.victim): continue
       let p = position(point(event.x, event.z), 0.035)
       let color = teamColors[event.side]
-      shapes.addCircle(p, 0.6, rgbx(color.r, color.g, color.b, 110))
+      shapes.addCircle(p, 0.6, rgbx(color.r, color.g, color.b, uint8(110*fade)))
       for n in 0..4:
         let a = n.float32*1.256+event.slot.float32
         shapes.addCircle(p+vec3(cos(a)*0.65, 0.001, sin(a)*0.65), 0.17, rgbx(
-            color.r, color.g, color.b, 120))
+            color.r, color.g, color.b, uint8(120*fade)))
         if age < 18:
           let f = age.float32/18
           shapes.gem(p+vec3(cos(a)*f*1.8, sin(f*PI.float32)*1.2+0.2, sin(
@@ -356,10 +357,11 @@ proc runGraphics*() =
         shapes.box(p.x+cos(spin)*0.32,p.y+1.24,p.z+sin(spin)*0.32,
             0.35,0.13,0.12,rgbx(61,77,67,255),spin)
       else:
-        shapes.box(p.x, p.y, p.z, 0.4, 0.48, 0.32, color)
+        shapes.box(p.x, p.y, p.z, 0.4, 0.48, 0.32, color,
+            if item.kind == medkitPickup: spin else: 0'f32)
       if item.kind == medkitPickup:
-        shapes.box(p.x, p.y+0.49, p.z, 0.26, 0.03, 0.08, rgbx(215, 69, 66, 255))
-        shapes.box(p.x, p.y+0.49, p.z, 0.08, 0.03, 0.26, rgbx(215, 69, 66, 255))
+        shapes.box(p.x, p.y+0.49, p.z, 0.26, 0.03, 0.08, rgbx(215, 69, 66, 255), spin)
+        shapes.box(p.x, p.y+0.49, p.z, 0.08, 0.03, 0.26, rgbx(215, 69, 66, 255), spin)
 
     for g in world.grenades:
       let f = clamp((world.tick-g.releasedAt).float32/max(1,
