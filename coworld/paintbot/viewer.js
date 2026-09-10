@@ -45,6 +45,13 @@
       pickup: "picked up the enemy heart",
       drop: "dropped the heart",
       return: "heart returned home",
+      "grenade pickup": "picked up a grenade",
+      "spray pickup": "picked up a spray can",
+      "shield pickup": "picked up armor",
+      "grenade throw": "threw a grenade",
+      "grenade blast": "grenade exploded",
+      spray: "sprayed paint",
+      heal: "used a med kit",
     })[e.kind];
   function ready() {
     return (
@@ -231,7 +238,7 @@
     const rows = w.cogs
       .map(
         (c, i) =>
-          `<tr><td><button data-seat="${i}" class="${team(i) ? "blue" : "red"}">${escape(name(i))}</button></td><td>${c.hp > 0 ? "● Alive" : `↻ ${Math.ceil(c.respawn / 24)}s`}</td><td>${c.tags}</td><td>${counts[i].deaths}</td><td>${c.captures}</td><td>${c.tags + c.captures * 10}</td></tr>`,
+          `<tr><td><button data-seat="${i}" class="${team(i) ? "blue" : "red"}">${escape(name(i))}</button></td><td>${c.hp > 0 ? "● Alive" : state.world.equipment?.[i]?.lives === 0 ? "Eliminated" : `↻ ${Math.ceil(c.respawn / 24)}s`}</td><td>${c.tags}</td><td>${counts[i].deaths}</td><td>${c.captures}</td><td>${c.tags + c.captures * 10}</td></tr>`,
       )
       .join("");
     show(
@@ -264,7 +271,7 @@
     );
     show(
       "The match, moment by moment",
-      `<div class="toolbar"><select id="eventfilter" aria-label="Event type">${["all", "capture", "pickup", "drop", "return", "tag", "down"].map((x) => `<option ${x === eventFilter ? "selected" : ""}>${x}</option>`).join("")}</select><span class="hint">${list.length} events · ${spoilers ? "Future events visible" : "Future events hidden"}</span></div><div class="eventlist">${list.map((e) => `<button data-tick="${e.tick}"><span class="${e.side ? "blue" : "red"}">${clock(e.tick)} · ${escape(e.slot < 0 ? (e.side ? "Azure" : "Ember") : name(e.slot))}</span> ${eventTitle(e)}</button>`).join("") || '<p class="hint">No matching events at this point in the replay.</p>'}</div>`,
+      `<div class="toolbar"><select id="eventfilter" aria-label="Event type">${["all", "capture", "pickup", "drop", "return", "tag", "down", "grenade throw", "grenade blast", "spray", "grenade pickup", "spray pickup", "shield pickup", "heal"].map((x) => `<option ${x === eventFilter ? "selected" : ""}>${x}</option>`).join("")}</select><span class="hint">${list.length} events · ${spoilers ? "Future events visible" : "Future events hidden"}</span></div><div class="eventlist">${list.map((e) => `<button data-tick="${e.tick}"><span class="${e.side ? "blue" : "red"}">${clock(e.tick)} · ${escape(e.slot < 0 ? (e.side ? "Azure" : "Ember") : name(e.slot))}</span> ${eventTitle(e)}</button>`).join("") || '<p class="hint">No matching events at this point in the replay.</p>'}</div>`,
     );
     $("eventfilter").onchange = (e) => {
       eventFilter = e.target.value;
@@ -371,7 +378,7 @@
           e.slot === selected &&
           e.tick <= state.world.tick,
       ).length;
-    const markup = `<p class="railtitle">Bot ${selected + 1} / ${team(selected) ? "Azure" : "Ember"}</p><div class="name">${escape(name(selected))}</div><dl><dt>Health</dt><dd>${c.hp} / 3</dd><dt>Tags / outs</dt><dd>${c.tags} / ${d}</dd><dt>Captures</dt><dd>${c.captures}</dd><dt>Respawn</dt><dd>${c.hp ? "—" : (c.respawn / 24).toFixed(1) + "s"}</dd><dt>Shield</dt><dd>${(c.shield / 24).toFixed(1)}s</dd><dt>Carrying</dt><dd>${c.carrying ? "♥ Enemy heart" : "—"}</dd><dt>Position</dt><dd>${(c.pos.x / 100).toFixed(1)}, ${(c.pos.z / 100).toFixed(1)}</dd></dl><div class="inspection-actions"><button id="follow" aria-pressed="${following}">Follow</button><button id="eyes" aria-pressed="${pov}">Eyes</button><button id="botlens">Vision</button><button id="clear">Clear</button></div>`;
+    const markup = `<p class="railtitle">Bot ${selected + 1} / ${team(selected) ? "Azure" : "Ember"}</p><div class="name">${escape(name(selected))}</div><dl><dt>Health</dt><dd>${c.hp} / 3</dd><dt>Lives</dt><dd>${state.world.equipment?.[selected]?.lives ?? "∞"}</dd><dt>Armor</dt><dd>${state.world.equipment?.[selected]?.armor ?? 0}</dd><dt>Equipment</dt><dd>${[state.world.equipment?.[selected]?.grenade ? "Grenade" : "", state.world.equipment?.[selected]?.sprayCan ? "Spray can" : ""].filter(Boolean).join(" · ") || "Paintball gun"}</dd><dt>Tags / outs</dt><dd>${c.tags} / ${d}</dd><dt>Captures</dt><dd>${c.captures}</dd><dt>Respawn</dt><dd>${c.hp ? "—" : (c.respawn / 24).toFixed(1) + "s"}</dd><dt>Shield</dt><dd>${(c.shield / 24).toFixed(1)}s</dd><dt>Carrying</dt><dd>${c.carrying ? "♥ Enemy heart" : "—"}</dd><dt>Position</dt><dd>${(c.pos.x / 100).toFixed(1)}, ${(c.pos.z / 100).toFixed(1)}</dd></dl><div class="inspection-actions"><button id="follow" aria-pressed="${following}">Follow</button><button id="eyes" aria-pressed="${pov}">Eyes</button><button id="botlens">Vision</button><button id="clear">Clear</button></div>`;
     if (stable) {
       const temp = document.createElement("div");
       temp.innerHTML = markup;

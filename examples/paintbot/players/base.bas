@@ -68,3 +68,31 @@ while i < 16
   end if
   i = i + 1
 wend
+' Collect nearby equipment and use charged grenades within throwing distance.
+if not carrying then
+  nearest = -1
+  nearestCost = 490000
+  j = 0
+  while j < pickupCount()
+    if pickupVisible(j) then
+      kind = pickupKind(j)
+      wanted = (kind = 0 and not hasGrenade) or (kind = 1 and not hasSpray) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3)
+      if wanted then
+        dx = pickupX(j) - selfX
+        dy = pickupY(j) - selfY
+        cost = dx * dx + dy * dy
+        if cost < nearestCost then
+          nearest = j
+          nearestCost = cost
+        end if
+      end if
+    end if
+    j = j + 1
+  wend
+  if nearest >= 0 then
+    walkTo(pickupX(nearest), pickupY(nearest))
+  end if
+end if
+if hasGrenade and best >= 0 and bestCost < 1638400 then
+  chargeGrenade(grenadeCharge < 24)
+end if

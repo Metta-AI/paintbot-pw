@@ -1,6 +1,8 @@
 import std/unittest
 import ../examples/paintbot/sim
 suite "Paintbot rules":
+  setup:
+    visionRulesVersion = 5
   test "seeded arena is deterministic":
     var a=newWorld(42);var b=newWorld(42)
     for i in 0..<100:

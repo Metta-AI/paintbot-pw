@@ -8,9 +8,15 @@ type
   Frame* = object
     commands*: array[Seats, Command]
     hash*: uint32
+  LegacyCommand = object
+    walk, shoot, direct: bool
+    goal, aim: Point
+  LegacyFrame = object
+    commands: array[Seats, LegacyCommand]
+    hash: uint32
   LegacyRecording = object
     seed*: int32
-    frames*: seq[Frame]
+    frames*: seq[LegacyFrame]
   Communication* = object
     tick*, slot*: int
     text*: string
@@ -19,16 +25,32 @@ type
     frames*: seq[Frame]
     names*: array[Seats, string]
     communications*: seq[Communication]
-var replayRulesVersion* = 5
+type LegacyMetadataRecording = object
+  seed: int32
+  frames: seq[LegacyFrame]
+  names: array[Seats, string]
+  communications: seq[Communication]
+proc convertFrames(frames: seq[LegacyFrame]): seq[Frame] =
+  for f in frames:
+    var next = Frame(hash: f.hash)
+    for i, c in f.commands:
+      next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
+          goal: c.goal, aim: c.aim)
+    result.add next
+var replayRulesVersion* = 6
 proc loadRecording*(path: string): Recording =
   replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
   visionRulesVersion = replayRulesVersion
   if replayRulesVersion == 1:
     let old = loadReplayFile(path, "paintbot_pw", 1, LegacyRecording)
     result.seed = old.seed
-    result.frames = old.frames
+    result.frames = convertFrames(old.frames)
   elif replayRulesVersion in [2, 3, 4, 5]:
-    result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
+    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, LegacyMetadataRecording)
+    result = Recording(seed: old.seed, frames: convertFrames(old.frames),
+        names: old.names, communications: old.communications)
+  elif replayRulesVersion == 6:
+    result = loadReplayFile(path, "paintbot_pw", 6, Recording)
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
   if result.frames.len > 28800 or result.communications.len > 20000:
@@ -74,7 +96,7 @@ proc setup*() =
 proc advance*() =
   if replayMode:
     if world.tick >= recording.frames.len: return
-    if world.winner >= 0: raise newException(ReplayError, "Replay has frames after victory")
+    if world.winner != -1: raise newException(ReplayError, "Replay has frames after victory")
     let f = recording.frames[world.tick]
     world.step(f.commands, replayRulesVersion)
     if world.stateHash() != f.hash: raise newException(ReplayError,
@@ -103,10 +125,10 @@ proc advance*() =
 proc runHeadless*() =
   setup()
   let limit = if replayMode: recording.frames.len else: options.maximumTicks.int
-  while world.tick < limit and world.winner < 0: advance()
+  while world.tick < limit and world.winner == -1: advance()
   if replayMode and world.tick != limit: raise newException(ReplayError, "Replay has frames after victory")
   if not replayMode and options.recordPath.len > 0: saveReplayFile(
-      options.recordPath, "paintbot_pw", 5, recording)
+      options.recordPath, "paintbot_pw", 6, recording)
   echo "ticks=", world.tick, " captures=", world.captures, " hash=",
       world.stateHash()
   when defined(coworld):

@@ -38,3 +38,9 @@ All twelve rule tests, three replay-analysis tests, and five Python runtime test
 ## Unlimited forward sight (0.1.5)
 
 The 120-degree cone now extends across the entire arena without a distance cap. Walls still occlude sight. BASIC, WASM, and POV fog share this behavior. Thirteen rule tests, three replay-analysis tests, and five runtime tests passed; the v4 mixed-policy replay still reproduces hash `2173305639`. Replay format v5 retains unlimited visibility for new recordings while earlier recordings preserve their original fog rules.
+
+## Equipment and Paint Crew (0.1.6)
+
+The original CTF rules in `coworld-ctf/docs/RULES.md` supplied grenade charge/flight/damage, five-tick directional spray, trench movement and damage interactions, shields, med kits, lives and capture/wipe conditions. The user's one-shot-per-second cadence and unlimited forward cone remain intentional overrides. Equipment uses the existing WASM sprite labels and C-button protocol; BASIC exposes inventory, pickup queries, aiming, and charge/release. The approved B Paint Crew design replaces the humanoid models with generated wheeled cog GLBs and a generated portrait.
+
+Nine equipment tests cover grenade flight, friendly/trench blast damage, spray locking and once-per-burst damage, cover, trench escape, finite lives and heart return, capture, shields/med kits, and simultaneous gun releases. Thirteen legacy/current movement/vision tests, three replay-analysis tests and Python boundary tests pass. A full mixed BASIC/WASM match ends by wipe after 1,152 ticks with replay hash `3815528982`. Old v1 and v4 replays retain their original hashes. Local browser inspection found and fixed missing equipment event labels and stale capture text.

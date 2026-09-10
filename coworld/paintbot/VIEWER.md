@@ -25,7 +25,7 @@ Reference: `coworld-ctf/client/replay_broadcast.html`, with the newer communicat
 
 Fullscreen, replay download, top-down camera, order traces, and a searchable-by-type event list are also available.
 
-The source CTF game's finite-lives elimination, grenades, pickups, hill coverage, four-faction rounds, map votes, and huddles do not exist in PW's capture-the-heart rules. Their game-specific indicators are not fabricated. PW has two teams and unlimited timed respawns. Campaign maps remain in Observatory's league view, outside the episode viewer.
+The viewer displays finite lives, armor, grenade pickups/throws/blasts, spray pickups/bursts, med kits, and trenches. The active league is a two-team ladder; campaign maps live in Observatory outside the episode viewer.
 
 ## Replay compatibility and public comms
 

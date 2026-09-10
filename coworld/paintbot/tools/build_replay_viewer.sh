@@ -15,12 +15,13 @@ if actual != expected:
 ASSETS
 cd "$root"
 python3 coworld/paintbot/tools/build_cover.py
+python3 coworld/paintbot/tools/build_cog.py
 nim c -d:emscripten -d:replayViewer examples/paintbot/paintbot.nim
 mkdir -p "$output"
 cp examples/paintbot/emscripten/paintbot.{js,wasm,data} "$output/"
 cp "$root/coworld/paintbot/viewer.js" "$output/"
 cp "$POLYWORLD_DATA/fonts/"Rubik-{Regular,Bold}.ttf "$output/"
-cp "$POLYWORLD_DATA/characters/modular_chars/character.preset_14.profile.png" "$output/portrait.png"
+cp "$root/coworld/paintbot/art/paint-crew.png" "$output/portrait.png"
 python3 - "$root" "$output" <<'PY'
 from pathlib import Path
 import sys

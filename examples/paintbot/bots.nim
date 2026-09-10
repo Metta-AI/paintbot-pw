@@ -12,7 +12,7 @@ var
   shouts*: array[Seats,seq[string]]
   active*: World
   commands*: array[Seats, Command]
-const DataNames = ["selfId","selfTeam","selfX","selfY","selfHp","carrying","homeX","homeY","heartX","heartY","worldTick","ownHeartX","ownHeartY","ownHeartStolen"]
+const DataNames = ["selfId","selfTeam","selfX","selfY","selfHp","carrying","homeX","homeY","heartX","heartY","worldTick","ownHeartX","ownHeartY","ownHeartStolen","hasGrenade","hasSpray","armorHp","livesLeft","grenadeCharge","trenchId"]
 proc limits*(): Limits =
   result=defaultLimits()
   result.maxSourceBytes=64*1024; result.maxInstructions=20000
@@ -35,6 +35,20 @@ proc host(slot:int, strings:StringPool): Host =
     if active.visible(slot,a[0].int):active.cogs[a[0]].hp else:0,4)
   discard result.addFunction("playerCarrying",1,proc(a:openArray[int32]):int32 =
     if active.visible(slot,a[0].int):active.cogs[a[0]].carrying.int32 else:0,4)
+  discard result.addFunction("chargeGrenade",1,proc(a:openArray[int32]):int32 =
+    commands[slot].chargeGrenade=a[0]!=0;1,4)
+  discard result.addFunction("pickupCount",0,proc(a:openArray[int32]):int32 = active.pickups.len.int32,4)
+  discard result.addFunction("pickupVisible",1,proc(a:openArray[int32]):int32 =
+    let i=a[0].int
+    int32(i>=0 and i<active.pickups.len and active.pickups[i].readyAt<=active.tick and active.canSeePoint(slot,active.pickups[i].pos)),4)
+  for axis in 0..2:
+    let field=axis
+    discard result.addFunction(["pickupX","pickupY","pickupKind"][field],1,proc(a:openArray[int32]):int32 =
+      let i=a[0].int
+      if i<0 or i>=active.pickups.len or active.pickups[i].readyAt>active.tick or not active.canSeePoint(slot,active.pickups[i].pos):return -1
+      if field==0:active.pickups[i].pos.x
+      elif field==1:active.pickups[i].pos.z
+      else:active.pickups[i].kind.int32,4)
   discard result.addFunction("walkTo",2,proc(a:openArray[int32]):int32 =
     commands[slot].walk=true;commands[slot].goal=Point(x:a[0],z:a[1]);1,4)
   discard result.addFunction("lookAt",2,proc(a:openArray[int32]):int32 =
@@ -59,7 +73,7 @@ proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
     let heart=if enemyHeart.carrier<0 or w.visible(slot,enemyHeart.carrier.int):enemyHeart.pos else:home(1-team(slot))
     let ownPos=if own.carrier<0 or w.visible(slot,own.carrier.int):own.pos else:home
     if b.isNil or b.failed or cog.hp<=0:continue
-    let values=[slot.int32,team(slot).int32,cog.pos.x,cog.pos.z,cog.hp,cog.carrying.int32,home.x,home.z,heart.x,heart.z,w.tick,ownPos.x,ownPos.z,int32(own.carrier>=0)]
+    let values=[slot.int32,team(slot).int32,cog.pos.x,cog.pos.z,cog.hp,cog.carrying.int32,home.x,home.z,heart.x,heart.z,w.tick,ownPos.x,ownPos.z,int32(own.carrier>=0),w.equipment[slot].grenade.int32,w.equipment[slot].sprayCan.int32,w.equipment[slot].armor,w.equipment[slot].lives,w.equipment[slot].charge,w.trenchAt(cog.pos).int32]
     b.runtime.restart()
     b.strings.reset()
     try:

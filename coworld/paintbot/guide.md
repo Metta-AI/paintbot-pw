@@ -1,61 +1,67 @@
 # Paintbot PW
 
-Paintbot on Polyworld: a deterministic 3D paintball arena for sixteen agents.
-Red controls even slots and Blue controls odd slots. Capture the enemy heart
-and bring it home while your own heart is home. Three captures win. A time
-limit without a capture victory is a draw; all agents receive zero.
+Sixteen wheeled cogs fight on a symmetric Polyworld arena. Red uses even slots;
+Blue uses odd slots. Capture the enemy heart in your home endzone or exhaust the
+other team's lives to win. One capture wins, even if your own heart is stolen.
+Each cog has three lives and three base HP. Death returns a carried heart home,
+loses equipment, and respawns at a fresh endzone position after 72 ticks if lives
+remain. Spawn protection lasts 36 ticks. A time-limit draw gives both teams zero.
 
-Players move through a symmetric seeded bunker arena. Paintballs travel and
-collide with cover; three hits tag a player out. Tagged players drop the heart
-and respawn after 72 ticks, with 36 ticks of spawn protection. A dropped heart
-returns after 240 ticks, or when its team touches it. Carrying slows movement
-to 70 percent. Matches run at 24 deterministic ticks per simulated second,
-with no wall-clock pacing on the server.
+## Combat and equipment
 
-## Submit either file type
+- Solid bodies block teammates and opponents. Movement while carrying is 70%.
+- Vision is a 120-degree forward cone with unlimited distance and wall occlusion.
+- Paintball guns lock aim during a five-tick windup, then trace a hitscan ray.
+  Friendly fire is enabled. Shots released together choose targets before damage.
+  Range is 5250 units. The user-selected cadence is one shot per second.
+- Four grenade pickups refill after five seconds. Carry one; hold C to charge up
+  to 24 ticks and release to throw. Grenades fly over walls, land after ten ticks,
+  and deal two damage to every body in the blast, including allies and yourself.
+- Spray cans refill after 30 seconds. A carried can replaces the gun. Fire sends
+  a directional cone for five ticks, with 20 ticks of recovery. Aim locks at the
+  beginning of each burst; each victim takes three damage once per burst.
+- Trenches are walkable pits. Entering is full speed; movement outward is slowed
+  fivefold. Gun cooldown is tripled, and 70% of outside gunfire passes overhead.
+  Shots from inside the same trench and spray ignore that protection. Grenades
+  deal six damage to victims in the landing trench, one to victims in other
+  trenches, and two outside trenches.
+- Shields add three armor HP without healing base HP. Damage consumes armor first.
+  Armor, heart carrying, and trenches slow gunfire threefold without stacking.
+- Med kits restore base HP; healthy cogs leave them. Shields and kits refill in
+  30 seconds. All pickups and other cogs are fog-gated for policies.
 
-Upload one raw BASIC source file or one Paintbot reactor WASM file. File type
-is detected from the WASM magic bytes, not its extension. The game runs both
-inside its pod; there are no player pods. BASIC uses Polyworld's bounded VM.
-WASM uses Wasmtime with no filesystem/network/environment grants, 256 MiB
-memory per seat, bounded fuel, and an epoch deadline. Mixed rosters work.
+The game runs at 24 deterministic ticks per second. Coordinates use integer
+hundredths of a Polyworld tile on a 6400×4000 arena.
 
-The WASM entrypoints and Sprite-v1 packets match `cogame-paintbot-cdx`:
-`paintbot_init`, `paintbot_buffer`, `paintbot_step`, `paintbot_output_size`,
-exported memory, and optional WASI `_initialize`. The unchanged CDX baseline
-is bundled as `players/baseline.wasm`. Observations contain the walkability
-map, fog-gated avatars and HP, hearts, endzones, and own aim. Movement, fire,
-and aim masks are translated to Polyworld actions. Chat is accepted but has
-no gameplay effect. This version has no grenade, pickup, battle-royale, or
-Season 2 play-call mechanics. It preserves the file interface, not identical
-combat trajectories or old replay files.
+## File policies
 
-## BASIC interface
+Submit either a UTF-8 BASIC file or a WASM module implementing `paintbot_alloc`,
+`paintbot_buffer`, `paintbot_step`, `paintbot_output_size`, exported memory and
+optional WASI `_initialize`. WASM uses the existing Paintbot sprite protocol:
+movement, aim buttons, A for gun/spray, C for grenade charge/release. Observations
+include fog-gated equipment labels, grenade flights/targets/blasts, spray puffs,
+armor, lives, hearts, and static trench terrain.
 
-Coordinates are integer hundredths of a Polyworld tile, with x right and y
-down on a 6400×4000 map. Slots are zero-based, Red=0 and Blue=1.
-
-Read-only data: `selfId`, `selfTeam`, `selfX`, `selfY`, `selfHp`, `carrying`,
-`homeX`, `homeY`, `heartX`, `heartY`, `ownHeartX`, `ownHeartY`,
-`ownHeartStolen`, `worldTick`.
+BASIC read-only data: `selfId`, `selfTeam`, `selfX`, `selfY`, `selfHp`, `carrying`,
+`homeX`, `homeY`, `heartX`, `heartY`, `ownHeartX`, `ownHeartY`, `ownHeartStolen`,
+`worldTick`, `hasGrenade`, `hasSpray`, `armorHp`, `livesLeft`, `grenadeCharge`,
+`trenchId` (-1 outside).
 
 Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
-`playerCarrying(slot)`. Hidden enemies yield no coordinates. Enemy heart
-coordinates fall back to its home when its carrier is not visible.
+`playerCarrying(slot)`, `pickupCount()`, `pickupVisible(id)`, `pickupX(id)`,
+`pickupY(id)`, `pickupKind(id)` (0 grenade, 1 spray, 2 medkit, 3 armor).
+Hidden player and pickup coordinates are not disclosed.
 
-Actions: `walkTo(x,y)` uses bounded cover navigation; `shootAt(x,y)` fires
-when the gun is ready. Source is limited to 64 KiB, VM memory to 2 MiB,
-and each decision to 20,000 instructions/50,000 work units. PRINT stays in
-private seat logs. A BASIC runtime error disables its VM.
-
-`players/base.bas` reimplements the baseline's carrier-first objectives,
-heart recovery, defensive roles, wounded-target focus and short movement
-lead in BASIC. It is a strategic translation, not an action-identical port
-of every tuning flag in the larger Nim policy. Use the original WASM file
-for the original policy code.
+Actions: `walkTo(x,y)`, `lookAt(x,y)`, `shootAt(x,y)`, `chargeGrenade(held)`.
+Release by calling `chargeGrenade(0)` or not calling it on the next tick.
+`shout(stringHandle)` is public communication; PRINT remains private.
+Source is limited to 64 KiB, memory to 2 MiB, and each decision to 20,000
+instructions / 50,000 work units. WASM instances are isolated in the game pod.
 
 ## Replays
 
-Action-only Polyworld tapes contain accepted commands and portable per-tick
-hashes, never policy source. The native verifier and browser replay renderer
-resimulate those actions. The viewer has play/pause, speed and seeking.
+Replays record accepted actions and per-tick state hashes. Version 6 includes
+all equipment state and the approved Paint Crew cog models. The viewer supports
+seeking, individual cone visibility, first-person view, event filtering, inventory,
+armor/lives inspection, grenade arcs/blasts, spray effects and trench markers.
+Earlier replay versions retain their original rules and hashes.

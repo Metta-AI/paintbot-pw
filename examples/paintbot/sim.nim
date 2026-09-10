@@ -34,6 +34,23 @@ type
     pos*: Point
     carrier*: int32 # -1 on ground
     returnAt*: int32
+  PickupKind* = enum
+    grenadePickup, sprayPickup, medkitPickup, armorPickup
+  Pickup* = object
+    pos*: Point
+    kind*: PickupKind
+    readyAt*: int32
+  Equipment* = object
+    grenade*, sprayCan*: bool
+    charge*, armor*, lives*, burst*, sprayCooldown*, windup*: int32
+    sprayAim*, gunAim*: Point
+    sprayHits*: uint32
+  Lob* = object
+    start*, target*: Point
+    owner*, releasedAt*, landsAt*: int32
+  Blast* = object
+    pos*: Point
+    tick*, owner*, trench*: int32
   World* = object
     seed*, tick*: int32
     rng*: Rng
@@ -43,9 +60,15 @@ type
     cover*: seq[Cover]
     balls*: seq[Paintball]
     winner*: int32 # -1 before a capture victory
+    equipment*: array[Seats, Equipment]
+    trenches*: seq[Cover]
+    pickups*: seq[Pickup]
+    grenades*: seq[Lob]
+    blasts*: seq[Blast]
   Command* = object
     walk*, shoot*, direct*: bool
     goal*, aim*: Point
+    chargeGrenade*: bool
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
@@ -75,12 +98,13 @@ proc lineClear*(w: World, a, b: Point): bool =
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
     if w.blocked(p, 0): return false
   true
-var visionRulesVersion* = 5
+var visionRulesVersion* = 6
 proc canSeePoint*(w: World, slot: int, p: Point): bool =
   if slot notin 0..<Seats or w.cogs[slot].hp <= 0: return false
   let c = w.cogs[slot]
   let distance = distance2(c.pos, p)
-  if visionRulesVersion < 5 and distance > VisionRange.int64*VisionRange: return false
+  if visionRulesVersion < 5 and distance >
+      VisionRange.int64*VisionRange: return false
   if visionRulesVersion >= 4 and distance > 0:
     let facing = if c.aim == Point(): home(1-team(slot)) else: c.aim
     let fx = int64(facing.x)-c.pos.x
@@ -127,6 +151,7 @@ proc spawn(w: var World, slot: int, solid = true) =
   w.cogs[slot].firing = false; w.cogs[slot].carrying = false
 proc resetHeart*(w: var World, side: int) =
   w.hearts[side] = Heart(pos: home(side), carrier: -1)
+proc initializeEquipment(w: var World)
 proc newWorld*(seed: int32): World =
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
   # Symmetric lanes and bunkers leave all homes reachable.
@@ -139,9 +164,23 @@ proc newWorld*(seed: int32): World =
           w: c.w, h: c.h)
   for side in 0..1: result.resetHeart(side)
   for i in 0..<Seats: result.spawn(i)
+  if visionRulesVersion >= 6: result.initializeEquipment()
 proc scores*(w: World): seq[int] =
   for i in 0..<Seats: result.add int(w.winner == team(i).int32)
-proc stateHash*(w: World): uint32 = hashy(w)
+type LegacyWorld = object
+  seed, tick: int32
+  rng: Rng
+  cogs: array[Seats, Cog]
+  hearts: array[2, Heart]
+  captures: array[2, int32]
+  cover: seq[Cover]
+  balls: seq[Paintball]
+  winner: int32
+proc stateHash*(w: World): uint32 =
+  if visionRulesVersion >= 6: return hashy(w)
+  hashy(LegacyWorld(seed: w.seed, tick: w.tick, rng: w.rng, cogs: w.cogs,
+      hearts: w.hearts, captures: w.captures, cover: w.cover, balls: w.balls,
+      winner: w.winner))
 proc dropHeart(w: var World, slot: int) =
   if not w.cogs[slot].carrying: return
   let enemy = 1-team(slot)
@@ -149,7 +188,8 @@ proc dropHeart(w: var World, slot: int) =
       returnAt: w.tick+240)
   w.cogs[slot].carrying = false
 # Optional spectator instrumentation lives outside World and its hash.
-var observeTag*: proc(tick: int32, victim, attacker: int, pos: Point) {.closure.}
+var observeTag*: proc(tick: int32, victim, attacker: int,
+    pos: Point) {.closure.}
 proc hit*(w: var World, victim, attacker: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
   dec w.cogs[victim].hp
@@ -179,7 +219,12 @@ proc waypoint*(w: World, start, goal: Point): Point =
   var n = b
   while prev[n] >= 0 and prev[n] != a: n = prev[n]
   point(n mod nx*200+100, n div nx*200+100)
-proc step*(w: var World, commands: array[Seats, Command], rulesVersion = 4) =
+proc stepEquipment(w: var World, commands: array[Seats, Command])
+proc step*(w: var World, commands: array[Seats, Command],
+    rulesVersion = visionRulesVersion) =
+  if rulesVersion >= 6:
+    w.stepEquipment(commands)
+    return
   let solid = rulesVersion >= 3
   if w.winner >= 0: return
   for i in 0..<Seats:
@@ -250,3 +295,5 @@ proc step*(w: var World, commands: array[Seats, Command], rulesVersion = 4) =
       w.cogs[i].carrying = false; w.resetHeart(enemy)
       if w.captures[side] >= CaptureTarget: w.winner = side.int32
   inc w.tick
+
+include mechanics

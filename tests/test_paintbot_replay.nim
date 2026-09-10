@@ -19,22 +19,22 @@ suite "Paintbot replay analysis and metadata":
       let target=min(tick,720)
       check world.tick==target
       check world.stateHash()==(if target==0:newWorld(2026).stateHash() else:recording.frames[target-1].hash)
-  test "v1 remains readable and v2 preserves only public metadata":
+  test "v1 remains readable and v6 preserves public metadata":
     type Legacy=object
       seed:int32
       frames:seq[Frame]
     let path=getTempDir()/"paintbot-replay-metadata-test.replay"
     defer:removeFile(path)
-    saveReplayFile(path,"paintbot_pw",1,Legacy(seed:2026,frames:recording.frames))
+    saveReplayFile(path,"paintbot_pw",1,Legacy(seed:2026,frames: @[]))
     check loadRecording(path).names[0]=="Ember 1"
     recording.names[0]="Daveey <test>"
     recording.communications = @[Communication(tick:1,slot:0,text:"Guard the heart ♥")]
-    saveReplayFile(path,"paintbot_pw",2,recording)
+    saveReplayFile(path,"paintbot_pw",6,recording)
     let loaded=loadRecording(path)
     check loaded.names[0]=="Daveey <test>"
     check loaded.communications[0].text=="Guard the heart ♥"
     recording.communications[0].slot=16
-    saveReplayFile(path,"paintbot_pw",2,recording)
+    saveReplayFile(path,"paintbot_pw",6,recording)
     expect ReplayError:discard loadRecording(path)
   test "analysis refuses corrupt replay inputs":
     recording.communications = @[]

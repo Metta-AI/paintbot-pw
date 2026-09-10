@@ -49,6 +49,11 @@ def visible(w, slot, other):
         return False
     if slot == other:
         return True
+    return can_see_point(w, slot, b)
+
+
+def can_see_point(w, slot, b):
+    a = w["cogs"][slot]["pos"]
     aim = w["cogs"][slot]["aim"]
     if aim == {"x": 0, "z": 0}:
         aim = {"x": 5440 if slot % 2 == 0 else 960, "z": 2000}
@@ -139,11 +144,90 @@ class SpriteView:
             )
             item(label, c["pos"], 12, 12)
             item(
-                "hp " + str(c["hp"]) + "/3",
+                "hp "
+                + str(c["hp"])
+                + "/3"
+                + (
+                    " shield " + str(w["equipment"][i]["armor"])
+                    if w.get("equipment") and w["equipment"][i]["armor"]
+                    else ""
+                ),
                 {"x": c["pos"]["x"], "z": c["pos"]["z"] - 65},
                 12,
                 2,
             )
+        for i, e in enumerate(w.get("equipment", [])):
+            if not visible(w, self.slot, i):
+                continue
+            p = w["cogs"][i]["pos"]
+            if e["grenade"]:
+                item("grenade carried", p)
+            if e["sprayCan"]:
+                item("spray can carried", p)
+                item("cog spray can " + COLORS[i % 2], p)
+            if e["armor"]:
+                item("shield", p)
+            item("lives " + str(e["lives"]), p)
+            if e["burst"]:
+                for n in range(1, 6):
+                    puff = {
+                        key: p[key] + e["sprayAim"][key] * n // 5 for key in ("x", "z")
+                    }
+                    if clear(w, p, puff) and can_see_point(w, self.slot, puff):
+                        item("spray paint puff", puff, 8 + n * 8, 8 + n * 8)
+            if e["charge"]:
+                aim = w["cogs"][i]["aim"]
+                dx, dz = aim["x"] - p["x"], aim["z"] - p["z"]
+                length = max(1, math.isqrt(dx * dx + dz * dz))
+                reach = 150 + (1280 - 150) * e["charge"] // 24
+                item(
+                    "throw target",
+                    {
+                        "x": p["x"] + dx * reach // length,
+                        "z": p["z"] + dz * reach // length,
+                    },
+                    104,
+                    104,
+                )
+        for pickup in w.get("pickups", []):
+            if pickup["readyAt"] <= w["tick"] and can_see_point(
+                w, self.slot, pickup["pos"]
+            ):
+                label = {
+                    "grenadePickup": "grenade",
+                    "sprayPickup": "spray can",
+                    "medkitPickup": "med kit",
+                    "armorPickup": "shield",
+                }[pickup["kind"]]
+                item(label, pickup["pos"], 14, 14)
+        for trench in w.get("trenches", []):
+            item(
+                "trench",
+                {
+                    "x": trench["x"] + trench["w"] // 2,
+                    "z": trench["z"] + trench["h"] // 2,
+                },
+                trench["w"] // 5,
+                trench["h"] // 5,
+            )
+        for grenade in w.get("grenades", []):
+            age = w["tick"] - grenade["releasedAt"]
+            length = max(1, grenade["landsAt"] - grenade["releasedAt"])
+            p = {
+                key: grenade["start"][key]
+                + (grenade["target"][key] - grenade["start"][key]) * age // length
+                for key in ("x", "z")
+            }
+            if can_see_point(w, self.slot, p):
+                item("grenade air", p, 10, 10)
+        for blast in w.get("blasts", []):
+            if can_see_point(w, self.slot, blast["pos"]):
+                item(
+                    "blast stage " + str(min(3, (w["tick"] - blast["tick"]) // 6)),
+                    blast["pos"],
+                    104,
+                    104,
+                )
         item("own aim " + str(self.angle), me["pos"])
         item("game teams 2 map 1280x800", me["pos"])
         item("fire icon" if me["cooldown"] <= 1 else "fire icon cooldown", me["pos"])
@@ -180,6 +264,7 @@ class SpriteView:
             "walk": True,
             "direct": True,
             "shoot": bool(self.mask & 32),
+            "chargeGrenade": bool(self.mask & 128),
             "goal": {"x": p["x"] + dx * 100, "z": p["z"] + dz * 100},
             "aim": {
                 "x": p["x"] + round(math.cos(a) * 1800),

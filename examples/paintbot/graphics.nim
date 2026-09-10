@@ -51,7 +51,8 @@ proc setCamera(x, z, d, angle, pitch: cfloat) {.exportc: "pw_camera", cdecl,
   camX = clamp(x, -40, 40); camZ = clamp(z, -28, 28); distance = clamp(d, 6,
       100); yaw = angle; tilt = clamp(pitch, 0.2, 1.56)
 proc setInset(value: cfloat) {.exportc: "pw_inset", cdecl,
-    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = insetSize = clamp(value, 0.18, 0.5)
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = insetSize = clamp(value,
+        0.18, 0.5)
 proc setOptions(f, p, b, t: cint) {.exportc: "pw_options", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   follow = f != 0; firstPerson = p != 0; bars = b != 0; trails = t != 0
@@ -124,12 +125,10 @@ proc runGraphics*() =
   scene.useToonShading()
   scene.setToonHour(15.4)
   setEnvironmentPalette(scene.toon)
-  let model = loadModularCharacterModel(DataRoot &
-      "/characters/modular_chars/character.glb", ["Body_Yellow_1",
-      "Body_Yellow_Head_3", "Chest_14", "Foot_14", "Hand_14", "Head_14",
-      "Leg_14", "Eye_BlueB_1", "Mouth_Yellow_2"], 2.0)
-  let runClip = model.clipIndex("Run")
-  let idleClip = model.clipIndex("Idle")
+  let models = [loadCharacterModel(when defined(emscripten): "/paintbot-cog-red.glb" else: "tmp/paintbot-cog-red.glb", 1.9),
+                loadCharacterModel(when defined(
+                    emscripten): "/paintbot-cog-blue.glb" else: "tmp/paintbot-cog-blue.glb", 1.9)]
+  for model in models: model.unlitParts = @["eye", "smile"]
   var shapes = initShapeRenderer()
   var last = epochTime()
   var accumulator = 0.0
@@ -148,7 +147,8 @@ proc runGraphics*() =
       var steps = 0
       while accumulator >= 1 and steps < 96:
         if (replayMode and world.tick >= recording.frames.len) or
-            (not replayMode and (world.tick >= options.maximumTicks or world.winner >= 0)): paused = true; accumulator = 0; break
+            (not replayMode and (world.tick >= options.maximumTicks or
+                world.winner != -1)): paused = true; accumulator = 0; break
         previous = world.cogs
         advance(); accumulator-=1; inc steps
     let alpha = if paused: 1'f32 else: clamp(accumulator.float32, 0, 1)
@@ -175,11 +175,11 @@ proc runGraphics*() =
             10000: continue
         let delta = vec2((c.aim.x-c.pos.x).float32, (c.aim.z-c.pos.z).float32)
         let facing = arctan2(delta.x.float32, delta.y.float32)
-        let clip = if c.pos != previous[i].pos: runClip else: idleClip
-        drawCharacter(scene, model, poses[i], facing, clip, (
-            world.tick.float32+alpha)/24,
-          tint = if team(i) == 0: color(1, 0.52, 0.37, 1) else: color(0.38,
-              0.72, 1, 1))
+        let rolling = if c.pos != previous[i].pos: (
+            world.tick.float32+alpha)/24 else: 0
+        let lowered = if world.trenchAt(c.pos) >= 0: 0.38'f32 else: 0'f32
+        drawCharacter(scene, models[team(i)], poses[i]-vec3(0, lowered, 0),
+            facing, 0, rolling)
     if visibilityTick != world.tick or visibilityLens != lens:
       var visibility = newSeq[uint8](GridTiles*GridTiles)
       for z in 0..<GridTiles:
@@ -226,6 +226,72 @@ proc runGraphics*() =
         187, 111, 255))
     for x in [-32'f32, 32'f32]: shapes.box(x, 0, 0, 0.07, 0.16, 20, rgbx(217,
         187, 111, 255))
+    for t in world.trenches:
+      let p = position(Point(x: t.x+t.w div 2, z: t.z+t.h div 2))
+      shapes.box(p.x, 0.01, p.z, t.w.float32/100, 0.03, t.h.float32/100, rgbx(
+          42, 35, 27, 255))
+      for offset in [-1'f32, 1'f32]:
+        shapes.box(p.x+offset*t.w.float32/200, 0.06, p.z, 0.12, 0.13,
+            t.h.float32/100, rgbx(130, 104, 65, 255))
+        shapes.box(p.x, 0.06, p.z+offset*t.h.float32/200, t.w.float32/100, 0.13,
+            0.12, rgbx(130, 104, 65, 255))
+    for item in world.pickups:
+      if item.readyAt > world.tick: continue
+      if lens >= 0:
+        var lit = false
+        for seat in 0..<Seats:
+          if (seat == lens or lens >= Seats and team(seat) == lens-Seats) and
+              world.canSeePoint(seat, item.pos): lit = true
+        if not lit: continue
+      let p = position(item.pos, 0.28)
+      let color = case item.kind
+        of grenadePickup: rgbx(148, 165, 73, 255)
+        of sprayPickup: rgbx(243, 160, 57, 255)
+        of armorPickup: rgbx(96, 191, 241, 255)
+        of medkitPickup: rgbx(243, 238, 207, 255)
+      shapes.addCircle(position(item.pos, 0.04), 0.55, color)
+      shapes.box(p.x, p.y, p.z, 0.4, 0.48, 0.32, color)
+      if item.kind == medkitPickup:
+        shapes.box(p.x, p.y+0.49, p.z, 0.26, 0.03, 0.08, rgbx(215, 69, 66, 255))
+        shapes.box(p.x, p.y+0.49, p.z, 0.08, 0.03, 0.26, rgbx(215, 69, 66, 255))
+      elif item.kind == sprayPickup: shapes.box(p.x, p.y+0.5, p.z, 0.13, 0.12,
+          0.13, rgbx(222, 232, 228, 255))
+    for g in world.grenades:
+      let f = clamp((world.tick-g.releasedAt).float32/max(1,
+          g.landsAt-g.releasedAt).float32, 0, 1)
+      let p = mix(position(g.start, 1), position(g.target, 0.1), f)+vec3(0, sin(
+          f*PI.float32)*3, 0)
+      shapes.gem(p, 0.21, rgbx(157, 175, 66, 255))
+      shapes.addCircle(position(g.target, 0.05), 0.24, rgbx(192, 161, 85, 160))
+    for b in world.blasts:
+      let fade = 1-(world.tick-b.tick).float32/24
+      if b.trench >= 0:
+        let t = world.trenches[b.trench]
+        let p = position(Point(x: t.x+t.w div 2, z: t.z+t.h div 2))
+        shapes.box(p.x, 0.05, p.z, t.w.float32/100, 0.06, t.h.float32/100,
+            teamColors[team(b.owner.int)])
+      else: shapes.addCircle(position(b.pos, 0.07),
+          GrenadeBlastRadius.float32/100, teamColors[team(b.owner.int)])
+      if fade > 0.6: shapes.gem(position(b.pos, 0.4), fade*1.4, rgbx(255, 218,
+          109, 255))
+    for i, e in world.equipment:
+      if world.cogs[i].hp <= 0 or not seen(i): continue
+      let c = world.cogs[i]
+      if e.charge > 0: shapes.addCircle(position(world.grenadeTarget(i), 0.08),
+          GrenadeBlastRadius.float32/100, rgbx(229, 199, 88, 255))
+      if e.burst > 0:
+        for n in 1..10:
+          let f = n.float32/10
+          let p = Point(x: c.pos.x+e.sprayAim.x*n.int32 div 10,
+              z: c.pos.z+e.sprayAim.z*n.int32 div 10)
+          if not world.lineClear(c.pos, p): break
+          shapes.gem(position(p, 0.9), 0.14+f*1.0, teamColors[team(i)])
+      if e.grenade: shapes.gem(poses[i]+vec3(-0.45, 1.0, -0.3), 0.19, rgbx(157,
+          175, 66, 255))
+      if e.sprayCan: shapes.box(poses[i].x+0.5, 0.75, poses[i].z, 0.3, 0.5,
+          0.25, rgbx(241, 175, 70, 255))
+      for hp in 0..<e.armor: shapes.box(poses[i].x-0.3+hp.float32*0.25, 2.1,
+          poses[i].z, 0.16, 0.09, 0.09, rgbx(65, 203, 245, 255))
     for side in 0..1:
       let h = position(home(side))
       shapes.addCircle(h+vec3(0, 0.04, 0), 2.3, rgbx(45, 69, 64, 255))
@@ -248,8 +314,9 @@ proc runGraphics*() =
       let d = direction(c.pos, c.aim, 105)
       shapes.addLine(p+vec3(0, 1.05, 0), p+vec3(d.x.float32/100, 1.05,
           d.z.float32/100), rgbx(49, 60, 66, 255), halfWidth = 0.13)
-      if c.cooldown >= (if replayRulesVersion >= 3: FireCooldownTicks-1 else: 7): shapes.gem(p+vec3(d.x.float32/100, 1.05,
-          d.z.float32/100), 0.23, rgbx(255, 239, 177, 255))
+      if c.cooldown >= (if replayRulesVersion >=
+          3: FireCooldownTicks-1 else: 7): shapes.gem(p+vec3(d.x.float32/100,
+          1.05, d.z.float32/100), 0.23, rgbx(255, 239, 177, 255))
       if c.shield > 0: shapes.addCircle(p+vec3(0, 0.09, 0), 0.75, rgbx(196, 241,
           243, 95))
       if trails:
@@ -261,7 +328,7 @@ proc runGraphics*() =
     for b in world.balls:
       if lens >= 0 and not seen(b.owner.int): continue
       shapes.addLine(position(b.pos, 1), position(point(
-          b.pos.x-b.velocity.x div 2, b.pos.z-b.velocity.z div 2), 1),
+          b.pos.x-b.velocity.x div (if replayRulesVersion>=6:1 else:2), b.pos.z-b.velocity.z div (if replayRulesVersion>=6:1 else:2)), 1),
           teamColors[team(b.owner.int)], halfWidth = 0.06)
       shapes.gem(position(b.pos, 1), 0.14, teamColors[team(b.owner.int)])
     shapes.draw(vp)

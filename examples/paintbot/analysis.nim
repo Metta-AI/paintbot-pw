@@ -19,6 +19,14 @@ type
 proc snapshot(w: World): World =
   result = w
   # Explicit copies keep checkpoint storage independent of mutable sequences.
+  result.pickups = @[]
+  for x in w.pickups: result.pickups.add x
+  result.trenches = @[]
+  for x in w.trenches: result.trenches.add x
+  result.grenades = @[]
+  for x in w.grenades: result.grenades.add x
+  result.blasts = @[]
+  for x in w.blasts: result.blasts.add x
   result.balls = @[]
   for ball in w.balls: result.balls.add ball
   result.cover = @[]
@@ -34,6 +42,7 @@ proc indexReplay*(): ReplayIndex =
   result.checkpoints.add Checkpoint(state: snapshot(world))
   while world.tick < recording.frames.len:
     let previous = world.cogs
+    let equipment = world.equipment
     let hearts = world.hearts
     advance()
     result.events.add tags
@@ -42,18 +51,33 @@ proc indexReplay*(): ReplayIndex =
       template event(label: string) =
         result.events.add Moment(tick: world.tick, slot: i, side: team(i),
             kind: label, x: cog.pos.x, z: cog.pos.z)
+      if world.equipment[i].grenade and not equipment[i].grenade: event("grenade pickup")
+      if world.equipment[i].sprayCan and not equipment[i].sprayCan: event("spray pickup")
+      if world.equipment[i].armor > equipment[i].armor: event("shield pickup")
+      if world.equipment[i].burst > equipment[i].burst: event("spray")
+      if cog.hp > previous[i].hp and previous[i].hp > 0: event("heal")
       if cog.hp == 0 and previous[i].hp > 0:
         event("down")
       if cog.captures > previous[i].captures: event("capture")
       if cog.carrying and not previous[i].carrying: event("pickup")
+    for g in world.grenades:
+      if g.releasedAt == world.tick-1:
+        result.events.add Moment(tick: world.tick, slot: g.owner, side: team(
+            g.owner.int), kind: "grenade throw", x: g.target.x, z: g.target.z)
+    for b in world.blasts:
+      if b.tick == world.tick-1:
+        result.events.add Moment(tick: world.tick, slot: b.owner, side: team(
+            b.owner.int), kind: "grenade blast", x: b.pos.x, z: b.pos.z)
     for side in 0..1:
       if hearts[side].carrier >= 0 and world.hearts[side].carrier < 0:
         result.events.add Moment(tick: world.tick, slot: hearts[side].carrier,
             side: side, kind: (if world.hearts[side].pos == home(
             side): "return" else: "drop"), x: world.hearts[side].pos.x,
             z: world.hearts[side].pos.z)
-      if hearts[side].returnAt>0 and world.hearts[side].returnAt==0 and world.hearts[side].carrier<0:
-        result.events.add Moment(tick:world.tick,slot: -1,side:side,kind:"return",x:home(side).x,z:home(side).z)
+      if hearts[side].returnAt > 0 and world.hearts[side].returnAt == 0 and
+          world.hearts[side].carrier < 0:
+        result.events.add Moment(tick: world.tick, slot: -1, side: side,
+            kind: "return", x: home(side).x, z: home(side).z)
     if world.tick mod 24 == 0 or world.tick == recording.frames.len:
       var glory: array[2, int32]
       for i, c in world.cogs: glory[team(i)] += c.tags + c.captures * 10
