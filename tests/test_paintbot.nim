@@ -31,3 +31,21 @@ suite "Paintbot rules":
     let w=newWorld(2)
     check not w.visible(0,1)
     check w.visible(0,2)
+
+  test "a stolen home heart prevents scoring":
+    var w = newWorld(1)
+    w.cogs[0].pos = home(0)
+    w.cogs[0].goal = home(0)
+    w.cogs[0].carrying = true
+    w.hearts[1].carrier = 0
+    w.cogs[1].carrying = true
+    w.hearts[0].carrier = 1
+    w.step(default(array[Seats, Command]))
+    check w.captures[0] == 0
+    check w.cogs[0].carrying
+  test "dropped heart automatically returns":
+    var w = newWorld(1)
+    w.hearts[0].pos = point(3200, 200)
+    w.hearts[0].returnAt = 2
+    for i in 0..<3: w.step(default(array[Seats, Command]))
+    check w.hearts[0].pos == home(0)
