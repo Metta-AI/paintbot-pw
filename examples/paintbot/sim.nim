@@ -232,10 +232,13 @@ proc dropHeart(w: var World, slot: int) =
       returnAt: w.tick+240)
   w.cogs[slot].carrying = false
 # Optional spectator instrumentation lives outside World and its hash.
+var observeHit*: proc(tick: int32, victim, attacker: int,
+    pos: Point) {.closure.}
 var observeTag*: proc(tick: int32, victim, attacker: int,
     pos: Point) {.closure.}
 proc hit*(w: var World, victim, attacker: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
+  if observeHit != nil: observeHit(w.tick, victim, attacker, w.cogs[victim].pos)
   dec w.cogs[victim].hp
   if w.cogs[victim].hp == 0:
     w.dropHeart(victim); w.cogs[victim].respawn = RespawnTicks

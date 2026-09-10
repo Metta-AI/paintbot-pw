@@ -13,6 +13,7 @@ type
     state*: World
   ReplayIndex* = object
     events*: seq[Moment]
+    hits*: seq[Moment]
     momentum*: seq[Sample]
     checkpoints*: seq[Checkpoint]
 
@@ -33,7 +34,11 @@ proc snapshot(w: World): World =
   for cover in w.cover: result.cover.add cover
 
 proc indexReplay*(): ReplayIndex =
-  var tags: seq[Moment]
+  var tags, hits: seq[Moment]
+  observeHit = proc(tick: int32, victim, attacker: int, pos: Point) =
+    hits.add Moment(tick: tick+1, slot: attacker, side: team(attacker),
+        victim: victim, kind: "hit", x: pos.x, z: pos.z)
+  defer: observeHit = nil
   observeTag = proc(tick: int32, victim, attacker: int, pos: Point) =
     tags.add Moment(tick: tick + 1, slot: attacker, side: team(attacker),
         victim: victim, kind: "tag", x: pos.x, z: pos.z)
@@ -45,6 +50,8 @@ proc indexReplay*(): ReplayIndex =
     let equipment = world.equipment
     let hearts = world.hearts
     advance()
+    result.hits.add hits
+    hits.setLen(0)
     result.events.add tags
     tags.setLen(0)
     for i, cog in world.cogs:

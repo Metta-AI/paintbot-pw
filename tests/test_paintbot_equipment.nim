@@ -116,3 +116,22 @@ suite "Original Paintbot equipment":
     for tick in 0..<GunWindupTicks:w.step(c)
     check w.cogs[0].hp==0
     check w.cogs[2].hp==0
+  test "paint impacts include armor and nonlethal damage but exclude spawn shields":
+    var w=arena()
+    var impacts=0
+    observeHit=proc(tick:int32,victim,attacker:int,pos:Point)=
+      inc impacts
+      check victim==0
+      check attacker==1
+    defer:observeHit=nil
+    w.equipment[0].armor=2
+    w.damage(0,1,1)
+    check impacts==1
+    check w.cogs[0].hp==3
+    w.equipment[0].armor=0
+    w.damage(0,1,1)
+    check impacts==2
+    check w.cogs[0].hp==2
+    w.cogs[0].shield=10
+    w.damage(0,1,1)
+    check impacts==2

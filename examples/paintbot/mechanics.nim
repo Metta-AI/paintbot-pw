@@ -58,6 +58,7 @@ proc initializeEquipment(w: var World) =
 
 proc damage*(w: var World, victim, attacker, amount: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
+  if observeHit != nil: observeHit(w.tick, victim, attacker, w.cogs[victim].pos)
   let absorbed = min(w.equipment[victim].armor, amount.int32)
   w.equipment[victim].armor-=absorbed
   w.cogs[victim].hp = max(0'i32, w.cogs[victim].hp-(amount.int32-absorbed))

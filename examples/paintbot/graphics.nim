@@ -303,6 +303,22 @@ proc runGraphics*() =
           let f = age.float32/18
           shapes.gem(p+vec3(cos(a)*f*1.8, sin(f*PI.float32)*1.2+0.2, sin(
               a)*f*1.8), 0.11, color)
+    # Every damaging hit splashes the victim, including armor hits and survivors.
+    for hit in index.hits:
+      let age=world.tick.float32+alpha-hit.tick.float32
+      if age<0 or age>=14 or not seen(hit.victim):continue
+      let fade=1-age/14
+      let center=(if world.cogs[hit.victim].hp>0:poses[hit.victim]
+          else:position(point(hit.x,hit.z)))+vec3(0,1.3,0)
+      let front=center+normalize(eye-center)*0.5
+      let color=if hit.side==0:rgbx(255,103,112,255) else:rgbx(83,218,255,255)
+      shapes.paintball(front,0.36*fade,color)
+      for drop in 0..<7:
+        let angle=drop.float32*0.8976+hit.slot.float32
+        let spread=0.28+age*0.045
+        let offset=vec3(cos(angle)*spread,sin(angle)*spread-age*0.025,
+            sin(angle*2)*0.18)
+        shapes.paintball(front+offset,(0.11+(drop mod 3).float32*0.035)*fade,color)
     # Brass boundary rails make the playable rectangle explicit within the grove.
     for z in [-20'f32, 20'f32]: shapes.box(0, 0, z, 32, 0.16, 0.07, rgbx(217,
         187, 111, 255))
