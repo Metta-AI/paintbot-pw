@@ -13,6 +13,7 @@
     following = false,
     pov = false,
     bars = true,
+    eventToasts = false,
     trails = false,
     lastTick = -1,
     ended = false,
@@ -173,6 +174,12 @@
   bind("topdown", () => {
     camera.tilt = camera.tilt > 1.5 ? 0.92 : 1.55;
     cameraUpdate();
+  });
+  bind("eventtoasts", () => {
+    eventToasts = !eventToasts;
+    pressed("eventtoasts", eventToasts);
+    $("feed").hidden = !eventToasts;
+    $("banner").hidden = !eventToasts;
   });
   bind("bars", () => {
     bars = !bars;

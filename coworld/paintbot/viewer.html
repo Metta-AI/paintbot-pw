@@ -562,6 +562,10 @@
   body.pov #feed {
     top: 38%;
   }
+  #feed[hidden],
+  #banner[hidden] {
+    display: none;
+  }
   #toast {
     position: absolute;
     left: 50%;
@@ -1027,6 +1031,8 @@
     <option value="17">Azure vision</option></select
   ><button id="fit">Fit arena</button><button id="topdown">Top down</button
   ><button id="bars" aria-pressed="true">Health</button
+  ><button id="eventtoasts" aria-pressed="false" aria-controls="feed banner">
+    Toasts</button
   ><button id="trails" aria-pressed="false" class="optional">Orders</button
   ><button id="download" class="optional">↓ Replay</button>
 </div>
@@ -1035,8 +1041,8 @@
   <strong>Gnomewick Village</strong>
   <p>Sixteen minds. Two hearts. One arena.</p>
 </div>
-<div id="feed"></div>
-<div id="banner"></div>
+<div id="feed" hidden></div>
+<div id="banner" hidden></div>
 <div id="povframe">
   <button
     id="povresize"
