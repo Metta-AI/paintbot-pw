@@ -1,4 +1,4 @@
-# Gnomewick concept and local implementation
+# Heartwick concept and local implementation
 
 Artist reference: `art/gnomewick-level-concept.png` (generated for this level).
 

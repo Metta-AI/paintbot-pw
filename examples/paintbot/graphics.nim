@@ -110,7 +110,7 @@ proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
 proc runGraphics*() =
   setup()
   let index = if replayMode: indexReplay() else: ReplayIndex()
-  let window = newWindow("Paintbot · Gnomewick Village", ivec2(1440, 900))
+  let window = newWindow("Paintbot · Heartwick", ivec2(1440, 900))
   makeContextCurrent(window)
   loadExtensions()
   # Keep only a narrow scenic strip around the playable arena.

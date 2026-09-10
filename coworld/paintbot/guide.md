@@ -66,7 +66,7 @@ seeking, individual cone visibility, first-person view, event filtering, invento
 armor/lives inspection, grenade arcs/blasts, spray effects and trench markers.
 Earlier replay versions retain their original rules and hashes.
 
-## Gnomewick Village arena
+## Heartwick arena
 
 Cottages, garden walls, carts, supply stacks and the market well are solid cover: they block movement, sight and direct fire. Grenades still lob over them. The village is symmetric under a half turn, with a market square, cross streets and side lanes. Flower patches are walkable decoration. Trenches retain their existing movement and damage rules.
 
