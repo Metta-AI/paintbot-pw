@@ -238,21 +238,33 @@ def walkability(
                 if island_margin(x * 5 - ox, z * 5 - oz) < 59:
                     raw[(z * width + x) * 4 + 3] = 0
     if layered:
+        # Reuse the height raster for all four slope probes. Computing the
+        # island's procedural hills five times per pixel stalled hosted startup.
+        from array import array
+
+        heights = array(
+            "i",
+            (
+                terrain_height(
+                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island
+                )
+                for z in range(height)
+                for x in range(width)
+            ),
+        )
         for z in range(11, height - 11):
             for x in range(11, width - 11):
-                px, pz = x * 5 - ox, z * 5 - oz
-                h = terrain_height(px, pz, wide, wilderness, deep, organic, island)
-                if any(
-                    abs(
-                        terrain_height(
-                            px + dx, pz + dz, wide, wilderness, deep, organic, island
-                        )
-                        - h
-                    )
-                    > 80
-                    for dx, dz in [(55, 0), (-55, 0), (0, 55), (0, -55)]
+                i = z * width + x
+                if not raw[i * 4 + 3]:
+                    continue
+                h = heights[i]
+                if (
+                    abs(heights[i + 11] - h) > 80
+                    or abs(heights[i - 11] - h) > 80
+                    or abs(heights[i + 11 * width] - h) > 80
+                    or abs(heights[i - 11 * width] - h) > 80
                 ):
-                    raw[(z * width + x) * 4 + 3] = 0
+                    raw[i * 4 + 3] = 0
     return literal_snappy(raw)
 
 

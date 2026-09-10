@@ -1,6 +1,7 @@
 import std/unittest
 import ../examples/paintbot/sim
 suite "Rounded cover":
+  setup: visionRulesVersion = 8
   test "corners outside the circle remain walkable and visible":
     var w: World
     w.cover = @[Cover(x:1000,z:1000,w:400,h:0)]
