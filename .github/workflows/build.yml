@@ -20,7 +20,7 @@ jobs:
         run: |
           cd ..
           nimby create
-          nimby install "${{ github.event.repository.name }}/${{ github.event.repository.name }}.nimble"
+          nimby install "${{ github.event.repository.name }}/polyworld.nimble"
           nimby sync "${{ github.event.repository.name }}/nimby.lock"
       - run: nim r tests/tests.nim
       - run: >-
@@ -38,3 +38,5 @@ jobs:
       - run: nim c -d:headless examples/call_to_adventure/cta.nim
       - run: nim c -d:headless examples/light_vs_dark/lvd.nim
       - run: nim c -d:headless examples/heartleaf/heartleaf.nim
+      - run: nim r tests/test_paintbot_respawns.nim
+      - run: nim r tests/test_paintbot_barrage.nim
