@@ -95,7 +95,7 @@ Verified hosted replay job: `dd4fab30-1a27-4cb4-8236-f4afa0a06c6f`, hash 2109017
 The published viewer was opened and visually checked, including its island,
 territory overlay, heart towers, equipment events, and fractional speed controls.
 
-Validation: all nine `test_paintbot_*` suites and five Python runtime tests pass.
+Validation: all eleven Paintbot test suites and five Python runtime tests pass.
 The v8 round-cover fixture now explicitly selects v8; current terrain otherwise
 changes its line-of-sight premise. Walkability reuses a height raster rather than
 computing every slope probe's terrain independently. Vet was unavailable because
@@ -103,3 +103,9 @@ its Anthropic credentials were not configured.
 
 Player source and validation remain private in `daveey/cogamer`; they are not
 included in this public package.
+
+The separate league credit pool was empty and blocked every scheduled round.
+Funded 4,320 credits (the existing $432 budget) and configured a daily refill
+with the same 4,320-credit balance cap. Round #5 then started with the newly
+placed daveey-heartwick:v1 champion (policy version
+`ba035f7e-1f3a-4896-b18f-90157f46b0de`).
