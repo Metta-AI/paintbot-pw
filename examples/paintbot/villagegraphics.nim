@@ -13,10 +13,11 @@ proc placeVillage*(world: World) =
   let meadow = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/props.glb",
       unitHeight = false, textured = true, only = @["wood_cart_01a",
           "flower_pot_01a"])
-  let masonry = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/buildings.glb",
-      unitHeight = false, textured = true, only = @["stone_wall_01a"])
+  let vegetables = loadPropPack(DataRoot & "/terrain/low_poly_village.glb",
+      unitHeight = true, textured = true, only = @["carrot1", "tomato1"])
   let greenery = loadPropPack(DataRoot &
-      "/terrain/toon_enchanted_meadow/vegetation.glb", unitHeight = true, textured = true,
+      "/terrain/toon_enchanted_meadow/vegetation.glb", unitHeight = true,
+      textured = true,
       only = @["flowers_patch_01a", "flowers_patch_02a", "mushroom_01a",
           "mushroom_03a"])
   proc fit(pack: PropPack, name: string, c: Cover, height: float32,
@@ -34,7 +35,20 @@ proc placeVillage*(world: World) =
     of cottage:
       fit(homes, if i div 2 mod 2 == 0: "house_02" else: "house_03", c, 5.2, reverse)
     of bakery: fit(homes, "bakery", c, 5.8, reverse)
-    of gardenWall: fit(masonry, "stone_wall_01a", c, 1.6, reverse)
+    of gardenWall:
+      # Timber raised beds fill the same solid footprints as the village walls.
+      fit(props, "wood_crate_01a", c, 0.7, reverse)
+      let alongX = c.w > c.h
+      let count = max(c.w, c.h).int div 65
+      for n in 0..<count:
+        for row in 0..1:
+          let along = 35'f32+n.float32*65
+          let across = 25'f32+row.float32*40
+          let x = c.x.float32+(if alongX: along else: across)
+          let z = c.z.float32+(if alongX: across else: along)
+          vegetables.placeProp(if i div 2 mod 2 == 0: "carrot1" else: "tomato1",
+              vec3(x/100-32, 0.68, z/100-20), 0, 0.7)
+
     of cart: fit(meadow, "wood_cart_01a", c, 1.8, reverse)
     of supplies:
       # A filled stack keeps the whole rectangular obstacle visibly occupied.
@@ -42,8 +56,8 @@ proc placeVillage*(world: World) =
       let top = Cover(x: c.x+35, z: c.z+35, w: c.w-70, h: c.h-70)
       let dim = props.propDimensions("wood_barrel_01a")
       props.placeProp("wood_barrel_01a", vec3((
-          top.x+top.w div 2).float32/100-32, 1.35, (top.z+top.h div 2).float32/100-20),
-              0, 1,
+          top.x+top.w div 2).float32/100-32, 1.35, (
+              top.z+top.h div 2).float32/100-20), 0, 1,
           vec3(1, 1, 1), vec3(top.w.float32/100/dim.x, 0.9/dim.y,
               top.h.float32/100/dim.z))
     of well: fit(props, "well_01a", c, 2.8, false)

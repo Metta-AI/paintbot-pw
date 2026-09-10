@@ -79,3 +79,4 @@ terrain/toon_enchanted_meadow/buildings.glb
 terrain/toon_enchanted_meadow/atlas_1a.png
 terrain/toon_enchanted_meadow/vegetation.glb
 terrain/toon_enchanted_meadow/atlas_vegetation_1a.png
+terrain/low_poly_village.glb
