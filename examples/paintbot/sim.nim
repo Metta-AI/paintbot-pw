@@ -106,9 +106,9 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 13
-proc minX*():int = (if visionRulesVersion>=12: -800 else: 0)
-proc minZ*():int = (if visionRulesVersion>=12: -400 else: 0)
+var visionRulesVersion* = 14
+proc minX*():int = (if visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
+proc minZ*():int = (if visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
 proc maxZ*():int = Height-minZ()
 proc elevation*(w: World, p: Point): int =
@@ -208,6 +208,7 @@ proc initializeEquipment(w: var World)
 proc newWorld*(seed: int32): World =
   wideRamps = visionRulesVersion >= 11
   wilderness = visionRulesVersion >= 12
+  deepWilderness = visionRulesVersion >= 14
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
   if visionRulesVersion >= 8:
     for lot in roundVillage():
@@ -235,6 +236,9 @@ proc newWorld*(seed: int32): World =
     for p in [point(-620,300),point(-620,1700),point(-620,3500),point(1200,-320),point(3100,-320),point(5400,-320)]:
       for q in [p,point(6400-p.x.int,4000-p.z.int)]:
         result.cover.add Cover(x:q.x-65,z:q.z-65,w:130,h:0)
+  if deepWilderness:
+    for lot in forestLots():
+      result.cover.add Cover(x:(lot.x-lot.radius).int32,z:(lot.z-lot.radius).int32,w:(2*lot.radius).int32,h:0)
   if visionRulesVersion >= 6: result.initializeEquipment()
 proc scores*(w: World): seq[int] =
   for i in 0..<Seats:
@@ -280,11 +284,11 @@ proc waypoint*(w: World, start, goal: Point): Point =
   ## Bounded breadth-first navigation over a 32x20 arena grid.
   if w.lineClear(start, goal) and w.traversable(start, goal): return goal
   let nx = (maxX()-minX()) div 200; let nz = (maxZ()-minZ()) div 200
-  var prev: array[960, int]
+  var prev: array[1920, int]
   for x in prev.mitems: x = -2
   let a = clamp((start.z.int-minZ()) div 200, 0, nz-1)*nx+clamp((start.x.int-minX()) div 200, 0, nx-1)
   let b = clamp((goal.z.int-minZ()) div 200, 0, nz-1)*nx+clamp((goal.x.int-minX()) div 200, 0, nx-1)
-  var q: array[960, int]; var head = 0; var tail = 1
+  var q: array[1920, int]; var head = 0; var tail = 1
   q[0] = a; prev[a] = -1
   while head < tail and prev[b] == -2:
     let n = q[head]; inc head

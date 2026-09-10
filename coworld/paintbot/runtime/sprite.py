@@ -28,9 +28,29 @@ def literal_snappy(raw):
     return bytes(out)
 
 
+def forest_height(x, z):
+    height = 0
+    for cx, cz, h, r in [
+        (-1900, 700, 600, 1100),
+        (-1400, 3100, 480, 1000),
+        (800, -900, 380, 1000),
+        (3600, -900, 460, 1100),
+        (5700, -800, 330, 900),
+    ]:
+        for px, pz in [(cx, cz), (6400 - cx, 4000 - cz)]:
+            d2 = (x - px) ** 2 + (z - pz) ** 2
+            height = max(height, max(0, h * (r * r - d2) // (r * r)))
+    route = min(abs(x + 1700), abs(x - 8100), abs(z + 650), abs(z - 4650))
+    height = height * (300 + min(route, 500)) // 800
+    edge = max(0, -x, x - 6400, -z, z - 4000)
+    return height * min(edge, 500) // 500
+
+
 @lru_cache(maxsize=65536)
-def terrain_height(x, z, wide=False, wilderness=False):
+def terrain_height(x, z, wide=False, wilderness=False, deep=False):
     if wilderness and (x < 0 or x > 6400 or z < 0 or z > 4000):
+        if deep:
+            return forest_height(x, z)
         h = max(
             max(0, 180 - (abs(x - cx) + abs(z - cz)) // 3)
             for cx, cz in [
@@ -70,7 +90,11 @@ def elevation(w, p):
     if w.get("rulesVersion", 0) < 9:
         return 0
     h = terrain_height(
-        p["x"], p["z"], w.get("rulesVersion", 0) >= 11, w.get("rulesVersion", 0) >= 12
+        p["x"],
+        p["z"],
+        w.get("rulesVersion", 0) >= 11,
+        w.get("rulesVersion", 0) >= 12,
+        w.get("rulesVersion", 0) >= 14,
     )
     for t in w.get("trenches", []):
         if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
@@ -137,9 +161,9 @@ def can_see_point(w, slot, b):
 
 
 @lru_cache(maxsize=4)
-def walkability(cover, layered=False, wide=False, wilderness=False):
-    width, height = (1600, 960) if wilderness else (1280, 800)
-    ox, oz = (800, 400) if wilderness else (0, 0)
+def walkability(cover, layered=False, wide=False, wilderness=False, deep=False):
+    width, height = (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
+    ox, oz = (2800, 1200) if deep else (800, 400) if wilderness else (0, 0)
     raw = bytearray(width * height * 4)
     for z in range(11, height - 11):
         start = (z * width + 11) * 4 + 3
@@ -168,9 +192,10 @@ def walkability(cover, layered=False, wide=False, wilderness=False):
         for z in range(11, height - 11):
             for x in range(11, width - 11):
                 px, pz = x * 5 - ox, z * 5 - oz
-                h = terrain_height(px, pz, wide, wilderness)
+                h = terrain_height(px, pz, wide, wilderness, deep)
                 if any(
-                    abs(terrain_height(px + dx, pz + dz, wide, wilderness) - h) > 80
+                    abs(terrain_height(px + dx, pz + dz, wide, wilderness, deep) - h)
+                    > 80
                     for dx, dz in [(55, 0), (-55, 0), (0, 55), (0, -55)]
                 ):
                     raw[(z * width + x) * 4 + 3] = 0
@@ -186,8 +211,11 @@ class SpriteView:
 
     def frame(self, w):
         wilderness = w.get("rulesVersion", 0) >= 12
-        ox, oz = (160, 80) if wilderness else (0, 0)
-        width, height = (1600, 960) if wilderness else (1280, 800)
+        deep = w.get("rulesVersion", 0) >= 14
+        ox, oz = (560, 240) if deep else (160, 80) if wilderness else (0, 0)
+        width, height = (
+            (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
+        )
         out = bytearray(b"\x04")
         obj = 0
 
@@ -229,6 +257,7 @@ class SpriteView:
                     w.get("rulesVersion", 0) >= 9,
                     w.get("rulesVersion", 0) >= 11,
                     wilderness,
+                    deep,
                 ),
             )
             sprite(1, "map", width, height)

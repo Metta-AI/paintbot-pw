@@ -98,3 +98,8 @@ Grenade and spray pickups are enlarged, bob, and spin. Each gun shot draws four 
 ### Wilderness flanks (rules 12)
 
 Heartwick now has 80m × 48m of playable terrain, 50% more area than the original 64m × 40m village. Coordinates extend from (-800,-400) to (7200,4400) cm, preserving the village, hearts, and equipment positions. Wooded rolling hills and a continuous perimeter trail connect back into the village on all sides. Two BASIC flankers per team use the upper and lower wilderness wings. `mapMinX/Y()` and `mapMaxX/Y()` expose the bounds; WASM sprites use a translated 1600×960 pixel map with the same five-cm scale. Older recordings retain their original boundaries.
+
+Heartwick now spans 120 × 64 metres (twice the preceding wilderness map area).
+The original village sits inside wooded hill country with broad saddles, outer
+trails, six outlying territory hearts, and four extra medkit stations. Terrain
+heights and tree/bush collision bounds are shared by native and WASM policies.

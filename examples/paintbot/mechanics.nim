@@ -61,6 +61,12 @@ proc initializeEquipment(w: var World) =
         point(1800,-200),point(4600,4200),point(-400,3000),point(6800,1000),
         point(3200,1250),point(3200,2750)]:
       w.controlHearts.add ControlHeart(pos:w.freePickup(p),owner:(if i<2:i.int32 else: -1'i32))
+    if deepWilderness:
+      for i,p in [point(-1700,700),point(8100,3300),point(1200,-650),point(5200,4650),
+          point(-1700,3300),point(8100,700)]:
+        w.controlHearts[i+2].pos=w.freePickup(p)
+      for p in [point(-1700,2000),point(8100,2000),point(3200,-650),point(3200,4650)]:
+        w.pickups.add Pickup(pos:w.freePickup(p),kind:medkitPickup)
     w.captures=[1'i32,1'i32]
 
 proc updateTerritory*(w:var World) =

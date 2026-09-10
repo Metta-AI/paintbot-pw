@@ -8,9 +8,9 @@ proc placeRoundVillage*() =
   let pack = loadPropPack(when defined(emscripten): "/round-village.glb" else: "tmp/round-village.glb",
       unitHeight = false, textured = false)
   let grove = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/vegetation.glb",
-      unitHeight = true, textured = true)
+      unitHeight = true, textured = true, maxTextureSize = 512, only = @["tree_01a","tree_02a","tree_03a","tree_04a","tree_05a","tree_06a","bush_01a","bush_02a","flower_bush_01a","flower_bush_02a","flowers_patch_01a","flowers_patch_02a","flowers_patch_03a","ivy_01a"])
   let rocks = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/rocks.glb",
-      unitHeight = true, textured = true)
+      unitHeight = true, textured = true, maxTextureSize = 512, only = @["rock_medium_01a","rock_medium_02a","rock_medium_03a"])
   let trees = ["tree_01a", "tree_02a", "tree_03a", "tree_04a", "tree_05a", "tree_06a"]
   let bushes = ["bush_01a", "bush_02a", "flower_bush_01a", "flower_bush_02a"]
   proc at(x, z: float32): Vec3 =
@@ -78,6 +78,16 @@ proc placeRoundVillage*() =
         let base=at(q.x.float32,q.z.float32)
         grove.placeProp(trees[i mod trees.len],base,i.float32*1.2,3.2)
         grove.placeProp(bushes[i mod bushes.len],base+vec3(0.5,0,0.3),i.float32,0.65)
+
+  if deepWilderness:
+    for i,lot in forestLots():
+      let p=at(lot.x.float32,lot.z.float32)
+      if i mod 4==0:
+        grove.placeProp(bushes[i mod bushes.len],p,i.float32*0.7,1.7)
+      else:
+        grove.placeProp(trees[i mod trees.len],p,i.float32*0.7,3.5+(i mod 5).float32*0.55)
+      if i mod 3==0:
+        grove.placeProp("flowers_patch_0" & $(1+i mod 3) & "a",p+vec3(0.8,0,0.5),i.float32,0.8)
 
 proc placeVillage*(world: World) =
   let homes = loadPropPack(DataRoot & "/terrain/toon_golden_valley/presets.glb",

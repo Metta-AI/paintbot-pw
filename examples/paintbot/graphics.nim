@@ -50,8 +50,8 @@ proc setView(value: cint) {.exportc: "pw_lens", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = lens = clamp(value.int, -1, Seats+1)
 proc setCamera(x, z, d, angle, pitch: cfloat) {.exportc: "pw_camera", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
-  camX = clamp(x, -40, 40); camZ = clamp(z, -28, 28); distance = clamp(d, 6,
-      100); yaw = angle; tilt = clamp(pitch, 0.2, 1.56)
+  camX = clamp(x, minX().float32/100-32, maxX().float32/100-32); camZ = clamp(z, minZ().float32/100-20, maxZ().float32/100-20); distance = clamp(d, 6,
+      160); yaw = angle; tilt = clamp(pitch, 0.2, 1.56)
 proc setInset(value: cfloat) {.exportc: "pw_inset", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = insetSize = clamp(value,
         0.18, 0.5)
@@ -150,7 +150,8 @@ proc runGraphics*() =
           tile.kind = RoadTile
       if wilderness and (gx<0 or gx>=64 or gz<0 or gz>=40):
         # A continuous perimeter loop, plus open links into village streets.
-        if abs(gz+2)<=1 or abs(gz-42)<=1 or abs(gx+4)<=1 or abs(gx-68)<=1:
+        if (deepWilderness and (forestRouteDistance(gx*100,gz*100)<180 or abs(gz-20)<2)) or
+            (not deepWilderness and (abs(gz+2)<=1 or abs(gz-42)<=1 or abs(gx+4)<=1 or abs(gx-68)<=1)):
           tile.kind=RoadTile
       # Dig into the terrain itself; the rim and floor share textured earth.
       for t in world.trenches:
@@ -196,8 +197,7 @@ proc runGraphics*() =
   treeHeight = 5.5
   initTerrain(MixedTrees, GeneratedTerrain, PaintedRocks)
   computeWalkable()
-  scatterGrass(1500, recording.seed, matchTerrain = true)
-  bakeTerrain(rebuildWalkability = false)
+  scatterGrass(if deepWilderness: 1800 else: 1500, recording.seed, matchTerrain = true)
   if replayRulesVersion >= 8:
     placeRoundVillage()
   elif replayRulesVersion >= 7:
@@ -254,7 +254,7 @@ proc runGraphics*() =
         tilt))*fittedDistance
     let view = lookAt(eye, target, vec3(0, 1, 0))
     let projection = perspective(45'f32, window.size.x.float32/max(1,
-        window.size.y).float32, 0.1'f32, 250'f32)
+        window.size.y).float32, 0.1'f32, 600'f32)
     let vp = projection*view
     proc actors(exclude = -1) =
       for i, c in world.cogs:

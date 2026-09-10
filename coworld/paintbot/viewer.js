@@ -248,7 +248,7 @@
     cameraUpdate();
   });
   bind("zoomout", () => {
-    camera.d = Math.min(100, camera.d * 1.25);
+    camera.d = Math.min(160, camera.d * 1.25);
     cameraUpdate();
   });
   $("zoom").oninput = (e) => {
@@ -625,7 +625,7 @@
       const p = [...pointers.values()],
         n = Math.hypot(p[0][0] - p[1][0], p[0][1] - p[1][1]);
       if (n > 0) {
-        camera.d = Math.max(6, Math.min(100, (camera.d * pinch) / n));
+        camera.d = Math.max(6, Math.min(160, (camera.d * pinch) / n));
         pinch = n;
         cameraUpdate();
       }
@@ -684,7 +684,7 @@
       e.preventDefault();
       camera.d = Math.max(
         6,
-        Math.min(100, camera.d * Math.exp(e.deltaY * 0.002)),
+        Math.min(160, camera.d * Math.exp(e.deltaY * 0.002)),
       );
       cameraUpdate();
     },
