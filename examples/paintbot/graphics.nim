@@ -468,12 +468,16 @@ proc runGraphics*() =
       if e.charge > 0: shapes.addCircle(position(world.grenadeTarget(i), 0.08),
           GrenadeBlastRadius.float32/100, rgbx(229, 199, 88, 255))
       if e.burst > 0:
-        for n in 1..10:
-          let f = n.float32/10
-          let p = Point(x: c.pos.x+e.sprayAim.x*n.int32 div 10,
-              z: c.pos.z+e.sprayAim.z*n.int32 div 10)
-          if not world.lineClear(c.pos, p): break
-          shapes.gem(position(p, 0.9), 0.14+f*1.0, teamColors[team(i)])
+        let spread = if replayRulesVersion >= 17: 0.6'f32 else: 0.25'f32
+        for ray in -4..4:
+          for n in 1..10:
+            let f = n.float32/10
+            let lateral=ray.float32/4*spread
+            let p = point(c.pos.x.int+int((e.sprayAim.x.float32-e.sprayAim.z.float32*lateral)*f),
+              c.pos.z.int+int((e.sprayAim.z.float32+e.sprayAim.x.float32*lateral)*f))
+            if not world.lineClear(c.pos,p):break
+            shapes.paintball(position(p,0.9+sin(n.float32+ray.float32)*0.15),
+              0.08+f*0.16,teamColors[team(i)])
       if e.grenade: shapes.gem(poses[i]+vec3(-0.45, 1.0, -0.3), 0.19, rgbx(157,
           175, 66, 255))
       if e.sprayCan: shapes.box(poses[i].x+0.5, poses[i].y+0.75, poses[i].z,

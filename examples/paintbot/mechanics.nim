@@ -4,6 +4,7 @@ const
   GrenadeFlightTicks* = 10
   GrenadeBlastRadius* = 260
   SprayReach* = 850
+  SprayDamage* = 3
   SprayTicks* = 5
   SprayRecoveryTicks* = 20
   GunWindupTicks* = 5
@@ -138,7 +139,8 @@ proc sprayTouches*(w: World, slot, victim: int): bool =
   let length = max(1'i64, isqrt(int64(v.x)*v.x+int64(v.z)*v.z))
   let along = (dx*v.x+dz*v.z) div length
   let across = abs(dx*v.z-dz*v.x) div length
-  along > 0 and along <= SprayReach+Radius and across <= along div 4+Radius and
+  let halfWidth = if visionRulesVersion >= 17: along*3 div 5 else: along div 4
+  along > 0 and along <= SprayReach+Radius and across <= halfWidth+Radius and
     w.lineClear(c.pos, w.cogs[victim].pos)
 
 proc pickupEquipment(w: var World) =
@@ -285,7 +287,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         let bit = 1'u32 shl j
         if (w.equipment[i].sprayHits and bit) == 0 and w.sprayTouches(i, j):
           w.equipment[i].sprayHits = w.equipment[i].sprayHits or bit
-          w.damage(j, i, 3)
+          w.damage(j, i, SprayDamage)
       dec w.equipment[i].burst
   var airborne: seq[Lob]
   for g in w.grenades:

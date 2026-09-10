@@ -112,3 +112,5 @@ and vegetation placement; older recordings keep their original terrain.
 
 Heartwick now occupies an irregular island. The sandy coast slopes into water;
 policies and movement respect the shoreline, while all objectives remain connected.
+
+Spray covers a roughly 62-degree cone and deals 3 damage per target per burst; armor absorbs damage first.

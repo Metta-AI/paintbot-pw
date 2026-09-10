@@ -135,3 +135,23 @@ suite "Original Paintbot equipment":
     w.cogs[0].shield=10
     w.damage(0,1,1)
     check impacts==2
+
+  test "wide spray hits off-axis enemies for three HP":
+    var w = arena()
+    visionRulesVersion = 17
+    w.cogs[0].pos = point(3000,2000)
+    w.cogs[0].goal = w.cogs[0].pos
+    w.cogs[1].pos = point(3500,2250)
+    w.cogs[1].goal = w.cogs[1].pos
+    w.equipment[0].sprayAim = point(850,0)
+    check w.sprayTouches(0,1)
+    visionRulesVersion = 16
+    check not w.sprayTouches(0,1)
+    visionRulesVersion = 17
+    w.cogs[2].pos = point(3500,2450)
+    check not w.sprayTouches(0,2)
+    w.equipment[0].sprayCan = true
+    var commands: array[Seats,Command]
+    commands[0] = Command(shoot:true,aim:point(4000,2000))
+    w.step(commands)
+    check w.cogs[1].hp == 0
