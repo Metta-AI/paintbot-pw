@@ -94,6 +94,26 @@ proc gem(r: var ShapeRenderer, p: Vec3, s: float32, c: ColorRGBX) =
     r.addTriangle(top, ring[i], ring[(i+1) mod 4], c)
     r.addTriangle(bottom, ring[(i+1) mod 4], ring[i], c)
 
+proc heartMarker(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX) =
+  # Camera-facing silhouette stays legible from above and at oblique angles.
+  let front = normalize(eye-p)
+  let right = normalize(cross(vec3(0,1,0),front))
+  let up = cross(front,right)
+  for layer in 0..1:
+    let scale = if layer==0:1.45'f32 else:1.25'f32
+    let center = p+front*(layer.float32*0.025)
+    # Alpha 254 bypasses ShapeRenderer's implicit half-alpha for 255.
+    let tint = if layer==0:rgbx(25,36,40,254)
+      else:rgbx(color.r,color.g,color.b,254)
+    var points:array[48,Vec3]
+    for i in 0..<48:
+      let t=i.float32*2*PI.float32/48
+      let x=16*pow(sin(t),3'f32)/17
+      let y=(13*cos(t)-5*cos(2*t)-2*cos(3*t)-cos(4*t))/17
+      points[i]=center+(right*x+up*y)*scale
+    for i in 0..<48:
+      r.addTriangle(center,points[(i+1) mod 48],points[i],tint)
+
 proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
     color: ColorRGBX) =
   for ring in 0..<6:
@@ -428,27 +448,17 @@ proc runGraphics*() =
             shapes.addQuad(position(point(x,z),0.09),position(point(x,z+200),0.09),
               position(point(x+200,z+200),0.09),position(point(x+200,z),0.09),color)
       for heart in world.controlHearts:
-        let color=if heart.owner<0:rgbx(170,179,188,255) else:teamColors[heart.owner]
-        let base=position(heart.pos,0.08)
-        shapes.addCircle(base,1.4,color)
-        shapes.addCircle(base+vec3(0,0.01,0),1.13,rgbx(47,63,58,255))
-        let p=position(heart.pos,1.4+sin((world.tick.float32+alpha)/12)*0.12)
-        shapes.gem(p,0.7,color)
-        shapes.gem(p+vec3(-0.28,0.32,0),0.4,color)
-        shapes.gem(p+vec3(0.28,0.32,0),0.4,color)
+        let color=if heart.owner<0:rgbx(220,229,238,255)
+          elif heart.owner==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)
+        let p=position(heart.pos,1.8+sin((world.tick.float32+alpha)/12)*0.12)
+        shapes.heartMarker(p,eye,color)
     else:
       for side in 0..1:
-        let h = position(home(side))
-        shapes.addCircle(h+vec3(0, 0.04, 0), 2.3, rgbx(45, 69, 64, 255))
-        shapes.addCircle(h+vec3(0, 0.06, 0), 1.65, teamColors[side])
-        shapes.addCircle(h+vec3(0, 0.07, 0), 1.45, rgbx(56, 76, 71, 255))
         let heart = world.hearts[side]
         if heart.carrier < 0 or seen(heart.carrier):
-          let hp = position(heart.pos, if heart.carrier < 0: 1.45+sin(
+          let p = position(heart.pos, if heart.carrier < 0: 1.8+sin(
               world.tick.float32/12)*0.12 else: 3.1)
-          shapes.gem(hp, 0.62, teamColors[side])
-          shapes.gem(hp+vec3(-0.25, 0.3, 0), 0.36, teamColors[side])
-          shapes.gem(hp+vec3(0.25, 0.3, 0), 0.36, teamColors[side])
+          shapes.heartMarker(p,eye,if side==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255))
     for i, c in world.cogs:
       if c.hp <= 0 or not seen(i): continue
       let p = poses[i]
