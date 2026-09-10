@@ -345,16 +345,32 @@ proc runGraphics*() =
       shapes.gem(p, 0.21, rgbx(157, 175, 66, 255))
       shapes.addCircle(position(g.target, 0.05), 0.24, rgbx(192, 161, 85, 160))
     for b in world.blasts:
-      let fade = 1-(world.tick-b.tick).float32/24
-      if b.trench >= 0:
-        let t = world.trenches[b.trench]
-        let p = position(Point(x: t.x+t.w div 2, z: t.z+t.h div 2))
-        shapes.box(p.x, p.y+0.05, p.z, t.w.float32/200, 0.06, t.h.float32/200,
-            teamColors[team(b.owner.int)])
-      else: shapes.addCircle(position(b.pos, 0.07),
-          GrenadeBlastRadius.float32/100, teamColors[team(b.owner.int)])
-      if fade > 0.6: shapes.gem(position(b.pos, 0.4), fade*1.4, rgbx(255, 218,
-          109, 255))
+      let age=clamp((world.tick.float32+alpha-b.tick.float32)/24,0'f32,1'f32)
+      let bloom=min(age/0.18,1'f32)
+      let settle=clamp((age-0.18)/0.72,0'f32,1'f32)
+      let palette=if team(b.owner.int)==0:
+        [rgbx(255,91,93,255),rgbx(255,168,57,255),rgbx(245,74,155,255)]
+      else:
+        [rgbx(67,203,255,255),rgbx(72,231,193,255),rgbx(164,127,255,255)]
+      # Deterministic paint puffs: fast expansion, then a brief falling cloud.
+      for n in 0..<16:
+        let angle=n.float32*2.39996+b.owner.float32*0.7
+        let reach=(0.55+(n mod 5).float32*0.4)*bloom
+        var spot=point(b.pos.x.int+int(cos(angle)*reach*100),
+            b.pos.z.int+int(sin(angle)*reach*100))
+        if b.trench>=0:
+          let trench=world.trenches[b.trench]
+          spot.x=clamp(spot.x,trench.x+15,trench.x+trench.w-15)
+          spot.z=clamp(spot.z,trench.z+15,trench.z+trench.h-15)
+        let floor=position(spot,0.065)
+        let height=(0.9+(n mod 4).float32*0.32)*bloom*(1-settle)*(1-settle)
+        let radius=(0.26+0.34*bloom)*(1-settle*0.85)
+        if age<0.9:
+          shapes.paintball(floor+vec3(0,height+radius*0.5,0),radius,palette[n mod 3])
+        # Irregular droplets flatten into paint as the cloud comes down.
+        let stain=clamp((age-0.3)/0.35,0'f32,1'f32)*(1-age)
+        if stain>0:
+          shapes.addCircle(floor,(0.22+(n mod 3).float32*0.13)*stain,palette[n mod 3])
     for i, e in world.equipment:
       if world.cogs[i].hp <= 0 or not seen(i): continue
       let c = world.cogs[i]
