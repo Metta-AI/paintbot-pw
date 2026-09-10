@@ -12,16 +12,21 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: polyworld
     steps:
       - uses: actions/checkout@v5
+        with:
+          path: polyworld
       - uses: treeform/setup-nim-action@v6
       - name: Install dependencies
         shell: bash
         run: |
           cd ..
           nimby create
-          nimby install "${{ github.event.repository.name }}/polyworld.nimble"
-          nimby sync "${{ github.event.repository.name }}/nimby.lock"
+          nimby install "polyworld/polyworld.nimble"
+          nimby sync "polyworld/nimby.lock"
       - run: nim r tests/tests.nim
       - run: >-
           nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2
