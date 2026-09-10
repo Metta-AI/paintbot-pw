@@ -71,7 +71,8 @@ proc seen(i: int): bool =
   for s in 0..<Seats:
     if team(s) == lens-Seats and world.cogs[s].hp > 0 and world.visible(s,
         i): return true
-proc box(r: var ShapeRenderer, x, y, z, dx, dy, dz: float32, c: ColorRGBX, yaw: float32 = 0) =
+proc box(r: var ShapeRenderer, x, y, z, dx, dy, dz: float32, color: ColorRGBX, yaw: float32 = 0) =
+  let c = rgbx(color.r,color.g,color.b,if color.a==255:254'u8 else:color.a)
   let light = rgbx(uint8(c.r.float*0.78), uint8(c.g.float*0.78), uint8(
       c.b.float*0.78), c.a)
   let dark = rgbx(uint8(c.r.float*0.55), uint8(c.g.float*0.55), uint8(
@@ -87,7 +88,8 @@ proc box(r: var ShapeRenderer, x, y, z, dx, dy, dz: float32, c: ColorRGBX, yaw: 
   r.addQuad(b, b+up, e+up, e, dark)
   r.addQuad(e, e+up, d+up, d, light)
   r.addQuad(d, d+up, a+up, a, dark)
-proc gem(r: var ShapeRenderer, p: Vec3, s: float32, c: ColorRGBX) =
+proc gem(r: var ShapeRenderer, p: Vec3, s: float32, color: ColorRGBX) =
+  let c = rgbx(color.r,color.g,color.b,if color.a==255:254'u8 else:color.a)
   let top = p+vec3(0, s, 0); let bottom = p-vec3(0, s, 0)
   let ring = [p+vec3(s, 0, 0), p+vec3(0, 0, s), p+vec3(-s, 0, 0), p+vec3(0, 0, -s)]
   for i in 0..3:
@@ -191,7 +193,7 @@ proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
       let p3 = p+vec3(cos(b)*cos(c), sin(b), cos(b)*sin(c))*radius
       let shade = 0.65+0.35*(ring.float32/6)
       let col = rgbx(uint8(color.r.float32*shade), uint8(color.g.float32*shade),
-          uint8(color.b.float32*shade), 255)
+          uint8(color.b.float32*shade), if color.a==255:254'u8 else:color.a)
       r.addQuad(p0, p3, p2, p1, col)
 
 proc runGraphics*() =
@@ -470,7 +472,7 @@ proc runGraphics*() =
           g.landsAt-g.releasedAt).float32, 0, 1)
       let p = mix(position(g.start, 1), position(g.target, 0.1), f)+vec3(0, sin(
           f*PI.float32)*3, 0)
-      shapes.gem(p, 0.21, rgbx(157, 175, 66, 255))
+      shapes.gem(p, 0.4, rgbx(190, 211, 79, 254))
       shapes.addCircle(position(g.target, 0.05), 0.24, rgbx(192, 161, 85, 160))
     for b in world.blasts:
       let age=clamp((world.tick.float32+alpha-b.tick.float32)/24,0'f32,1'f32)
