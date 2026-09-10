@@ -8,6 +8,7 @@ const
   Height* = 4000
   Radius* = 55
   MoveSpeed* = 28
+  FireCooldownTicks* = TickRate
   ShotSpeed* = 100
   ShotRange* = 1800
   VisionRange* = 2000
@@ -80,10 +81,32 @@ proc visible*(w: World, slot, other: int): bool =
       (distance2(w.cogs[slot].pos, w.cogs[other].pos) <=
           VisionRange.int64*VisionRange and
        w.lineClear(w.cogs[slot].pos, w.cogs[other].pos)))
-proc spawn(w: var World, slot: int) =
-  let p = point(if team(slot) == 0: 350+(slot div 2 mod 2)*160 else: Width-350-(
+proc occupied(w: World, p: Point, slot: int): bool =
+  for other in 0..<Seats:
+    if other != slot and w.cogs[other].hp > 0 and
+        distance2(p, w.cogs[other].pos) < (2*Radius).int64*(2*Radius):
+      return true
+proc movementBlocked(w: World, p: Point, slot: int, solid: bool): bool =
+  w.blocked(p) or (solid and w.occupied(p, slot))
+proc spawn(w: var World, slot: int, solid = true) =
+  var p = point(if team(slot) == 0: 350+(slot div 2 mod 2)*160 else: Width-350-(
       slot div 2 mod 2)*160,
     1100+(slot div 4)*550)
+  if solid and w.movementBlocked(p, slot, true):
+    let origin = p
+    var found = false
+    block search:
+      for ring in 1..20:
+        for dz in -ring..ring:
+          for dx in -ring..ring:
+            if abs(dx) != ring and abs(dz) != ring: continue
+            let candidate = point(origin.x.int+dx*(2*Radius+2),
+                origin.z.int+dz*(2*Radius+2))
+            if not w.movementBlocked(candidate, slot, true):
+              p = candidate
+              found = true
+              break search
+    if not found: return # Retry next tick rather than overlap a living cog.
   w.cogs[slot].pos = p; w.cogs[slot].goal = p
   w.cogs[slot].hp = 3; w.cogs[slot].shield = 36
   w.cogs[slot].firing = false; w.cogs[slot].carrying = false
@@ -141,12 +164,12 @@ proc waypoint*(w: World, start, goal: Point): Point =
   var n = b
   while prev[n] >= 0 and prev[n] != a: n = prev[n]
   point(n mod nx*200+100, n div nx*200+100)
-proc step*(w: var World, commands: array[Seats, Command]) =
+proc step*(w: var World, commands: array[Seats, Command], solid = true) =
   if w.winner >= 0: return
   for i in 0..<Seats:
     if w.cogs[i].hp <= 0:
       dec w.cogs[i].respawn
-      if w.cogs[i].respawn <= 0: w.spawn(i)
+      if w.cogs[i].respawn <= 0: w.spawn(i, solid)
       continue
     if w.cogs[i].shield > 0: dec w.cogs[i].shield
     if w.cogs[i].cooldown > 0: dec w.cogs[i].cooldown
@@ -161,15 +184,15 @@ proc step*(w: var World, commands: array[Seats, Command]) =
     if distance2(w.cogs[i].pos, dest) > speed.int64*speed:
       let v = direction(w.cogs[i].pos, dest, speed)
       var p = w.cogs[i].pos; p.x+=v.x
-      if not w.blocked(p): w.cogs[i].pos = p
+      if not w.movementBlocked(p, i, solid): w.cogs[i].pos = p
       p = w.cogs[i].pos; p.z+=v.z
-      if not w.blocked(p): w.cogs[i].pos = p
+      if not w.movementBlocked(p, i, solid): w.cogs[i].pos = p
     if cmd.shoot and w.cogs[i].cooldown == 0:
       let v = direction(w.cogs[i].pos, w.cogs[i].aim, ShotSpeed)
       if v.x != 0 or v.z != 0:
         w.balls.add Paintball(pos: w.cogs[i].pos, velocity: v, owner: i.int32,
             life: ShotRange div ShotSpeed)
-        w.cogs[i].cooldown = 8
+        w.cogs[i].cooldown = (if solid: FireCooldownTicks else: 8)
   var live: seq[Paintball]
   for original in w.balls:
     var b = original

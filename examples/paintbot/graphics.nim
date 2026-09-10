@@ -250,7 +250,7 @@ proc runGraphics*() =
       let d = direction(c.pos, c.aim, 105)
       shapes.addLine(p+vec3(0, 1.05, 0), p+vec3(d.x.float32/100, 1.05,
           d.z.float32/100), rgbx(49, 60, 66, 255), halfWidth = 0.13)
-      if c.cooldown >= 7: shapes.gem(p+vec3(d.x.float32/100, 1.05,
+      if c.cooldown >= (if replayRulesVersion >= 3: FireCooldownTicks-1 else: 7): shapes.gem(p+vec3(d.x.float32/100, 1.05,
           d.z.float32/100), 0.23, rgbx(255, 239, 177, 255))
       if c.shield > 0: shapes.addCircle(p+vec3(0, 0.09, 0), 0.75, rgbx(196, 241,
           243, 95))
