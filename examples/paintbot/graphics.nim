@@ -1,5 +1,5 @@
 ## Painted Polyworld arena with hash-verified spectator analysis.
-import std/[math, times, tables]
+import std/[math, times]
 import windy, opengl, vmath, chroma, jsony
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing]
 import game, sim, analysis

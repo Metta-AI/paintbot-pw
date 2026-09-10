@@ -27,7 +27,7 @@ proc snapshot(w: World): World =
 proc indexReplay*(): ReplayIndex =
   var tags: seq[Moment]
   observeTag = proc(tick: int32, victim, attacker: int, pos: Point) =
-    tags.add Moment(tick: tick, slot: attacker, side: team(attacker),
+    tags.add Moment(tick: tick + 1, slot: attacker, side: team(attacker),
         victim: victim, kind: "tag", x: pos.x, z: pos.z)
   defer: observeTag = nil
   world = newWorld(recording.seed)
