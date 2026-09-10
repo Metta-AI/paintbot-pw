@@ -2,7 +2,7 @@
 import std/[math, times]
 import windy, opengl, vmath, chroma, jsony
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing]
-import game, sim, analysis
+import game, sim, analysis, villagegraphics
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
 else: {.emit: "#define EMSCRIPTEN_KEEPALIVE".}
 type
@@ -89,7 +89,7 @@ proc gem(r: var ShapeRenderer, p: Vec3, s: float32, c: ColorRGBX) =
 proc runGraphics*() =
   setup()
   let index = if replayMode: indexReplay() else: ReplayIndex()
-  let window = newWindow("Paintbot · The Painted Grove", ivec2(1440, 900))
+  let window = newWindow("Paintbot · Gnomewick Village", ivec2(1440, 900))
   makeContextCurrent(window)
   loadExtensions()
   # The playable surface stays perfectly flat. Scenic elevation is outside it.
@@ -106,6 +106,12 @@ proc runGraphics*() =
         if (x*17+z*31) mod 13 == 0: tile.kind = TreeTile
       elif abs(gz-20) < 3 or (gx < 12 or gx > 52) and abs(gz-20) <
           6: tile.kind = RoadTile
+      if replayRulesVersion >= 7 and gx >= 0 and gz >= 0 and gx < 64 and gz < 40:
+        # Market square, cross streets, and paths between cottage fronts.
+        if (abs(gx-32) < 6 and abs(gz-20) < 6) or
+            abs(gx-21) < 2 or abs(gx-43) < 2 or
+            (gx > 10 and gx < 54 and (abs(gz-11) < 2 or abs(gz-29) < 2)):
+          tile.kind = RoadTile
       ground.tiles[z*80+x] = tile
   layers = @[ground]
   amplitude = 1.2
@@ -114,12 +120,15 @@ proc runGraphics*() =
   computeWalkable()
   scatterGrass(1500, recording.seed, matchTerrain = true)
   bakeTerrain(rebuildWalkability = false)
-  let coverPack = loadPropPack(when defined(
-      emscripten): "/paintbot-cover.glb" else: "tmp/paintbot-cover.glb",
-      unitHeight = false, textured = true, repeatTexture = true)
-  for c in world.cover:
-    coverPack.placeProp("cover", vec3((c.x+c.w div 2).float32/100-32, 0, (
-        c.z+c.h div 2).float32/100-20))
+  if replayRulesVersion >= 7:
+    placeVillage(world)
+  else:
+    let coverPack = loadPropPack(when defined(
+        emscripten): "/paintbot-cover.glb" else: "tmp/paintbot-cover.glb",
+        unitHeight = false, textured = true, repeatTexture = true)
+    for c in world.cover:
+      coverPack.placeProp("cover", vec3((c.x+c.w div 2).float32/100-32, 0, (
+          c.z+c.h div 2).float32/100-20))
   bakeTerrain(rebuildWalkability = false)
   let scene = newCharacterScene(window)
   scene.useToonShading()
@@ -328,7 +337,9 @@ proc runGraphics*() =
     for b in world.balls:
       if lens >= 0 and not seen(b.owner.int): continue
       shapes.addLine(position(b.pos, 1), position(point(
-          b.pos.x-b.velocity.x div (if replayRulesVersion>=6:1 else:2), b.pos.z-b.velocity.z div (if replayRulesVersion>=6:1 else:2)), 1),
+          b.pos.x-b.velocity.x div (if replayRulesVersion >= 6: 1 else: 2),
+              b.pos.z-b.velocity.z div (if replayRulesVersion >= 6: 1 else: 2)),
+              1),
           teamColors[team(b.owner.int)], halfWidth = 0.06)
       shapes.gem(position(b.pos, 1), 0.14, teamColors[team(b.owner.int)])
     shapes.draw(vp)

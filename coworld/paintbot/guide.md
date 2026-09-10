@@ -65,3 +65,7 @@ all equipment state and the approved Paint Crew cog models. The viewer supports
 seeking, individual cone visibility, first-person view, event filtering, inventory,
 armor/lives inspection, grenade arcs/blasts, spray effects and trench markers.
 Earlier replay versions retain their original rules and hashes.
+
+## Gnomewick Village arena
+
+Cottages, garden walls, carts, supply stacks and the market well are solid cover: they block movement, sight and direct fire. Grenades still lob over them. The village is symmetric under a half turn, with a market square, cross streets and side lanes. Flower patches are walkable decoration. Trenches retain their existing movement and damage rules.

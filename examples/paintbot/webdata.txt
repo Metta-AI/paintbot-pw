@@ -69,3 +69,13 @@ terrain/toon_enchanted_meadow/rocks.glb
 terrain/toon_enchanted_meadow/terrain_stone_02d.png
 terrain/water_normals/water_1_normal.jpg
 terrain/water_normals/water_2_normal.jpg
+terrain/toon_golden_valley/presets.glb
+terrain/toon_golden_valley/props.glb
+terrain/toon_golden_valley/atlas_1a.png
+terrain/toon_golden_valley/atlas_vegetation_1a.png
+terrain/toon_golden_valley/atlas_trees_2a.png
+terrain/toon_enchanted_meadow/props.glb
+terrain/toon_enchanted_meadow/buildings.glb
+terrain/toon_enchanted_meadow/atlas_1a.png
+terrain/toon_enchanted_meadow/vegetation.glb
+terrain/toon_enchanted_meadow/atlas_vegetation_1a.png

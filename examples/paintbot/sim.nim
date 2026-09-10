@@ -1,3 +1,4 @@
+import village
 ## Integer-only Paintbot simulation; Polyworld RNG and portable state hashes.
 import polyworld/[rngs, hashes]
 
@@ -98,7 +99,7 @@ proc lineClear*(w: World, a, b: Point): bool =
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
     if w.blocked(p, 0): return false
   true
-var visionRulesVersion* = 6
+var visionRulesVersion* = 7
 proc canSeePoint*(w: World, slot: int, p: Point): bool =
   if slot notin 0..<Seats or w.cogs[slot].hp <= 0: return false
   let c = w.cogs[slot]
@@ -154,14 +155,22 @@ proc resetHeart*(w: var World, side: int) =
 proc initializeEquipment(w: var World)
 proc newWorld*(seed: int32): World =
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
-  # Symmetric lanes and bunkers leave all homes reachable.
-  for x in [1500, 2600]:
-    let shift = result.rng.between(-100, 100)
-    for z in [650, 1650, 2850]:
-      let c = Cover(x: x.int32, z: z.int32+shift, w: 260, h: 420)
-      result.cover.add c
-      result.cover.add Cover(x: Width.int32-c.x-c.w, z: Height.int32-c.z-c.h,
-          w: c.w, h: c.h)
+  if visionRulesVersion >= 7:
+    for lot in VillageLots:
+      result.cover.add Cover(x: lot.x.int32, z: lot.z.int32,
+          w: lot.w.int32, h: lot.h.int32)
+      result.cover.add Cover(x: (Width-lot.x-lot.w).int32,
+          z: (Height-lot.z-lot.h).int32, w: lot.w.int32, h: lot.h.int32)
+    result.cover.add Cover(x: 3090, z: 1890, w: 220, h: 220)
+  else:
+    # Symmetric lanes and bunkers leave all homes reachable.
+    for x in [1500, 2600]:
+      let shift = result.rng.between(-100, 100)
+      for z in [650, 1650, 2850]:
+        let c = Cover(x: x.int32, z: z.int32+shift, w: 260, h: 420)
+        result.cover.add c
+        result.cover.add Cover(x: Width.int32-c.x-c.w, z: Height.int32-c.z-c.h,
+            w: c.w, h: c.h)
   for side in 0..1: result.resetHeart(side)
   for i in 0..<Seats: result.spawn(i)
   if visionRulesVersion >= 6: result.initializeEquipment()

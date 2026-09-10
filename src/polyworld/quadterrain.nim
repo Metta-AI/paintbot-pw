@@ -1402,6 +1402,19 @@ proc hasProp*(pack: PropPack, name: string): bool =
   ## Returns whether a pack contains a model with the requested node name.
   pack != nil and name in pack.names
 
+proc propDimensions*(pack: PropPack, name: string): Vec3 =
+  ## Bounds after loading/normalization, for collision-aligned placements.
+  if not pack.hasProp(name):
+    raise newException(QuadTerrainError, "Unknown prop: " & name)
+  var low = vec3(float32.high, float32.high, float32.high)
+  var high = vec3(float32.low, float32.low, float32.low)
+  let vertices = pack.models[pack.names[name]].vertices
+  for i in countup(0, vertices.len - 9, 9):
+    let p = vec3(vertices[i], vertices[i+1], vertices[i+2])
+    low = min(low, p)
+    high = max(high, p)
+  max(high-low, vec3(0.001, 0.001, 0.001))
+
 proc pickProp*(
     pack: PropPack,
     name: string,
