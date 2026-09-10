@@ -683,6 +683,8 @@
     }
     const w = data.world,
       t = w.tick;
+    $("povsight").style.visibility =
+      selected >= 0 && w.cogs[selected].hp > 0 ? "visible" : "hidden";
     $("play").textContent = data.paused ? "Play" : "Pause";
     $("scrub").max = data.total;
     $("scrub").value = t;

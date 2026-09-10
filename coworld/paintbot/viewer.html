@@ -871,6 +871,17 @@
   body.pov #povframe {
     display: block;
   }
+  #povsight {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 36px;
+    height: 36px;
+    transform: translate(-50%, -50%);
+    color: #fff5d7;
+    filter: drop-shadow(0 1px 1px #000) drop-shadow(0 0 2px #000);
+    pointer-events: none;
+  }
   #povresize {
     position: absolute;
     bottom: 0;
@@ -1044,6 +1055,18 @@
 <div id="feed" hidden></div>
 <div id="banner" hidden></div>
 <div id="povframe">
+  <svg id="povsight" viewBox="0 0 36 36" aria-hidden="true">
+    <circle cx="18" cy="18" r="1.7" fill="currentColor" />
+    <g
+      stroke="currentColor"
+      stroke-width="1.5"
+      stroke-linecap="round"
+      fill="none"
+    >
+      <path d="M18 3v7 M18 26v7 M3 18h7 M26 18h7" />
+      <circle cx="18" cy="18" r="8" opacity="0.65" />
+    </g>
+  </svg>
   <button
     id="povresize"
     aria-label="Resize first-person view"
