@@ -985,8 +985,11 @@
       ? "Territory control · Claim all 10 hearts"
       : "Capture the heart · Three lives";
     updatePovSignal();
-    $("play").innerHTML = icon(data.paused ? "play" : "pause");
-    $("play").setAttribute("aria-label", data.paused ? "Play" : "Pause");
+    const playLabel = data.paused ? "Play" : "Pause";
+    if ($("play").getAttribute("aria-label") !== playLabel) {
+      $("play").innerHTML = icon(data.paused ? "play" : "pause");
+      $("play").setAttribute("aria-label", playLabel);
+    }
     $("scrub").max = data.total;
     $("scrub").value = t;
     $("clock").textContent = `${clock(t)} / ${clock(data.total)}`;
