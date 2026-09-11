@@ -72,13 +72,49 @@ proc initializeEquipment(w: var World) =
       for i,p in [point(-3000,500),point(9400,3500),point(1000,-1600),point(5400,5600),point(-3000,3500),point(9400,500)]:
         w.controlHearts[i+2].pos=w.freePickup(p)
     w.captures=[1'i32,1'i32]
+    if visionRulesVersion >= 24:
+      for heart in w.controlHearts:
+        w.heartCaptures.add HeartCapture(team: -1)
+
+proc updateBigHeart*(w: var World) =
+  if visionRulesVersion < 25 or w.tick >= w.endTick: return
+  let round = w.tick div BigHeartInterval
+  if round <= w.bigHeartRound: return
+  w.bigHeartRound = round
+  var candidates: seq[int32]
+  for index, used in w.usedBigHearts:
+    if not used: candidates.add index.int32
+  w.bigHeart = -1
+  if candidates.len > 0:
+    w.bigHeart = candidates[w.rng.below(candidates.len.int32)]
+    w.usedBigHearts[w.bigHeart] = true
+
+proc remainingHeartPoints*(w: World): int32 =
+  ## Elimination credits all future map income, including scheduled big hearts.
+  result = w.controlHearts.len.int32 * max(0'i32, w.endTick-w.tick)
+  if visionRulesVersion >= 25:
+    let bonusStart = max(w.tick, BigHeartInterval.int32)
+    let bonusEnd = min(w.endTick, (w.controlHearts.len.int32+1)*BigHeartInterval)
+    result += (BigHeartPoints-1)*max(0'i32, bonusEnd-bonusStart)
 
 proc updateTerritory*(w:var World) =
-  for heart in w.controlHearts.mitems:
+  for index, heart in w.controlHearts.mpairs:
     var touching:array[2,bool]
     for i,c in w.cogs:
       if c.hp>0 and distance2(c.pos,heart.pos)<=140*140 and w.traversable(c.pos,heart.pos):
         touching[team(i)]=true
+    if visionRulesVersion >= 24:
+      w.heartCaptures[index].contested = touching[0] and touching[1]
+      if touching[0] and touching[1]: continue
+      let attacker = if touching[0]: 0'i32 elif touching[1]: 1'i32 else: -1'i32
+      if attacker < 0 or attacker == heart.owner:
+        w.heartCaptures[index] = HeartCapture(team: -1)
+        continue
+      if w.heartCaptures[index].team != attacker:
+        w.heartCaptures[index] = HeartCapture(team: attacker)
+      inc w.heartCaptures[index].ticks
+      if w.heartCaptures[index].ticks < HeartCaptureTicks: continue
+      w.heartCaptures[index] = HeartCapture(team: -1)
     if touching[0] != touching[1]:
       let owner=(if touching[0]:0'i32 else:1'i32)
       if heart.owner!=owner:
@@ -223,6 +259,13 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
       if w.equipment[i].lives > 0:
         dec w.cogs[i].respawn
         if w.cogs[i].respawn <= 0:
+          if visionRulesVersion >= 24:
+            var ownsHeart = false
+            for heart in w.controlHearts:
+              if heart.owner == team(i).int32: ownsHeart = true
+            if ownsHeart:
+              discard w.spawnAtHeart(i)
+              continue
           # Random endzone positions prevent spawn camping; solid fallback handles crowds.
           var placed = false
           for attempt in 0..<64:
@@ -353,16 +396,18 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
   if visionRulesVersion>=13:
     w.updateTerritory()
     if visionRulesVersion >= 23:
-      for side in 0..1: w.scoreTicks[side] += w.captures[side]
+      for index, heart in w.controlHearts:
+        if heart.owner >= 0: w.scoreTicks[heart.owner] += w.heartPoints(index)
       var alive: array[2, bool]
       for i,c in w.cogs:
         if c.hp > 0 or w.equipment[i].lives > 0: alive[team(i)] = true
       inc w.tick
       if alive[0] != alive[1]:
         let survivor = if alive[0]: 0 else: 1
-        w.scoreTicks[survivor] += w.controlHearts.len.int32 * max(0'i32, w.endTick-w.tick)
+        w.scoreTicks[survivor] += w.remainingHeartPoints()
       if not alive[0] or not alive[1] or w.tick >= w.endTick:
         w.winner = if w.scoreTicks[0] > w.scoreTicks[1]: 0 elif w.scoreTicks[1] > w.scoreTicks[0]: 1 else: -2
+      if w.winner == -1: w.updateBigHeart()
       return
     if visionRulesVersion >= 20:
       var surviving: array[2,bool]

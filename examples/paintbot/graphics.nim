@@ -262,14 +262,14 @@ proc heartSculpture(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX,
   for face in facets:r.addTriangle(face.a,face.b,face.c,face.tint)
 
 proc heartTower(r: var ShapeRenderer, base, eye: Vec3, color: ColorRGBX,
-    time: float32) =
-  let heart=base+vec3(0,3.05+sin(time)*0.05,0)
+    time: float32, big = false) =
+  let heart=base+vec3(0,(if big: 4.1 else: 3.05)+sin(time)*0.05,0)
   let front=normalize(eye-heart)
   let right=normalize(cross(vec3(0,1,0),front))
   let up=cross(front,right)
   # Layered translucent halos soften to nothing at the outer edge.
   for layer in 0..<7:
-    let radius=2.15'f32-layer.float32*0.19
+    let radius=(2.15'f32-layer.float32*0.19)*(if big: 1.8'f32 else: 1'f32)
     let center=heart-front*0.85
     for i in 0..<32:
       let a=i.float32*2*PI.float32/32
@@ -296,7 +296,13 @@ proc heartTower(r: var ShapeRenderer, base, eye: Vec3, color: ColorRGBX,
       rgbx(uint8(177+row*5),uint8(182+row*4),uint8(153+row*5),254),row.float32*0.16)
   course(r,1.68,0.12,0.74,0.74,color)
   course(r,1.8,0.22,0.86,0.98,rgbx(209,193,142,254))
-  r.heartSculpture(heart,eye,color,time*2*PI.float32/6,0.72)
+  r.heartSculpture(heart,eye,color,time*2*PI.float32/6,(if big: 1.44 else: 0.72))
+  if big:
+    for i in 0..<32:
+      let a=i.float32*2*PI.float32/32
+      let b=(i+1).float32*2*PI.float32/32
+      r.addLine(base+vec3(cos(a)*1.8,0.12,sin(a)*1.8),
+        base+vec3(cos(b)*1.8,0.12,sin(b)*1.8),rgbx(255,215,85,255),halfWidth=0.08)
 
 proc spawnBeam(r: var ShapeRenderer, p: Vec3, color: ColorRGBX,
     progress: float32, slot: int) =
@@ -771,10 +777,27 @@ proc runGraphics*() =
             let color=if owner<0:rgbx(150,155,160,55) else:rgbx(teamColors[owner].r,teamColors[owner].g,teamColors[owner].b,85)
             shapes.addQuad(position(point(x,z),0.09),position(point(x,z+200),0.09),
               position(point(x+200,z+200),0.09),position(point(x+200,z),0.09),color)
-      for heart in world.controlHearts:
+      for index, heart in world.controlHearts:
         let color=if heart.owner<0:rgbx(220,229,238,255)
           elif heart.owner==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)
-        shapes.heartTower(position(heart.pos),eye,color,heartAnimationTime)
+        let big = world.heartPoints(index) == BigHeartPoints
+        shapes.heartTower(position(heart.pos),eye,color,heartAnimationTime,big)
+        if index < world.heartCaptures.len:
+          let capture = world.heartCaptures[index]
+          if capture.ticks > 0 or capture.contested:
+            let center = position(heart.pos, if big: 6.7 else: 4.9)
+            let right = normalize(cross(vec3(0,1,0), normalize(eye-center)))
+            let start = center-right*1.4
+            let finish = center+right*1.4
+            shapes.addLine(start, finish, rgbx(28,35,43,255), halfWidth=0.18)
+            if capture.ticks > 0:
+              let progressColor = if capture.team == 0: rgbx(255,75,99,255)
+                else: rgbx(65,221,255,255)
+              shapes.addLine(start, start+right*(2.8*capture.ticks.float32/HeartCaptureTicks.float32),
+                progressColor, halfWidth=0.12)
+            if capture.contested:
+              shapes.addLine(start+vec3(0,0.3,0),finish+vec3(0,0.3,0),
+                rgbx(255,214,82,255),halfWidth=0.06)
     else:
       for side in 0..1:
         let heart = world.hearts[side]

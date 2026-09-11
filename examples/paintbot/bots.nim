@@ -82,9 +82,16 @@ proc host(slot:int, strings:StringPool): Host =
       if i<0 or i>=active.controlHearts.len:return -1
       if field==0:active.controlHearts[i].pos.x
       elif field==1:active.controlHearts[i].pos.z
-      else:active.controlHearts[i].owner
-  for axis in 0..2:
-    discard result.addFunction(["controlX","controlY","controlOwner"][axis],1,getControl(axis),4)
+      elif field==2:active.controlHearts[i].owner
+      elif field==6:active.heartPoints(i)
+      elif i>=active.heartCaptures.len:
+        if field==3: -1'i32 else: 0'i32
+      elif field==3:active.heartCaptures[i].team
+      elif field==4:active.heartCaptures[i].ticks
+      else:active.heartCaptures[i].contested.int32
+  for axis in 0..6:
+    discard result.addFunction(["controlX","controlY","controlOwner",
+      "controlCaptureTeam","controlCaptureTicks","controlContested","controlPoints"][axis],1,getControl(axis),4)
   discard result.addFunction("mapMinX",0,proc(a:openArray[int32]):int32 = minX().int32,4)
   discard result.addFunction("mapMinY",0,proc(a:openArray[int32]):int32 = minZ().int32,4)
   discard result.addFunction("mapMaxX",0,proc(a:openArray[int32]):int32 = maxX().int32,4)

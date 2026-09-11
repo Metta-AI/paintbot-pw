@@ -459,6 +459,17 @@ class SpriteView:
         for i, heart in enumerate(controls):
             owner = heart["owner"]
             item(f"control heart {i} owner {owner}", heart["pos"], 20, 20)
+            if w.get("rulesVersion", 0) >= 25:
+                points = 5 if w.get("bigHeart", -1) == i else 1
+                item(f"control value {i} points {points}", heart["pos"], 20, 20)
+            captures = w.get("heartCaptures", [])
+            if i < len(captures):
+                capture = captures[i]
+                item(
+                    f"control capture {i} team {capture['team']} "
+                    f"ticks {capture['ticks']} contested {int(capture['contested'])}",
+                    heart["pos"], 20, 20,
+                )
         for side, color in enumerate(COLORS):
             h = w["hearts"][side]
             if controls and side != self.slot % 2:
