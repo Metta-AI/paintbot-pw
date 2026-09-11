@@ -12,7 +12,7 @@ Reference: `coworld-ctf/client/replay_broadcast.html`, with the newer communicat
 | Player inspection and K/D roster | Live health, tags/outs, captures, respawn, shield, carrying, coordinates; full scoreboard at the playhead |
 | Kill feed and flag/capture announcements | Exact attacker/victim tag events, pickups/drops/returns/captures; capture banner and paint bursts |
 | Momentum / glory timeline | Tag + capture momentum, clickable event marks, spoilers hidden by default |
-| Play/pause, restart, back-tick, +5s, end | All supported, plus forward one tick; 1/2/4/8/16/32x speed |
+| Play/pause, restart, back-tick, +5s, end | All supported, plus forward one tick; 1/2/4/16x speed |
 | Scrubbing and tick deep links | Range scrubber, `?t=<tick>` opens paused; independent 240-tick seek checkpoints |
 | Loop and auto-skip lulls | Loop restarts playback; lull skip jumps to two seconds before the next event |
 | Minimap, camera pan/zoom | Tactical minimap navigation, camera footprint, zoom buttons/slider, drag pan, Shift-drag orbit, pinch, deliberate Ctrl-scroll |

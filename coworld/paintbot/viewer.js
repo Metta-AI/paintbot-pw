@@ -549,7 +549,8 @@
         ["Drag", "Pan across the arena"],
         ["Shift + drag", "Orbit camera"],
         ["Pinch", "Zoom on touch screens"],
-        ["Right-click a bot", "Follow, View (first person), or Vision"],
+        ["Right-click", state?.playerSlot ? "Move, or shoot at an enemy" : "Bot menu: follow, view, or vision"],
+        ...(state?.playerSlot ? [["Shift + right-click", "Shoot at the ground"], ["Hold C / release", "Charge / throw grenade"]] : []),
       ]
         .map(([k, v]) => `<div><kbd>${k}</kbd> ${v}</div>`)
         .join(

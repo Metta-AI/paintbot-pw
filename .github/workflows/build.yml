@@ -45,3 +45,6 @@ jobs:
       - run: nim c -d:headless examples/heartleaf/heartleaf.nim
       - run: nim r tests/test_paintbot_respawns.nim
       - run: nim r tests/test_paintbot_barrage.nim
+      - run: nim r tests/test_paintbot_human.nim
+      - run: nim r tests/test_paintbot_replay.nim
+      - run: node tests/test_paintbot_webinputs.js
