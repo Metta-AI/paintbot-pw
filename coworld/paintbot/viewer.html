@@ -205,8 +205,11 @@
   }
   #minimap {
     display: block;
-    width: 100%;
+    /* Preserve the 320:200 map while keeping both axes below 10% of the viewport. */
+    width: min(100%, 9.9vw, 15.84vh);
     height: auto;
+    max-height: 9.9vh;
+    box-sizing: border-box;
     background: #1e392d;
     border: 1px solid #adbb8a44;
     border-radius: 4px;
@@ -750,9 +753,6 @@
     .teamhead {
       height: 30px;
     }
-    #minimap {
-      height: 100px;
-    }
   }
 
   #povframe {
@@ -834,9 +834,6 @@
     }
     .teamhead {
       margin-bottom: 5px;
-    }
-    #minimap {
-      height: 70px;
     }
     .heartstate span {
       display: block;
