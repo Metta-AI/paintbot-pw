@@ -74,8 +74,53 @@
     if (!button.title) button.title = label;
     button.innerHTML = icon(id);
   }
-  const mapSummary = $("map-panel").querySelector("summary");
-  mapSummary.innerHTML = icon("map");
+  $("map-expand").innerHTML = icon("map");
+  const mapPanel = $("map-panel");
+  function containMap() {
+    const r=mapPanel.getBoundingClientRect();
+    if (r.right > innerWidth || r.left < 0) mapPanel.style.left = `${Math.max(0,innerWidth-mapPanel.offsetWidth-12)}px`;
+    if (r.top < 0 || r.bottom > innerHeight) {
+      mapPanel.style.top = `${Math.max(0,Math.min(r.top,innerHeight-mapPanel.offsetHeight))}px`;
+      mapPanel.style.bottom = 'auto';
+    }
+  }
+  function collapseMap(collapsed) {
+    mapPanel.classList.toggle('collapsed',collapsed);
+    $("map-body").hidden = collapsed;
+    $("map-expand").hidden = !collapsed;
+    containMap();
+    (collapsed ? $("map-expand") : $("map-collapse")).focus();
+  }
+  $("map-collapse").onclick = () => collapseMap(true);
+  let mapMoved = false;
+  $("map-expand").onclick = e => {
+    if (mapMoved) { mapMoved = false; e.preventDefault(); return; }
+    collapseMap(false);
+  };
+  for (const handle of [$("minimap"), $("map-expand")]) {
+    let drag = null;
+    handle.onpointerdown = e => {
+      if (e.button !== 0 || e.target.closest('#map-collapse')) return;
+      const r=mapPanel.getBoundingClientRect();
+      drag={x:e.clientX,y:e.clientY,left:r.left,top:r.top}; mapMoved=false;
+      handle.setPointerCapture(e.pointerId);
+    };
+    handle.onpointermove = e => {
+      if (!drag) return;
+      const dx=e.clientX-drag.x, dy=e.clientY-drag.y;
+      if (Math.abs(dx)+Math.abs(dy)<4 && !mapMoved) return;
+      mapMoved=true;
+      mapPanel.style.left=`${Math.max(0,Math.min(innerWidth-mapPanel.offsetWidth,drag.left+dx))}px`;
+      mapPanel.style.top=`${Math.max(0,Math.min(innerHeight-mapPanel.offsetHeight,drag.top+dy))}px`;
+      mapPanel.style.bottom='auto';
+    };
+    handle.onpointerup = e => {
+      if (drag && !mapMoved && handle.id === 'minimap' && ready()) mapMove(e);
+      drag=null;
+    };
+    handle.onpointercancel = () => { drag=null; };
+  }
+  window.addEventListener('resize', containMap);
   $("territorytoggle").lastChild.textContent = "";
   $("territorytoggle").insertAdjacentHTML("beforeend", icon("map"));
   $("territorytoggle").title = "Territory overlay";
@@ -85,7 +130,6 @@
     events: "Match events",
     help: "Keyboard shortcuts (?)",
     fullscreen: "Toggle fullscreen",
-    lens: "Choose whose vision to show",
     fit: "Fit the whole arena",
     topdown: "View from above",
     actioncam: "Action camera: automatically frame fights and heart contests (C in spectator mode)",
@@ -96,9 +140,6 @@
     trails: "Show / hide movement orders",
     territory: "Show / hide territory colors",
     download: "Download replay",
-    zoom: "Camera distance",
-    zoomin: "Zoom in",
-    zoomout: "Zoom out",
     speed: "Playback speed",
     scrub: "Seek through the replay",
     follow: "Follow this agent",
@@ -244,7 +285,6 @@
     pressed("actioncam", false);
     if (ready())
       Module._pw_camera(camera.x, camera.z, camera.d, camera.yaw, camera.tilt);
-    $("zoom").value = camera.d;
     pressed("topdown", camera.tilt > 1.5);
   }
   const signalCanvas = $("povstatic");
@@ -366,10 +406,11 @@
       button.setAttribute("aria-pressed", String(Number(button.dataset.agent) === selected));
     });
   }
+  let currentLens = -1;
   function setLens(value) {
     if (!ready()) return;
     Module._pw_lens(Number(value));
-    $("lens").value = String(value);
+    currentLens = Number(value);
   }
   function toast(text) {
     $("toast").textContent = text;
@@ -433,23 +474,14 @@
     pressed("trails", trails);
     options();
   });
-  bind("zoomin", () => {
-    camera.d = Math.max(6, camera.d * 0.8);
+  function zoomCamera(factor) {
+    camera.d = Math.max(6, Math.min(160, camera.d*factor));
     cameraUpdate();
-  });
-  bind("zoomout", () => {
-    camera.d = Math.min(160, camera.d * 1.25);
-    cameraUpdate();
-  });
-  $("zoom").oninput = (e) => {
-    camera.d = +e.target.value;
-    cameraUpdate();
-  };
+  }
   $("speed").onchange = (e) => {
     if (ready()) Module._pw_speed(Number(e.target.value));
   };
   $("scrub").oninput = (e) => seek(+e.target.value);
-  $("lens").onchange = (e) => setLens(e.target.value);
   document.addEventListener("fullscreenchange", () =>
     pressed("fullscreen", !!document.fullscreenElement),
   );
@@ -499,7 +531,7 @@
     const rows = w.cogs
       .map(
         (c, i) =>
-          `<tr><td><button data-seat="${i}" class="${team(i) ? "blue" : "red"}">${escape(name(i))}</button></td><td>${c.hp > 0 ? "● Alive" : state.world.equipment?.[i]?.lives === 0 ? "Eliminated" : `↻ ${Math.ceil(c.respawn / 24)}s`}</td><td>${c.tags}</td><td>${counts[i].deaths}</td><td>${c.captures}</td><td>${c.tags + c.captures * 10}</td></tr>`,
+          `<tr><td><button data-seat="${i}" class="${team(i) ? "blue" : "red"}">${escape(name(i))}</button></td><td>${c.hp > 0 ? "● Alive" : state.world.equipment?.[i]?.lives === 0 ? "Eliminated" : `↻ ${Math.ceil(c.respawn / 24)}s`}</td><td>${c.tags}</td><td>${counts[i].deaths}</td><td>${c.captures}</td></tr>`,
       )
       .join("");
     show(
@@ -508,7 +540,7 @@
           ? "Match drawn"
           : `${w.winner ? "Azure" : "Ember"} wins`
         : "Match scoreboard",
-      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}<br>${state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination. Individual glory is tags + 10 × captures." : "Glory = tags + 10 × captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th><th>Glory</th></tr></thead><tbody>${rows}</tbody></table>`,
+      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}<br>${state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
     $("dialogbody")
       .querySelectorAll("[data-seat]")
@@ -596,10 +628,11 @@
       r: "loop",
       f: "skip",
       o: "spoilers",
-      z: "zoomin",
-      x: "zoomout",
     };
-    if (keys[e.key.toLowerCase()]) {
+    if (['z','x'].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+      zoomCamera(e.key.toLowerCase()==='z' ? .8 : 1.25);
+    } else if (keys[e.key.toLowerCase()]) {
       e.preventDefault();
       if (e.repeat && e.key.toLowerCase() === "c") return;
       $(keys[e.key.toLowerCase()]).click();
@@ -640,26 +673,26 @@
     if (!state || !index) return;
     const tick = state.world.tick,
       total = state.total;
-    const shown = index.events.filter((e) => spoilers || e.tick <= tick);
-    $("markers").innerHTML = shown
-      .filter((e) => e.kind !== "down" && e.kind !== "return")
-      .map(
-        (e) =>
-          `<button class="marker ${e.kind}" style="left:${(100 * e.tick) / total}%;background:${colors[e.side]}" data-tick="${e.tick}" aria-label="${clock(e.tick)} ${escape(e.slot < 0 ? (e.side ? "Azure" : "Ember") : name(e.slot))} ${eventTitle(e)}" title="${clock(e.tick)} · ${escape(e.slot < 0 ? (e.side ? "Azure" : "Ember") : name(e.slot))} ${eventTitle(e)}"></button>`,
-      )
-      .join("");
-    $("markers")
-      .querySelectorAll("button")
-      .forEach((b) => (b.onclick = () => seek(+b.dataset.tick, true)));
-    const samples = index.momentum.filter((p) => spoilers || p.tick <= tick),
-      max = Math.max(1, ...samples.map((p) => Math.max(p.red, p.blue)));
-    $("momentum").innerHTML = ["red", "blue"]
-      .map(
-        (side, i) =>
-          `<polyline fill="none" stroke="${colors[i]}" stroke-width="1.5" points="${samples.map((p) => `${(p.tick / total) * 1000},${42 - (p[side] / max) * 38}`).join(" ")}"/>`,
-      )
-      .join("");
+    const samples = index.momentum.filter(p => (spoilers || p.tick <= tick) && p.tick !== tick);
+    samples.push({tick, redHearts: state.world.captures[0], blueHearts: state.world.captures[1]});
+    samples.sort((a,b) => a.tick-b.tick);
+    const x = t => t / Math.max(1,total) * 1000;
+    const y = n => 42 - n / 10 * 40;
+    const first = x(samples[0].tick), last = x(samples.at(-1).tick);
+    let chart = `<rect x="${first}" y="2" width="${last-first}" height="40" fill="#87918c" fill-opacity=".3"/>`;
+    for (let side=0; side<2; side++) {
+      let path = '';
+      samples.forEach((sample,i) => {
+        const held = side===0 ? sample.redHearts : 10-sample.blueHearts;
+        path += i===0 ? `M${x(sample.tick)},${y(held)}` : `H${x(sample.tick)}V${y(held)}`;
+      });
+      const base = side===0 ? 42 : 2;
+      chart += `<path d="${path} L${last},${base} L${first},${base} Z" fill="${colors[side]}" fill-opacity=".55"/>`;
+      chart += `<path d="${path}" fill="none" stroke="${colors[side]}" stroke-width="1.5"/>`;
+    }
+    $("territory-history").innerHTML = chart;
   }
+
   function renderGraphs() {
     if (!state || !index || ($("territory-graph").hidden && $("points-graph").hidden)) return;
     const tick = state.world.tick, total = Math.max(24, state.live ? state.recorded : state.total);
@@ -800,46 +833,47 @@
         ctx.fill();
       } else ctx.fillRect(c.x / 20, c.z / 20, c.w / 20, c.h / 20);
     }
-    for (let i = 0; i < 16; i++) {
-      const c = w.cogs[i];
-      if (c.hp <= 0) continue;
-      ctx.beginPath();
-      ctx.fillStyle = colors[team(i)];
-      ctx.arc(
-        c.pos.x / 20,
-        c.pos.z / 20,
-        i === selected ? 4 : 2.5,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fill();
-      if (i === selected) {
-        ctx.strokeStyle = "#fff3b0";
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(c.pos.x / 20, c.pos.z / 20);
-        const a = Math.atan2(c.aim.z - c.pos.z, c.aim.x - c.pos.x);
-        ctx.lineTo(
-          c.pos.x / 20 + Math.cos(a - 0.5) * 35,
-          c.pos.z / 20 + Math.sin(a - 0.5) * 35,
-        );
-        ctx.lineTo(
-          c.pos.x / 20 + Math.cos(a + 0.5) * 35,
-          c.pos.z / 20 + Math.sin(a + 0.5) * 35,
-        );
-        ctx.closePath();
-        ctx.fillStyle = "#ffefa022";
-        ctx.fill();
-      }
-    }
+    ctx.restore();
+    ctx.save();
+    const mapX = x => (x - bounds[0]) * 320 / (bounds[2] - bounds[0]);
+    const mapY = z => (z - bounds[1]) * 200 / (bounds[3] - bounds[1]);
+    const markerColors = ["#ff705f", "#52caff"];
     const hearts = (w.controlHearts || []).length
       ? w.controlHearts
       : w.hearts.map((h, owner) => ({ ...h, owner }));
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "bold 20px sans-serif";
+    ctx.lineJoin = "round";
     for (const h of hearts) {
-      ctx.fillStyle = h.owner < 0 ? "#d7dddf" : colors[h.owner];
-      ctx.font = "15px serif";
-      ctx.fillText("♥", h.pos.x / 20 - 5, h.pos.z / 20 + 4);
+      const x = mapX(h.pos.x), y = mapY(h.pos.z);
+      ctx.strokeStyle = "#081a18";
+      ctx.lineWidth = 4;
+      ctx.strokeText("♥", x, y);
+      ctx.fillStyle = h.owner < 0 ? "#ffe8a3" : markerColors[h.owner];
+      ctx.fillText("♥", x, y);
     }
+    for (let i = 0; i < 16; i++) {
+      const c = w.cogs[i];
+      if (c.hp <= 0) continue;
+      const x = mapX(c.pos.x), y = mapY(c.pos.z);
+      ctx.beginPath();
+      ctx.arc(x, y, i === selected ? 5 : 4, 0, Math.PI * 2);
+      ctx.fillStyle = markerColors[team(i)];
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#081a18";
+      ctx.stroke();
+      if (i === selected) {
+        ctx.beginPath();
+        ctx.arc(x, y, 7, 0, Math.PI * 2);
+        ctx.strokeStyle = "#fff3b0";
+        ctx.stroke();
+      }
+    }
+    ctx.scale(6400 / (bounds[2] - bounds[0]), 4000 / (bounds[3] - bounds[1]));
+    ctx.translate(-bounds[0] / 20, -bounds[1] / 20);
+    ctx.lineWidth = 1;
     ctx.strokeStyle = "#ffffff88";
     ctx.beginPath();
     state.footprint.forEach((p, i) => {
@@ -850,7 +884,6 @@
     ctx.stroke();
     ctx.restore();
   }
-  let mapDrag = false;
   function mapMove(e) {
     const r = $("minimap").getBoundingClientRect();
     const b = state.bounds || [0, 0, 6400, 4000];
@@ -863,16 +896,6 @@
     cameraUpdate();
     options();
   }
-  $("minimap").onpointerdown = (e) => {
-    mapDrag = true;
-    $("minimap").setPointerCapture(e.pointerId);
-    mapMove(e);
-  };
-  $("minimap").onpointermove = (e) => {
-    if (mapDrag) mapMove(e);
-  };
-  $("minimap").onpointerup = () => (mapDrag = false);
-  $("minimap").onpointercancel = () => (mapDrag = false);
   const agentMenu = document.createElement("div");
   agentMenu.id = "agent-menu";
   agentMenu.setAttribute("role", "menu");
@@ -912,7 +935,7 @@
     for (const [action, label, on] of [
       ["follow", "Follow", following],
       ["view", "View", pov],
-      ["vision", "Vision", $("lens").value === String(i)],
+      ["vision", "Vision", currentLens === i],
     ]) {
       const button = document.createElement("button");
       button.textContent = label;
@@ -924,7 +947,7 @@
         if (action === "follow") following = !following;
         if (action === "view") pov = !pov;
         if (action === "vision")
-          setLens($("lens").value === String(menuAgent) ? -1 : menuAgent);
+          setLens(currentLens === menuAgent ? -1 : menuAgent);
         options();
         closeAgentMenu();
         $("canvas").focus();
@@ -1127,10 +1150,6 @@
       life.dataset.agent = i;
       life.setAttribute("aria-pressed", "false");
       $(`lives${team(i)}`).append(life);
-      const option = document.createElement("option");
-      option.value = i;
-      option.textContent = `${i + 1} · ${name(i)}`;
-      $("lens").append(option);
     }
     $("verification").textContent = isPlayPage ? "LIVE" : "✓";
     $("verification").title = isPlayPage ? "Local simulation, recorded as it runs" : "Replay hash verified";

@@ -41,13 +41,9 @@ proc graphSample*(w: World): Sample =
   if visionRulesVersion >= 23:
     result.red = w.scoreTicks[0].float/TickRate
     result.blue = w.scoreTicks[1].float/TickRate
-  elif visionRulesVersion >= 13:
+  else:
     result.red = w.captures[0].float
     result.blue = w.captures[1].float
-  else:
-    for i,c in w.cogs:
-      if team(i)==0: result.red += (c.tags+c.captures*10).float
-      else: result.blue += (c.tags+c.captures*10).float
 
 proc sampleGraphs*(index: var ReplayIndex, w: World) =
   # Sample ownership changes exactly, plus one-second points and the final bonus.

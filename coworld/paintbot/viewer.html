@@ -213,20 +213,6 @@
     cursor: crosshair;
     touch-action: none;
   }
-  #zoomrow {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 8px;
-  }
-  #zoom {
-    min-width: 0;
-    width: 100%;
-    accent-color: var(--gold);
-  }
-  #zoomrow button {
-    padding: 4px 9px;
-  }
   #viewbar {
     position: absolute;
     top: 90px;
@@ -344,35 +330,11 @@
     height: 48px;
     border-top: 1px solid var(--line);
   }
-  #momentum {
+  #territory-history {
     position: absolute;
     width: 100%;
     height: 42px;
     opacity: 0.7;
-  }
-  #markers {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-  }
-  .marker {
-    position: absolute;
-    top: 4px;
-    width: 4px;
-    height: 13px;
-    pointer-events: auto;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    opacity: 0.7;
-  }
-  .marker.capture {
-    height: 23px;
-    width: 6px;
-    background: var(--gold) !important;
-  }
-  .marker:hover {
-    opacity: 1;
   }
   #scrub {
     position: absolute;
@@ -726,15 +688,6 @@
       width: 50%;
       text-align: center;
     }
-    #zoomrow {
-      gap: 0;
-    }
-    #zoomrow button {
-      padding: 3px 6px;
-    }
-    #zoom {
-      width: 40px;
-    }
     .helpgrid {
       grid-template-columns: 1fr;
     }
@@ -889,12 +842,6 @@
       display: block;
     }
   }
-  #lens {
-    width: 150px;
-    min-width: 0;
-    max-width: 40vw;
-    text-overflow: ellipsis;
-  }
   .seat {
     display: flex;
     flex-direction: column;
@@ -906,9 +853,6 @@
     line-height: 8px;
   }
   @media (max-width: 700px) {
-    #lens {
-      width: 100px;
-    }
     .seat .pips {
       flex-basis: 6px;
       line-height: 6px;
@@ -1034,7 +978,6 @@
   #viewbar button[aria-pressed="true"],
   header button[aria-pressed="true"],
   .transport button[aria-pressed="true"],
-  #map-panel[open] > summary,
   #territorytoggle:has(:checked) {
     background: #e8cf88;
     color: #17382e;
@@ -1077,7 +1020,7 @@
     margin-top: 5px;
     height: 30px;
   }
-  #momentum {
+  #territory-history {
     height: 22px;
   }
   #scrub {
@@ -1087,36 +1030,21 @@
     display: none;
   }
   #map-panel {
-    position: absolute;
-    top: 54px;
-    right: 12px;
-    z-index: 4;
+    position: fixed; left: 0; bottom: 84px; z-index: 34;
+    width: min(260px, calc(100vw - 24px));
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; box-shadow: 0 8px 24px #0004; overflow: hidden;
   }
-  #map-panel summary {
-    list-style: none;
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    cursor: pointer;
+  #map-panel.collapsed { width: 36px; height: 36px; border-radius: 10px; }
+  #map-panel [hidden] { display: none; }
+  #map-collapse {
+    position: absolute; right: 4px; top: 4px; z-index: 1;
+    width: 24px; height: 24px; padding: 2px; border: 0;
+    background: #10231fcc; border-radius: 5px;
   }
-  #map-panel summary::-webkit-details-marker {
-    display: none;
-  }
-  .map-content {
-    position: absolute;
-    right: 0;
-    top: 42px;
-    width: 240px;
-    padding: 12px;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-  }
+  #map-expand { width: 34px; height: 34px; padding: 8px; border: 0; background: transparent; touch-action: none; }
+  .map-content { padding: 0; }
+  #map-panel #minimap { width: 100%; height: auto; border: 0; border-radius: 0; cursor: grab; }
   #comms summary {
     padding: 7px 10px;
     font-size: 10px;
@@ -1265,35 +1193,17 @@
     <div class="squad" id="squad1"></div>
   </section>
 </div>
-<details id="map-panel">
-  <summary aria-label="Tactical map" title="Tactical map">◇</summary>
-  <div class="map-content">
-    <p class="railtitle">Tactical map</p>
-    <canvas
-      id="minimap"
-      width="320"
-      height="200"
-      aria-label="Tactical minimap. Click or drag to move the camera."
-    ></canvas>
-    <div id="zoomrow">
-      <button id="zoomout" aria-label="Zoom out">−</button
-      ><input
-        id="zoom"
-        type="range"
-        min="6"
-        max="160"
-        value="60"
-        aria-label="Camera distance"
-      /><button id="zoomin" aria-label="Zoom in">+</button>
+<section id="map-panel" aria-label="Tactical map">
+  <button id="map-expand" aria-label="Expand tactical map" aria-expanded="false" aria-controls="map-body" hidden>◇</button>
+  <div id="map-body">
+    <button id="map-collapse" aria-label="Collapse tactical map" aria-expanded="true" aria-controls="map-body">−</button>
+    <div class="map-content">
+      <canvas id="minimap" width="320" height="200" aria-label="Tactical minimap. Click to move the camera; drag to reposition the map."></canvas>
     </div>
   </div>
-</details>
+</section>
 <div id="viewbar">
-  <select id="lens" aria-label="Visibility perspective">
-    <option value="-1">All-seeing</option>
-    <option value="16">Ember vision</option>
-    <option value="17">Azure vision</option></select
-  ><button id="fit">Fit arena</button><button id="topdown">Top down</button
+<button id="fit">Fit arena</button><button id="topdown">Top down</button
   ><button id="actioncam" aria-pressed="true">Action camera</button
   ><button id="bars" aria-pressed="true">Health</button
   ><button id="speech" aria-pressed="true" aria-controls="speech-bubbles">
@@ -1390,12 +1300,12 @@
   </div>
   <div id="timeline">
     <svg
-      id="momentum"
+      id="territory-history"
       preserveAspectRatio="none"
       viewBox="0 0 1000 45"
-      aria-label="Team momentum"
+      role="img"
+      aria-label="Territory held over time: Ember, Azure, and unclaimed hearts"
     ></svg>
-    <div id="markers"></div>
     <input
       id="scrub"
       type="range"
