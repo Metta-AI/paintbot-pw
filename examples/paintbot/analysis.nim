@@ -17,7 +17,7 @@ type
     momentum*: seq[Sample]
     checkpoints*: seq[Checkpoint]
 
-proc snapshot(w: World): World =
+proc snapshot*(w: World): World =
   result = w
   # Explicit copies keep checkpoint storage independent of mutable sequences.
   result.controlHearts = @[]

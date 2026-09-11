@@ -91,9 +91,10 @@ proc host(slot:int, strings:StringPool): Host =
     commands[slot].aim=Point(x:clamp(a[0],minX().int32,maxX().int32),z:clamp(a[1],minZ().int32,maxZ().int32));1,4)
   discard result.addFunction("shootAt",2,proc(a:openArray[int32]):int32 =
     commands[slot].shoot=true;commands[slot].aim=Point(x:clamp(a[0],minX().int32,maxX().int32),z:clamp(a[1],minZ().int32,maxZ().int32));1,4)
-proc loadBots*(groups:seq[BotGroup]):array[Seats,Bot] =
-  let sources=groups.expandBotSources(controllerKinds(Seats,0))
+proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
+  let sources=groups.expandBotSources(controllerKinds(Seats,playerSlot))
   for slot in 0..<Seats:
+    if isPlayerIndex(playerSlot, slot): continue
     let strings=initStringPool()
     let h=host(slot,strings)
     let p=when defined(coworld):compilePlayer(sources[slot],h,limits(),slot)

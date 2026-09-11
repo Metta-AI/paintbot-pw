@@ -3,6 +3,21 @@
   "use strict";
   const $ = (id) => document.getElementById(id),
     colors = ["#ff8069", "#71cfff"];
+  const modes = document.createElement("div");
+  modes.style.cssText = "position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:30;display:flex;gap:8px";
+  const isPlayPage = location.pathname.includes("/play/");
+  for (const [label, human] of [["Watch live demo", false], ["Play as human", true]]) {
+    const button = document.createElement("button");
+    button.textContent = label;
+    button.onclick = () => {
+      const url = new URL(isPlayPage ? "index.html" : "play/index.html", location.href);
+      url.searchParams.set("bot", "base.bas:" + (human ? 15 : 16));
+      if (human) url.searchParams.set("player", "1");
+      location.href = url.href;
+    };
+    modes.append(button);
+  }
+  document.body.append(modes);
   const paths = {
     stats: "M4 20V12h3v8M10 20V4h3v16M16 20V8h3v12",
     events: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01",
@@ -195,7 +210,7 @@
   function ready() {
     return (
       state !== null &&
-      !document.getElementById("status").classList.contains("error")
+      !document.getElementById("status")?.classList.contains("error")
     );
   }
   function seek(t, pause = false) {
@@ -799,7 +814,15 @@
       ) + "px";
     agentMenu.firstElementChild.focus();
   }
-  $("canvas").addEventListener("contextmenu", e => openAgentMenu(e, agentAt(e)));
+  $("canvas").addEventListener("contextmenu", e => {
+    if (state?.playerSlot && state.world.tick >= state.recorded) {
+      e.preventDefault();
+      const rect = $("canvas").getBoundingClientRect();
+      const target = agentAt(e);
+      Module._pw_order((e.clientX-rect.left)/rect.width, (e.clientY-rect.top)/rect.height,
+        e.shiftKey || (target >= 0 && team(target) !== team(state.playerSlot-1)) ? 2 : 1);
+    } else openAgentMenu(e, agentAt(e));
+  });
   $("match-score").addEventListener("click", e => {
     const button = e.target.closest(".agent-life");
     if (button) select(Number(button.dataset.agent));
@@ -980,9 +1003,9 @@
       option.textContent = `${i + 1} · ${name(i)}`;
       $("lens").append(option);
     }
-    $("verification").textContent = "✓";
-    $("verification").title = "Replay hash verified";
-    $("verification").setAttribute("aria-label", "Replay hash verified");
+    $("verification").textContent = isPlayPage ? "LIVE" : "✓";
+    $("verification").title = isPlayPage ? "Local simulation, recorded as it runs" : "Replay hash verified";
+    $("verification").setAttribute("aria-label", isPlayPage ? "Local simulation, recorded as it runs" : "Replay hash verified");
   };
   Module.paintbotState = (data) => {
     state = data;
@@ -996,6 +1019,10 @@
     }
     const w = data.world,
       t = w.tick;
+    if (data.playerSlot) {
+      modes.title = "Right-click to move or attack an enemy. Shift-right-click to shoot at ground. Rewind to review; return to the latest tick to control.";
+      modes.children[1].textContent = "You · Right-click to move / attack";
+    }
     const control = (w.controlHearts || []).length > 0;
     $("territorytoggle").hidden = !control;
     $("modehint").textContent = control
@@ -1103,7 +1130,7 @@
         seek(next.tick - 48);
       } else $("skipping").textContent = "";
     } else $("skipping").textContent = "";
-    if (t === data.total) {
+    if (t === data.total && (!data.live || data.paused)) {
       if (loop) {
         seek(0);
         Module._pw_play(1);
