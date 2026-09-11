@@ -653,7 +653,7 @@
   }
   function renderGraphs() {
     if (!state || !index || ($("territory-graph").hidden && $("points-graph").hidden)) return;
-    const tick = state.world.tick, total = Math.max(1, state.total);
+    const tick = state.world.tick, total = Math.max(24, state.live ? state.recorded : state.total);
     const history = index.momentum.filter(p => spoilers || p.tick <= tick);
     const w = state.world;
     const current = {tick, red: (w.scoreTicks?.[0] || 0)/24, blue: (w.scoreTicks?.[1] || 0)/24,
