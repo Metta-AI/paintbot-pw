@@ -1,7 +1,7 @@
 ## Painted Polyworld arena with hash-verified spectator analysis.
 import std/[math, times, algorithm]
 import windy, opengl, vmath, chroma, jsony
-import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing]
+import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam]
 import game, sim, analysis, villagegraphics
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
 else: {.emit: "#define EMSCRIPTEN_KEEPALIVE".}
@@ -18,6 +18,8 @@ type
     bounds: array[4,int]
     total: int
     paused: bool
+    actionCamera: bool
+    camera: array[3, float32]
     screen: array[Seats, array[2, float32]]
     visible: array[Seats, bool]
     footprint: array[4, array[2, float32]]
@@ -28,6 +30,12 @@ var
   selected = -1
   lens = -1
   follow = false
+  autoCamera = false
+  director = initActionCam(minDistance = 26, maxDistance = 150, tight = 0.6,
+    followRate = 1.0, zoomRate = 0.7, holdSeconds = 2.8, mapSpan = 160)
+  directorTick = -1
+  directorLens = -2
+  camY = 0'f32
   firstPerson = false
   territoryOverlay = false
   insetSize = 0.25'f32
@@ -51,6 +59,8 @@ proc setView(value: cint) {.exportc: "pw_lens", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = lens = clamp(value.int, -1, Seats+1)
 proc setCamera(x, z, d, angle, pitch: cfloat) {.exportc: "pw_camera", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  autoCamera = false
+  camY = 0
   camX = clamp(x, minX().float32/100-32, maxX().float32/100-32); camZ = clamp(z, minZ().float32/100-20, maxZ().float32/100-20); distance = clamp(d, 6,
       160); yaw = angle; tilt = clamp(pitch, 0.2, 1.56)
 proc setInset(value: cfloat) {.exportc: "pw_inset", cdecl,
@@ -58,7 +68,17 @@ proc setInset(value: cfloat) {.exportc: "pw_inset", cdecl,
         0.18, 0.5)
 proc setOptions(f, p, b, t: cint) {.exportc: "pw_options", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  if f != 0: autoCamera = false
   follow = f != 0; firstPerson = p != 0; bars = b != 0; trails = t != 0
+proc setActionCamera(value: cint) {.exportc: "pw_action_camera", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  autoCamera = value != 0
+  if autoCamera: follow = false
+  director = initActionCam(minDistance = 26, maxDistance = 150, tight = 0.6,
+    followRate = 1.0, zoomRate = 0.7, holdSeconds = 2.8,
+    mapSpan = (maxX()-minX()).float32/100)
+  directorTick = -1
+  directorLens = lens
 proc setTerritory(value:cint) {.exportc:"pw_territory",cdecl,
     codegenDecl:"EMSCRIPTEN_KEEPALIVE $# $#$#".} = territoryOverlay=value!=0
 const teamColors = [rgbx(255, 103, 81, 255), rgbx(74, 192, 255, 255)]
@@ -370,6 +390,7 @@ proc runGraphics*() =
     # Decorative hearts keep turning while playback is paused or slowed.
     heartAnimationTime = (heartAnimationTime+dt.float32)
     if replayMode and seek >= 0:
+      setActionCamera(cint(autoCamera))
       index.restore(seek); seek = -1; accumulator = 0; previous = world.cogs
       if world.tick == recording.frames.len: paused = true
     if not paused:
@@ -387,8 +408,53 @@ proc runGraphics*() =
       poses[i] = if previous[i].hp > 0 and c.hp > 0: mix(position(previous[
           i].pos), position(c.pos), alpha) else: position(c.pos)
     if follow and selected >= 0:
-      camX = poses[selected].x; camZ = poses[selected].z
-    let target = vec3(camX, 0, camZ)
+      let blend = 1-exp(-5*dt.float32)
+      camX = mix(camX, poses[selected].x, blend)
+      camZ = mix(camZ, poses[selected].z, blend)
+      camY = mix(camY, poses[selected].y+1, blend)
+    var target = vec3(camX, camY, camZ)
+    if autoCamera:
+      if directorLens != lens: setActionCamera(1)
+      # Rebuild visible interests each simulation tick, including after lens changes.
+      let cameraTickChanged = directorTick != world.tick
+      if cameraTickChanged:
+        director.beginFrame(world.tick)
+        for i, c in world.cogs:
+          if c.hp <= 0 or not seen(i): continue
+          director.noteInterest(int32(i+1), poses[i], 15, 5, world.tick, 1)
+          for j in i+1..<Seats:
+            if team(i) == team(j) or world.cogs[j].hp <= 0 or not seen(j): continue
+            let gap = length(poses[i]-poses[j])
+            if gap < 40:
+              director.noteInterest(int32(100+i*Seats+j), (poses[i]+poses[j])*0.5,
+                100-gap, gap*0.5+3, world.tick, 1)
+        for n, h in world.controlHearts:
+          var nearby: array[2, int]
+          for i, c in world.cogs:
+            if c.hp > 0 and seen(i) and distance2(c.pos,h.pos) < 1000000:
+              inc nearby[team(i)]
+          if nearby[0]+nearby[1] > 0:
+            let contested = nearby[0] > 0 and nearby[1] > 0
+            director.noteInterest(int32(1000+n), position(h.pos, 2),
+              (if contested: 125'f32 else: 45'f32), 9, world.tick, 1)
+        for n, event in index.events:
+          if event.tick > world.tick or world.tick-event.tick > 36: continue
+          if event.slot >= 0 and not seen(event.slot): continue
+          let weight = case event.kind
+            of "grenade blast": 165'f32
+            of "down": 145'f32
+            of "tag", "spray": 100'f32
+            of "territory": 130'f32
+            else: 0'f32
+          if weight > 0 and (lens < 0 or event.slot >= 0):
+            director.noteInterest(int32(10000+n), position(point(event.x,event.z),1),
+              weight, 9, world.tick, 1)
+        directorTick = world.tick
+      if not paused or cameraTickChanged:
+        director.chooseShot(dt.float32, max(1, speed.int32))
+      director.follow(target, distance, dt.float32, max(1, speed.int32))
+      camX = target.x; camY = target.y; camZ = target.z
+
     let fittedDistance = distance*max(1'f32, 1.6'f32/(window.size.x.float32/max(
         1, window.size.y).float32))
     let eye = target+vec3(sin(yaw)*cos(tilt), sin(tilt), cos(yaw)*cos(
@@ -679,7 +745,7 @@ proc runGraphics*() =
           screens[i] = [(clip.x/clip.w*0.5+0.5).float32, (
               0.5-clip.y/clip.w*0.5).float32]
         let payload = ViewerState(rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], total: recording.frames.len,
-            paused: paused, screen: screens, visible: visibility,
+            paused: paused, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint).toJson()
         let data = payload.cstring
         let tick = world.tick
