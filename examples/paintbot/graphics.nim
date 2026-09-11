@@ -356,6 +356,10 @@ proc sprayCloud(renderer: var ShapeRenderer, world: World, slot: int,
   let baseColor = teamColors[team(slot)]
   let color = rgbx(uint8(baseColor.r.float32*0.65),
     uint8(baseColor.g.float32*0.65), uint8(baseColor.b.float32*0.65), 255)
+  # Height does not affect the game's 2D visibility query. Reuse each ray's
+  # result across the intersecting sheets instead of tracing every vertex.
+  var horizontalClear: array[Steps+1, array[Across+1, bool]]
+  var verticalClear: array[Steps+1, array[7, bool]]
   for vertical in [false, true]:
     for layer in -3..3:
       var vertices: array[Steps+1, array[Across+1, Vec3]]
@@ -374,7 +378,13 @@ proc sprayCloud(renderer: var ShapeRenderer, world: World, slot: int,
           let feather = max(0'f32, 1-radius2)
           let billow = 0.75+0.25*sin(f*24-phase*0.22+u*4+v*3)
           let density = feather*feather*billow*min(f*10, 1'f32)*min((1-f)*6, 1'f32)
-          let opacity = if world.lineClear(origin, p): uint8(60*density) else: 0'u8
+          if not vertical and layer == -3:
+            horizontalClear[step][column] = world.lineClear(origin, p)
+          elif vertical and column == 0:
+            verticalClear[step][layer+3] = world.lineClear(origin, p)
+          let visible = if vertical: verticalClear[step][layer+3]
+            else: horizontalClear[step][column]
+          let opacity = if visible: uint8(60*density) else: 0'u8
           colors[step][column] = rgbx(color.r, color.g, color.b, opacity)
       for step in 0..<Steps:
         for column in 0..<Across:
