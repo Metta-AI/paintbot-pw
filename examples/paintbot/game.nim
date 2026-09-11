@@ -20,11 +20,17 @@ type
   Communication* = object
     tick*, slot*: int
     text*: string
+  PriorRecording = object
+    seed*: int32
+    frames*: seq[Frame]
+    names*: array[Seats, string]
+    communications*: seq[Communication]
   Recording* = object
     seed*: int32
     frames*: seq[Frame]
     names*: array[Seats, string]
     communications*: seq[Communication]
+    endTick*: int32
 type LegacyMetadataRecording = object
   seed: int32
   frames: seq[LegacyFrame]
@@ -37,7 +43,7 @@ proc convertFrames(frames: seq[LegacyFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
           goal: c.goal, aim: c.aim)
     result.add next
-var replayRulesVersion* = 22
+var replayRulesVersion* = 23
 proc loadRecording*(path: string): Recording =
   replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
   visionRulesVersion = replayRulesVersion
@@ -50,9 +56,15 @@ proc loadRecording*(path: string): Recording =
     result = Recording(seed: old.seed, frames: convertFrames(old.frames),
         names: old.names, communications: old.communications)
   elif replayRulesVersion in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]:
-    result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
+    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PriorRecording)
+    result = Recording(seed:old.seed,frames:old.frames,names:old.names,communications:old.communications)
+  elif replayRulesVersion == 23:
+    result = loadReplayFile(path, "paintbot_pw", 23, Recording)
+    if result.endTick <= 0 or result.endTick > 28800:
+      raise newException(ReplayError, "Invalid match duration")
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
+  if replayRulesVersion < 23: result.endTick = MatchTicks
   if result.frames.len > 28800 or result.communications.len > 20000:
     raise newException(ReplayError, "Replay limits exceeded")
   for i in 0..<Seats:
@@ -85,9 +97,10 @@ proc setup*() =
   if replayMode:
     recording = loadRecording(options.replayPath)
     if recording.frames.len > 28800: raise newException(ValueError, "Replay tick limit exceeded")
-    world = newWorld(recording.seed)
+    world = newWorld(recording.seed, recording.endTick)
   else:
-    world = newWorld(options.seed); recording.seed = options.seed
+    world = newWorld(options.seed, options.maximumTicks); recording.seed = options.seed
+    recording.endTick = options.maximumTicks
     players = loadBots(options.botGroups, options.playerSlot)
     for i in 0..<Seats:
       recording.names[i] = if i == options.playerSlot-1: "You" else: "Bot " & $(i+1)
@@ -135,13 +148,13 @@ proc advance*() =
 proc runHeadless*() =
   setup()
   let limit = if replayMode: recording.frames.len else: options.maximumTicks.int
-  while (world.tick < limit or (not replayMode and replayRulesVersion >= 20 and limit >= 7200)) and world.winner == -1: advance()
+  while (world.tick < limit or (not replayMode and replayRulesVersion in 20..22 and limit >= 7200)) and world.winner == -1: advance()
   if replayMode and world.tick != limit: raise newException(ReplayError, "Replay has frames after victory")
   if not replayMode and options.recordPath.len > 0: saveReplayFile(
-      options.recordPath, "paintbot_pw", 22, recording)
+      options.recordPath, "paintbot_pw", 23, recording)
   echo "ticks=", world.tick, " captures=", world.captures, " hash=",
       world.stateHash()
   when defined(coworld):
-    finishCoworld(CoworldResults(scores: world.scores(), ticks: world.tick,
+    finishCoworld(NumericCoworldResults[float](scores: world.scores(), ticks: world.tick,
         seed: world.seed, outcome: if world.winner <
         0: "time_limit" else: $world.winner))

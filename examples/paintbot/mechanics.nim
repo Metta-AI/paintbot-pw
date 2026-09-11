@@ -91,7 +91,14 @@ proc updateTerritory*(w:var World) =
   for heart in w.controlHearts:
     if heart.owner>=0:inc w.captures[heart.owner]
   for side in 0..1:
-    if w.captures[side]==10:w.winner=side.int32
+    if w.captures[side]==10:
+      if visionRulesVersion >= 23:
+        for i in 0..<Seats:
+          if team(i) != side:
+            w.cogs[i].hp = 0
+            w.cogs[i].respawn = 0
+            w.equipment[i].lives = 0
+      else: w.winner=side.int32
 
 proc damage*(w: var World, victim, attacker, amount: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
@@ -123,7 +130,7 @@ proc barrageDepth*(tick: int32): int =
   80+1000*progress div BarrageRampTicks
 
 proc updateBarrage*(w: var World) =
-  if visionRulesVersion < 20 or w.tick < BarrageStartTick: return
+  if visionRulesVersion < 20 or visionRulesVersion >= 23 or w.tick < BarrageStartTick: return
   let age = w.tick.int-BarrageStartTick
   # Integral launch count preserves the original fractional 4 -> 50/s pacing.
   proc launches(t: int): int =
@@ -196,7 +203,7 @@ proc pickupEquipment(w: var World) =
 
 proc stepEquipment(w: var World, commands: array[Seats, Command]) =
   if w.winner != -1: return
-  if visionRulesVersion >= 21 and w.tick >= BarrageStartTick:
+  if visionRulesVersion in 21..22 and w.tick >= BarrageStartTick:
     # Only the life currently on the field survives the sudden-death cutoff.
     for i in 0..<Seats:
       w.equipment[i].lives = (if w.cogs[i].hp > 0: 1 else: 0)
@@ -345,6 +352,18 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
   w.pickupEquipment()
   if visionRulesVersion>=13:
     w.updateTerritory()
+    if visionRulesVersion >= 23:
+      for side in 0..1: w.scoreTicks[side] += w.captures[side]
+      var alive: array[2, bool]
+      for i,c in w.cogs:
+        if c.hp > 0 or w.equipment[i].lives > 0: alive[team(i)] = true
+      inc w.tick
+      if alive[0] != alive[1]:
+        let survivor = if alive[0]: 0 else: 1
+        w.scoreTicks[survivor] += w.controlHearts.len.int32 * max(0'i32, w.endTick-w.tick)
+      if not alive[0] or not alive[1] or w.tick >= w.endTick:
+        w.winner = if w.scoreTicks[0] > w.scoreTicks[1]: 0 elif w.scoreTicks[1] > w.scoreTicks[0]: 1 else: -2
+      return
     if visionRulesVersion >= 20:
       var surviving: array[2,bool]
       for i,c in w.cogs:
