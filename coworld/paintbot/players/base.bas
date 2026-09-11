@@ -4,7 +4,11 @@ if worldTick mod 72 = 0 then
   dxProgress = selfX - progressX
   dyProgress = selfY - progressY
   if dxProgress * dxProgress + dyProgress * dyProgress < 40000 and objective >= 0 and objective < 10 then
-    avoidUntil(objective) = worldTick + 360
+    dxHeart = controlX(objective) - selfX
+    dyHeart = controlY(objective) - selfY
+    if dxHeart * dxHeart + dyHeart * dyHeart > 19600 then
+      avoidUntil(objective) = worldTick + 360
+    end if
   end if
   progressX = selfX
   progressY = selfY

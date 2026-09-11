@@ -2,7 +2,7 @@ import village, topography
 export topography
 ## Integer-only Paintbot simulation; Polyworld RNG and portable state hashes.
 import polyworld/[rngs, hashes]
-import std/tables
+import std/[tables, math]
 
 const
   Seats* = 16
@@ -18,6 +18,18 @@ const
   VisionRange* = 2000
   RespawnTicks* = 72
   CaptureTarget* = 3
+  HeartCaptureTicks* = 3 * TickRate
+  BigHeartInterval* = 30 * TickRate
+  BigHeartPoints* = 5
+  SpawnTemperature* = 1000
+  HeartSpawnRadius* = 350
+  # Compile-time exponential table keeps native/WASM sampling integer-only.
+  # Scores are quantized to 10 world units (1% of the temperature).
+  SpawnWeights = block:
+    var weights: array[1601, int32]
+    for i in 0..1600:
+      weights[i] = int32(exp(-float(i) / 100.0) * 1000000.0)
+    weights
 
 type
   Point* = object
@@ -58,6 +70,10 @@ type
   ControlHeart* = object
     pos*: Point
     owner*: int32 # -1 neutral, 0 Ember, 1 Azure
+  HeartCapture* = object
+    team*: int32 # -1 when idle
+    ticks*: int32
+    contested*: bool
   World* = object
     seed*, tick*: int32
     rng*: Rng
@@ -75,6 +91,10 @@ type
     controlHearts*: seq[ControlHeart]
     scoreTicks*: array[2, int32] # One point = TickRate units, no floating-point drift.
     endTick*: int32
+    heartCaptures*: seq[HeartCapture]
+    bigHeart*: int32 # -1 until 30 seconds, or after all hearts have been used
+    bigHeartRound*: int32
+    usedBigHearts*: seq[bool]
   TerritoryWorld = object
     seed*, tick*: int32
     rng*: Rng
@@ -125,7 +145,7 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 23
+var visionRulesVersion* = 25
 proc minX*():int = (if visionRulesVersion>=22: -4800 elif visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
 proc minZ*():int = (if visionRulesVersion>=22: -2800 elif visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
@@ -210,6 +230,49 @@ proc movementBlocked(w: World, p: Point, slot: int, solid: bool): bool =
   w.blocked(p) or (solid and w.occupied(p, slot)) or
     (distance2(w.cogs[slot].pos, p) < 10000 and not w.traversable(w.cogs[
         slot].pos, p))
+proc sampleSpawnHeart*(w: var World, slot: int): int =
+  ## Softmax of summed distances to living teammates; larger sums are favored.
+  var candidates: seq[int]
+  var scores: seq[int64]
+  var maximum = 0'i64
+  for index, heart in w.controlHearts:
+    if heart.owner != team(slot).int32: continue
+    var score = 0'i64
+    for other, cog in w.cogs:
+      if other != slot and team(other) == team(slot) and cog.hp > 0:
+        score += isqrt(distance2(cog.pos, heart.pos))
+    candidates.add index
+    scores.add score
+    maximum = max(maximum, score)
+  if candidates.len == 0: return -1
+  var weights: seq[int32]
+  var total = 0'i32
+  for score in scores:
+    let bucket = min(1600'i64, (maximum-score) * 100 div SpawnTemperature)
+    let weight = SpawnWeights[bucket.int]
+    weights.add weight
+    total += weight
+  var draw = w.rng.below(total)
+  for i, weight in weights:
+    if draw < weight: return candidates[i]
+    draw -= weight
+  candidates[^1]
+
+proc spawnAtHeart(w: var World, slot: int): bool =
+  let heart = w.sampleSpawnHeart(slot)
+  if heart < 0: return false
+  let origin = w.controlHearts[heart].pos
+  # Search only near the selected heart. If crowded, retry next tick.
+  for attempt in 0..<128:
+    let p = point(origin.x.int+w.rng.between(-HeartSpawnRadius, HeartSpawnRadius).int,
+        origin.z.int+w.rng.between(-HeartSpawnRadius, HeartSpawnRadius).int)
+    if distance2(origin, p) > HeartSpawnRadius*HeartSpawnRadius: continue
+    if w.blocked(p) or w.occupied(p, slot) or not w.traversable(origin, p): continue
+    w.cogs[slot].pos = p; w.cogs[slot].goal = p
+    w.cogs[slot].hp = 3; w.cogs[slot].shield = 36
+    w.cogs[slot].firing = false; w.cogs[slot].carrying = false
+    return true
+
 proc spawn(w: var World, slot: int, solid = true) =
   var p = point(if team(slot) == 0: 350+(slot div 2 mod 2)*160 else: Width-350-(
       slot div 2 mod 2)*160,
@@ -265,7 +328,8 @@ proc newWorld*(seed: int32, endTick: int32 = MatchTicks): World =
         result.cover.add Cover(x: Width.int32-c.x-c.w, z: Height.int32-c.z-c.h,
             w: c.w, h: c.h)
   for side in 0..1: result.resetHeart(side)
-  for i in 0..<Seats: result.spawn(i)
+  if visionRulesVersion < 24:
+    for i in 0..<Seats: result.spawn(i)
   if wilderness:
     for p in [point(-620,300),point(-620,1700),point(-620,3500),point(1200,-320),point(3100,-320),point(5400,-320)]:
       for q in [p,point(6400-p.x.int,4000-p.z.int)]:
@@ -274,6 +338,16 @@ proc newWorld*(seed: int32, endTick: int32 = MatchTicks): World =
     for lot in forestLots():
       result.cover.add Cover(x:(lot.x-lot.radius).int32,z:(lot.z-lot.radius).int32,w:(2*lot.radius).int32,h:0)
   if visionRulesVersion >= 6: result.initializeEquipment()
+  if visionRulesVersion >= 24:
+    for i in 0..<Seats:
+      discard result.spawnAtHeart(i)
+  result.bigHeart = -1
+  if visionRulesVersion >= 25:
+    result.usedBigHearts = newSeq[bool](result.controlHearts.len)
+
+proc heartPoints*(w: World, index: int): int32 =
+  if visionRulesVersion >= 25 and w.bigHeart == index.int32: BigHeartPoints else: 1
+
 proc scores*(w: World): seq[float] =
   for i in 0..<Seats:
     result.add (if visionRulesVersion >= 23: w.scoreTicks[team(i)].float / TickRate.float else: float(if visionRulesVersion >= 20 and w.winner >= 0: (if w.winner == team(i).int32: 10 else: 0) elif visionRulesVersion>=13:w.captures[team(i)].int else:int(w.winner == team(i).int32)))
@@ -287,12 +361,18 @@ type LegacyWorld = object
   balls: seq[Paintball]
   winner: int32
 proc stateHash*(w: World): uint32 =
-  if visionRulesVersion >= 23: return hashy(w)
+  if visionRulesVersion >= 25: return hashy(w)
   if visionRulesVersion >= 13:
-    return hashy(TerritoryWorld(seed:w.seed,tick:w.tick,rng:w.rng,cogs:w.cogs,
+    result = hashy(TerritoryWorld(seed:w.seed,tick:w.tick,rng:w.rng,cogs:w.cogs,
       hearts:w.hearts,captures:w.captures,cover:w.cover,balls:w.balls,winner:w.winner,
       equipment:w.equipment,trenches:w.trenches,pickups:w.pickups,grenades:w.grenades,
       blasts:w.blasts,controlHearts:w.controlHearts))
+    if visionRulesVersion >= 23:
+      result.addHashy(w.scoreTicks)
+      result.addHashy(w.endTick)
+    if visionRulesVersion >= 24:
+      result.addHashy(w.heartCaptures)
+    return
   if visionRulesVersion >= 6:
     return hashy(CombatWorld(seed:w.seed,tick:w.tick,rng:w.rng,cogs:w.cogs,
       hearts:w.hearts,captures:w.captures,cover:w.cover,balls:w.balls,winner:w.winner,

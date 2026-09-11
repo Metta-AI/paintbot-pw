@@ -3,20 +3,32 @@
 Sixteen wheeled cogs fight for territory in Heartwick. Red uses even slots;
 Blue uses odd slots. Ten stationary hearts divide the entire map into nearest-heart
 regions. Each team starts with its base heart; eight hearts start neutral gray.
-Touch a heart within 140 units on connected terrain to claim it instantly. If both
-teams touch at once, its ownership stays unchanged. Holding all ten eliminates the entire opposing team, including remaining respawns.
+Stay within 140 units of a heart on connected terrain for three seconds (72 ticks)
+to claim it. Extra cogs do not accelerate capture. Both teams in range pause
+progress; if the attackers leave or only defenders remain, progress resets.
+The current owner keeps earning points until capture completes. Holding all ten eliminates the entire opposing team, including remaining respawns.
 
 The default-on territory overlay colors each region by its heart owner, including
 neutral gray. Toggle it off for an unobstructed terrain view. Heart locations and
 ownership are public. BASIC exposes `heartCount()`, `controlX(i)`, `controlY(i)`,
-and `controlOwner(i)` (-1 neutral, 0 red, 1 blue). WASM sprite observations include
-`control heart <index> owner <owner>`; the legacy enemy-flag target points to an
+and `controlOwner(i)` (-1 neutral, 0 red, 1 blue). Capture state is also public:
+`controlCaptureTeam(i)` (-1 idle), `controlCaptureTicks(i)` (0–71 of 72), and
+`controlContested(i)` (0 or 1). Invalid indices return -1. WASM sprite observations include
+`control heart <index> owner <owner>` and a separate
+`control capture <index> team <team> ticks <ticks> contested <0|1>` sprite; the legacy enemy-flag target points to an
 unowned objective so existing Paintbot WASM policies can play territory control.
 
 Cogs have three base HP and three respawns (four lives total). Death loses equipment and respawns
-after 72 ticks; spawn protection lasts 36 ticks. Each owned heart earns its team one point per second, accumulated at 24 ticks per
-second. Matches last five minutes. When a team is eliminated, the survivor receives
-10 × remaining seconds in bonus points. Both teams keep previously earned points.
+after 72 ticks; spawn protection lasts 36 ticks. Initial spawns and respawns are within 350 world units
+of an owned heart, sampled with softmax over the sum of distances from living teammates (excluding
+self). Larger sums favor less-covered hearts. Temperature is 1,000 world units, with distances
+quantized to 10 units for deterministic sampling. With no owned hearts, respawns use the endzone.
+Blocked or crowded heart placements retry on the next tick. Each owned normal heart earns its team one point per second, accumulated at 24 ticks
+per second. Starting at 0:30, every 30 seconds a random heart becomes big and earns
+five points per second instead of one. Only one heart is big at a time; the previous
+heart returns to normal. Selection includes neutral and owned hearts, and no heart
+is selected twice in a game. After every heart has been selected, no more become big. Matches last five minutes. When a team is eliminated, the survivor receives
+all remaining map income in bonus points, including scheduled big-heart income. Both teams keep previously earned points.
 The higher total wins; equal totals draw. Simultaneous elimination gives no bonus.
 There is no bombardment or overtime.
 Older replays retain their original capture-the-heart rules.
@@ -127,3 +139,22 @@ clearance and traversable slopes; blocked cogs sidestep instead of pushing
 forever. Baselines abandon objectives after three seconds without progress.
 WASM receives the same enlarged geometry through a compressed 3200 × 1920
 walkability map, including clearance around obstacles.
+
+### Deliberate heart captures (rules 24)
+
+Heart towers show a bar in the capturing team's color. A yellow marker means
+capture is contested and paused; the minimap shows the same progress and an
+exclamation mark. Capturing an enemy heart takes the same three seconds as a
+neutral heart. A different attacking team starts from zero. Capture progress
+is recorded in deterministic state hashes and restored when seeking replays.
+Rules 23 and older retain their original instant captures and replay hashes.
+
+### Big hearts (rules 25)
+
+Big hearts are twice as large and have a gold ring; the minimap marks them with
+`5`. Capture time, capture radius, and ownership rules stay the same. A neutral
+big heart earns no points until captured. BASIC `controlPoints(i)` returns 1 or 5
+(-1 for an invalid index). WASM receives `control value <index> points <1|5>`
+alongside the unchanged ownership and capture sprites. Choices are deterministic
+for replay verification, and seeking restores both the active heart and used-heart
+history. Rules 24 and older retain ordinary one-point hearts.

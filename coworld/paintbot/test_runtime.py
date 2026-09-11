@@ -114,6 +114,28 @@ class RuntimeTests(unittest.TestCase):
         w["cogs"][0]["cooldown"] = 8
         self.assertIn(b"fire icon cooldown", view.frame(w))
 
+    def test_wasm_receives_public_capture_progress_without_changing_owner_label(self):
+        view = SpriteView(0)
+        view.initial = False
+        w = dict(
+            cogs=[dict(pos=dict(x=500, z=2000), aim=dict(x=0,z=0), hp=3, cooldown=0)
+                  for _ in range(16)],
+            cover=[],
+            hearts=[dict(pos=dict(x=x,z=2000), carrier=-1) for x in (960,5440)],
+            controlHearts=[dict(pos=dict(x=3200,z=2000), owner=-1)],
+            heartCaptures=[dict(team=1, ticks=36, contested=True)],
+        )
+        frame = view.frame(w)
+        self.assertIn(b"control heart 0 owner -1", frame)
+        self.assertIn(b"control capture 0 team 1 ticks 36 contested 1", frame)
+        w["rulesVersion"] = 25
+        w["bigHeart"] = 0
+        self.assertIn(b"control value 0 points 5", view.frame(w))
+        w["bigHeart"] = -1
+        self.assertIn(b"control value 0 points 1", view.frame(w))
+        del w["heartCaptures"]
+        self.assertNotIn(b"control capture", view.frame(w))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -544,7 +544,7 @@
           ? "Match drawn"
           : `${w.winner ? "Azure" : "Ember"} wins`
         : "Match scoreboard",
-      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}<br>${state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
+      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}<br>${state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
     $("dialogbody")
       .querySelectorAll("[data-seat]")
@@ -860,13 +860,44 @@
     ctx.textBaseline = "middle";
     ctx.font = "bold 20px sans-serif";
     ctx.lineJoin = "round";
-    for (const h of hearts) {
+    for (const [i, h] of hearts.entries()) {
       const x = mapX(h.pos.x), y = mapY(h.pos.z);
+      const big = state.rulesVersion >= 25 && w.bigHeart === i;
+      ctx.font = big ? "bold 30px sans-serif" : "bold 20px sans-serif";
       ctx.strokeStyle = "#081a18";
       ctx.lineWidth = 4;
       ctx.strokeText("♥", x, y);
       ctx.fillStyle = h.owner < 0 ? "#ffe8a3" : markerColors[h.owner];
       ctx.fillText("♥", x, y);
+      if (big) {
+        ctx.strokeStyle = "#ffd755";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, 19, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = "#ffd755";
+        ctx.font = "bold 12px sans-serif";
+        ctx.fillText("5", x + 23, y);
+      }
+      const capture = w.heartCaptures?.[i];
+      if (capture && (capture.ticks > 0 || capture.contested)) {
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#27313a";
+        ctx.beginPath();
+        ctx.arc(x, y, 13, 0, Math.PI * 2);
+        ctx.stroke();
+        if (capture.ticks > 0) {
+          ctx.strokeStyle = markerColors[capture.team];
+          ctx.beginPath();
+          ctx.arc(x, y, 13, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * capture.ticks / 72);
+          ctx.stroke();
+        }
+        if (capture.contested) {
+          ctx.fillStyle = "#ffd652";
+          ctx.font = "bold 13px sans-serif";
+          ctx.fillText("!", x, y - 18);
+        }
+      }
     }
     for (let i = 0; i < 16; i++) {
       const c = w.cogs[i];
@@ -1201,7 +1232,7 @@
     const control = (w.controlHearts || []).length > 0;
     $("territorytoggle").hidden = !control;
     $("modehint").textContent = control
-      ? (data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
+      ? (data.rulesVersion >= 25 ? (w.bigHeart >= 0 ? `Big heart ${w.bigHeart + 1}: 5 points/s · ${30 - Math.floor(t / 24) % 30}s left` : w.bigHeartRound > 0 ? "All big hearts used · Normal hearts: 1 point/s" : "First big heart at 0:30 · Normal hearts: 1 point/s") : data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
       : "Capture the heart · Three lives";
     updatePovSignal();
     const playLabel = data.paused ? "Play" : "Pause";
@@ -1220,7 +1251,8 @@
       const owned = control ? w.controlHearts.filter(h => h.owner === s).length : w.captures[s];
       $(`score${s}`).textContent = data.rulesVersion >= 23 ? (w.scoreTicks[s]/24).toFixed(1) : owned;
       const scoreLine = $(`score${s}`).parentElement;
-      scoreLine.title = `${owned} hearts held`;
+      const bigOwned = data.rulesVersion >= 25 && w.bigHeart >= 0 && w.controlHearts[w.bigHeart].owner === s;
+      scoreLine.title = `${owned} hearts held${bigOwned ? " · Big heart: 5 points/s" : ""}`;
       scoreLine.querySelector('small').textContent = data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
       w.cogs.forEach((c, i) => {
         if (team(i) !== s) return;
