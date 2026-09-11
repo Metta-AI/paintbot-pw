@@ -7,6 +7,7 @@ import std/tables
 const
   Seats* = 16
   TickRate* = 24
+  MatchTicks* = 5*60*TickRate
   Width* = 6400
   Height* = 4000
   Radius* = 55
@@ -72,6 +73,23 @@ type
     grenades*: seq[Lob]
     blasts*: seq[Blast]
     controlHearts*: seq[ControlHeart]
+    scoreTicks*: array[2, int32] # One point = TickRate units, no floating-point drift.
+    endTick*: int32
+  TerritoryWorld = object
+    seed*, tick*: int32
+    rng*: Rng
+    cogs*: array[Seats, Cog]
+    hearts*: array[2, Heart]
+    captures*: array[2, int32]
+    cover*: seq[Cover]
+    balls*: seq[Paintball]
+    winner*: int32 # -1 before a capture victory
+    equipment*: array[Seats, Equipment]
+    trenches*: seq[Cover]
+    pickups*: seq[Pickup]
+    grenades*: seq[Lob]
+    blasts*: seq[Blast]
+    controlHearts*: seq[ControlHeart]
   CombatWorld = object
     seed*, tick*: int32
     rng*: Rng
@@ -107,7 +125,7 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 22
+var visionRulesVersion* = 23
 proc minX*():int = (if visionRulesVersion>=22: -4800 elif visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
 proc minZ*():int = (if visionRulesVersion>=22: -2800 elif visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
@@ -217,13 +235,14 @@ proc spawn(w: var World, slot: int, solid = true) =
 proc resetHeart*(w: var World, side: int) =
   w.hearts[side] = Heart(pos: home(side), carrier: -1)
 proc initializeEquipment(w: var World)
-proc newWorld*(seed: int32): World =
+proc newWorld*(seed: int32, endTick: int32 = MatchTicks): World =
   wideRamps = visionRulesVersion >= 11
   wilderness = visionRulesVersion >= 12
   deepWilderness = visionRulesVersion >= 14
   organicTerrain = visionRulesVersion >= 15
   islandTerrain = visionRulesVersion >= 16
   expandedIsland = visionRulesVersion >= 22
+  result.endTick = endTick
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
   if visionRulesVersion >= 8:
     for lot in roundVillage():
@@ -255,9 +274,9 @@ proc newWorld*(seed: int32): World =
     for lot in forestLots():
       result.cover.add Cover(x:(lot.x-lot.radius).int32,z:(lot.z-lot.radius).int32,w:(2*lot.radius).int32,h:0)
   if visionRulesVersion >= 6: result.initializeEquipment()
-proc scores*(w: World): seq[int] =
+proc scores*(w: World): seq[float] =
   for i in 0..<Seats:
-    result.add (if visionRulesVersion >= 20 and w.winner >= 0: (if w.winner == team(i).int32: 10 else: 0) elif visionRulesVersion>=13:w.captures[team(i)].int else:int(w.winner == team(i).int32))
+    result.add (if visionRulesVersion >= 23: w.scoreTicks[team(i)].float / TickRate.float else: float(if visionRulesVersion >= 20 and w.winner >= 0: (if w.winner == team(i).int32: 10 else: 0) elif visionRulesVersion>=13:w.captures[team(i)].int else:int(w.winner == team(i).int32)))
 type LegacyWorld = object
   seed, tick: int32
   rng: Rng
@@ -268,7 +287,12 @@ type LegacyWorld = object
   balls: seq[Paintball]
   winner: int32
 proc stateHash*(w: World): uint32 =
-  if visionRulesVersion >= 13: return hashy(w)
+  if visionRulesVersion >= 23: return hashy(w)
+  if visionRulesVersion >= 13:
+    return hashy(TerritoryWorld(seed:w.seed,tick:w.tick,rng:w.rng,cogs:w.cogs,
+      hearts:w.hearts,captures:w.captures,cover:w.cover,balls:w.balls,winner:w.winner,
+      equipment:w.equipment,trenches:w.trenches,pickups:w.pickups,grenades:w.grenades,
+      blasts:w.blasts,controlHearts:w.controlHearts))
   if visionRulesVersion >= 6:
     return hashy(CombatWorld(seed:w.seed,tick:w.tick,rng:w.rng,cogs:w.cogs,
       hearts:w.hearts,captures:w.captures,cover:w.cover,balls:w.balls,winner:w.winner,

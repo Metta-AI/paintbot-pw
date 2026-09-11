@@ -424,7 +424,7 @@ proc runGraphics*() =
       index.restore(restore.int)
       previous = world.cogs
       transport.sync(world.tick, recording.frames.len.int32, world.winner != -1)
-    if not replayMode and replayRulesVersion >= 20 and options.maximumTicks >= 7200 and
+    if not replayMode and replayRulesVersion in 20..22 and options.maximumTicks >= 7200 and
         world.tick >= transport.durationTicks and world.winner < 0:
       transport.durationTicks = world.tick + TickRate*60
     transport.startFrame(dt.float32 * playbackRate / transport.speed.float32, TickRate)

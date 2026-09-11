@@ -44,13 +44,14 @@ type
   PlayerFailure = object
     message: string
     failedPolicyIndex: int
-  CoworldResults* = object
-    scores*: seq[int]
+  NumericCoworldResults*[T: SomeNumber] = object
+    scores*: seq[T]
     ticks*: int32
     seed*: int32
     outcome*: string
     bankedGold*: seq[int32]
     returned*: seq[bool]
+  CoworldResults* = NumericCoworldResults[int]
   ServerAddress = object
     server: Server
     host: string
@@ -82,7 +83,7 @@ proc renameHook*(
 
 proc dumpHook*(
     bytes: var string,
-    value: CoworldResults | PlayerStatus | PlayerStatuses | PlayerFailure
+    value: NumericCoworldResults | PlayerStatus | PlayerStatuses | PlayerFailure
 ) =
   ## Serializes protocol records with the platform's snake case field names.
   bytes.add '{'
@@ -327,7 +328,7 @@ proc completedSignal(signal: cint) {.noconv.} =
   ## Exits successfully when the runner terminates a completed episode.
   exitnow(QuitSuccess)
 
-proc finishCoworld*(results: CoworldResults) =
+proc finishCoworld*(results: NumericCoworldResults) =
   ## Finalizes private outputs before publishing the successful result marker.
   if results.scores.len != logs.len or not fileExists(replayPath):
     raise newException(CoworldError, "Incomplete Coworld results or replay")

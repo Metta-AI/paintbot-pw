@@ -4,7 +4,7 @@ import polyworld/tapes
 
 suite "Paintbot replay analysis and metadata":
   test "checkpoint seeks preserve all recorded world hashes":
-    recording=Recording(seed:2026)
+    recording=Recording(seed:2026,endTick:MatchTicks)
     world=newWorld(recording.seed)
     var commands:array[Seats,Command]
     for i in 0..<Seats:
@@ -19,7 +19,7 @@ suite "Paintbot replay analysis and metadata":
       let target=min(tick,720)
       check world.tick==target
       check world.stateHash()==(if target==0:newWorld(2026).stateHash() else:recording.frames[target-1].hash)
-  test "v1 remains readable and v6 preserves public metadata":
+  test "v1 remains readable and v23 preserves public metadata":
     type Legacy=object
       seed:int32
       frames:seq[Frame]
@@ -29,12 +29,12 @@ suite "Paintbot replay analysis and metadata":
     check loadRecording(path).names[0]=="Ember 1"
     recording.names[0]="Daveey <test>"
     recording.communications = @[Communication(tick:1,slot:0,text:"Guard the heart ♥")]
-    saveReplayFile(path,"paintbot_pw",6,recording)
+    saveReplayFile(path,"paintbot_pw",23,recording)
     let loaded=loadRecording(path)
     check loaded.names[0]=="Daveey <test>"
     check loaded.communications[0].text=="Guard the heart ♥"
     recording.communications[0].slot=16
-    saveReplayFile(path,"paintbot_pw",6,recording)
+    saveReplayFile(path,"paintbot_pw",23,recording)
     expect ReplayError:discard loadRecording(path)
   test "analysis refuses corrupt replay inputs":
     recording.communications = @[]

@@ -8,7 +8,7 @@ type
     x*, z*: int32
   Sample* = object
     tick*: int
-    red*, blue*: int32
+    red*, blue*: float
   Checkpoint* = object
     state*: World
   ReplayIndex* = object
@@ -45,7 +45,7 @@ proc indexReplay*(): ReplayIndex =
     tags.add Moment(tick: tick + 1, slot: attacker, side: team(attacker),
         victim: victim, kind: "tag", x: pos.x, z: pos.z)
   defer: observeTag = nil
-  world = newWorld(recording.seed)
+  world = newWorld(recording.seed, recording.endTick)
   result.checkpoints.add Checkpoint(state: snapshot(world))
   while world.tick < recording.frames.len:
     let previous = world.cogs
@@ -97,10 +97,10 @@ proc indexReplay*(): ReplayIndex =
       var glory: array[2, int32]
       for i, c in world.cogs: glory[team(i)] += c.tags + c.captures * 10
       if visionRulesVersion>=13:glory=world.captures
-      result.momentum.add Sample(tick: world.tick, red: glory[0], blue: glory[1])
+      result.momentum.add Sample(tick: world.tick, red: (if visionRulesVersion >= 23: world.scoreTicks[0].float/TickRate else: glory[0].float), blue: (if visionRulesVersion >= 23: world.scoreTicks[1].float/TickRate else: glory[1].float))
     if world.tick mod 240 == 0:
       result.checkpoints.add Checkpoint(state: snapshot(world))
-  world = newWorld(recording.seed)
+  world = newWorld(recording.seed, recording.endTick)
 
 proc restore*(index: ReplayIndex, tick: int) =
   let target = clamp(tick, 0, recording.frames.len)
