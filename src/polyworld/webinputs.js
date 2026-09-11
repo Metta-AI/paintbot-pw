@@ -58,6 +58,10 @@
     });
   });
 
+  if (parameters.has("player")) {
+    commandArguments.push("--player:" + (parameters.get("player") || "1"));
+  }
+
   if (parameters.has("verbose")) {
     commandArguments.push("--verbose");
   }

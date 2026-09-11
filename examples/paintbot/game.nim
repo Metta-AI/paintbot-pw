@@ -1,7 +1,7 @@
 import std/[os, strutils]
 import jsony
 import polyworld/[cli, tapes]
-import sim, bots
+import sim, bots, controls
 when defined(coworld): import polyworld/coworld
 
 type
@@ -79,6 +79,8 @@ proc setup*() =
       if not options.takeCommonFlag(args, i, args[i]): raise newException(
           ValueError, "Unknown argument: "&args[i])
       inc i
+  when not defined(coworld):
+    options.validateGameOptions(Seats, "live games require exactly 16 bots")
   replayMode = options.replayPath.len > 0
   if replayMode:
     recording = loadRecording(options.replayPath)
@@ -86,7 +88,9 @@ proc setup*() =
     world = newWorld(recording.seed)
   else:
     world = newWorld(options.seed); recording.seed = options.seed
-    players = loadBots(options.botGroups)
+    players = loadBots(options.botGroups, options.playerSlot)
+    for i in 0..<Seats:
+      recording.names[i] = if i == options.playerSlot-1: "You" else: "Bot " & $(i+1)
     when defined(coworld):
       for i in 0..<min(Seats, config.players.len): recording.names[
           i] = config.players[i].name
@@ -94,7 +98,7 @@ proc setup*() =
       if not open(bridge, FileHandle(parseInt(getEnv("PW_POLICY_FD"))),
           fmReadWrite): raise newException(IOError, "Cannot open policy bridge")
 proc advance*() =
-  if replayMode:
+  if replayMode or world.tick < recording.frames.len:
     if world.tick >= recording.frames.len: return
     if world.winner != -1: raise newException(ReplayError, "Replay has frames after victory")
     let f = recording.frames[world.tick]
@@ -103,6 +107,7 @@ proc advance*() =
         "Replay hash mismatch at " & $world.tick)
   else:
     var commands = players.decide(world)
+    flushPlayerCommands(commands, options.playerSlot.int-1)
     for slot, messages in shouts:
       for message in messages:
         if recording.communications.len < 20000:

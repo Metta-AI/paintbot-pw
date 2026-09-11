@@ -32,3 +32,23 @@ hud=(root/'coworld/paintbot/viewer.html').read_text()
 html=html.replace('</body>',hud+'</body>')
 (out/'index.html').write_text(html)
 PY
+
+# GotA's live demo uses the ordinary browser client and shared webinputs loader.
+nim c -d:emscripten examples/paintbot/paintbot.nim
+mkdir -p "$output/play"
+cp examples/paintbot/emscripten/paintbot.{js,wasm,data} "$output/play/"
+cp examples/paintbot/players/base.bas "$output/play/base.bas"
+cp "$output/"{viewer.js,portrait.png,Rubik-Regular.ttf,Rubik-Bold.ttf} "$output/play/"
+python3 - "$root" "$output" <<'PLAY'
+from pathlib import Path
+import sys
+root,out=map(Path,sys.argv[1:])
+html=(root/'examples/paintbot/emscripten/paintbot.html').read_text()
+hud=(root/'coworld/paintbot/viewer.html').read_text()
+# Standalone defaults match GotA's demo: fill all seats with bundled BASIC bots.
+bootstrap = """<script>
+if (!location.search) location.replace('?bot=base.bas:16');
+</script>"""
+html=html.replace('</head>',bootstrap+'</head>')
+(out/'play/index.html').write_text(html.replace('</body>',hud+'</body>'))
+PLAY
