@@ -478,6 +478,7 @@ proc terrainFrag(
 var
   cameraPos: Uniform[Vec3]
   waterNormals: Uniform[Sampler2dArray]
+  waterTime: Uniform[float32]
 
 proc waterVert(
     gl_Position: var Vec4,
@@ -499,9 +500,9 @@ proc waterFrag(
   ## Shades transparent water with a view-dependent highlight.
   let
     normalA: Vec3 = texture(waterNormals, vec3(
-      worldPos.x * 0.08, worldPos.z * 0.08, 0.0)).xyz * 2.0 - vec3(1.0)
+      worldPos.x * 0.08 + waterTime * 0.018, worldPos.z * 0.08 + waterTime * 0.009, 0.0)).xyz * 2.0 - vec3(1.0)
     normalB: Vec3 = texture(waterNormals, vec3(
-      worldPos.z * -0.13, worldPos.x * 0.13, 1.0)).xyz * 2.0 - vec3(1.0)
+      worldPos.z * -0.13 - waterTime * 0.012, worldPos.x * 0.13 + waterTime * 0.015, 1.0)).xyz * 2.0 - vec3(1.0)
     detailNormal: Vec3 = normalize(vec3(
       normalA.x + normalB.x,
       normalA.z + normalB.z,
@@ -884,7 +885,7 @@ var
   groundRingShapeValues = vec3(0)
   waterProgram: GLuint
   waterMvpLocation, waterCameraLocation, waterNormalsLocation: GLint
-  waterVisibilityTexLocation: GLint
+  waterTimeLocation, waterVisibilityTexLocation: GLint
   waterVisibilityOffsetLocation, waterVisibilityScaleLocation: GLint
   waterNormalTextureArray: GLuint
   propProgram: GLuint
@@ -3047,6 +3048,23 @@ proc emitWaterLayer(layer: QuadLayer) =
       waterMesh.add normal.x
       waterMesh.add normal.y
       waterMesh.add normal.z
+  # A uniform ocean is one surface; avoid hundreds of thousands of identical tiles.
+  var flatOcean = not layer.slab and layer.tiles.len > 0
+  for tile in layer.tiles:
+    if not tile.exists or tile.tops != layer.tiles[0].tops:
+      flatOcean = false
+      break
+  if flatOcean:
+    let heights = layer.tiles[0].tops.unpack
+    if heights[0] == heights[1] and heights[0] == heights[2] and heights[0] == heights[3]:
+      let x = layer.originX.float32-HalfGrid
+      let z = layer.originZ.float32-HalfGrid
+      let w = layer.width.float32
+      let d = layer.depth.float32
+      let h = heights[0]
+      addWaterTriangle(vec3(x,h,z), vec3(x+w,h,z), vec3(x,h,z+d), vec3(0,1,0))
+      addWaterTriangle(vec3(x+w,h,z), vec3(x+w,h,z+d), vec3(x,h,z+d), vec3(0,1,0))
+      return
   let w = layer.width
   for z in 0 ..< layer.depth:
     for x in 0 ..< w:
@@ -3271,6 +3289,7 @@ proc initTerrain*(
   waterMvpLocation = glGetUniformLocation(waterProgram, "mvp")
   waterEnv = envLocations(waterProgram)
   waterCameraLocation = glGetUniformLocation(waterProgram, "cameraPos")
+  waterTimeLocation = glGetUniformLocation(waterProgram, "waterTime")
   waterNormalsLocation = glGetUniformLocation(waterProgram, "waterNormals")
   waterVisibilityTexLocation = glGetUniformLocation(
     waterProgram,
@@ -3809,7 +3828,7 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
       drawTexturedBatch(batch, mvp)
   glUseProgram(0)
 
-proc drawWater*(viewProjection: Mat4, cameraEye: Vec3) =
+proc drawWater*(viewProjection: Mat4, cameraEye: Vec3, seconds = 0'f32) =
   ## Transparent water pass; call after all opaque drawing.
   if waterMesh.len == 0:
     return
@@ -3819,6 +3838,7 @@ proc drawWater*(viewProjection: Mat4, cameraEye: Vec3) =
   mvp = viewProjection
   glUniformMatrix4fv(waterMvpLocation, 1, GL_FALSE, cast[ptr float32](mvp.addr))
   glUniform3f(waterCameraLocation, cameraEye.x, cameraEye.y, cameraEye.z)
+  glUniform1f(waterTimeLocation, seconds)
   glUniform1f(waterVisibilityOffsetLocation, HalfGrid)
   glUniform1f(
     waterVisibilityScaleLocation,
