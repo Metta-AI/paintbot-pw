@@ -318,6 +318,9 @@
   .transport button {
     padding: 6px 10px;
   }
+  .replay-tools { display:flex; align-items:center; gap:3px; flex-shrink:0; padding-left:6px; border-left:1px solid var(--line); }
+  .transport { overflow-x:auto; scrollbar-width:none; }
+  .transport > * { flex-shrink:0; }
   .transport #play {
     min-width: 80px;
     background: #d4bd84;
@@ -693,7 +696,10 @@
       font-size: 11px;
       padding: 6px;
     }
-    .transport #play {
+    .replay-tools { display:flex; align-items:center; gap:3px; flex-shrink:0; padding-left:6px; border-left:1px solid var(--line); }
+  .transport { overflow-x:auto; scrollbar-width:none; }
+  .transport > * { flex-shrink:0; }
+  .transport #play {
       min-width: 58px;
     }
     #clock {
@@ -1049,6 +1055,9 @@
     height: 28px;
     gap: 3px;
   }
+  .replay-tools { display:flex; align-items:center; gap:3px; flex-shrink:0; padding-left:6px; border-left:1px solid var(--line); }
+  .transport { overflow-x:auto; scrollbar-width:none; }
+  .transport > * { flex-shrink:0; }
   .transport #play {
     min-width: 30px;
     width: 30px;
@@ -1187,10 +1196,10 @@
     color: #17382e;
   }
 
-  #match-score { gap: 20px; }
-  .team-summary { min-width: 168px; }
+  #match-score { flex:1; min-width:0; display:flex; justify-content:space-between; gap:clamp(24px,6vw,100px); }
+  .team-summary { min-width:0; }
   .team-scoreline { display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12px; line-height:16px; }
-  .team-scoreline strong { max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; letter-spacing:.12em; }
+  .team-scoreline strong { max-width:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; letter-spacing:.12em; }
   .team-scoreline small { font-size:7px; letter-spacing:.08em; opacity:.7; }
   .agent-lives { display:flex; gap:3px; }
   header .agent-life { width:17px; min-width:17px; height:17px; padding:0; display:block; border:0; border-radius:0; background:conic-gradient(currentColor calc(var(--fill,1)*1turn),transparent 0); box-shadow:inset 0 0 0 1px currentColor; opacity:.9; cursor:pointer; }
@@ -1201,7 +1210,7 @@
   .team-scoreline > span { white-space:nowrap; flex-shrink:0; }
   .team-scoreline strong { min-width:0; }
   @media(max-width:700px) { header .place { display:none; } #match-score { gap:10px; } header { gap:8px; padding:0 8px; } }
-  @media(max-width:520px) { .team-summary { min-width:128px; } .agent-life { width:14px; gap:1px; } .agent-life .agent-number { font-size:6px; } #match-score { gap:6px; } header .right { gap:0; } }
+  @media(max-width:520px) { .team-summary { min-width:0; } header .agent-life { width:14px; min-width:0; height:14px; flex-shrink:1; } .agent-lives { gap:2px; } .agent-life .agent-number { font-size:6px; } #match-score { gap:6px; } header .right { gap:0; } }
 </style>
 <header>
   <small id="modehint" hidden></small>
@@ -1216,10 +1225,7 @@
     </section>
   </div>
   <div class="right">
-    <span class="verified" id="verification">◌ VERIFYING REPLAY</span
-    ><button id="stats">Scoreboard</button><button id="events">Events</button
-    ><button id="help" aria-label="Keyboard shortcuts">?</button
-    ><button id="fullscreen" aria-label="Fullscreen">⛶</button>
+    <button id="fullscreen" aria-label="Fullscreen">⛶</button>
   </div>
 </header>
 <div hidden>
@@ -1271,10 +1277,12 @@
     <option value="16">Ember vision</option>
     <option value="17">Azure vision</option></select
   ><button id="fit">Fit arena</button><button id="topdown">Top down</button
-  ><button id="actioncam" aria-pressed="false">Action camera</button
+  ><button id="actioncam" aria-pressed="true">Action camera</button
   ><button id="bars" aria-pressed="true">Health</button
   ><button id="speech" aria-pressed="true" aria-controls="speech-bubbles">
     Speech bubbles</button
+  ><button id="commstoggle" aria-pressed="false" aria-controls="comms">
+    Communications log</button
   ><button id="eventtoasts" aria-pressed="false" aria-controls="feed banner">
     Toasts</button
   ><label id="territorytoggle"
@@ -1311,7 +1319,7 @@
 </div>
 <div id="fpvcap">BOT EYES · LIVE POV</div>
 <div id="toast" role="status"></div>
-<details id="comms">
+<details id="comms" hidden>
   <summary>COMMS <span id="commscount">0</span></summary>
   <div id="commsbody">
     <div class="commsfilters">
@@ -1346,6 +1354,11 @@
     ><button id="spoilers" title="Show future events (O)" aria-pressed="false">
       Spoilers</button
     ><span id="skipping"></span><span class="spacer"></span
+    ><div class="replay-tools" role="group" aria-label="Replay information">
+      <span class="verified" id="verification">◌ VERIFYING REPLAY</span>
+      <button id="stats">Scoreboard</button><button id="events">Events</button>
+      <button id="help" aria-label="Keyboard shortcuts">?</button>
+    </div
     ><span id="clock">0:00 / 0:00</span
     ><select id="speed" aria-label="Playback speed">
       <option value="0.25">¼×</option>
