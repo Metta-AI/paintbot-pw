@@ -1068,6 +1068,10 @@
       modes.title = "Right-click to move or attack an enemy. Shift-right-click to shoot at ground. Hold C then release to throw a grenade. Rewind to review; return to the latest tick to control.";
       modes.children[1].textContent = "New human game";
     }
+    if (data.live) {
+      $('verification').textContent = t < data.recorded ? 'REPLAY' : 'LIVE';
+      $('verification').title = t < data.recorded ? 'Reviewing recorded actions' : 'Live browser simulation';
+    }
     const control = (w.controlHearts || []).length > 0;
     $("territorytoggle").hidden = !control;
     $("modehint").textContent = control
