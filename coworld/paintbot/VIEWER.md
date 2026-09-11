@@ -8,16 +8,16 @@ Reference: `coworld-ctf/client/replay_broadcast.html`, with the newer communicat
 
 | CTF spectator capability | Paintbot PW |
 | --- | --- |
-| Team score, flags/hearts, living squad pips | Team plates, capture scores, heart state, 16 selectable portraits and health/respawn status |
+| Team score, flags/hearts, living squad pips | Team plates, heart-time points, heart state, 16 selectable portraits and health/respawn status |
 | Player inspection and K/D roster | Live health, tags/outs, captures, respawn, shield, carrying, coordinates; full scoreboard at the playhead |
 | Kill feed and flag/capture announcements | Exact attacker/victim tag events, pickups/drops/returns/captures; capture banner and paint bursts |
-| Momentum / glory timeline | Tag + capture momentum, clickable event marks, spoilers hidden by default |
+| Territory timeline | Team heart ownership above the scrubber, spoilers hidden by default |
 | Play/pause, restart, back-tick, +5s, end | All supported, plus forward one tick; 1/2/4/16x speed |
 | Scrubbing and tick deep links | Range scrubber, `?t=<tick>` opens paused; independent 240-tick seek checkpoints |
 | Loop and auto-skip lulls | Loop restarts playback; lull skip jumps to two seconds before the next event |
-| Minimap, camera pan/zoom | Tactical minimap navigation, camera footprint, zoom buttons/slider, drag pan, Shift-drag orbit, pinch, deliberate Ctrl-scroll |
-| POV visibility lens | Individual bot or collective team vision, using actual range and cover checks |
-| First-person inset, resize grip, tactical context | Second 3D camera, pointer/keyboard resize handle; selected bot and facing wedge on full-context minimap |
+| Minimap, camera pan/zoom | Draggable bottom-left tactical map, collapses into its own button; colored hearts and agents, click-to-pan, camera footprint; keyboard and wheel zoom |
+| POV visibility lens | Individual bot vision through the agent context menu, using actual range and cover checks |
+| First-person inset, resize grip, tactical context | Second 3D camera, pointer/keyboard resize handle; selected bot highlighted on full-context minimap |
 | Comms, expand/collapse, jump to live | Initially collapsed, team filters, time-correct public shouts, pinned scrolling; no private diagnostic logs |
 | Endcard / result roster | Final outcome and per-seat scoreboard, still able to seek back into the match |
 | Keyboard and embedded host protocol | Shortcuts in `?`; loading/ready/error messages, first-error-wins, hash failures stop playback |
