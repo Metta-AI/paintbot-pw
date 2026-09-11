@@ -205,6 +205,16 @@ proc addTriangle*(
   renderer.addVertex(b, uvB, painted)
   renderer.addVertex(c, uvC, painted)
 
+proc addGradientTriangle*(
+    renderer: var ShapeRenderer,
+    a, b, c: Vec3,
+    colorA, colorB, colorC: ColorRGBX
+) =
+  ## Interpolates explicit vertex colors, including transparent feathered edges.
+  renderer.addVertex(a, vec2(0, 0), colorA)
+  renderer.addVertex(b, vec2(1, 0), colorB)
+  renderer.addVertex(c, vec2(0.5, 1), colorC)
+
 proc addQuad*(
     renderer: var ShapeRenderer,
     a,
