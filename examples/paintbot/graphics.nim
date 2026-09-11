@@ -36,7 +36,7 @@ var
   selected = -1
   lens = -1
   follow = false
-  autoCamera = false
+  autoCamera = true
   director = initActionCam(minDistance = 26, maxDistance = 150, tight = 0.6,
     followRate = 1.0, zoomRate = 0.7, holdSeconds = 2.8, mapSpan = 160)
   directorTick = -1
@@ -137,6 +137,83 @@ proc gem(r: var ShapeRenderer, p: Vec3, s: float32, color: ColorRGBX) =
   for i in 0..3:
     r.addTriangle(top, ring[i], ring[(i+1) mod 4], c)
     r.addTriangle(bottom, ring[(i+1) mod 4], ring[i], c)
+
+proc equipmentPickup(r: var ShapeRenderer, p, eye: Vec3, spin: float32,
+    grenade: bool) =
+  # Closed, lit meshes with distinct silhouettes: round pineapple vs tall aerosol.
+  type Face = tuple[a,b,c: Vec3, color: ColorRGBX, depth: float32]
+  var faces: seq[Face]
+  proc vertex(v: Vec3): Vec3 =
+    p+vec3(v.x*cos(spin)-v.z*sin(spin),v.y,v.x*sin(spin)+v.z*cos(spin))
+  proc triangle(a,b,c: Vec3, color: ColorRGBX) =
+    let va=vertex(a); let vb=vertex(b); let vc=vertex(c)
+    let normal=normalize(cross(vb-va,vc-va))
+    let light=0.65'f32+0.35*abs(dot(normal,normalize(vec3(-0.5,0.9,0.4))))
+    let center=(va+vb+vc)/3
+    faces.add((va,vb,vc,rgbx(uint8(color.r.float32*light),
+      uint8(color.g.float32*light),uint8(color.b.float32*light),254),
+      dot(center-eye,center-eye)))
+  proc quad(a,b,c,d:Vec3,color:ColorRGBX) =
+    triangle(a,b,c,color); triangle(a,c,d,color)
+  proc band(y0,y1,r0,r1:float32,color:ColorRGBX) =
+    for i in 0..<24:
+      let a=i.float32*2*PI.float32/24
+      let b=(i+1).float32*2*PI.float32/24
+      quad(vec3(cos(a)*r0,y0,sin(a)*r0),vec3(cos(b)*r0,y0,sin(b)*r0),
+        vec3(cos(b)*r1,y1,sin(b)*r1),vec3(cos(a)*r1,y1,sin(a)*r1),color)
+  proc solidBox(center,half:Vec3,color:ColorRGBX) =
+    let a=center+vec3(-half.x,-half.y,-half.z)
+    let b=center+vec3(half.x,-half.y,-half.z)
+    let c=center+vec3(half.x,-half.y,half.z)
+    let d=center+vec3(-half.x,-half.y,half.z)
+    let up=vec3(0,half.y*2,0)
+    quad(a,b,c,d,color);quad(a+up,d+up,c+up,b+up,color)
+    quad(a,a+up,b+up,b,color);quad(b,b+up,c+up,c,color)
+    quad(c,c+up,d+up,d,color);quad(d,d+up,a+up,a,color)
+  let metal=rgbx(240,246,255,255)
+  let dark=rgbx(36,47,57,255)
+  if grenade:
+    # Lime enamel body with dark horizontal grooves and a silver safety ring.
+    let green=rgbx(183,237,62,255)
+    band(0,0.16,0,0.48,dark)
+    for j in 0..<6:
+      let y0=0.16'f32+j.float32*0.2
+      let y1=y0+0.17
+      let r0=0.7'f32*sin((y0/1.55)*PI.float32)
+      let r1=0.7'f32*sin((y1/1.55)*PI.float32)
+      band(y0,y1,r0,r1,green)
+      band(y1,y0+0.2,r1,0.7*sin(((y0+0.2)/1.55)*PI.float32),dark)
+    band(1.36,1.5,0.26,0.19,dark)
+    solidBox(vec3(0.28,1.52,0),vec3(0.48,0.09,0.16),metal)
+    solidBox(vec3(0.68,1.18,0),vec3(0.09,0.36,0.16),metal)
+    for i in 0..<24:
+      let a=i.float32*2*PI.float32/24
+      let b=(i+1).float32*2*PI.float32/24
+      quad(vec3(-0.22+cos(a)*0.25,1.73+sin(a)*0.25,0),
+        vec3(-0.22+cos(b)*0.25,1.73+sin(b)*0.25,0),
+        vec3(-0.22+cos(b)*0.16,1.73+sin(b)*0.16,0),
+        vec3(-0.22+cos(a)*0.16,1.73+sin(a)*0.16,0),metal)
+  else:
+    let paint=rgbx(255,89,195,255)
+    band(0,0.09,0,0.43,metal)
+    band(0.09,0.18,0.43,0.46,metal)
+    band(0.18,0.5,0.46,0.46,paint)
+    band(0.5,1.18,0.46,0.46,metal)
+    band(1.18,1.65,0.46,0.46,paint)
+    band(1.65,1.78,0.46,0.34,metal)
+    band(1.78,1.82,0.34,0,metal)
+    solidBox(vec3(0,1.96,0),vec3(0.18,0.14,0.16),dark)
+    solidBox(vec3(0.23,1.96,0),vec3(0.13,0.07,0.1),metal)
+    # Bold paint drips across the white label, visible from every direction.
+    for i in 0..<5:
+      let a=i.float32*2*PI.float32/5
+      let b=a+0.25
+      quad(vec3(cos(a)*0.47,1.21,sin(a)*0.47),
+        vec3(cos(b)*0.47,1.21,sin(b)*0.47),
+        vec3(cos(b)*0.47,0.72,sin(b)*0.47),
+        vec3(cos(a)*0.47,0.88,sin(a)*0.47),paint)
+  faces.sort(proc(a,b:Face):int=cmp(b.depth,a.depth))
+  for face in faces:r.addTriangle(face.a,face.b,face.c,face.color)
 
 proc heartSculpture(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX,
     spin: float32, scale = 1'f32) =
@@ -450,7 +527,9 @@ proc runGraphics*() =
       camZ = mix(camZ, poses[selected].z, blend)
       camY = mix(camY, poses[selected].y+1, blend)
     var target = vec3(camX, camY, camZ)
-    if autoCamera:
+    # Keep the final frame still behind the results, including camera toggles.
+    let cameraFinished = world.winner >= 0 or world.tick >= transport.timelineEnd
+    if autoCamera and not cameraFinished:
       if directorLens != lens: setActionCamera(1)
       # Rebuild visible interests each simulation tick, including after lens changes.
       let cameraTickChanged = directorTick != world.tick
@@ -606,20 +685,16 @@ proc runGraphics*() =
               world.canSeePoint(seat, item.pos): lit = true
         if not lit: continue
       let special = item.kind in {grenadePickup,sprayPickup}
-      let spin = (world.tick.float32+alpha)*0.045
+      let spin = heartAnimationTime*1.08
       let p = position(item.pos, if special: 0.7+0.15*sin(spin*1.7) else: 0.28)
       let color = case item.kind
-        of grenadePickup: rgbx(148, 165, 73, 255)
-        of sprayPickup: rgbx(243, 160, 57, 255)
+        of grenadePickup: rgbx(183, 237, 62, 255)
+        of sprayPickup: rgbx(255, 89, 195, 255)
         of armorPickup: rgbx(96, 191, 241, 255)
         of medkitPickup: rgbx(243, 238, 207, 255)
       shapes.addCircle(position(item.pos, 0.04), if special: 1.0 else: 0.55, color)
       if special:
-        shapes.box(p.x,p.y,p.z,0.55,1.05,0.4,color,spin)
-        shapes.box(p.x,p.y+1.05,p.z,0.24,0.22,0.18,rgbx(234,240,224,255),spin)
-        # An offset nozzle/lever makes rotation readable from above.
-        shapes.box(p.x+cos(spin)*0.32,p.y+1.24,p.z+sin(spin)*0.32,
-            0.35,0.13,0.12,rgbx(61,77,67,255),spin)
+        shapes.equipmentPickup(p,eye,spin,item.kind == grenadePickup)
       else:
         shapes.box(p.x, p.y, p.z, 0.4, 0.48, 0.32, color,
             if item.kind == medkitPickup: spin else: 0'f32)

@@ -44,6 +44,7 @@
     topdown: "M12 3 3 8l9 5 9-5-9-5ZM3 13l9 5 9-5M3 18l9 5 9-5",
     bars: "M12 20S3 14 3 8a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 6-9 12-9 12Z",
     speech: "M4 4h16v12H9l-5 4V4ZM8 8h8M8 12h5",
+    commstoggle: "M4 3h16v18H4V3ZM8 7h8M8 11h8M8 15h5",
     eventtoasts: "M5 17h14l-2-3V9a5 5 0 0 0-10 0v5l-2 3ZM10 21h4",
     trails: "M4 20V9a5 5 0 0 1 10 0v6a3 3 0 0 0 6 0V4M17 7l3-3 3 3",
     "territory-graph-toggle": "M3 3v18h18M4 15h5v-5h6v-4h6M4 7h5v4h6v6h6",
@@ -90,6 +91,7 @@
     actioncam: "Action camera: automatically frame fights and heart contests (C in spectator mode)",
     bars: "Show / hide health bars",
     speech: "Show / hide speech bubbles",
+    commstoggle: "Show / hide communications log",
     eventtoasts: "Show / hide event notifications",
     trails: "Show / hide movement orders",
     territory: "Show / hide territory colors",
@@ -409,6 +411,12 @@
     const bubbles = $("speech-bubbles");
     if (bubbles) bubbles.hidden = !speechBubbles;
   });
+  bind("commstoggle", () => {
+    const panel = $("comms");
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) panel.open = true;
+    pressed("commstoggle", !panel.hidden);
+  });
   bind("eventtoasts", () => {
     eventToasts = !eventToasts;
     pressed("eventtoasts", eventToasts);
@@ -593,6 +601,7 @@
     };
     if (keys[e.key.toLowerCase()]) {
       e.preventDefault();
+      if (e.repeat && e.key.toLowerCase() === "c") return;
       $(keys[e.key.toLowerCase()]).click();
     } else if (
       ["a", "d"].includes(e.key.toLowerCase()) &&
@@ -1140,6 +1149,8 @@
       }
       const t = new URLSearchParams(location.search).get("t");
       if (t !== null && Number.isFinite(Number(t))) seek(Number(t), true);
+      Module._pw_action_camera(1);
+      data.actionCamera = true;
     }
     pressed("actioncam", !!data.actionCamera);
     if (data.camera) [camera.x, camera.z, camera.d] = data.camera;
