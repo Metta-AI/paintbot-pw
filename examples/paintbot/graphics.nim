@@ -345,6 +345,46 @@ proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
           uint8(color.b.float32*shade), if color.a==255:254'u8 else:color.a)
       r.addQuad(p0, p3, p2, p1, col)
 
+proc sprayCloud(renderer: var ShapeRenderer, world: World, slot: int,
+    phase, spread: float32) =
+  # Intersecting translucent sheets form a continuous volume from every camera,
+  # with density feathered across the cone and advecting away from the nozzle.
+  const Steps = 20
+  const Across = 12
+  let origin = world.cogs[slot].pos
+  let aim = world.equipment[slot].sprayAim
+  let baseColor = teamColors[team(slot)]
+  let color = rgbx(uint8(baseColor.r.float32*0.65),
+    uint8(baseColor.g.float32*0.65), uint8(baseColor.b.float32*0.65), 255)
+  for vertical in [false, true]:
+    for layer in -3..3:
+      var vertices: array[Steps+1, array[Across+1, Vec3]]
+      var colors: array[Steps+1, array[Across+1, ColorRGBX]]
+      for step in 0..Steps:
+        let f = step.float32/Steps.float32
+        for column in 0..Across:
+          let across = column.float32/Across.float32*2-1
+          let depth = layer.float32/3.5
+          let u = if vertical: depth else: across
+          let v = if vertical: across else: depth
+          let p = point(origin.x.int+int((aim.x.float32-aim.z.float32*u*spread)*f),
+            origin.z.int+int((aim.z.float32+aim.x.float32*u*spread)*f))
+          vertices[step][column] = position(p, 0.9+v*f*0.85)
+          let radius2 = u*u+v*v
+          let feather = max(0'f32, 1-radius2)
+          let billow = 0.75+0.25*sin(f*24-phase*0.22+u*4+v*3)
+          let density = feather*feather*billow*min(f*10, 1'f32)*min((1-f)*6, 1'f32)
+          let opacity = if world.lineClear(origin, p): uint8(60*density) else: 0'u8
+          colors[step][column] = rgbx(color.r, color.g, color.b, opacity)
+      for step in 0..<Steps:
+        for column in 0..<Across:
+          renderer.addGradientTriangle(vertices[step][column], vertices[step+1][column],
+            vertices[step+1][column+1], colors[step][column], colors[step+1][column],
+            colors[step+1][column+1])
+          renderer.addGradientTriangle(vertices[step][column], vertices[step+1][column+1],
+            vertices[step][column+1], colors[step][column], colors[step+1][column+1],
+            colors[step][column+1])
+
 proc runGraphics*() =
   setup()
   var index = if replayMode: indexReplay() else:
@@ -738,24 +778,19 @@ proc runGraphics*() =
           shapes.addCircle(floor,(0.22+(n mod 3).float32*0.13)*stain,palette[n mod 3])
     for i, e in world.equipment:
       if world.cogs[i].hp <= 0 or not seen(i): continue
-      let c = world.cogs[i]
       if e.charge > 0: shapes.addCircle(position(world.grenadeTarget(i), 0.08),
           GrenadeBlastRadius.float32/100, rgbx(229, 199, 88, 255))
       if e.burst > 0:
         let spread = if replayRulesVersion >= 17: 0.6'f32 else: 0.25'f32
-        for ray in -4..4:
-          for n in 1..10:
-            let f = n.float32/10
-            let lateral=ray.float32/4*spread
-            let p = point(c.pos.x.int+int((e.sprayAim.x.float32-e.sprayAim.z.float32*lateral)*f),
-              c.pos.z.int+int((e.sprayAim.z.float32+e.sprayAim.x.float32*lateral)*f))
-            if not world.lineClear(c.pos,p):break
-            shapes.paintball(position(p,0.9+sin(n.float32+ray.float32)*0.15),
-              0.08+f*0.16,teamColors[team(i)])
+        shapes.sprayCloud(world, i, world.tick.float32+alpha, spread)
       if e.grenade: shapes.gem(poses[i]+vec3(-0.45, 1.0, -0.3), 0.19, rgbx(157,
           175, 66, 255))
-      if e.sprayCan: shapes.box(poses[i].x+0.5, poses[i].y+0.75, poses[i].z,
-          0.3, 0.5, 0.25, rgbx(241, 175, 70, 255))
+      if e.sprayCan:
+        let can = poses[i]+vec3(0.95, 0.55, 0)
+        shapes.box(can.x, can.y, can.z, 0.5, 1.2, 0.42,
+          rgbx(241, 175, 70, 255))
+        shapes.box(can.x, can.y+1.2, can.z, 0.23, 0.22, 0.2,
+          rgbx(48, 55, 64, 255))
       for hp in 0..<e.armor: shapes.box(poses[i].x-0.3+hp.float32*0.25, poses[
           i].y+2.1, poses[i].z, 0.16, 0.09, 0.09, rgbx(65, 203, 245, 255))
     if world.controlHearts.len>0:

@@ -614,6 +614,18 @@
           "",
         )}</div><p class="hint">Visibility uses the game’s range and cover checks. The tactical map shows full spectator context. Communications contain public policy shouts; private diagnostic logs are never displayed. Existing v1 replays have no recorded names or communications.</p>`,
     );
+  // Own Space before the canvas handler or a focused control can consume it.
+  window.addEventListener("keydown", (e) => {
+    if (e.code !== "Space" && e.key !== " ") return;
+    if (!ready() || $("dialog").open || e.ctrlKey || e.metaKey || e.altKey) return;
+    const target = e.target;
+    if (target.isContentEditable || target.closest?.("textarea, select") ||
+        (target.tagName === "INPUT" &&
+         !["range", "checkbox", "radio", "button", "submit", "reset"].includes(target.type))) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (!e.repeat) $("play").click();
+  }, { capture: true });
   window.addEventListener("keydown", (e) => {
     if (
       !ready() ||
@@ -622,7 +634,6 @@
     )
       return;
     const keys = {
-      " ": "play",
       ",": "restart",
       b: "back",
       c: state?.playerSlot ? null : "actioncam",
