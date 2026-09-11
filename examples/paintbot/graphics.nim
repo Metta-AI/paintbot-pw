@@ -2,7 +2,8 @@
 import std/[math, times, algorithm]
 import windy, opengl, vmath, chroma, jsony
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing]
-import game, sim, analysis, villagegraphics
+import game, sim, analysis, villagegraphics, controls
+import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
 else: {.emit: "#define EMSCRIPTEN_KEEPALIVE".}
 type
@@ -16,15 +17,19 @@ type
     rulesVersion: int
     world: World
     bounds: array[4,int]
+    recorded: int
     total: int
+    live: bool
+    playerSlot: int
     paused: bool
     screen: array[Seats, array[2, float32]]
     visible: array[Seats, bool]
     footprint: array[4, array[2, float32]]
 var
-  paused = false
-  speed = 1'f32
-  seek = -1
+  transport: Player
+  orderX, orderY: float32
+  orderKind = 0
+  orderSeat = -1
   selected = -1
   lens = -1
   follow = false
@@ -39,11 +44,24 @@ var
   yaw = 0'f32
   tilt = 0.92'f32
 proc setPlaying(value: cint) {.exportc: "pw_play", cdecl,
-    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = paused = value == 0
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = 
+  if value == 0: transport.pause()
+  else: transport.play()
 proc setSpeed(value: cfloat) {.exportc: "pw_speed", cdecl,
-    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = speed = clamp(value, 0.25'f32, 32'f32)
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = transport.setSpeed(speedIndexOf(value.int32))
 proc setTick(value: cint) {.exportc: "pw_seek", cdecl,
-    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = seek = max(0, value.int)
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = transport.seekTo(value.int32, play = false)
+proc saveLiveRecording() {.exportc: "pw_save", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  if not replayMode:
+    saveReplayFile("/human.replay", "paintbot_pw", replayRulesVersion.uint16, recording)
+proc chargeGrenade(held: cint) {.exportc: "pw_charge", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  setGrenadeCharge(held != 0 and options.playerSlot > 0 and not replayMode and not transport.inHistory)
+proc issueOrder(x, y: cfloat, kind, seat: cint) {.exportc: "pw_order", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  if options.playerSlot > 0 and not replayMode and not transport.inHistory:
+    orderX = x; orderY = y; orderKind = kind.int; orderSeat = seat.int
 proc selectSeat(value: cint) {.exportc: "pw_select", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = selected = clamp(value.int,
     -1, Seats-1)
@@ -229,7 +247,15 @@ proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
 
 proc runGraphics*() =
   setup()
-  let index = if replayMode: indexReplay() else: ReplayIndex()
+  var index = if replayMode: indexReplay() else:
+    ReplayIndex(checkpoints: @[Checkpoint(state: snapshot(world))])
+  transport = initPlayer(not replayMode, if replayMode: recording.frames.len.int32 else: options.maximumTicks,
+    playing = not options.pauseOnStart, speed = options.speed)
+  transport.sync(world.tick, recording.frames.len.int32, world.winner != -1)
+  if options.playerSlot > 0:
+    selected = options.playerSlot.int-1
+    lens = selected
+
   let window = newWindow("Paintbot · Heartwick", ivec2(1440, 900))
   makeContextCurrent(window)
   loadExtensions()
@@ -358,7 +384,6 @@ proc runGraphics*() =
   for model in models: model.unlitParts = @["eye", "smile"]
   var shapes = initShapeRenderer()
   var last = epochTime()
-  var accumulator = 0.0
   var heartAnimationTime = 0'f32
   var previous = world.cogs
   var announced = false
@@ -369,19 +394,25 @@ proc runGraphics*() =
     let now = epochTime(); let dt = min(now-last, 0.1); last = now
     # Decorative hearts keep turning while playback is paused or slowed.
     heartAnimationTime = (heartAnimationTime+dt.float32)
-    if replayMode and seek >= 0:
-      index.restore(seek); seek = -1; accumulator = 0; previous = world.cogs
-      if world.tick == recording.frames.len: paused = true
-    if not paused:
-      accumulator+=dt*TickRate.float*speed.float
-      var steps = 0
-      while accumulator >= 1 and steps < 96:
-        if (replayMode and world.tick >= recording.frames.len) or
-            (not replayMode and ((world.tick >= options.maximumTicks and (replayRulesVersion < 20 or options.maximumTicks < 7200)) or
-                world.winner != -1)): paused = true; accumulator = 0; break
-        previous = world.cogs
-        advance(); accumulator-=1; inc steps
-    let alpha = if paused: 1'f32 else: clamp(accumulator.float32, 0, 1)
+    let restore = transport.takeRestore()
+    if restore >= 0:
+      index.restore(restore.int)
+      previous = world.cogs
+      transport.sync(world.tick, recording.frames.len.int32, world.winner != -1)
+    if not replayMode and replayRulesVersion >= 20 and options.maximumTicks >= 7200 and
+        world.tick >= transport.durationTicks and world.winner < 0:
+      transport.durationTicks = world.tick + TickRate*60
+    transport.startFrame(dt.float32, TickRate)
+    let frameStart = epochTime()
+    while transport.shouldTick(frameStart):
+      previous = world.cogs
+      let atFrontier = world.tick == recording.frames.len
+      advance()
+      if atFrontier and world.tick mod 240 == 0:
+        index.checkpoints.add Checkpoint(state: snapshot(world))
+      transport.sync(world.tick, recording.frames.len.int32, world.winner != -1)
+    let paused = not transport.playing
+    let alpha = if paused: 1'f32 else: clamp(transport.accumulator*TickRate.float32, 0, 1)
     var poses: array[Seats, Vec3]
     for i, c in world.cogs:
       poses[i] = if previous[i].hp > 0 and c.hp > 0: mix(position(previous[
@@ -397,6 +428,22 @@ proc runGraphics*() =
     let projection = perspective(45'f32, window.size.x.float32/max(1,
         window.size.y).float32, 0.1'f32, 600'f32)
     let vp = projection*view
+    if orderKind != 0:
+      # Unproject the click into the same world coordinates used by bot commands.
+      let inverse = vp.inverse
+      let a = inverse*vec4(orderX*2-1, 1-orderY*2, -1, 1)
+      let b = inverse*vec4(orderX*2-1, 1-orderY*2, 1, 1)
+      let origin = vec3(a.x, a.y, a.z)/a.w
+      let ray = normalize(vec3(b.x, b.y, b.z)/b.w-origin)
+      let hit = pickWalkableTile(origin, ray)
+      if orderSeat in 0..<Seats and world.visible(options.playerSlot.int-1, orderSeat):
+        queueShootAt(world.cogs[orderSeat].pos)
+      elif hit.hit:
+        let point = tileCenter(hit.layer, hit.x, hit.z)
+        let target = Point(x: int32(round((point.x+32)*100)), z: int32(round((point.z+20)*100)))
+        if orderKind == 1: queueWalkTo(target)
+        else: queueShootAt(target)
+      orderKind = 0
     proc actors(exclude = -1) =
       for i, c in world.cogs:
         if c.hp <= 0 or i == exclude or not seen(i): continue
@@ -678,7 +725,7 @@ proc runGraphics*() =
           let clip = vp*vec4(poses[i]+vec3(0, 1, 0), 1)
           screens[i] = [(clip.x/clip.w*0.5+0.5).float32, (
               0.5-clip.y/clip.w*0.5).float32]
-        let payload = ViewerState(rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], total: recording.frames.len,
+        let payload = ViewerState(rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
             paused: paused, screen: screens, visible: visibility,
             footprint: footprint).toJson()
         let data = payload.cstring
