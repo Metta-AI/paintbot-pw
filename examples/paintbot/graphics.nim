@@ -348,7 +348,7 @@ proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
 proc runGraphics*() =
   setup()
   var index = if replayMode: indexReplay() else:
-    ReplayIndex(checkpoints: @[Checkpoint(state: snapshot(world))])
+    ReplayIndex(checkpoints: @[Checkpoint(state: snapshot(world))], momentum: @[graphSample(world)])
   transport = initPlayer(not replayMode, if replayMode: recording.frames.len.int32 else: options.maximumTicks,
     playing = not options.pauseOnStart, speed = options.speed)
   playbackRate = options.speed.float32
@@ -489,6 +489,7 @@ proc runGraphics*() =
   var previous = world.cogs
   var announced = false
   var lastHud = -1
+  var sentGraphSamples = 0
   var visibilityTick = -1
   var visibilityLens = -2
   window.onFrame = proc() =
@@ -501,7 +502,7 @@ proc runGraphics*() =
       index.restore(restore.int)
       previous = world.cogs
       transport.sync(world.tick, recording.frames.len.int32, world.winner != -1)
-    if not replayMode and replayRulesVersion >= 20 and options.maximumTicks >= 7200 and
+    if not replayMode and replayRulesVersion in 20..22 and options.maximumTicks >= 7200 and
         world.tick >= transport.durationTicks and world.winner < 0:
       transport.durationTicks = world.tick + TickRate*60
     transport.startFrame(dt.float32 * playbackRate / transport.speed.float32, TickRate)
@@ -510,6 +511,7 @@ proc runGraphics*() =
       previous = world.cogs
       let atFrontier = world.tick == recording.frames.len
       advance()
+      if atFrontier: index.sampleGraphs(world)
       if atFrontier and world.tick mod 240 == 0:
         index.checkpoints.add Checkpoint(state: snapshot(world))
       transport.sync(world.tick, recording.frames.len.int32, world.winner != -1)
@@ -607,19 +609,22 @@ proc runGraphics*() =
             0: 0.55'f32 else: 0'f32
         drawCharacter(scene, models[team(i)], poses[i]-vec3(0, lowered, 0),
             facing, 0, rolling)
-    if visibilityTick != world.tick or visibilityLens != lens:
+    # Terrain is public in a live match. Keep actor/target visibility exact;
+    # thousands of terrain rays per tick otherwise stall human input.
+    let terrainLens = if not replayMode: -1 else: lens
+    if (terrainLens >= 0 and visibilityTick != world.tick) or visibilityLens != terrainLens:
       var visibility = newSeq[uint8](GridTiles*GridTiles)
       for z in 0..<GridTiles:
         for x in 0..<GridTiles:
           let p = point((x-HalfGrid.int+32)*100, (z-HalfGrid.int+20)*100)
-          var lit = lens < 0
+          var lit = terrainLens < 0
           if not lit:
             for s in 0..<Seats:
               if (s == lens or lens >= Seats and team(s) == lens-Seats) and
                   world.canSeePoint(s, p): lit = true; break
           visibility[z*GridTiles+x] = if lit: 255'u8 else: 65'u8
       uploadTerrainVisibility(visibility)
-      visibilityTick = world.tick; visibilityLens = lens
+      visibilityTick = world.tick; visibilityLens = terrainLens
     sunDepthPasses(window.size):
       drawTerrainSunDepth()
       scene.sunDepthPass = true; actors(); scene.sunDepthPass = false
@@ -853,6 +858,10 @@ proc runGraphics*() =
         let data = payload.cstring
         {.emit: "EM_ASM({if(Module.paintbotIndex)Module.paintbotIndex(JSON.parse(UTF8ToString($0)));}, `data`);".}
         announced = true
+      if not replayMode and sentGraphSamples != index.momentum.len:
+        let samples = index.momentum.toJson().cstring
+        {.emit: "EM_ASM({if(Module.paintbotGraphs)Module.paintbotGraphs(JSON.parse(UTF8ToString($0)));}, `samples`);".}
+        sentGraphSamples = index.momentum.len
       if lastHud != world.tick or paused:
         var screens: array[Seats, array[2, float32]]
         var visibility: array[Seats, bool]

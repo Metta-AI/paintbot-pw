@@ -8,7 +8,8 @@ type
     x*, z*: int32
   Sample* = object
     tick*: int
-    red*, blue*: int32
+    red*, blue*: float
+    redHearts*, blueHearts*: int32
   Checkpoint* = object
     state*: World
   ReplayIndex* = object
@@ -35,6 +36,30 @@ proc snapshot*(w: World): World =
   result.cover = @[]
   for cover in w.cover: result.cover.add cover
 
+proc graphSample*(w: World): Sample =
+  result = Sample(tick:w.tick,redHearts:w.captures[0],blueHearts:w.captures[1])
+  if visionRulesVersion >= 23:
+    result.red = w.scoreTicks[0].float/TickRate
+    result.blue = w.scoreTicks[1].float/TickRate
+  elif visionRulesVersion >= 13:
+    result.red = w.captures[0].float
+    result.blue = w.captures[1].float
+  else:
+    for i,c in w.cogs:
+      if team(i)==0: result.red += (c.tags+c.captures*10).float
+      else: result.blue += (c.tags+c.captures*10).float
+
+proc sampleGraphs*(index: var ReplayIndex, w: World) =
+  # Sample ownership changes exactly, plus one-second points and the final bonus.
+  let sample = graphSample(w)
+  if index.momentum.len > 0:
+    let previous = index.momentum[^1]
+    if sample.tick <= previous.tick: return
+    if sample.tick mod TickRate != 0 and w.winner == -1 and
+        sample.redHearts == previous.redHearts and sample.blueHearts == previous.blueHearts:
+      return
+  index.momentum.add sample
+
 proc indexReplay*(): ReplayIndex =
   var tags, hits: seq[Moment]
   observeHit = proc(tick: int32, victim, attacker: int, pos: Point) =
@@ -45,8 +70,9 @@ proc indexReplay*(): ReplayIndex =
     tags.add Moment(tick: tick + 1, slot: attacker, side: team(attacker),
         victim: victim, kind: "tag", x: pos.x, z: pos.z)
   defer: observeTag = nil
-  world = newWorld(recording.seed)
+  world = newWorld(recording.seed, recording.endTick)
   result.checkpoints.add Checkpoint(state: snapshot(world))
+  result.sampleGraphs(world)
   while world.tick < recording.frames.len:
     let previous = world.cogs
     let equipment = world.equipment
@@ -93,14 +119,12 @@ proc indexReplay*(): ReplayIndex =
           world.hearts[side].carrier < 0:
         result.events.add Moment(tick: world.tick, slot: -1, side: side,
             kind: "return", x: home(side).x, z: home(side).z)
-    if world.tick mod 24 == 0 or world.tick == recording.frames.len:
-      var glory: array[2, int32]
-      for i, c in world.cogs: glory[team(i)] += c.tags + c.captures * 10
-      if visionRulesVersion>=13:glory=world.captures
-      result.momentum.add Sample(tick: world.tick, red: glory[0], blue: glory[1])
+    result.sampleGraphs(world)
+    if world.tick == recording.frames.len and result.momentum[^1].tick != world.tick:
+      result.momentum.add graphSample(world)
     if world.tick mod 240 == 0:
       result.checkpoints.add Checkpoint(state: snapshot(world))
-  world = newWorld(recording.seed)
+  world = newWorld(recording.seed, recording.endTick)
 
 proc restore*(index: ReplayIndex, tick: int) =
   let target = clamp(tick, 0, recording.frames.len)

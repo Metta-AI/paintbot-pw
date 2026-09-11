@@ -1211,6 +1211,23 @@
   .team-scoreline strong { min-width:0; }
   @media(max-width:700px) { header .place { display:none; } #match-score { gap:10px; } header { gap:8px; padding:0 8px; } }
   @media(max-width:520px) { .team-summary { min-width:0; } header .agent-life { width:14px; min-width:0; height:14px; flex-shrink:1; } .agent-lives { gap:2px; } .agent-life .agent-number { font-size:6px; } #match-score { gap:6px; } header .right { gap:0; } }
+
+  .match-graph {
+    position: fixed; left: 16px; top: 112px; width: min(360px, calc(100vw - 32px));
+    z-index: 35; border: 1px solid var(--line); border-radius: 12px;
+    background: rgba(16, 35, 33, .95); color: #edf2e9;
+    box-shadow: 0 8px 32px #0005; overflow: hidden;
+  }
+  .match-graph[hidden], .match-graph svg[hidden] { display: none; }
+  #points-graph { top: 326px; }
+  .match-graph header { display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 12px; border-bottom: 1px solid var(--line); cursor: grab; touch-action: none; }
+  .match-graph header strong { font-size: 13px; }
+  .match-graph header button { padding: 2px 8px; font-size: 18px; }
+  .match-graph .graph-values { display: flex; gap: 16px; padding: 8px 12px 0; font-size: 12px; }
+  .match-graph svg { display: block; width: 100%; height: 142px; }
+  .match-graph svg text { fill: #becac2; font: 10px sans-serif; }
+  .match-graph .graph-note { padding: 12px; font-size: 12px; color: #becac2; }
 </style>
 <header>
   <small id="modehint" hidden></small>
@@ -1288,7 +1305,7 @@
   ><label id="territorytoggle"
     ><input id="territory" type="checkbox" /> Territory</label
   ><button id="trails" aria-pressed="false" class="optional">Orders</button
-  ><button id="download" class="optional">↓ Replay</button>
+  ><button id="download" class="optional">↓ Replay</button><button id="territory-graph-toggle" aria-pressed="false" aria-controls="territory-graph">Territory graph</button><button id="points-graph-toggle" aria-pressed="false" aria-controls="points-graph">Points graph</button>
 </div>
 <div class="scene-caption">
   <div class="eyebrow">Polyworld arena / 01</div>
@@ -1394,4 +1411,16 @@
   <button class="close" aria-label="Close dialog">×</button>
   <div id="dialogbody"></div>
 </dialog>
+
+
+<section id="territory-graph" class="match-graph" aria-label="Territory held over time" hidden>
+  <header><strong>Territory held</strong><button aria-label="Close territory graph">×</button></header>
+  <div class="graph-values"></div><svg viewBox="0 0 360 142" role="img" aria-label="Hearts held by Ember and Azure over time"></svg>
+</section>
+<section id="points-graph" class="match-graph" aria-label="Team points over time" hidden>
+  <header><strong>Points over time</strong><button aria-label="Close points graph">×</button></header>
+  <div class="graph-values"></div><svg viewBox="0 0 360 142" role="img" aria-label="Ember and Azure points over time"></svg>
+  <div class="graph-note" hidden>Points scoring is available in matches using rules 23 or later.</div>
+</section>
+
 <script src="viewer.js"></script>

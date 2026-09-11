@@ -47,6 +47,8 @@
     commstoggle: "M4 3h16v18H4V3ZM8 7h8M8 11h8M8 15h5",
     eventtoasts: "M5 17h14l-2-3V9a5 5 0 0 0-10 0v5l-2 3ZM10 21h4",
     trails: "M4 20V9a5 5 0 0 1 10 0v6a3 3 0 0 0 6 0V4M17 7l3-3 3 3",
+    "territory-graph-toggle": "M3 3v18h18M4 15h5v-5h6v-4h6M4 7h5v4h6v6h6",
+    "points-graph-toggle": "M3 3v18h18M4 18l5-3 4-7 4 2 4-6M4 19l6-1 4-3 7-2",
     download: "M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5",
     restart: "M5 8a8 8 0 1 1-1 8M5 3v5h5",
     back: "M5 5v14M18 5l-9 7 9 7V5Z",
@@ -506,7 +508,7 @@
           ? "Match drawn"
           : `${w.winner ? "Azure" : "Ember"} wins`
         : "Match scoreboard",
-      `<p class="hint">${clock(w.tick)} · Ember ${w.captures[0]} — ${w.captures[1]} Azure · Seed ${index.seed}<br>Glory = tags + 10 × captures. ${w.controlHearts?.length ? "Captures count heart claims; the team score is current ownership." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th><th>Glory</th></tr></thead><tbody>${rows}</tbody></table>`,
+      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}<br>${state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination. Individual glory is tags + 10 × captures." : "Glory = tags + 10 × captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th><th>Glory</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
     $("dialogbody")
       .querySelectorAll("[data-seat]")
@@ -658,6 +660,85 @@
       )
       .join("");
   }
+  function renderGraphs() {
+    if (!state || !index || ($("territory-graph").hidden && $("points-graph").hidden)) return;
+    const tick = state.world.tick, total = Math.max(24, state.live ? state.recorded : state.total);
+    const history = index.momentum.filter(p => spoilers || p.tick <= tick);
+    const w = state.world;
+    const current = {tick, red: (w.scoreTicks?.[0] || 0)/24, blue: (w.scoreTicks?.[1] || 0)/24,
+      redHearts: w.captures[0], blueHearts: w.captures[1]};
+    // Include the exact playhead between samples, even when scrubbing backwards.
+    const samples = history.filter(p => p.tick !== tick).concat(current).sort((a,b) => a.tick-b.tick);
+    for (const kind of ['territory', 'points']) {
+      const panel = $(`${kind}-graph`);
+      if (panel.hidden) continue;
+      const svg = panel.querySelector('svg'), points = kind === 'points';
+      const available = !points || state.rulesVersion >= 23;
+      svg.hidden = !available;
+      const note = panel.querySelector('.graph-note');
+      if (note) note.hidden = available;
+      panel.querySelector('.graph-values').innerHTML = available ? ['Ember','Azure'].map((name,i) =>
+        `<span style="color:${colors[i]}">${name} <b>${points ? (w.scoreTicks[i]/24).toFixed(1) : w.captures[i]}</b>${points ? ' pts' : ' hearts'}</span>`).join('') : '';
+      if (!available) continue;
+      const fields = points ? ['red','blue'] : ['redHearts','blueHearts'];
+      const max = points ? Math.max(1,...samples.flatMap(p => [p.red,p.blue])) : 10;
+      const x = t => 34+310*t/total, y = v => 112-94*v/max;
+      let chart = [0,.5,1].map(f => `<line x1="34" x2="344" y1="${y(f*max)}" y2="${y(f*max)}" stroke="#ffffff18"/><text x="29" y="${y(f*max)+3}" text-anchor="end">${+(f*max).toFixed(1)}</text>`).join('');
+      chart += `<text x="34" y="132">0:00</text><text x="189" y="132" text-anchor="middle">${clock(total/2)}</text><text x="344" y="132" text-anchor="end">${clock(total)}</text>`;
+      for (let side=0; side<2; side++) {
+        let path = '';
+        samples.forEach((p,i) => {
+          const value = p[fields[side]];
+          // Territory is stacked: gray space is unclaimed, red below, blue above.
+          const v = !points && side===1 ? 10-value : value;
+          path += i===0 ? `M${x(p.tick)},${y(v)}` : points ? `L${x(p.tick)},${y(v)}` : `H${x(p.tick)}V${y(v)}`;
+        });
+        if (!points && samples.length) {
+          const base = side===0 ? 112 : 18;
+          chart += `<path d="${path} L${x(samples.at(-1).tick)},${base} L${x(samples[0].tick)},${base} Z" fill="${colors[side]}" fill-opacity=".3"/>`;
+        }
+        chart += `<path d="${path}" fill="none" stroke="${colors[side]}" stroke-width="2" stroke-linejoin="round"/>`;
+      }
+      chart += `<line x1="${x(tick)}" x2="${x(tick)}" y1="16" y2="114" stroke="#edf2e9" stroke-dasharray="3 3"/>`;
+      svg.innerHTML = chart;
+    }
+  }
+  for (const kind of ['territory', 'points']) {
+    const panel = $(`${kind}-graph`), toggle = $(`${kind}-graph-toggle`);
+    const setOpen = open => {
+      panel.hidden = !open; toggle.setAttribute('aria-pressed', String(open));
+      if (open) {
+        const r=panel.getBoundingClientRect();
+        panel.style.left = `${Math.max(0,Math.min(innerWidth-panel.offsetWidth,r.left))}px`;
+        panel.style.top = `${Math.max(0,Math.min(innerHeight-panel.offsetHeight,r.top))}px`;
+      }
+      renderGraphs();
+    };
+    toggle.onclick = () => setOpen(panel.hidden);
+    panel.querySelector('header button').onclick = () => setOpen(false);
+    const header = panel.querySelector('header');
+    let drag = null;
+    header.onpointerdown = e => {
+      if (e.target.closest('button')) return;
+      const r = panel.getBoundingClientRect();
+      drag = {x:e.clientX-r.left,y:e.clientY-r.top};
+      header.setPointerCapture(e.pointerId); e.preventDefault();
+    };
+    header.onpointermove = e => {
+      if (!drag) return;
+      panel.style.left = `${Math.max(0,Math.min(innerWidth-panel.offsetWidth,e.clientX-drag.x))}px`;
+      panel.style.top = `${Math.max(0,Math.min(innerHeight-panel.offsetHeight,e.clientY-drag.y))}px`;
+    };
+    header.onpointerup = header.onpointercancel = () => { drag = null; };
+    window.addEventListener('resize', () => {
+      const r=panel.getBoundingClientRect();
+      if (!panel.hidden) {
+        panel.style.left = `${Math.max(0,Math.min(innerWidth-panel.offsetWidth,r.left))}px`;
+        panel.style.top = `${Math.max(0,Math.min(innerHeight-panel.offsetHeight,r.top))}px`;
+      }
+    });
+  }
+  Module.paintbotGraphs = samples => { if (index) index.momentum = samples; };
   function islandMargin(x, z) {
     function wave(value, period, amplitude) {
       const phase = ((value % period) + period) % period,
@@ -1079,10 +1160,14 @@
       modes.title = "Right-click to move or attack an enemy. Shift-right-click to shoot at ground. Hold C then release to throw a grenade. Rewind to review; return to the latest tick to control.";
       modes.children[1].textContent = "New human game";
     }
+    if (data.live) {
+      $('verification').textContent = t < data.recorded ? 'REPLAY' : 'LIVE';
+      $('verification').title = t < data.recorded ? 'Reviewing recorded actions' : 'Live browser simulation';
+    }
     const control = (w.controlHearts || []).length > 0;
     $("territorytoggle").hidden = !control;
     $("modehint").textContent = control
-      ? "Territory control · Claim all 10 hearts"
+      ? (data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
       : "Capture the heart · Three lives";
     updatePovSignal();
     const playLabel = data.paused ? "Play" : "Pause";
@@ -1099,7 +1184,10 @@
       $(`policy${s}`).textContent = policyNames;
       $(`policy${s}`).title = policyNames;
       const owned = control ? w.controlHearts.filter(h => h.owner === s).length : w.captures[s];
-      $(`score${s}`).textContent = owned;
+      $(`score${s}`).textContent = data.rulesVersion >= 23 ? (w.scoreTicks[s]/24).toFixed(1) : owned;
+      const scoreLine = $(`score${s}`).parentElement;
+      scoreLine.title = `${owned} hearts held`;
+      scoreLine.querySelector('small').textContent = data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
       w.cogs.forEach((c, i) => {
         if (team(i) !== s) return;
         const unlimited = data.rulesVersion >= 13 && data.rulesVersion < 19;
@@ -1178,6 +1266,7 @@
         renderTimeline();
       lastTick = t;
     }
+    renderGraphs();
     minimap();
     if (skip && !data.paused) {
       const next = index.events.find((e) => e.tick > t && e.kind !== "down");

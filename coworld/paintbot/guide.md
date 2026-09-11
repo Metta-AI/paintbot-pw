@@ -4,7 +4,7 @@ Sixteen wheeled cogs fight for territory in Heartwick. Red uses even slots;
 Blue uses odd slots. Ten stationary hearts divide the entire map into nearest-heart
 regions. Each team starts with its base heart; eight hearts start neutral gray.
 Touch a heart within 140 units on connected terrain to claim it instantly. If both
-teams touch at once, its ownership stays unchanged. Claim all ten to win.
+teams touch at once, its ownership stays unchanged. Holding all ten eliminates the entire opposing team, including remaining respawns.
 
 The default-on territory overlay colors each region by its heart owner, including
 neutral gray. Toggle it off for an unobstructed terrain view. Heart locations and
@@ -14,8 +14,11 @@ and `controlOwner(i)` (-1 neutral, 0 red, 1 blue). WASM sprite observations incl
 unowned objective so existing Paintbot WASM policies can play territory control.
 
 Cogs have three base HP and three respawns (four lives total). Death loses equipment and respawns
-after 72 ticks; spawn protection lasts 36 ticks. Scores are the team's number of
-owned hearts (0–10), also at timeout. A timeout without full control has no winner.
+after 72 ticks; spawn protection lasts 36 ticks. Each owned heart earns its team one point per second, accumulated at 24 ticks per
+second. Matches last five minutes. When a team is eliminated, the survivor receives
+10 × remaining seconds in bonus points. Both teams keep previously earned points.
+The higher total wins; equal totals draw. Simultaneous elimination gives no bonus.
+There is no bombardment or overtime.
 Older replays retain their original capture-the-heart rules.
 
 ## Combat and equipment
@@ -114,11 +117,6 @@ Heartwick now occupies an irregular island. The sandy coast slopes into water;
 policies and movement respect the shoreline, while all objectives remain connected.
 
 Spray covers a roughly 62-degree cone and deals 3 damage per target per burst; armor absorbs damage first.
-
-After five minutes, environment paint grenades bombard the coastline. Over 30 seconds, the target band expands across the island and the rate rises from four to fifty grenades per second. The barrage continues until one team has lives remaining (or both are eliminated together). A decisive victory scores 10–0.
-
-Bombardment is sudden death: at five minutes all spare lives expire, pending respawns are cancelled, and agents already alive have only their current life.
-
 
 ### Expanded island and navigation (rules 22)
 
