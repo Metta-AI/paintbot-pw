@@ -271,7 +271,7 @@ proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
 proc runGraphics*() =
   setup()
   var index = if replayMode: indexReplay() else:
-    ReplayIndex(checkpoints: @[Checkpoint(state: snapshot(world))])
+    ReplayIndex(checkpoints: @[Checkpoint(state: snapshot(world))], momentum: @[graphSample(world)])
   transport = initPlayer(not replayMode, if replayMode: recording.frames.len.int32 else: options.maximumTicks,
     playing = not options.pauseOnStart, speed = options.speed)
   playbackRate = options.speed.float32
@@ -412,6 +412,7 @@ proc runGraphics*() =
   var previous = world.cogs
   var announced = false
   var lastHud = -1
+  var sentGraphSamples = 0
   var visibilityTick = -1
   var visibilityLens = -2
   window.onFrame = proc() =
@@ -433,6 +434,7 @@ proc runGraphics*() =
       previous = world.cogs
       let atFrontier = world.tick == recording.frames.len
       advance()
+      if atFrontier: index.sampleGraphs(world)
       if atFrontier and world.tick mod 240 == 0:
         index.checkpoints.add Checkpoint(state: snapshot(world))
       transport.sync(world.tick, recording.frames.len.int32, world.winner != -1)
@@ -781,6 +783,10 @@ proc runGraphics*() =
         let data = payload.cstring
         {.emit: "EM_ASM({if(Module.paintbotIndex)Module.paintbotIndex(JSON.parse(UTF8ToString($0)));}, `data`);".}
         announced = true
+      if not replayMode and sentGraphSamples != index.momentum.len:
+        let samples = index.momentum.toJson().cstring
+        {.emit: "EM_ASM({if(Module.paintbotGraphs)Module.paintbotGraphs(JSON.parse(UTF8ToString($0)));}, `samples`);".}
+        sentGraphSamples = index.momentum.len
       if lastHud != world.tick or paused:
         var screens: array[Seats, array[2, float32]]
         var visibility: array[Seats, bool]

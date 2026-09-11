@@ -14,6 +14,11 @@ suite "Paintbot replay analysis and metadata":
       recording.frames.add Frame(commands:commands,hash:world.stateHash())
     replayMode=true
     let index=indexReplay()
+    check index.momentum[0].tick == 0
+    check index.momentum[^1].tick == 720
+    for sample in index.momentum:
+      index.restore(sample.tick)
+      check graphSample(world) == sample
     for tick in [719,1,240,480,721,0,333,600,240]:
       index.restore(tick)
       let target=min(tick,720)
@@ -40,3 +45,24 @@ suite "Paintbot replay analysis and metadata":
     recording.communications = @[]
     recording.frames[13].hash=0
     expect ReplayError:discard indexReplay()
+
+  test "live graph history records ownership changes and ignores rewinds":
+    visionRulesVersion = 23
+    var w = newWorld(2026)
+    var history: ReplayIndex
+    history.sampleGraphs(w)
+    w.tick = 7
+    w.captures = [2'i32,1'i32]
+    w.scoreTicks = [8'i32,7'i32]
+    history.sampleGraphs(w)
+    check history.momentum.len == 2
+    check history.momentum[^1].tick == 7
+    check history.momentum[^1].redHearts == 2
+    w.tick = 3
+    history.sampleGraphs(w)
+    check history.momentum.len == 2
+    w.tick = 9
+    w.winner = 0
+    w.scoreTicks[0] = 70000
+    history.sampleGraphs(w)
+    check history.momentum[^1].red == 70000.0/24

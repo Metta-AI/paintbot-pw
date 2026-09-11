@@ -65,3 +65,13 @@ These are local browser matches; the league's running server match is separate.
 Standalone URLs: `play/index.html?bot=base.bas:16` to spectate or
 `play/index.html?bot=base.bas:15&player=1` to play. `player=N` uses the shared
 one-based seat contract. File replays preserve their recorded players.
+
+## Floating match graphs
+
+Use **Territory graph** and **Points graph** in the view toolbar to toggle each
+floating panel independently. Drag a panel by its title bar; use × to close it.
+Territory stacks Ember and Azure ownership out of ten hearts, leaving neutral
+hearts unfilled. Points plots both cumulative team scores, including elimination
+bonuses. Graphs follow the playhead and hide future history unless Spoilers is on.
+Live games collect the same simulation samples as replays, including ownership
+changes between seconds. Points are available for rules 23 and later.
