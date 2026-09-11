@@ -430,6 +430,8 @@
   bind("loop", () => {
     loop = !loop;
     pressed("loop", loop);
+    $("stats").disabled = loop;
+    if (loop && dialogMode === "stats") $("dialog").close();
   });
   bind("skip", () => {
     skip = !skip;
@@ -524,6 +526,8 @@
     if (e.target === $("dialog")) $("dialog").close();
   };
   function stats() {
+    if (loop) return;
+    dialogMode = "stats";
     const w = state.world,
       counts = Array.from({ length: 16 }, () => ({ deaths: 0, shots: 0 }));
     for (const e of index.events)
