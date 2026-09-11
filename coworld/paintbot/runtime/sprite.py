@@ -12,19 +12,28 @@ COLORS = ("red", "blue")
 SCALE = 5
 
 
-def literal_snappy(raw):
+def compress_walkability(raw):
+    """Snappy RGBA runs keep large semantic maps below the 16 MiB ABI limit."""
     n = len(raw)
     out = bytearray()
-    v = n
-    while v >= 128:
-        out.append((v & 127) | 128)
-        v >>= 7
-    out.append(v)
-    # A Snappy literal: tag 60 + 32-bit little-endian length for large maps.
-    size = max(1, ((n - 1).bit_length() + 7) // 8)
-    out.append((59 + size) << 2)
-    out.extend((n - 1).to_bytes(size, "little"))
-    out.extend(raw)
+    while n >= 128:
+        out.append((n & 127) | 128)
+        n >>= 7
+    out.append(n)
+    i = 0
+    while i < len(raw):
+        pixel = raw[i:i+4]
+        j = i+4
+        while j < len(raw) and raw[j:j+4] == pixel:
+            j += 4
+        out.append(12)  # four-byte literal
+        out.extend(pixel)
+        remaining = j-i-4
+        while remaining:
+            size = min(64, remaining)
+            out.extend(((size-1)*4+2, 4, 0))  # COPY_2, offset four
+            remaining -= size
+        i = j
     return bytes(out)
 
 
@@ -36,8 +45,8 @@ def land_wave(value, period, amplitude):
     return magnitude if phase < half else -magnitude
 
 
-def island_margin(x, z):
-    nx, nz = abs(x - 3200) * 1000 // 5800, abs(z - 2000) * 1000 // 3050
+def island_margin(x, z, expanded=False):
+    nx, nz = abs(x - 3200) * 1000 // (7733 if expanded else 5800), abs(z - 2000) * 1000 // (4575 if expanded else 3050)
     return (
         980
         - int(math.sqrt(math.sqrt(nx**4 + nz**4)))
@@ -53,15 +62,18 @@ def land_coordinates(x, z):
     )
 
 
-def forest_height(x, z):
+def forest_height(x, z, expanded=False):
     height = 0
-    for cx, cz, h, r in [
+    hills = [
         (-1900, 700, 600, 1100),
         (-1400, 3100, 480, 1000),
         (800, -900, 380, 1000),
         (3600, -900, 460, 1100),
         (5700, -800, 330, 900),
-    ]:
+    ]
+    if expanded:
+        hills += [(-3900,300,520,1800),(-3600,3600,460,1700),(700,-1800,410,1800),(3600,-1900,500,1900)]
+    for cx, cz, h, r in hills:
         for px, pz in [(cx, cz), (6400 - cx, 4000 - cz)]:
             d2 = (x - px) ** 2 + (z - pz) ** 2
             height = max(height, max(0, h * (r * r - d2) // (r * r)))
@@ -73,18 +85,18 @@ def forest_height(x, z):
 
 @lru_cache(maxsize=65536)
 def terrain_height(
-    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False
+    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False, expanded=False
 ):
     if island:
         return min(
-            terrain_height(x, z, wide, wilderness, deep, organic),
-            (island_margin(x, z) - 35) * 5,
+            terrain_height(x, z, wide, wilderness, deep, organic, False, expanded),
+            (island_margin(x, z, expanded) - 35) * 5,
         )
     if organic:
         x, z = land_coordinates(x, z)
     if wilderness and (x < 0 or x > 6400 or z < 0 or z > 4000):
         if deep:
-            return forest_height(x, z)
+            return forest_height(x, z, expanded)
         h = max(
             max(0, 180 - (abs(x - cx) + abs(z - cz)) // 3)
             for cx, cz in [
@@ -131,6 +143,7 @@ def elevation(w, p):
         w.get("rulesVersion", 0) >= 14,
         w.get("rulesVersion", 0) >= 15,
         w.get("rulesVersion", 0) >= 16,
+        w.get("rulesVersion", 0) >= 22,
     )
     for t in w.get("trenches", []):
         if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
@@ -211,14 +224,17 @@ def walkability(
     deep=False,
     organic=False,
     island=False,
+    expanded=False,
 ):
-    width, height = (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
-    ox, oz = (2800, 1200) if deep else (800, 400) if wilderness else (0, 0)
+    width, height = (3200, 1920) if expanded else (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
+    ox, oz = (4800, 2800) if expanded else (2800, 1200) if deep else (800, 400) if wilderness else (0, 0)
     raw = bytearray(width * height * 4)
     for z in range(11, height - 11):
         start = (z * width + 11) * 4 + 3
         raw[start : (z * width + width - 11) * 4 : 4] = b"\xff" * (width - 22)
     for cx, cz, cw, ch in cover:
+        if expanded:
+            cx, cz, cw, ch = cx-55, cz-55, cw+110, ch+110 if ch else 0
         cx, cz = cx + ox, cz + oz
         if ch == 0:
             r = cw / 2
@@ -241,7 +257,7 @@ def walkability(
     if island:
         for z in range(height):
             for x in range(width):
-                if island_margin(x * 5 - ox, z * 5 - oz) < 59:
+                if island_margin(x * 5 - ox, z * 5 - oz, expanded) < 59:
                     raw[(z * width + x) * 4 + 3] = 0
     if layered:
         # Reuse the height raster for all four slope probes. Computing the
@@ -252,7 +268,7 @@ def walkability(
             "i",
             (
                 terrain_height(
-                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island
+                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island, expanded
                 )
                 for z in range(height)
                 for x in range(width)
@@ -271,7 +287,7 @@ def walkability(
                     or abs(heights[i - 11 * width] - h) > 80
                 ):
                     raw[i * 4 + 3] = 0
-    return literal_snappy(raw)
+    return compress_walkability(raw)
 
 
 class SpriteView:
@@ -285,9 +301,10 @@ class SpriteView:
         wilderness = w.get("rulesVersion", 0) >= 12
         deep = w.get("rulesVersion", 0) >= 14
         organic = w.get("rulesVersion", 0) >= 15
-        ox, oz = (560, 240) if deep else (160, 80) if wilderness else (0, 0)
+        expanded = w.get("rulesVersion", 0) >= 22
+        ox, oz = (960, 560) if expanded else (560, 240) if deep else (160, 80) if wilderness else (0, 0)
         width, height = (
-            (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
+            (3200, 1920) if expanded else (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
         )
         out = bytearray(b"\x04")
         obj = 0
@@ -333,6 +350,7 @@ class SpriteView:
                     deep,
                     organic,
                     w.get("rulesVersion", 0) >= 16,
+                    w.get("rulesVersion", 0) >= 22,
                 ),
             )
             sprite(1, "map", width, height)

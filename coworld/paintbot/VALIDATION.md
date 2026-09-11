@@ -50,3 +50,19 @@ Nine equipment tests cover grenade flight, friendly/trench blast damage, spray l
 Heartleaf's Golden Valley cottage prefabs and Enchanted Meadow props replace the repeated bunkers: six cottages, mirrored garden walls, carts, supply stacks, and a central well. Visible model bounds are fitted to each solid rectangle. Roads connect a market square and side streets; low flowers are walkable and tall scenic mushrooms stay beyond the arena boundary. The authored models and atlases use the existing pinned Polyworld data revision.
 
 Rules v7 records the new map while v6 retains its original cover and replay hashes. Two layout tests check symmetry, overlap, free spawns/equipment, clear trenches, and flood-fill access to both hearts and every pickup across four seeds. A full mixed BASIC/WASM match ran 7,200 ticks and reproduced hash `35166491`; the old v6 match still reproduces `3815528982`. Equipment, movement/vision, replay analysis, and runtime boundary tests pass. Local browser verification displays HASH VERIFIED and the village scene. Optional vet review was unavailable because its API credentials were not configured.
+
+## Rules 22: expanded island and navigation (2026-09-11)
+
+- Exact map area: 160m × 96m = 2 × the preceding 120m × 64m.
+- All ten heart destinations reached from spawn on seed 930220186.
+- Body-clearance regression rejects a visible route that clips an obstacle.
+- Equipment, respawn and bombardment suites: 16 tests passed.
+- Runtime boundary suite: 5 tests passed.
+- 1,110 sampled terrain heights match exactly between native and WASM observations.
+- Full mixed BASIC/Daveey/WASM episode, seed 2026: 2,561 ticks, all ten hearts captured,
+  every replay hash reproduced; longest stationary interval 44 ticks (1.83 seconds).
+  Reported hosted failure had stationary intervals of 6,541 and 6,743 ticks.
+- Full BASIC episode, seed 930220186: 1,704 ticks; maximum stationary interval 3 ticks.
+- Rules 21 hosted replay c3e5bdcc-801d-4fe2-9e69-e22d044c8ef1 still verifies unchanged.
+- Enlarged mixed replay loaded in browser, hash verified; play control exercised.
+- Vet could not run because its required Anthropic credential is not configured.

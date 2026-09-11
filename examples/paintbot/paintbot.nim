@@ -1,3 +1,4 @@
+{.define: paintbotExpanded.}
 when defined(headless):
   import game
   runHeadless()

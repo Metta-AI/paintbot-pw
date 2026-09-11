@@ -2547,8 +2547,25 @@ proc bakeTexturedPlacement(placement: PropPlacement) =
 
 proc rebuildTexturedBatches() =
   ## Bakes every textured placement into its pack's batch and uploads it.
+  # Reserve each batch once. Growing multi-million-vertex foliage buffers
+  # otherwise temporarily retains both the old and new WASM allocations.
+  var counts: Table[GLuint,int]
+  for placement in rockPlacements:
+    let model=rockModels[placement.model]
+    if model.textureArray!=0:counts.mgetOrPut(model.textureArray,0)+=model.vertices.len div 9*12
+  for placement in propPlacements:
+    if placement.model.textureArray!=0:
+      counts.mgetOrPut(placement.model.textureArray,0)+=placement.model.vertices.len div 9*12
   for batch in texturedBatches.mitems:
-    batch.mesh.setLen(0)
+    batch.mesh = @[]
+  for texture,count in counts:
+    var found = -1
+    for i,batch in texturedBatches:
+      if batch.textureArray==texture:found=i;break
+    if found<0:
+      texturedBatches.add TexturedBatch(textureArray:texture)
+      found=texturedBatches.high
+    texturedBatches[found].mesh=newSeqOfCap[float32](count)
   for placement in rockPlacements:
     bakeTexturedPlacement(PropPlacement(
       model: rockModels[placement.model],

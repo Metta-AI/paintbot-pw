@@ -68,6 +68,9 @@ proc initializeEquipment(w: var World) =
         w.controlHearts[i+2].pos=w.freePickup(p)
       for p in [point(-1700,2000),point(8100,2000),point(3200,-650),point(3200,4650)]:
         w.pickups.add Pickup(pos:w.freePickup(p),kind:medkitPickup)
+    if expandedIsland:
+      for i,p in [point(-3000,500),point(9400,3500),point(1000,-1600),point(5400,5600),point(-3000,3500),point(9400,500)]:
+        w.controlHearts[i+2].pos=w.freePickup(p)
     w.captures=[1'i32,1'i32]
 
 proc updateTerritory*(w:var World) =
@@ -244,10 +247,21 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
             t.x+t.w div 2)): v.x = v.x div 5
         if abs(w.cogs[i].pos.z+v.z-(t.z+t.h div 2)) > abs(w.cogs[i].pos.z-(
             t.z+t.h div 2)): v.z = v.z div 5
+      let beforeMove = w.cogs[i].pos
       var p = w.cogs[i].pos; p.x+=v.x
       if not w.movementBlocked(p, i, true): w.cogs[i].pos = p
       p = w.cogs[i].pos; p.z+=v.z
       if not w.movementBlocked(p, i, true): w.cogs[i].pos = p
+      if visionRulesVersion>=22 and distance2(beforeMove,w.cogs[i].pos)<4:
+        # Yield sideways around a teammate instead of pushing forever.
+        let side=if i mod 2==0:1 else: -1
+        for turn in [side,-side,2*side,-2*side]:
+          let escape=if abs(turn)==1:point(-v.z.int*turn,v.x.int*turn)
+            else:point(-v.x.int-v.z.int*(turn div 2),-v.z.int+v.x.int*(turn div 2))
+          let step=direction(Point(),escape,speed)
+          let candidate=point(beforeMove.x.int+step.x.int,beforeMove.z.int+step.z.int)
+          if not w.movementBlocked(candidate,i,true) and w.walkClear(beforeMove,candidate):
+            w.cogs[i].pos=candidate;break
   for i in 0..<Seats:
     if w.cogs[i].hp <= 0: continue
     let cmd = commands[i]

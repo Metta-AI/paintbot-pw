@@ -1,3 +1,14 @@
+dim avoidUntil(10)
+' Drop an unreachable assignment after three seconds without meaningful progress.
+if worldTick mod 72 = 0 then
+  dxProgress = selfX - progressX
+  dyProgress = selfY - progressY
+  if dxProgress * dxProgress + dyProgress * dyProgress < 40000 and objective >= 0 and objective < 10 then
+    avoidUntil(objective) = worldTick + 360
+  end if
+  progressX = selfX
+  progressY = selfY
+end if
 ' BASIC translation of the Paintbot baseline's objective and combat priorities.
 ' Persistent tracks supply short lead prediction; every enemy query is fog gated.
 dim pickupMemoryX(32)
@@ -127,7 +138,7 @@ if heartCount() > 0 then
   objectiveCost = 2147483647
   j = 0
   while j < heartCount()
-    if controlOwner(j) <> selfTeam then
+    if controlOwner(j) <> selfTeam and avoidUntil(j) <= worldTick then
       dx = controlX(j) - selfX
       dy = controlY(j) - selfY
       cost = dx * dx + dy * dy
@@ -167,7 +178,7 @@ if not carrying and thief < 0 then
   nearestCost = 4840000
   j = 0
   while j < pickupCount() and j < 32
-    if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
+    if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 120 then
       kind = pickupMemoryKind(j)
       wanted = (kind = 0 and not hasGrenade) or (kind = 1 and not hasSpray and (selfId / 2) mod 2 = 0) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3)
       if wanted then

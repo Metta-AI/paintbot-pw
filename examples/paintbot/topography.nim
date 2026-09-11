@@ -6,6 +6,7 @@ var wilderness* = false
 var deepWilderness* = false
 var organicTerrain* = false
 var islandTerrain* = false
+var expandedIsland* = false
 proc landWave*(value,period,amplitude:int):int =
   let phase=((value mod period)+period) mod period
   let half=period div 2
@@ -14,8 +15,8 @@ proc landWave*(value,period,amplitude:int):int =
   if phase<half:magnitude else: -magnitude
 proc islandMargin*(x,z:int):int =
   # Rounded headlands with asymmetric coves, in normalized coast units.
-  let nx=abs(x-3200).int64*1000 div 5800
-  let nz=abs(z-2000).int64*1000 div 3050
+  let nx=abs(x-3200).int64*1000 div (if expandedIsland:7733 else:5800)
+  let nz=abs(z-2000).int64*1000 div (if expandedIsland:4575 else:3050)
   let radius=int(sqrt(sqrt((nx*nx*nx*nx+nz*nz*nz*nz).float64)))
   980-radius+landWave(x+z,2600,28)+landWave(x-z+1100,3700,22)
 proc landCoordinates*(x,z:int):tuple[x,z:int] =
@@ -50,14 +51,21 @@ proc forestHeight*(x,z:int):int =
       let d2=(x-cx)*(x-cx)+(z-cz)*(z-cz)
       if d2<c[3]*c[3]:
         height=max(height,c[2]*(c[3]*c[3]-d2) div (c[3]*c[3]))
+  if expandedIsland:
+    for c in [(-3900,300,520,1800),(-3600,3600,460,1700),(700,-1800,410,1800),(3600,-1900,500,1900)]:
+      for mirrored in [false,true]:
+        let cx=if mirrored:6400-c[0] else:c[0]
+        let cz=if mirrored:4000-c[1] else:c[1]
+        let d2=(x-cx)*(x-cx)+(z-cz)*(z-cz)
+        if d2<c[3]*c[3]:height=max(height,c[2]*(c[3]*c[3]-d2) div (c[3]*c[3]))
   # Broad saddles lower the route while leaving climbable slopes on either side.
   height=height*(300+min(baseForestRouteDistance(x,z),500)) div 800
   let edge=max(max(0,max(-x,x-6400)),max(0,max(-z,z-4000)))
   height*min(edge,500) div 500
 proc forestLots*():seq[tuple[x,z,radius:int]] =
   # Jittered groves, not a wall: trails and objective clearings stay open.
-  for z in countup(-1000,4800,400):
-    for x in countup(-2500,8900,400):
+  for z in countup((if expandedIsland: -2700 else: -1000),(if expandedIsland:6700 else:4800),400):
+    for x in countup((if expandedIsland: -4600 else: -2500),(if expandedIsland:11000 else:8900),400):
       if x>= -800 and x<=7200 and z>= -400 and z<=4400:continue
       let px=x+((x+3000)*17+(z+1400)*11) mod 161-80
       let pz=z+((x+3000)*7+(z+1400)*19) mod 181-90
