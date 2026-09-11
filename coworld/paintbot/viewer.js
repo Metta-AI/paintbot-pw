@@ -40,6 +40,7 @@
     help: "M9 8a3 3 0 1 1 5 2c-2 1-2 2-2 4M12 18h.01",
     fullscreen: "M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5",
     fit: "M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4M9 9h6v6H9z",
+    actioncam: "M3 6h12v12H3V6ZM15 10l6-4v12l-6-4M7 9v6M5 12h4",
     topdown: "M12 3 3 8l9 5 9-5-9-5ZM3 13l9 5 9-5M3 18l9 5 9-5",
     bars: "M12 20S3 14 3 8a5 5 0 0 1 9-3 5 5 0 0 1 9 3c0 6-9 12-9 12Z",
     speech: "M4 4h16v12H9l-5 4V4ZM8 8h8M8 12h5",
@@ -84,6 +85,7 @@
     lens: "Choose whose vision to show",
     fit: "Fit the whole arena",
     topdown: "View from above",
+    actioncam: "Action camera: automatically frame fights and heart contests (C)",
     bars: "Show / hide health bars",
     speech: "Show / hide speech bubbles",
     eventtoasts: "Show / hide event notifications",
@@ -235,6 +237,7 @@
     Module._pw_seek(Math.max(0, Math.min(state.total, Math.round(t))));
   }
   function cameraUpdate() {
+    pressed("actioncam", false);
     if (ready())
       Module._pw_camera(camera.x, camera.z, camera.d, camera.yaw, camera.tilt);
     $("zoom").value = camera.d;
@@ -291,6 +294,13 @@
     });
     $("fpvcap").style.top = r.top + 85 + "px";
   }
+  $("actioncam").onclick = () => {
+    if (!ready()) return;
+    const on = !state.actionCamera;
+    if (on) { following = false; options(); }
+    Module._pw_action_camera(+on);
+    pressed("actioncam", on);
+  };
   $("territory").onchange = () => {
     if (ready()) Module._pw_territory(+$("territory").checked);
   };
@@ -538,6 +548,7 @@
       "Take a closer look",
       `<div class="helpgrid">${[
         ["Space", "Play / pause"],
+        ["C", "Toggle intelligent action camera"],
         [", / E", "Restart / end"],
         ["B / N", "Previous / next tick"],
         [".", "Forward five seconds"],
@@ -568,6 +579,7 @@
       " ": "play",
       ",": "restart",
       b: "back",
+      c: "actioncam",
       n: "step",
       ".": "forward",
       e: "end",
@@ -1048,6 +1060,8 @@
       const t = new URLSearchParams(location.search).get("t");
       if (t !== null && Number.isFinite(Number(t))) seek(Number(t), true);
     }
+    pressed("actioncam", !!data.actionCamera);
+    if (data.camera) [camera.x, camera.z, camera.d] = data.camera;
     const w = data.world,
       t = w.tick;
     if (data.playerSlot) {
