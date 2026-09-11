@@ -66,3 +66,17 @@ Rules v7 records the new map while v6 retains its original cover and replay hash
 - Rules 21 hosted replay c3e5bdcc-801d-4fe2-9e69-e22d044c8ef1 still verifies unchanged.
 - Enlarged mixed replay loaded in browser, hash verified; play control exercised.
 - Vet could not run because its required Anthropic credential is not configured.
+
+## Rules 24–25: deliberate captures, heart spawns, and big hearts
+
+- Three-second captures pause during contests and reset when abandoned; scoring
+  transfers only when capture completes. Thirteen capture regressions pass.
+- Ten big-heart regressions cover 30-second timing, one-at-a-time selection,
+  no repeats, five-point income, pool exhaustion, ownership, elimination credit,
+  BASIC observations, and replay seeking.
+- Five heart-spawn regressions and six Python policy-boundary tests pass.
+- Pre-change rules-24 replay: 1,440 ticks, unchanged hash 2492433301.
+- Rules-25 BASIC match: 1,797 ticks, native/browser hash 2751937968; big hearts
+  change at ticks 720 and 1440. Browser visuals show enlarged hearts and gold rings.
+- Package score ceiling includes every possible bonus at the maximum duration.
+- Vet was unavailable because its Anthropic credentials were not configured.

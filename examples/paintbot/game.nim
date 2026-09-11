@@ -43,7 +43,7 @@ proc convertFrames(frames: seq[LegacyFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
           goal: c.goal, aim: c.aim)
     result.add next
-var replayRulesVersion* = 23
+var replayRulesVersion* = 25
 proc loadRecording*(path: string): Recording =
   replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
   visionRulesVersion = replayRulesVersion
@@ -58,8 +58,8 @@ proc loadRecording*(path: string): Recording =
   elif replayRulesVersion in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]:
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PriorRecording)
     result = Recording(seed:old.seed,frames:old.frames,names:old.names,communications:old.communications)
-  elif replayRulesVersion == 23:
-    result = loadReplayFile(path, "paintbot_pw", 23, Recording)
+  elif replayRulesVersion in [23, 24, 25]:
+    result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
     if result.endTick <= 0 or result.endTick > 28800:
       raise newException(ReplayError, "Invalid match duration")
   else:
@@ -151,7 +151,7 @@ proc runHeadless*() =
   while (world.tick < limit or (not replayMode and replayRulesVersion in 20..22 and limit >= 7200)) and world.winner == -1: advance()
   if replayMode and world.tick != limit: raise newException(ReplayError, "Replay has frames after victory")
   if not replayMode and options.recordPath.len > 0: saveReplayFile(
-      options.recordPath, "paintbot_pw", 23, recording)
+      options.recordPath, "paintbot_pw", replayRulesVersion.uint16, recording)
   echo "ticks=", world.tick, " captures=", world.captures, " hash=",
       world.stateHash()
   when defined(coworld):
