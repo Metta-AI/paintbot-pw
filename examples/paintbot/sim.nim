@@ -143,13 +143,23 @@ proc blocked*(w: World, p: Point, radius = Radius): bool =
     if p.x > c.x-radius and p.x < c.x+c.w+radius and p.z > c.z-radius and p.z <
         c.z+c.h+radius: return true
 proc lineClear*(w: World, a, b: Point): bool =
+  # Only obstacles overlapping the ray bounds can block its sampled points.
+  # Keep the exact sample positions and collision predicates for replay parity.
+  var rayWorld = w
+  rayWorld.cover = @[]
+  for c in w.cover:
+    let depth = if c.h == 0: c.w else: c.h
+    if c.x <= max(a.x,b.x) and c.x+c.w >= min(a.x,b.x) and
+        c.z <= max(a.z,b.z) and c.z+depth >= min(a.z,b.z):
+      rayWorld.cover.add c
+  let startHeight = if visionRulesVersion >= 9: w.elevation(a) else: 0
+  let endHeight = if visionRulesVersion >= 9: w.elevation(b) else: 0
   let steps = max(abs(b.x-a.x), abs(b.z-a.z)) div 25 + 1
   for i in 1..steps:
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
-    if w.blocked(p, 0): return false
+    if rayWorld.blocked(p, 0): return false
     if visionRulesVersion >= 9:
-      let eye = w.elevation(a)+120+(w.elevation(b)-w.elevation(
-          a))*i.int div steps.int
+      let eye = startHeight+120+(endHeight-startHeight)*i.int div steps.int
       if w.elevation(p) > eye: return false
   true
 proc canSeePoint*(w: World, slot: int, p: Point): bool =

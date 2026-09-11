@@ -3,7 +3,7 @@ import std/[math, times, algorithm]
 import windy, opengl, vmath, chroma, jsony
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing]
 import game, sim, analysis, villagegraphics, controls
-import polyworld/player
+import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
 else: {.emit: "#define EMSCRIPTEN_KEEPALIVE".}
 type
@@ -29,6 +29,7 @@ var
   transport: Player
   orderX, orderY: float32
   orderKind = 0
+  orderSeat = -1
   selected = -1
   lens = -1
   follow = false
@@ -50,10 +51,17 @@ proc setSpeed(value: cfloat) {.exportc: "pw_speed", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = transport.setSpeed(speedIndexOf(value.int32))
 proc setTick(value: cint) {.exportc: "pw_seek", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = transport.seekTo(value.int32, play = false)
-proc issueOrder(x, y: cfloat, kind: cint) {.exportc: "pw_order", cdecl,
+proc saveLiveRecording() {.exportc: "pw_save", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  if not replayMode:
+    saveReplayFile("/human.replay", "paintbot_pw", replayRulesVersion.uint16, recording)
+proc chargeGrenade(held: cint) {.exportc: "pw_charge", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  setGrenadeCharge(held != 0 and options.playerSlot > 0 and not replayMode and not transport.inHistory)
+proc issueOrder(x, y: cfloat, kind, seat: cint) {.exportc: "pw_order", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   if options.playerSlot > 0 and not replayMode and not transport.inHistory:
-    orderX = x; orderY = y; orderKind = kind.int
+    orderX = x; orderY = y; orderKind = kind.int; orderSeat = seat.int
 proc selectSeat(value: cint) {.exportc: "pw_select", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = selected = clamp(value.int,
     -1, Seats-1)
@@ -391,6 +399,9 @@ proc runGraphics*() =
       index.restore(restore.int)
       previous = world.cogs
       transport.sync(world.tick, recording.frames.len.int32, world.winner != -1)
+    if not replayMode and replayRulesVersion >= 20 and options.maximumTicks >= 7200 and
+        world.tick >= transport.durationTicks and world.winner < 0:
+      transport.durationTicks = world.tick + TickRate*60
     transport.startFrame(dt.float32, TickRate)
     let frameStart = epochTime()
     while transport.shouldTick(frameStart):
@@ -425,7 +436,9 @@ proc runGraphics*() =
       let origin = vec3(a.x, a.y, a.z)/a.w
       let ray = normalize(vec3(b.x, b.y, b.z)/b.w-origin)
       let hit = pickWalkableTile(origin, ray)
-      if hit.hit:
+      if orderSeat in 0..<Seats and world.visible(options.playerSlot.int-1, orderSeat):
+        queueShootAt(world.cogs[orderSeat].pos)
+      elif hit.hit:
         let point = tileCenter(hit.layer, hit.x, hit.z)
         let target = Point(x: int32(round((point.x+32)*100)), z: int32(round((point.z+20)*100)))
         if orderKind == 1: queueWalkTo(target)

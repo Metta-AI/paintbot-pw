@@ -4,7 +4,7 @@
   const $ = (id) => document.getElementById(id),
     colors = ["#ff8069", "#71cfff"];
   const modes = document.createElement("div");
-  modes.style.cssText = "position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:30;display:flex;gap:8px";
+  modes.style.cssText = "position:fixed;bottom:90px;left:12px;z-index:30;display:flex;gap:8px";
   const isPlayPage = location.pathname.includes("/play/");
   for (const [label, human] of [["Watch live demo", false], ["Play as human", true]]) {
     const button = document.createElement("button");
@@ -17,7 +17,23 @@
     };
     modes.append(button);
   }
+  const frontier = document.createElement('button');
+  frontier.textContent = 'Return to live';
+  frontier.hidden = !isPlayPage;
+  frontier.onclick = () => { if (ready()) { Module._pw_seek(state.recorded); Module._pw_play(1); } };
+  modes.append(frontier);
+  {
+    for (const option of [...$('speed').options]) if (![1,2,4,16].includes(Number(option.value))) option.remove();
+  }
   document.body.append(modes);
+  window.addEventListener('keydown', e => {
+    if (state?.playerSlot && e.code === 'KeyC' && !e.repeat &&
+        !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) Module._pw_charge(1);
+  });
+  window.addEventListener('keyup', e => {
+    if (state?.playerSlot && e.code === 'KeyC') Module._pw_charge(0);
+  });
+  window.addEventListener('blur', () => { if (state?.playerSlot) Module._pw_charge(0); });
   const paths = {
     stats: "M4 20V12h3v8M10 20V4h3v16M16 20V8h3v12",
     events: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01",
@@ -426,6 +442,15 @@
     }
   };
   bind("download", () => {
+    if (state.live) {
+      Module._pw_save();
+      const blob = new Blob([FS.readFile('/human.replay')]);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'paintbot.replay'; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      return;
+    }
     const uri =
       new URLSearchParams(location.hash.slice(1)).get("replay") ||
       new URLSearchParams(location.search).get("replay");
@@ -820,7 +845,8 @@
       const rect = $("canvas").getBoundingClientRect();
       const target = agentAt(e);
       Module._pw_order((e.clientX-rect.left)/rect.width, (e.clientY-rect.top)/rect.height,
-        e.shiftKey || (target >= 0 && team(target) !== team(state.playerSlot-1)) ? 2 : 1);
+        e.shiftKey || (target >= 0 && team(target) !== team(state.playerSlot-1)) ? 2 : 1,
+        target >= 0 && team(target) !== team(state.playerSlot-1) ? target : -1);
     } else openAgentMenu(e, agentAt(e));
   });
   $("match-score").addEventListener("click", e => {
@@ -1014,14 +1040,18 @@
       started = true;
       fit();
       layoutInset();
+      if (data.playerSlot) {
+        select(data.playerSlot-1);
+        setLens(data.playerSlot-1);
+      }
       const t = new URLSearchParams(location.search).get("t");
       if (t !== null && Number.isFinite(Number(t))) seek(Number(t), true);
     }
     const w = data.world,
       t = w.tick;
     if (data.playerSlot) {
-      modes.title = "Right-click to move or attack an enemy. Shift-right-click to shoot at ground. Rewind to review; return to the latest tick to control.";
-      modes.children[1].textContent = "You · Right-click to move / attack";
+      modes.title = "Right-click to move or attack an enemy. Shift-right-click to shoot at ground. Hold C then release to throw a grenade. Rewind to review; return to the latest tick to control.";
+      modes.children[1].textContent = "New human game";
     }
     const control = (w.controlHearts || []).length > 0;
     $("territorytoggle").hidden = !control;

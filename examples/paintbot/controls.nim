@@ -2,6 +2,10 @@
 import sim
 
 var pending: seq[Command]
+var charging = false
+
+proc setGrenadeCharge*(held: bool) =
+  charging = held
 
 proc queueWalkTo*(point: Point) =
   pending.add Command(walk: true, goal: point)
@@ -13,6 +17,7 @@ proc flushPlayerCommands*(commands: var array[Seats, Command], slot: int) =
   if slot notin 0..<Seats:
     pending.setLen(0)
     return
+  commands[slot].chargeGrenade = charging
   for command in pending:
     if command.walk:
       commands[slot].walk = true

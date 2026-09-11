@@ -46,3 +46,22 @@ The bundle contains its fonts, portrait, textures and models; it needs no extern
 ## Verification
 
 `tests/test_paintbot_replay.nim` checks forward/backward/repeated checkpoint seeks against recorded hashes, v1 conversion, v2 public metadata, invalid metadata, and hash corruption. The existing seven rules tests and four Python runtime-boundary tests remain passing. A newly recorded 16-seat mixed BASIC/WASM episode retained the existing 3984-tick, 3–0 result and hash `1977552757`.
+
+## Live browser games and human control
+
+The bundle includes `play/index.html`, built as an ordinary Emscripten client,
+using the same shared `webinputs.js`, `controllers.nim`, and `player.nim` as
+Gods of the Arena. Reference: Polyworld `53625e903ee64d6fc938e46613247f8c5d395279`,
+`tools/demo/deploy.md` and `examples/gods_of_the_arena/controls.nim`.
+
+The viewer's **Watch live demo** runs sixteen bundled BASIC bots in the browser.
+**Play as human** reserves seat 1 for you and loads fifteen bots. Right-click to
+move or attack an enemy; Shift-right-click shoots at the ground. Hold C and
+release to throw a carried grenade. Human commands use the bot command stream
+and are recorded with the same world hashes. Rewind to review the action; use
+**Return to live** to resume control. Download saves the recorded match.
+These are local browser matches; the league's running server match is separate.
+
+Standalone URLs: `play/index.html?bot=base.bas:16` to spectate or
+`play/index.html?bot=base.bas:15&player=1` to play. `player=N` uses the shared
+one-based seat contract. File replays preserve their recorded players.

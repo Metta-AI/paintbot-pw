@@ -17,6 +17,12 @@ var
   heard*: array[Seats,seq[HeardMessage]]
   active*: World
   commands*: array[Seats, Command]
+var visionCache: array[Seats, array[Seats, int8]]
+proc visibleToBot(slot, other: int): bool =
+  if other notin 0..<Seats: return false
+  if visionCache[slot][other] == 0:
+    visionCache[slot][other] = if active.visible(slot, other): 1 else: -1
+  visionCache[slot][other] == 1
 const DataNames = ["selfId","selfTeam","selfX","selfY","selfHp","carrying","homeX","homeY","heartX","heartY","worldTick","ownHeartX","ownHeartY","ownHeartStolen","hasGrenade","hasSpray","armorHp","livesLeft","grenadeCharge","trenchId"]
 proc limits*(): Limits =
   result=defaultLimits()
@@ -45,15 +51,15 @@ proc host(slot:int, strings:StringPool): Host =
   for axis in 0..2:
     discard result.addFunction(["heardSlot","heardX","heardY"][axis],1,getHeard(axis),4)
   for name in DataNames:discard result.addData(name)
-  discard result.addFunction("visible",1,proc(a:openArray[int32]):int32 = int32(active.visible(slot,a[0].int)),4)
+  discard result.addFunction("visible",1,proc(a:openArray[int32]):int32 = int32(visibleToBot(slot,a[0].int)),4)
   discard result.addFunction("playerX",1,proc(a:openArray[int32]):int32 =
-    if active.visible(slot,a[0].int):active.cogs[a[0]].pos.x else: -1,4)
+    if visibleToBot(slot,a[0].int):active.cogs[a[0]].pos.x else: -1,4)
   discard result.addFunction("playerY",1,proc(a:openArray[int32]):int32 =
-    if active.visible(slot,a[0].int):active.cogs[a[0]].pos.z else: -1,4)
+    if visibleToBot(slot,a[0].int):active.cogs[a[0]].pos.z else: -1,4)
   discard result.addFunction("playerHp",1,proc(a:openArray[int32]):int32 =
-    if active.visible(slot,a[0].int):active.cogs[a[0]].hp else:0,4)
+    if visibleToBot(slot,a[0].int):active.cogs[a[0]].hp else:0,4)
   discard result.addFunction("playerCarrying",1,proc(a:openArray[int32]):int32 =
-    if active.visible(slot,a[0].int):active.cogs[a[0]].carrying.int32 else:0,4)
+    if visibleToBot(slot,a[0].int):active.cogs[a[0]].carrying.int32 else:0,4)
   discard result.addFunction("chargeGrenade",1,proc(a:openArray[int32]):int32 =
     commands[slot].chargeGrenade=a[0]!=0;1,4)
   discard result.addFunction("pickupCount",0,proc(a:openArray[int32]):int32 = active.pickups.len.int32,4)
@@ -105,6 +111,7 @@ proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
 proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
   shouts=default(array[Seats,seq[string]])
   active=w;commands=default(array[Seats,Command])
+  visionCache=default(array[Seats,array[Seats,int8]])
   for slot in 0..<Seats:
     let b=bots[slot];let cog=w.cogs[slot];let home=home(team(slot));let enemyHeart=w.hearts[1-team(slot)];let own=w.hearts[team(slot)]
     let heart=if enemyHeart.carrier<0 or w.visible(slot,enemyHeart.carrier.int):enemyHeart.pos else:home(1-team(slot))
