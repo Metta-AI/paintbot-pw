@@ -118,3 +118,14 @@ Spray covers a roughly 62-degree cone and deals 3 damage per target per burst; a
 After five minutes, environment paint grenades bombard the coastline. Over 30 seconds, the target band expands across the island and the rate rises from four to fifty grenades per second. The barrage continues until one team has lives remaining (or both are eliminated together). A decisive victory scores 10–0.
 
 Bombardment is sudden death: at five minutes all spare lives expire, pending respawns are cancelled, and agents already alive have only their current life.
+
+
+### Expanded island and navigation (rules 22)
+
+The island spans 160 × 96 metres, exactly twice the previous map area.
+Bounds are (-4800, -2800) to (11200, 6800) centimetres. Six outer hearts
+now sit in the expanded wooded hills. BASIC walkTo routes account for body
+clearance and traversable slopes; blocked cogs sidestep instead of pushing
+forever. Baselines abandon objectives after three seconds without progress.
+WASM receives the same enlarged geometry through a compressed 3200 × 1920
+walkability map, including clearance around obstacles.

@@ -2,6 +2,7 @@ import village, topography
 export topography
 ## Integer-only Paintbot simulation; Polyworld RNG and portable state hashes.
 import polyworld/[rngs, hashes]
+import std/tables
 
 const
   Seats* = 16
@@ -106,9 +107,9 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 21
-proc minX*():int = (if visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
-proc minZ*():int = (if visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
+var visionRulesVersion* = 22
+proc minX*():int = (if visionRulesVersion>=22: -4800 elif visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
+proc minZ*():int = (if visionRulesVersion>=22: -2800 elif visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
 proc maxZ*():int = Height-minZ()
 proc elevation*(w: World, p: Point): int =
@@ -212,6 +213,7 @@ proc newWorld*(seed: int32): World =
   deepWilderness = visionRulesVersion >= 14
   organicTerrain = visionRulesVersion >= 15
   islandTerrain = visionRulesVersion >= 16
+  expandedIsland = visionRulesVersion >= 22
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
   if visionRulesVersion >= 8:
     for lot in roundVillage():
@@ -283,7 +285,7 @@ proc hit*(w: var World, victim, attacker: int) =
     w.dropHeart(victim); w.cogs[victim].respawn = RespawnTicks
     inc w.cogs[attacker].tags
     if observeTag != nil: observeTag(w.tick, victim, attacker, w.cogs[victim].pos)
-proc waypoint*(w: World, start, goal: Point): Point =
+proc legacyWaypoint(w: World, start, goal: Point): Point =
   ## Bounded breadth-first navigation over a 32x20 arena grid.
   if w.lineClear(start, goal) and w.traversable(start, goal): return goal
   let nx = (maxX()-minX()) div 200; let nz = (maxZ()-minZ()) div 200
@@ -307,6 +309,100 @@ proc waypoint*(w: World, start, goal: Point): Point =
   var n = b
   while prev[n] >= 0 and prev[n] != a: n = prev[n]
   point(minX()+n mod nx*200+100, minZ()+n div nx*200+100)
+# Navigation uses body clearance, never the visibility ray. Cached flow fields
+# share static terrain work across cogs headed for the same objective.
+var navCover: seq[Cover]
+var navBounds: array[4,int]
+var navEdges: seq[seq[int]]
+var navFields: Table[int,seq[int]]
+const NavCell = 100
+proc walkClear*(w: World, a,b: Point):bool =
+  if w.blocked(b) or not w.traversable(a,b):return false
+  let dx=(b.x-a.x).float64;let dz=(b.z-a.z).float64
+  let length=dx*dx+dz*dz
+  for c in w.cover:
+    if c.h==0:
+      let r=c.w.float64/2
+      let cx=c.x.float64+r;let cz=c.z.float64+r
+      let t=if length==0:0.0 else:clamp(((cx-a.x.float64)*dx+(cz-a.z.float64)*dz)/length,0.0,1.0)
+      let ex=a.x.float64+t*dx-cx;let ez=a.z.float64+t*dz-cz
+      if ex*ex+ez*ez<(r+Radius.float64)*(r+Radius.float64):return false
+    else:
+      let steps=max(abs(b.x-a.x),abs(b.z-a.z)).int div 15+1
+      for i in 1..steps:
+        let x=a.x.int+(b.x-a.x).int*i div steps
+        let z=a.z.int+(b.z-a.z).int*i div steps
+        if x>c.x-Radius and x<c.x+c.w+Radius and z>c.z-Radius and z<c.z+c.h+Radius:return false
+  let steps=max(abs(b.x-a.x),abs(b.z-a.z)).int div 50+1
+  for i in 1..steps:
+    let x=a.x.int+(b.x-a.x).int*i div steps
+    let z=a.z.int+(b.z-a.z).int*i div steps
+    if islandTerrain and islandMargin(x,z)<Radius div 3+40:return false
+  true
+proc navigationPoint(n,nx:int):Point =
+  point(minX()+(n mod nx)*NavCell+NavCell div 2,
+        minZ()+(n div nx)*NavCell+NavCell div 2)
+proc waypoint*(w:World,start,goal:Point):Point =
+  if visionRulesVersion<22:return w.legacyWaypoint(start,goal)
+  if w.walkClear(start,goal):return goal
+  let nx=(maxX()-minX()) div NavCell
+  let nz=(maxZ()-minZ()) div NavCell
+  let bounds=[minX(),minZ(),maxX(),maxZ()]
+  if navEdges.len!=nx*nz or navCover!=w.cover or navBounds!=bounds:
+    navCover=w.cover;navBounds=bounds;navFields.clear()
+    navEdges=newSeq[seq[int]](nx*nz)
+    for n in 0..<nx*nz:
+      let a=navigationPoint(n,nx)
+      if w.blocked(a):continue
+      for delta in [(1,0),(0,1)]:
+        let x=n mod nx+delta[0];let z=n div nx+delta[1]
+        if x>=nx or z>=nz:continue
+        let j=z*nx+x
+        if w.walkClear(a,navigationPoint(j,nx)):
+          navEdges[n].add j;navEdges[j].add n
+  var target = -1
+  var best=high(int64)
+  for n in 0..<navEdges.len:
+    if navEdges[n].len==0:continue
+    let d=distance2(goal,navigationPoint(n,nx))
+    if d<best:best=d;target=n
+  if target<0:return start
+  if target notin navFields:
+    var distances=newSeq[int](nx*nz)
+    for d in distances.mitems:d = -1
+    var queue = @[target];distances[target]=0
+    var head=0
+    while head<queue.len:
+      let n=queue[head];inc head
+      for j in navEdges[n]:
+        if distances[j]<0:
+          distances[j]=distances[n]+1;queue.add j
+    if navFields.len>=64:navFields.clear()
+    navFields[target]=distances
+  let distances=navFields[target]
+  result=start
+  best=high(int64)
+  var anchor = -1
+  let sx=(start.x.int-minX()) div NavCell
+  let sz=(start.z.int-minZ()) div NavCell
+  for z in max(0,sz-3)..min(nz-1,sz+3):
+    for x in max(0,sx-3)..min(nx-1,sx+3):
+      let n=z*nx+x
+      if distances[n]<0:continue
+      let p=navigationPoint(n,nx)
+      let cost=distances[n].int64*10000000+distance2(start,p)
+      if cost<best and w.walkClear(start,p):
+        best=cost;anchor=n
+  if anchor<0:return
+  result=navigationPoint(anchor,nx)
+  for step in 0..<8:
+    var next = -1
+    for j in navEdges[anchor]:
+      if distances[j]>=0 and distances[j]<distances[anchor]:next=j;break
+    if next<0:break
+    let p=navigationPoint(next,nx)
+    if not w.walkClear(start,p):break
+    result=p;anchor=next
 proc stepEquipment(w: var World, commands: array[Seats, Command])
 proc step*(w: var World, commands: array[Seats, Command],
     rulesVersion = visionRulesVersion) =

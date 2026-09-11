@@ -237,9 +237,9 @@ proc runGraphics*() =
   const border = 3
   let terrainWidth = (maxX()-minX()) div 100+2*border
   let terrainDepth = (maxZ()-minZ()) div 100+2*border
-  let ground = QuadLayer(originX: 32-border+minX() div 100, originZ: 44-border+minZ() div 100, width: terrainWidth, depth: terrainDepth,
+  let ground = QuadLayer(originX: HalfGrid.int-32-border+minX() div 100, originZ: HalfGrid.int-20-border+minZ() div 100, width: terrainWidth, depth: terrainDepth,
       tiles: newSeq[Tile](terrainWidth*terrainDepth))
-  let terraces = QuadLayer(originX: 32-border+minX() div 100, originZ: 44-border+minZ() div 100, width: terrainWidth, depth: terrainDepth,
+  let terraces = QuadLayer(originX: HalfGrid.int-32-border+minX() div 100, originZ: HalfGrid.int-20-border+minZ() div 100, width: terrainWidth, depth: terrainDepth,
       slab: true, tiles: newSeq[Tile](terrainWidth*terrainDepth))
   for z in 0..<terrainDepth:
     for x in 0..<terrainWidth:
@@ -408,7 +408,7 @@ proc runGraphics*() =
       var visibility = newSeq[uint8](GridTiles*GridTiles)
       for z in 0..<GridTiles:
         for x in 0..<GridTiles:
-          let p = point((x-32)*100, (z-44)*100)
+          let p = point((x-HalfGrid.int+32)*100, (z-HalfGrid.int+20)*100)
           var lit = lens < 0
           if not lit:
             for s in 0..<Seats:

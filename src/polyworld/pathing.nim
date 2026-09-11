@@ -9,7 +9,7 @@ import
   profiles
 
 const
-  GridTiles* = 128
+  GridTiles* = (when defined(paintbotExpanded): 256 else: 128)
   HalfGrid* = GridTiles.float32 / 2.0
   HeightSteps* = 8.0'f32  # heights quantize to 1/8 of a tile
   PathUnitsPerTile* = 32'i32
