@@ -29,7 +29,7 @@ var
   lens = -1
   follow = false
   firstPerson = false
-  territoryOverlay = true
+  territoryOverlay = false
   insetSize = 0.25'f32
   bars = true
   trails = false
@@ -324,6 +324,13 @@ proc runGraphics*() =
           tile.kind=RoadTile
       ground.tiles[z*terrainWidth+x] = tile
   layers = if replayRulesVersion >= 9: @[ground, terraces] else: @[ground]
+  if islandTerrain:
+    let ocean = QuadLayer(originX: HalfGrid.int-400, originZ: HalfGrid.int-400, width: 800,
+      depth: 800, water: true, tiles: newSeq[Tile](800*800))
+    for tile in ocean.tiles.mitems:
+      tile = Tile(flags: TileExists, tops: pack([-2.75'f32, -2.75, -2.75, -2.75]),
+        bottoms: pack([-3'f32, -3, -3, -3]))
+    layers.add ocean
   amplitude = 1.2
   treeHeight = 5.5
   initTerrain(MixedTrees, GeneratedTerrain, PaintedRocks)
@@ -428,9 +435,6 @@ proc runGraphics*() =
     beginCharacters(scene, window, view, projection, eye)
     actors(); finishCharacters(scene)
     shapes.clear()
-    if islandTerrain:
-      shapes.addQuad(vec3(-400,-2.8,-400),vec3(-400,-2.8,400),
-        vec3(400,-2.8,400),vec3(400,-2.8,-400),rgbx(57,139,150,254))
     # Low stone courses exactly match collision bounds; capstones and stripes read at a glance.
     # Paint splashes and short bursts follow recorded tags, so seeking reconstructs them.
     for event in index.events:
@@ -616,6 +620,7 @@ proc runGraphics*() =
         let color=if team(b.owner.int)==0:rgbx(255,108,74,255) else:rgbx(89,220,255,255)
         shapes.paintball(ball,0.32-bead.float32*0.035,color)
         shapes.paintball(ball+vec3(-0.07,0.12,-0.04),0.085,rgbx(255,250,214,255))
+    if islandTerrain: drawWater(vp, eye, (world.tick.float32+alpha)/24)
     shapes.draw(vp)
     # A real second 3D camera gives the selected bot's eye-level view.
     if firstPerson and selected >= 0 and world.cogs[selected].hp > 0:
@@ -643,6 +648,7 @@ proc runGraphics*() =
       glViewport((window.size.x-wi-right).GLint, (window.size.y-he-top).GLint,
           wi.GLsizei, he.GLsizei)
       actors(selected); finishCharacters(scene)
+      if islandTerrain: drawWater(proj*v, p, (world.tick.float32+alpha)/24)
       shapes.draw(proj*v)
       glDisable(GL_SCISSOR_TEST)
     window.swapBuffers()
