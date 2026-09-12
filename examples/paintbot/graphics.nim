@@ -15,6 +15,7 @@ type
     communications: seq[Communication]
     seed: int32
   ViewerState = object
+    combat: array[Seats, CombatStats]
     rulesVersion: int
     world: World
     bounds: array[4,int]
@@ -617,7 +618,8 @@ proc runGraphics*() =
     while transport.shouldTick(frameStart):
       previous = world.cogs
       let atFrontier = world.tick == recording.frames.len
-      advance()
+      if atFrontier: index.advanceIndexed()
+      else: advance()
       if atFrontier: index.sampleGraphs(world)
       if atFrontier and world.tick mod 240 == 0:
         index.checkpoints.add Checkpoint(state: snapshot(world))
@@ -1012,7 +1014,7 @@ proc runGraphics*() =
           let clip = vp*vec4(poses[i]+vec3(0, 1, 0), 1)
           screens[i] = [(clip.x/clip.w*0.5+0.5).float32, (
               0.5-clip.y/clip.w*0.5).float32]
-        let payload = ViewerState(rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
+        let payload = ViewerState(combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
             paused: paused, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint).toJson()
         let data = payload.cstring

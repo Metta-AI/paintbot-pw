@@ -413,6 +413,7 @@ proc dropHeart(w: var World, slot: int) =
       returnAt: w.tick+240)
   w.cogs[slot].carrying = false
 # Optional spectator instrumentation lives outside World and its hash.
+var observeShot*: proc(tick: int32, slot: int) {.closure.}
 var observeHit*: proc(tick: int32, victim, attacker: int,
     pos: Point) {.closure.}
 var observeTag*: proc(tick: int32, victim, attacker: int,
@@ -578,6 +579,7 @@ proc step*(w: var World, commands: array[Seats, Command],
     if cmd.shoot and w.cogs[i].cooldown == 0:
       let v = direction(w.cogs[i].pos, w.cogs[i].aim, ShotSpeed)
       if v.x != 0 or v.z != 0:
+        if observeShot != nil: observeShot(w.tick, i)
         w.balls.add Paintball(pos: w.cogs[i].pos, velocity: v, owner: i.int32,
             life: ShotRange div ShotSpeed)
         w.cogs[i].cooldown = (if solid: FireCooldownTicks else: 8)

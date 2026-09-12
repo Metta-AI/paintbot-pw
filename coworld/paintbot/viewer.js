@@ -26,11 +26,8 @@
     for (const option of [...$('speed').options]) if (![1,2,4,16].includes(Number(option.value))) option.remove();
   }
   document.body.append(modes);
-  const soundReadout = document.createElement('div');
-  soundReadout.id = 'sound-readout';
-  soundReadout.style.cssText = 'position:fixed;left:12px;top:104px;z-index:25;max-width:300px;padding:7px 10px;border-radius:6px;background:#13251ee8;color:#f4e7c4;font:12px system-ui;pointer-events:none';
-  soundReadout.hidden = true;
-  document.body.append(soundReadout);
+  const cogReadout = $("cog-readout");
+  const soundReadout = $("sound-readout");
   window.addEventListener('keydown', e => {
     if (state?.playerSlot && e.code === 'KeyC' && !e.repeat &&
         !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) Module._pw_charge(1);
@@ -879,6 +876,21 @@
     const cues = (w.sounds || []).filter(cue => cue.listener === listener && w.tick - cue.tick <= 24);
     const descriptions = [...new Set(cues.map(cue =>
       `${['Footsteps','Gunfire','Explosion','Spray'][cue.kind]} ${['E','SE','S','SW','W','NW','N','NE'][cue.direction]} · ${['near','midrange','far'][cue.distance]}`))];
+    const inspected = selected >= 0 ? selected : listener;
+    const cog = w.cogs[inspected];
+    cogReadout.hidden = !cog;
+    if (cog) {
+      $("cog-name").textContent = `${name(inspected)} · Cog ${inspected + 1}`;
+      $("cog-name").style.color = colors[team(inspected)];
+      $("cog-health").textContent = `${cog.hp} / 3`;
+      $("cog-shots").textContent = state.combat?.[inspected]?.shots ?? "—";
+      $("cog-hits").textContent = state.combat?.[inspected]?.hits ?? "—";
+      $("cog-lives").textContent = w.equipment?.[inspected]?.lives ?? "—";
+      $("cog-captures").textContent = cog.captures;
+      $("cog-status").hidden = cog.hp > 0;
+      $("cog-status").textContent = w.equipment?.[inspected]?.lives === 0
+        ? "Eliminated" : `Respawning in ${Math.ceil(cog.respawn / 24)}s`;
+    }
     soundReadout.hidden = listener < 0 || !w.cogs[listener]?.hp || !descriptions.length;
     soundReadout.textContent = descriptions.slice(-3).join(' / ');
     if (listener >= 0 && w.cogs[listener]?.hp > 0) {

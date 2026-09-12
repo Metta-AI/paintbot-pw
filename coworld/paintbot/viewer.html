@@ -755,6 +755,20 @@
     }
   }
 
+  #cog-readout {
+    position: fixed; left: 12px; top: 104px; z-index: 25;
+    width: 300px; max-width: calc(100vw - 24px); box-sizing: border-box;
+    padding: 10px 12px; border-radius: 6px; background: #13251ee8;
+    color: #f4e7c4; font: 12px system-ui; pointer-events: none;
+  }
+  #cog-readout[hidden], #cog-readout [hidden] { display: none; }
+  #cog-name { font-weight: 700; overflow-wrap: anywhere; }
+  #cog-readout dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 12px; margin: 10px 0 0; }
+  #cog-readout dt { font-size: 10px; color: #c2c9b8; }
+  #cog-readout dd { margin: 2px 0 0; font-size: 16px; font-variant-numeric: tabular-nums; }
+  #cog-status, #sound-readout { margin-top: 8px; color: #c2c9b8; }
+  #sound-readout { border-top: 1px solid #ffffff20; padding-top: 7px; font-size: 11px; }
+
   #povframe {
     display: none;
     position: absolute;
@@ -1225,6 +1239,18 @@
 
 <div id="feed" hidden></div>
 <div id="banner" hidden></div>
+<section id="cog-readout" aria-label="Selected cog statistics" hidden>
+  <div id="cog-name"></div>
+  <dl>
+    <div><dt>Health</dt><dd id="cog-health"></dd></div>
+    <div><dt>Lives</dt><dd id="cog-lives"></dd></div>
+    <div><dt>Hearts captured</dt><dd id="cog-captures"></dd></div>
+    <div title="Gun shots fired, after windup completes"><dt>Shots fired</dt><dd id="cog-shots"></dd></div>
+    <div title="Hits dealt by gun, spray, or grenade, including armor hits"><dt>Hits</dt><dd id="cog-hits"></dd></div>
+  </dl>
+  <div id="cog-status" hidden></div>
+  <div id="sound-readout" hidden></div>
+</section>
 <div id="povframe">
   <canvas
     id="povstatic"
