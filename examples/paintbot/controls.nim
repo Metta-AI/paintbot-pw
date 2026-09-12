@@ -3,6 +3,10 @@ import sim
 
 var pending: seq[Command]
 var charging = false
+var sneaking = false
+
+proc setSneaking*(held: bool) =
+  sneaking = held
 
 proc setGrenadeCharge*(held: bool) =
   charging = held
@@ -18,6 +22,7 @@ proc flushPlayerCommands*(commands: var array[Seats, Command], slot: int) =
     pending.setLen(0)
     return
   commands[slot].chargeGrenade = charging
+  commands[slot].sneak = sneaking
   for command in pending:
     if command.walk:
       commands[slot].walk = true

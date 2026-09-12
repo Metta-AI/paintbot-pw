@@ -20,11 +20,24 @@ type
   Communication* = object
     tick*, slot*: int
     text*: string
+  PreSoundCommand = object
+    walk, shoot, direct: bool
+    goal, aim: Point
+    chargeGrenade: bool
+  PreSoundFrame = object
+    commands: array[Seats, PreSoundCommand]
+    hash: uint32
   PriorRecording = object
     seed*: int32
-    frames*: seq[Frame]
+    frames*: seq[PreSoundFrame]
     names*: array[Seats, string]
     communications*: seq[Communication]
+  PreSoundRecording = object
+    seed: int32
+    frames: seq[PreSoundFrame]
+    names: array[Seats, string]
+    communications: seq[Communication]
+    endTick: int32
   Recording* = object
     seed*: int32
     frames*: seq[Frame]
@@ -43,6 +56,13 @@ proc convertFrames(frames: seq[LegacyFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
           goal: c.goal, aim: c.aim)
     result.add next
+proc convertFrames(frames: seq[PreSoundFrame]): seq[Frame] =
+  for f in frames:
+    var next = Frame(hash: f.hash)
+    for i, c in f.commands:
+      next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
+        goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
+    result.add next
 var replayRulesVersion* = 27
 proc loadRecording*(path: string): Recording =
   replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
@@ -57,14 +77,18 @@ proc loadRecording*(path: string): Recording =
         names: old.names, communications: old.communications)
   elif replayRulesVersion in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]:
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PriorRecording)
-    result = Recording(seed:old.seed,frames:old.frames,names:old.names,communications:old.communications)
-  elif replayRulesVersion in [23, 24, 25, 27]:
+    result = Recording(seed:old.seed,frames:convertFrames(old.frames),names:old.names,communications:old.communications)
+  elif replayRulesVersion in [23, 24, 25]:
+    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreSoundRecording)
+    result = Recording(seed:old.seed,frames:convertFrames(old.frames),names:old.names,
+      communications:old.communications,endTick:old.endTick)
+  elif replayRulesVersion in [26, 27]:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
-    if result.endTick <= 0 or result.endTick > 28800:
-      raise newException(ReplayError, "Invalid match duration")
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
   if replayRulesVersion < 23: result.endTick = MatchTicks
+  elif result.endTick <= 0 or result.endTick > 28800:
+    raise newException(ReplayError, "Invalid match duration")
   if result.frames.len > 28800 or result.communications.len > 20000:
     raise newException(ReplayError, "Replay limits exceeded")
   for i in 0..<Seats:

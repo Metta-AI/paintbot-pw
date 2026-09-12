@@ -26,6 +26,11 @@
     for (const option of [...$('speed').options]) if (![1,2,4,16].includes(Number(option.value))) option.remove();
   }
   document.body.append(modes);
+  const soundReadout = document.createElement('div');
+  soundReadout.id = 'sound-readout';
+  soundReadout.style.cssText = 'position:fixed;left:12px;top:104px;z-index:25;max-width:300px;padding:7px 10px;border-radius:6px;background:#13251ee8;color:#f4e7c4;font:12px system-ui;pointer-events:none';
+  soundReadout.hidden = true;
+  document.body.append(soundReadout);
   window.addEventListener('keydown', e => {
     if (state?.playerSlot && e.code === 'KeyC' && !e.repeat &&
         !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) Module._pw_charge(1);
@@ -33,7 +38,16 @@
   window.addEventListener('keyup', e => {
     if (state?.playerSlot && e.code === 'KeyC') Module._pw_charge(0);
   });
-  window.addEventListener('blur', () => { if (state?.playerSlot) Module._pw_charge(0); });
+  window.addEventListener('keydown', e => {
+    if (state?.playerSlot && e.code === 'KeyQ' && !e.repeat &&
+        !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) Module._pw_sneak(1);
+  });
+  window.addEventListener('keyup', e => {
+    if (state?.playerSlot && e.code === 'KeyQ') Module._pw_sneak(0);
+  });
+  window.addEventListener('blur', () => {
+    if (state?.playerSlot) { Module._pw_charge(0); Module._pw_sneak(0); }
+  });
   const paths = {
     stats: "M4 20V12h3v8M10 20V4h3v16M16 20V8h3v12",
     events: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01",
@@ -607,7 +621,7 @@
         ["Shift + drag", "Orbit camera"],
         ["Pinch", "Zoom on touch screens"],
         ["Right-click", state?.playerSlot ? "Move, or shoot at an enemy" : "Bot menu: follow, view, or vision"],
-        ...(state?.playerSlot ? [["Shift + right-click", "Shoot at the ground"], ["Hold C / release", "Charge / throw grenade"]] : []),
+        ...(state?.playerSlot ? [["Shift + right-click", "Shoot at the ground"], ["Hold C / release", "Charge / throw grenade"], ["Hold Q", "Move quietly at half speed"]] : []),
       ]
         .map(([k, v]) => `<div><kbd>${k}</kbd> ${v}</div>`)
         .join(
@@ -852,6 +866,34 @@
     ctx.save();
     const mapX = x => (x - bounds[0]) * 320 / (bounds[2] - bounds[0]);
     const mapY = z => (z - bounds[1]) * 200 / (bounds[3] - bounds[1]);
+    // Trench footprints are independent of ownership and remain readable over paint.
+    for (const trench of w.trenches || []) {
+      const x = mapX(trench.x), y = mapY(trench.z);
+      const width = Math.max(5, mapX(trench.x + trench.w) - x);
+      const height = Math.max(4, mapY(trench.z + trench.h) - y);
+      ctx.fillStyle = "#302419"; ctx.fillRect(x, y, width, height);
+      ctx.strokeStyle = "#d6b274"; ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, y, width, height);
+    }
+    const listener = state.playerSlot ? state.playerSlot - 1 : selected;
+    const cues = (w.sounds || []).filter(cue => cue.listener === listener && w.tick - cue.tick <= 24);
+    const descriptions = [...new Set(cues.map(cue =>
+      `${['Footsteps','Gunfire','Explosion','Spray'][cue.kind]} ${['E','SE','S','SW','W','NW','N','NE'][cue.direction]} · ${['near','midrange','far'][cue.distance]}`))];
+    soundReadout.hidden = listener < 0 || !w.cogs[listener]?.hp || !descriptions.length;
+    soundReadout.textContent = descriptions.slice(-3).join(' / ');
+    if (listener >= 0 && w.cogs[listener]?.hp > 0) {
+      const p = w.cogs[listener].pos;
+      for (const cue of w.sounds || []) {
+        const age = w.tick - cue.tick;
+        if (cue.listener !== listener || age < 0 || age > 24) continue;
+        const angle = cue.direction * Math.PI / 4;
+        const radius = 15 + cue.distance * 7;
+        ctx.strokeStyle = ["#e4d8b0", "#ffc06e", "#ff8269", "#99dddd"][cue.kind];
+        ctx.globalAlpha = 0.85 * (1 - age / 25); ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.arc(mapX(p.x), mapY(p.z), radius, angle - 0.35, angle + 0.35); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
     const markerColors = ["#ff705f", "#52caff"];
     const hearts = (w.controlHearts || []).length
       ? w.controlHearts

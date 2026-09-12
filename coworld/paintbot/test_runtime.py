@@ -160,6 +160,28 @@ class RuntimeTests(unittest.TestCase):
         del w["heartCaptures"]
         self.assertNotIn(b"control capture", view.frame(w))
 
+    def test_sound_sprites_are_listener_relative_and_quiet_chord_is_opt_in(self):
+        view = SpriteView(0)
+        view.initial = False
+        w = dict(tick=20, rulesVersion=26, cover=[],
+                 cogs=[dict(pos=dict(x=500,z=2000),aim=dict(x=0,z=0),hp=3,cooldown=0) for _ in range(16)],
+                 hearts=[dict(pos=dict(x=x,z=2000),carrier=-1) for x in (960,5440)],
+                 sounds=[dict(listener=0,kind=1,direction=7,distance=2,tick=12),
+                         dict(listener=1,kind=2,direction=4,distance=0,tick=12),
+                         dict(listener=0,kind=3,direction=1,distance=0,tick=-20)])
+        frame = view.frame(w)
+        self.assertIn(b"sound kind 1 direction 7 distance 2 age 8", frame)
+        self.assertNotIn(b"sound kind 2", frame)
+        self.assertNotIn(b"sound kind 3", frame)
+        w["cogs"][0]["hp"] = 0
+        self.assertNotIn(b"sound kind", view.frame(w))
+        w["cogs"][0]["hp"] = 3
+        # B+Select is the quiet chord; existing single-button aim turns stay unchanged.
+        self.assertTrue(view.command(w, [(0x84,80)])["sneak"])
+        self.assertFalse(view.command(w, [(0x84,64)])["sneak"])
+        w["rulesVersion"] = 25
+        self.assertFalse(view.command(w, [(0x84,80)])["sneak"])
+
 
 if __name__ == "__main__":
     unittest.main()

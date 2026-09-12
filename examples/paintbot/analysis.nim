@@ -21,6 +21,8 @@ type
 proc snapshot*(w: World): World =
   result = w
   # Explicit copies keep checkpoint storage independent of mutable sequences.
+  result.sounds = @[]
+  for cue in w.sounds: result.sounds.add cue
   result.heartCaptures = @[]
   for h in w.heartCaptures: result.heartCaptures.add h
   result.usedBigHearts = @[]

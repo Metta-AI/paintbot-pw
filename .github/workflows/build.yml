@@ -48,6 +48,7 @@ jobs:
       - run: nim r tests/test_paintbot_scoring.nim
       - run: nim r tests/test_paintbot_capture.nim
       - run: nim r tests/test_paintbot_big_hearts.nim
+      - run: nim r tests/test_paintbot_sound.nim
       - run: nim r tests/test_paintbot_heart_spawns.nim
       - run: nim r tests/test_paintbot_uniform.nim
       - run: nim r tests/test_paintbot_human.nim

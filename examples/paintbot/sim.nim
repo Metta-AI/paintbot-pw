@@ -74,6 +74,8 @@ type
     team*: int32 # -1 when idle
     ticks*: int32
     contested*: bool
+  SoundCue* = object
+    listener*, kind*, direction*, distance*, tick*: int32
   World* = object
     seed*, tick*: int32
     rng*: Rng
@@ -95,6 +97,7 @@ type
     bigHeart*: int32 # -1 until 30 seconds, or after all hearts have been used
     bigHeartRound*: int32
     usedBigHearts*: seq[bool]
+    sounds*: seq[SoundCue] # Listener-relative sectors; never exact source coordinates.
     uniforms*: array[Seats, bool]
   TerritoryWorld = object
     seed*, tick*: int32
@@ -129,6 +132,7 @@ type
     walk*, shoot*, direct*: bool
     goal*, aim*: Point
     chargeGrenade*: bool
+    sneak*: bool
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
@@ -373,7 +377,7 @@ type LegacyWorld = object
   balls: seq[Paintball]
   winner: int32
 proc stateHash*(w: World): uint32 =
-  if visionRulesVersion >= 25:
+  if visionRulesVersion >= 26:
     result = HashySeed
     for name, value in fieldPairs(w):
       when name == "uniforms":
@@ -390,6 +394,10 @@ proc stateHash*(w: World): uint32 =
       result.addHashy(w.endTick)
     if visionRulesVersion >= 24:
       result.addHashy(w.heartCaptures)
+    if visionRulesVersion >= 25:
+      result.addHashy(w.bigHeart)
+      result.addHashy(w.bigHeartRound)
+      result.addHashy(w.usedBigHearts)
     return
   if visionRulesVersion >= 6:
     return hashy(CombatWorld(seed:w.seed,tick:w.tick,rng:w.rng,cogs:w.cogs,

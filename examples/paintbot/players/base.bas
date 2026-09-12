@@ -322,3 +322,44 @@ if heartCount() = 0 and mapMinX() < 0 and (role = 4 or role = 5) and not carryin
     end if
   end if
 end if
+
+' React to approximate sound bearings only when no opponent is visible.
+if best < 0 and soundCount() > 0 then
+  soundBest = -1
+  soundCost = 2147483647
+  j = 0
+  while j < soundCount()
+    cost = soundAge(j)
+    if soundKind(j) = 1 or soundKind(j) = 2 then
+      cost = cost - 48
+    end if
+    if cost < soundCost then
+      soundBest = j
+      soundCost = cost
+    end if
+    j = j + 1
+  wend
+  bearing = soundDirection(soundBest)
+  dxSound = 0
+  dySound = 0
+  if bearing = 0 or bearing = 1 or bearing = 7 then
+    dxSound = 1000
+  end if
+  if bearing = 3 or bearing = 4 or bearing = 5 then
+    dxSound = -1000
+  end if
+  if bearing = 1 or bearing = 2 or bearing = 3 then
+    dySound = 1000
+  end if
+  if bearing = 5 or bearing = 6 or bearing = 7 then
+    dySound = -1000
+  end if
+  lookAt(selfX + dxSound, selfY + dySound)
+  if objective >= 0 and objective < heartCount() then
+    dxSound = controlX(objective) - selfX
+    dySound = controlY(objective) - selfY
+    if dxSound * dxSound + dySound * dySound < 810000 then
+      sneak(1)
+    end if
+  end if
+end if

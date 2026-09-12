@@ -520,6 +520,9 @@ class SpriteView:
             item(
                 "shout " + str(message["slot"]) + " " + message["text"], message["pos"]
             )
+        for cue in w.get("sounds", []):
+            if w["cogs"][self.slot]["hp"] > 0 and cue["listener"] == self.slot and 0 <= w["tick"] - cue["tick"] <= 24:
+                item(f"sound kind {cue['kind']} direction {cue['direction']} distance {cue['distance']} age {w['tick'] - cue['tick']}", w["cogs"][self.slot]["pos"])
         return bytes(out)
 
     def command(self, w, replies):
@@ -539,6 +542,7 @@ class SpriteView:
             "direct": True,
             "shoot": bool(self.mask & 32),
             "chargeGrenade": bool(self.mask & 128),
+            "sneak": w.get("rulesVersion", 1) >= 26 and self.mask & 80 == 80,
             "goal": {"x": p["x"] + dx * 100, "z": p["z"] + dz * 100},
             "aim": {
                 "x": p["x"] + round(math.cos(a) * 1800),

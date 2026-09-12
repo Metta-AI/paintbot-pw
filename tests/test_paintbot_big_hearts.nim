@@ -4,8 +4,8 @@ import ../examples/paintbot/[sim, game, bots, analysis]
 
 suite "Rotating big hearts":
   setup:
-    visionRulesVersion = 25
-    replayRulesVersion = 25
+    visionRulesVersion = 26
+    replayRulesVersion = 26
 
   test "first heart appears at exactly 30 seconds and rotates at 60":
     var w = newWorld(2026)
@@ -138,7 +138,7 @@ suite "Rotating big hearts":
     for tick in 0..<2161:
       world.step(commands)
       recording.frames.add Frame(commands:commands,hash:world.stateHash())
-    saveReplayFile(path,"paintbot_pw",25,recording)
+    saveReplayFile(path,"paintbot_pw",26,recording)
     recording = loadRecording(path)
     replayMode = true
     let index = indexReplay()

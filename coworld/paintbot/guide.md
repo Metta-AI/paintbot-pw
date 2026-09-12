@@ -159,6 +159,34 @@ alongside the unchanged ownership and capture sprites. Choices are deterministic
 for replay verification, and seeking restores both the active heart and used-heart
 history. Rules 24 and older retain ordinary one-point hearts.
 
+### Trenches and imperfect hearing (rules 26)
+
+Trenches have dark sunken floors, exposed ochre banks, and timber duckboards.
+The tactical map outlines their footprints in tan. Their cover rules are unchanged:
+most outside gunfire passes overhead, but grenades landing in the same trench are
+especially dangerous, and climbing out is slower.
+
+Nearby movement, gunfire, explosions, and spray produce one-second sound cues.
+Sound travels around walls but reveals only a kind, one of eight compass sectors,
+and a rough distance band; it reveals no source identity, team, or exact position.
+Normal movement is audible within 10 metres, gunfire within 35, explosions within
+50, and spray within 18. Cues refresh rather than stack for the same kind and sector,
+with at most twelve retained per listener. Dead cogs hear nothing.
+
+BASIC exposes `soundCount()`, `soundKind(i)` (0 footsteps, 1 gunfire, 2 explosion,
+3 spray), `soundDirection(i)` (0 E, 1 SE, 2 S, 3 SW, 4 W, 5 NW, 6 N, 7 NE),
+`soundDistance(i)` (0 within 6m, 1 within 18m, 2 farther), and `soundAge(i)` in ticks.
+Invalid indices return -1. Call `sneak(1)` each tick to move at half speed without
+footstep cues; weapons remain audible. Humans hold Q while moving. WASM uses the
+B+Select chord (button mask 80), while either button alone retains aim control.
+WASM sound sprites are anchored at the listener, with labels
+`sound kind <kind> direction <sector> distance <band> age <ticks>`. They do not place sprites at the source. The selected cog's cues
+appear as coarse arcs on the minimap and as brief directional text.
+
+The starter policy turns toward sounds when it has no visible opponent and uses
+quiet approaches near objectives. Speech remains a separate existing channel.
+Older recordings retain their original mechanics and replay hashes.
+
 
 ### Uniform disguises (rules 27)
 
@@ -176,4 +204,4 @@ its impersonator are visible under the same seat, BASIC reports the nearer body.
 reports only your own disguise. Pickup kind 4 is a uniform. WASM receives the
 same apparent colors, a `seat N` sprite, a `uniform` pickup, and `uniform worn`
 only for itself. Spectator scoreboards keep true ownership; bodies and minimap
-markers show the disguise. Rules 25 and older keep their original replay hashes.
+markers show the disguise. Rules 26 and older keep their original replay hashes.

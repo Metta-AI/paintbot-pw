@@ -80,3 +80,16 @@ Rules v7 records the new map while v6 retains its original cover and replay hash
   change at ticks 720 and 1440. Browser visuals show enlarged hearts and gold rings.
 - Package score ceiling includes every possible bonus at the maximum duration.
 - Vet was unavailable because its Anthropic credentials were not configured.
+
+## Rules 26: trench visibility and directional hearing
+
+- All Paintbot Nim suites pass, including eight new sound regressions. Seven
+  Python runtime boundary tests pass; browser input checks pass.
+- Sound tests cover coarse octants, walls/range, listener privacy, bounded and
+  expiring cues, quiet movement, loud weapons, and independent replay snapshots.
+- Rules-25 hosted replay still verifies at 240 ticks, hash 837788888.
+- Rules-26 browser replay verifies at 1,797 ticks, hash 571947544; trenches are
+  visibly outlined dugouts and selected-cog sound text shows coarse bearings.
+- Private BASIC compatibility matches on both sides reproduce hashes 3901678753
+  and 3350044769 at 1,484 and 2,201 ticks. No competitive-strength claim is made.
+- Vet was attempted after code changes but unavailable without its API credentials.
