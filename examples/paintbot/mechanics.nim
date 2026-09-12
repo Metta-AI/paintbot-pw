@@ -11,6 +11,37 @@ const
   GunRange* = 5250
   StartingLives* = 3
 
+const SoundLifetime* = TickRate
+# Clockwise octants: E, SE, S, SW, W, NW, N, NE. Integer thresholds
+# deliberately reveal a sector, not a precise bearing or source location.
+proc soundDirection*(dx, dz: int32): int32 =
+  if abs(dx).int64 > 2 * abs(dz).int64: return (if dx >= 0: 0 else: 4)
+  if abs(dz).int64 > 2 * abs(dx).int64: return (if dz >= 0: 2 else: 6)
+  if dx >= 0: (if dz >= 0: 1 else: 7)
+  else: (if dz >= 0: 3 else: 5)
+
+proc emitSound*(w: var World, origin: Point, kind, source: int, radius: int) =
+  if visionRulesVersion < 26: return
+  for listener, cog in w.cogs:
+    if cog.hp <= 0 or listener == source: continue
+    let d = distance2(cog.pos, origin)
+    if d > radius.int64 * radius: continue
+    let cue = SoundCue(listener: listener.int32, kind: kind.int32,
+      direction: soundDirection(origin.x-cog.pos.x, origin.z-cog.pos.z),
+      distance: (if d <= 600*600: 0 elif d <= 1800*1800: 1 else: 2), tick: w.tick)
+    var duplicate = -1
+    var oldest = -1
+    var count = 0
+    for index, old in w.sounds:
+      if old.listener != listener.int32: continue
+      inc count
+      if oldest < 0 or old.tick < w.sounds[oldest].tick: oldest = index
+      if old.kind == cue.kind and old.direction == cue.direction and old.distance == cue.distance:
+        duplicate = index
+    if duplicate >= 0: w.sounds[duplicate] = cue
+    elif count >= 12: w.sounds[oldest] = cue
+    else: w.sounds.add cue
+
 proc gunSpreadPercent*(w: World, origin, target: Point): int =
   ## 25% less spread per metre downhill, capped at 50% less or 50% more spread.
   if visionRulesVersion < 10: return 100
@@ -193,6 +224,7 @@ proc grenadeTarget*(w: World, slot: int): Point =
   Point(x: clamp(c.pos.x+v.x,minX().int32,maxX().int32), z: clamp(c.pos.z+v.z,minZ().int32,maxZ().int32))
 
 proc explode*(w: var World, p: Point, owner: int) =
+  w.emitSound(p, 2, -1, 5000)
   let trench = w.trenchAt(p)
   w.blasts.add Blast(pos: p, tick: w.tick, owner: owner.int32,
       trench: trench.int32)
@@ -244,6 +276,11 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     for i in 0..<Seats:
       w.equipment[i].lives = (if w.cogs[i].hp > 0: 1 else: 0)
       if w.cogs[i].hp <= 0: w.cogs[i].respawn = 0
+  if visionRulesVersion >= 26:
+    var recent: seq[SoundCue]
+    for cue in w.sounds:
+      if w.tick-cue.tick < SoundLifetime and w.cogs[cue.listener].hp > 0: recent.add cue
+    w.sounds = recent
   var gunTargets: seq[tuple[attacker, victim: int]]
   var visual: seq[Paintball]
   for b in w.balls:
@@ -287,7 +324,8 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     w.cogs[i].firing = cmd.shoot
     let dest = if cmd.direct: w.cogs[i].goal else: w.waypoint(w.cogs[i].pos,
         w.cogs[i].goal)
-    let speed = if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed
+    var speed = if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed
+    if visionRulesVersion >= 26 and cmd.sneak: speed = speed div 2
     if distance2(w.cogs[i].pos, dest) > speed.int64*speed:
       var v = direction(w.cogs[i].pos, dest, speed)
       let trench = w.trenchAt(w.cogs[i].pos)
@@ -312,6 +350,8 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           let candidate=point(beforeMove.x.int+step.x.int,beforeMove.z.int+step.z.int)
           if not w.movementBlocked(candidate,i,true) and w.walkClear(beforeMove,candidate):
             w.cogs[i].pos=candidate;break
+      if not cmd.sneak and w.tick mod 12 == i mod 12 and distance2(beforeMove,w.cogs[i].pos) >= 16:
+        w.emitSound(w.cogs[i].pos, 0, i, 1000)
   for i in 0..<Seats:
     if w.cogs[i].hp <= 0: continue
     let cmd = commands[i]
@@ -325,6 +365,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         w.equipment[i].grenade = false; w.equipment[i].charge = 0
     if w.equipment[i].sprayCan:
       if cmd.shoot and w.equipment[i].sprayCooldown == 0:
+        w.emitSound(w.cogs[i].pos, 3, i, 1800)
         w.equipment[i].burst = SprayTicks
         w.equipment[i].sprayCooldown = SprayTicks+SprayRecoveryTicks
         w.equipment[i].sprayHits = 0
@@ -335,6 +376,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         if w.equipment[i].windup == 0:
           # Integer samples follow a hitscan corridor; each victim is tested only once.
           let origin = w.cogs[i].pos
+          w.emitSound(origin, 1, i, 3500)
           var aim = w.equipment[i].gunAim
           # Bounded triangular jitter approximates the original small angular spread.
           var jitter = w.rng.between(-32, 32)+w.rng.between(-32, 32)

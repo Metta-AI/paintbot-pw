@@ -13,8 +13,8 @@ proc touch(w: var World, slot: int, heart = 2) =
 
 suite "Three-second heart captures":
   setup:
-    visionRulesVersion = 24
-    replayRulesVersion = 24
+    visionRulesVersion = 26
+    replayRulesVersion = 26
 
   test "neutral heart changes owner on exactly tick 72":
     var w = emptyArena()
@@ -156,7 +156,7 @@ suite "Three-second heart captures":
       if world.heartCaptures[8].ticks == 30: partialTick = world.tick.int
     require partialTick > 0
     check world.controlHearts[8].owner == 0
-    saveReplayFile(path,"paintbot_pw",24,recording)
+    saveReplayFile(path,"paintbot_pw",26,recording)
     recording = loadRecording(path)
     replayMode = true
     let index = indexReplay()

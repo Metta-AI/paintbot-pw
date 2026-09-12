@@ -50,6 +50,28 @@ proc host(slot:int, strings:StringPool): Host =
       else:heard[slot][i].pos.z
   for axis in 0..2:
     discard result.addFunction(["heardSlot","heardX","heardY"][axis],1,getHeard(axis),4)
+  discard result.addFunction("sneak",1,proc(a:openArray[int32]):int32 =
+    commands[slot].sneak=a[0]!=0;1,4)
+  discard result.addFunction("soundCount",0,proc(a:openArray[int32]):int32 =
+    var count = 0
+    for cue in active.sounds:
+      if cue.listener==slot.int32 and active.tick-cue.tick<=SoundLifetime: inc count
+    count.int32,4)
+  proc getSound(field:int):HostProc =
+    result = proc(a:openArray[int32]):int32 =
+      var index=0
+      for cue in active.sounds:
+        if cue.listener!=slot.int32 or active.tick-cue.tick>SoundLifetime:continue
+        if index==a[0]:
+          return (case field
+            of 0:cue.kind
+            of 1:cue.direction
+            of 2:cue.distance
+            else:active.tick-cue.tick)
+        inc index
+      -1
+  for field in 0..3:
+    discard result.addFunction(["soundKind","soundDirection","soundDistance","soundAge"][field],1,getSound(field),4)
   for name in DataNames:discard result.addData(name)
   discard result.addFunction("visible",1,proc(a:openArray[int32]):int32 = int32(visibleToBot(slot,a[0].int)),4)
   discard result.addFunction("playerX",1,proc(a:openArray[int32]):int32 =

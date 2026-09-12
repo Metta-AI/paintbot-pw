@@ -69,6 +69,9 @@ proc saveLiveRecording() {.exportc: "pw_save", cdecl,
 proc chargeGrenade(held: cint) {.exportc: "pw_charge", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   setGrenadeCharge(held != 0 and options.playerSlot > 0 and not replayMode and not transport.inHistory)
+proc sneak(held: cint) {.exportc: "pw_sneak", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  setSneaking(held != 0 and options.playerSlot > 0 and not replayMode and not transport.inHistory)
 proc issueOrder(x, y: cfloat, kind, seat: cint) {.exportc: "pw_order", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   if options.playerSlot > 0 and not replayMode and not transport.inHistory:
@@ -137,6 +140,31 @@ proc gem(r: var ShapeRenderer, p: Vec3, s: float32, color: ColorRGBX) =
   for i in 0..3:
     r.addTriangle(top, ring[i], ring[(i+1) mod 4], c)
     r.addTriangle(bottom, ring[(i+1) mod 4], ring[i], c)
+
+proc trenchCover(r: var ShapeRenderer, t: Cover) =
+  # Dark earth, exposed banks and duckboards distinguish cover from ordinary roads.
+  let cx = t.x.float32+t.w.float32/2
+  let cz = t.z.float32+t.h.float32/2
+  proc vertex(dx, dz, height: float32): Vec3 =
+    let x = cx+dx; let z = cz+dz
+    vec3(x/100-32, (if replayRulesVersion >= 9: terrainHeight(x.int,z.int).float32/100 else: 0)+height, z/100-20)
+  for side in 0..<24:
+    let a = side.float32*2*PI/24
+    let b = (side+1).float32*2*PI/24
+    proc rim(angle, scale, height: float32): Vec3 =
+      let x = cos(angle); let z = sin(angle)
+      let k = pow(pow(abs(x),4)+pow(abs(z),4), -0.25'f32)
+      vertex(x*k*t.w.float32*scale/2,z*k*t.h.float32*scale/2,height)
+    r.addQuad(rim(a,0.67,-0.45),rim(b,0.67,-0.45),
+      rim(b,1.12,0.08),rim(a,1.12,0.08),rgbx(118,77,40,254))
+    r.addQuad(rim(a,1.12,0.08),rim(b,1.12,0.08),
+      rim(b,1.24,0.13),rim(a,1.24,0.13),rgbx(206,174,105,254))
+    r.addTriangle(vertex(0,0,-0.43),rim(b,0.67,-0.43),
+      rim(a,0.67,-0.43),rgbx(49,37,24,254))
+  for plank in -2..2:
+    let p = vertex(plank.float32*31,0,-0.38)
+    r.box(p.x,p.y,p.z,0.13,0.07,t.h.float32/200*0.57,
+      rgbx(144,111,67,254))
 
 proc equipmentPickup(r: var ShapeRenderer, p, eye: Vec3, spin: float32,
     grenade: bool) =
@@ -692,6 +720,7 @@ proc runGraphics*() =
     beginCharacters(scene, window, view, projection, eye)
     actors(); finishCharacters(scene)
     shapes.clear()
+    for trench in world.trenches: shapes.trenchCover(trench)
     # Low stone courses exactly match collision bounds; capstones and stripes read at a glance.
     # Paint splashes and short bursts follow recorded tags, so seeking reconstructs them.
     for event in index.events:
