@@ -17,10 +17,12 @@ cd "$root"
 python3 coworld/paintbot/tools/build_cover.py
 python3 coworld/paintbot/tools/build_cog.py
 python3 coworld/paintbot/tools/build_round_village.py
+nim c -d:emscripten -d:replayIndexer examples/paintbot/indexer.nim
 nim c -d:emscripten -d:replayViewer examples/paintbot/paintbot.nim
 mkdir -p "$output"
 cp examples/paintbot/emscripten/paintbot.{js,wasm,data} "$output/"
-cp "$root/coworld/paintbot/viewer.js" "$output/"
+cp examples/paintbot/emscripten/paintbot-index.{js,wasm} "$output/"
+cp "$root/coworld/paintbot/"{viewer.js,startup.js,index-worker.js} "$output/"
 cp "$POLYWORLD_DATA/fonts/"Rubik-{Regular,Bold}.ttf "$output/"
 cp "$root/coworld/paintbot/art/paint-crew.png" "$output/portrait.png"
 python3 - "$root" "$output" <<'PY'
@@ -52,3 +54,8 @@ if (!location.search) location.replace('?bot=base.bas:16');
 html=html.replace('</head>',bootstrap+'</head>')
 (out/'play/index.html').write_text(html.replace('</body>',hud+'</body>'))
 PLAY
+
+# Compress the opaque Emscripten archive explicitly: the static content server
+# does not apply HTTP compression to application/octet-stream. Both clients use
+# the same asset layout; share the compressed package across replay and live.
+python3 "$root/coworld/paintbot/tools/package_viewer.py" "$output"

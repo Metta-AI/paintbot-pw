@@ -1,5 +1,6 @@
 ## Painted Polyworld arena with hash-verified spectator analysis.
 import std/[math, times, algorithm]
+when defined(emscripten) and defined(replayViewer): import flatty
 import windy, opengl, vmath, chroma, jsony
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam]
 import game, sim, analysis, villagegraphics, controls
@@ -401,10 +402,26 @@ proc sprayCloud(renderer: var ShapeRenderer, world: World, slot: int,
             vertices[step][column+1], colors[step][column], colors[step+1][column+1],
             colors[step][column+1])
 
+proc startupPhase(label: string) =
+  when defined(emscripten):
+    let text = label.cstring
+    {.emit: "EM_ASM({if(Module.startupPhase)Module.startupPhase(UTF8ToString($0));}, `text`);".}
+    {.emit: "emscripten_sleep(0);".}
+
 proc runGraphics*() =
+  startupPhase("Preparing replay")
   setup()
-  var index = if replayMode: indexReplay() else:
-    ReplayIndex(checkpoints: @[Checkpoint(state: snapshot(world))], momentum: @[graphSample(world)])
+  var index: ReplayIndex
+  if replayMode:
+    when defined(emscripten) and defined(replayViewer):
+      # Produced by our worker from these exact replay bytes, after all hashes
+      # passed. It uses the same Flatty ABI and indexReplay implementation.
+      index = readFile("/episode.index").fromFlatty(ReplayIndex)
+    else:
+      index = indexReplay()
+  else:
+    index = ReplayIndex(checkpoints: @[Checkpoint(state: snapshot(world))],
+      momentum: @[graphSample(world)])
   transport = initPlayer(not replayMode, if replayMode: recording.frames.len.int32 else: options.maximumTicks,
     playing = not options.pauseOnStart, speed = options.speed)
   playbackRate = options.speed.float32
@@ -413,6 +430,7 @@ proc runGraphics*() =
     selected = options.playerSlot.int-1
     lens = selected
 
+  startupPhase("Building terrain")
   let window = newWindow("Paintbot · Heartwick", ivec2(1440, 900))
   makeContextCurrent(window)
   loadExtensions()
@@ -516,9 +534,11 @@ proc runGraphics*() =
     layers.add ocean
   amplitude = 1.2
   treeHeight = 5.5
+  startupPhase("Loading terrain textures")
   initTerrain(MixedTrees, GeneratedTerrain, PaintedRocks)
   computeWalkable()
   scatterGrass(if deepWilderness: 1800 else: 1500, recording.seed, matchTerrain = true)
+  startupPhase("Placing village and woodland")
   if replayRulesVersion >= 8:
     placeRoundVillage()
   elif replayRulesVersion >= 7:
@@ -530,7 +550,9 @@ proc runGraphics*() =
     for c in world.cover:
       coverPack.placeProp("cover", vec3((c.x+c.w div 2).float32/100-32, 0, (
           c.z+c.h div 2).float32/100-20))
+  startupPhase("Uploading terrain and foliage")
   bakeTerrain(rebuildWalkability = false)
+  startupPhase("Preparing first frame")
   let scene = newCharacterScene(window)
   scene.useToonShading()
   scene.setToonHour(15.4)

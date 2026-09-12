@@ -1,14 +1,3 @@
-characters/modular_chars/character.glb
-characters/modular_chars/character.preset_1.profile.png
-characters/modular_chars/character.preset_11.profile.png
-characters/modular_chars/character.preset_12.profile.png
-characters/modular_chars/character.preset_13.profile.png
-characters/modular_chars/character.preset_14.profile.png
-characters/modular_chars/character.preset_16.profile.png
-characters/modular_chars/character.preset_17.profile.png
-characters/modular_chars/character.preset_2.profile.png
-characters/modular_chars/character.preset_3.profile.png
-characters/modular_chars/character.preset_6.profile.png
 terrain/handpainted_trees/birch_double_01.png
 terrain/handpainted_trees/birch_double_02.png
 terrain/handpainted_trees/birch_double_03.png

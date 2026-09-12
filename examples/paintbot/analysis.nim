@@ -60,7 +60,7 @@ proc sampleGraphs*(index: var ReplayIndex, w: World) =
       return
   index.momentum.add sample
 
-proc indexReplay*(): ReplayIndex =
+proc indexReplay*(progress: proc(tick, total: int) = nil): ReplayIndex =
   var tags, hits: seq[Moment]
   observeHit = proc(tick: int32, victim, attacker: int, pos: Point) =
     hits.add Moment(tick: tick+1, slot: attacker, side: team(attacker),
@@ -124,6 +124,7 @@ proc indexReplay*(): ReplayIndex =
       result.momentum.add graphSample(world)
     if world.tick mod 240 == 0:
       result.checkpoints.add Checkpoint(state: snapshot(world))
+      if progress != nil: progress(world.tick, recording.frames.len)
   world = newWorld(recording.seed, recording.endTick)
 
 proc restore*(index: ReplayIndex, tick: int) =
