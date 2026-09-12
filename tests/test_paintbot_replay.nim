@@ -1,6 +1,7 @@
 import std/[unittest, os]
 import ../examples/paintbot/[sim, game, analysis]
 import polyworld/tapes
+import flatty
 
 suite "Paintbot replay analysis and metadata":
   test "checkpoint seeks preserve all recorded world hashes":
@@ -13,7 +14,13 @@ suite "Paintbot replay analysis and metadata":
       world.step(commands)
       recording.frames.add Frame(commands:commands,hash:world.stateHash())
     replayMode=true
-    let index=indexReplay()
+    var updates: seq[int]
+    let built = indexReplay(proc(tick, total: int) =
+      check total == 720
+      updates.add tick)
+    check updates == @[240, 480, 720]
+    # Exercise the same binary handoff as the worker, then seek against hashes.
+    let index = built.toFlatty().fromFlatty(ReplayIndex)
     check index.momentum[0].tick == 0
     check index.momentum[^1].tick == 720
     for sample in index.momentum:

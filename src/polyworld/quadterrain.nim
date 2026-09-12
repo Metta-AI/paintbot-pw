@@ -654,23 +654,36 @@ proc texturedPropVert(
     vertUv: Vec3,
     normal: Vec3,
     vertTint: Vec3,
+    instancePosition, instanceScale: Vec3,
+    instanceRotation: Vec2,
     fragUv: var Vec3,
     fragmentNormal: var Vec3,
     fragmentPosition: var Vec3,
     shadowPos: var Vec3,
     fragTint: var Vec3
 ) =
-  ## Tree vertex outputs plus a per-instance tint for textured props.
-  gl_Position = mvp * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)
-  shadowPos = vec3(
-    vertPos.x + normal.x * 0.08,
-    vertPos.y + normal.y * 0.08,
-    vertPos.z + normal.z * 0.08
-  )
+  ## Models stay in model space; placement transforms are applied by the GPU.
+  let scaled = vertPos * instanceScale
+  let position = instancePosition + vec3(
+    instanceRotation.x * scaled.x - instanceRotation.y * scaled.z,
+    scaled.y,
+    instanceRotation.y * scaled.x + instanceRotation.x * scaled.z)
+  # Match the original baked normal convention, including stretched props.
+  let rotatedNormal = vec3(
+    instanceRotation.x * normal.x - instanceRotation.y * normal.z,
+    normal.y,
+    instanceRotation.y * normal.x + instanceRotation.x * normal.z)
+  gl_Position = mvp * vec4(position.x, position.y, position.z, 1.0)
+  shadowPos = position + rotatedNormal * 0.08
   fragUv = vertUv
-  fragmentNormal = normal
-  fragmentPosition = vertPos
+  fragmentNormal = rotatedNormal
+  fragmentPosition = position
   fragTint = vertTint
+
+proc instancedDepthFrag(fragColor: var Vec4, fragUv: Vec3) =
+  if texture(treeTextures, fragUv).w < treeAlphaCutoff:
+    discardFragment()
+  fragColor = vec4(1.0)
 
 proc texturedPropFrag(
     fragColor: var Vec4,
@@ -951,11 +964,10 @@ type
     textureArray: GLuint    # set when the pack was loaded textured
 
   TexturedBatch = object
-    ## Every baked placement of one textured pack, drawn like the trees
-    ## with a per-instance tint.
-    textureArray: GLuint
-    mesh: seq[float32]      # x y z u v layer nx ny nz r g b
-    vertexArray, vertexBuffer, depthVertexArray: GLuint
+    ## One model buffer shared by all placements, including the shadow pass.
+    model: PropModel
+    instances: seq[float32] # position xyz, scale xyz, cos/sin rotation, tint rgb
+    vertexArray, instanceBuffer, depthVertexArray: GLuint
 
   PropPlacement = object
     model: PropModel
@@ -992,6 +1004,7 @@ var
   rockBurial = 0.45'f
   propPlacements: seq[PropPlacement]
   texturedBatches: seq[TexturedBatch]
+  instancedDepthProgram: GLuint
 
 proc bakedTexel(image: Image, x, y: int): ColorRGBX =
   ## The colour to bake for one uv sample. Cutout foliage atlases are mostly
@@ -2450,146 +2463,76 @@ proc propMeshFloatCount(): int =
     if placement.model.textureArray == 0:
       result += placement.model.vertices.len
 
-proc bakeTexturedInstance(
-    model: PropModel,
-    position: Vec3,
-    rotation,
-    instanceScale: float32,
-    tint: Vec3,
-    stretch: Vec3,
-    mesh: var seq[float32]
-) =
-  ## Appends one transformed textured prop to a batch mesh.
-  let
-    cosine = cos(rotation)
-    sine = sin(rotation)
-  var i = 0
-  while i < model.vertices.len:
-    let
-      x = model.vertices[i] * instanceScale * stretch.x
-      y = model.vertices[i + 1] * instanceScale * stretch.y
-      z = model.vertices[i + 2] * instanceScale * stretch.z
-      normalX = model.vertices[i + 6]
-      normalZ = model.vertices[i + 8]
-      uv = i div 9 * 3
-    mesh.add position.x + cosine * x - sine * z
-    mesh.add position.y + y
-    mesh.add position.z + sine * x + cosine * z
-    mesh.add model.uvs[uv]
-    mesh.add model.uvs[uv + 1]
-    mesh.add model.uvs[uv + 2]
-    mesh.add cosine * normalX - sine * normalZ
-    mesh.add model.vertices[i + 7]
-    mesh.add sine * normalX + cosine * normalZ
-    mesh.add tint.x
-    mesh.add tint.y
-    mesh.add tint.z
-    i += 9
-
 proc initTexturedVertexArrays(batch: var TexturedBatch) =
-  ## Creates the vertex arrays for one textured batch: the tinted lit draw
-  ## and the position-plus-uv view for the cutout depth pass.
-  const stride = (12 * sizeof(float32)).GLsizei
-  glGenBuffers(1, batch.vertexBuffer.addr)
-  glGenVertexArrays(1, batch.vertexArray.addr)
-  glBindVertexArray(batch.vertexArray)
-  glBindBuffer(GL_ARRAY_BUFFER, batch.vertexBuffer)
-  for attribute in [
-    (name: "vertPos", count: 3, offset: 0),
-    (name: "vertUv", count: 3, offset: 3 * sizeof(float32)),
-    (name: "normal", count: 3, offset: 6 * sizeof(float32)),
-    (name: "vertTint", count: 3, offset: 9 * sizeof(float32))
-  ]:
-    let location = glGetAttribLocation(
-      texturedPropProgram, attribute.name.cstring)
-    doAssert location >= 0
-    glEnableVertexAttribArray(location.GLuint)
-    glVertexAttribPointer(
-      location.GLuint, attribute.count.GLint, cGL_FLOAT, GL_FALSE, stride,
-      cast[pointer](attribute.offset))
-  glGenVertexArrays(1, batch.depthVertexArray.addr)
-  glBindVertexArray(batch.depthVertexArray)
-  glBindBuffer(GL_ARRAY_BUFFER, batch.vertexBuffer)
-  for attribute in [
-    (name: "vertPos", count: 3, offset: 0),
-    (name: "vertUv", count: 3, offset: 3 * sizeof(float32))
-  ]:
-    let location = glGetAttribLocation(
-      sunCutoutProgramId(), attribute.name.cstring)
-    doAssert location >= 0
-    glEnableVertexAttribArray(location.GLuint)
-    glVertexAttribPointer(
-      location.GLuint, attribute.count.GLint, cGL_FLOAT, GL_FALSE, stride,
-      cast[pointer](attribute.offset))
+  batch.model.uploadTexturedPropModel()
+  glGenBuffers(1, batch.instanceBuffer.addr)
+  for depth in [false, true]:
+    let program = if depth: instancedDepthProgram else: texturedPropProgram
+    var vao: GLuint
+    glGenVertexArrays(1, vao.addr)
+    if depth: batch.depthVertexArray = vao
+    else: batch.vertexArray = vao
+    glBindVertexArray(vao)
+    glBindBuffer(GL_ARRAY_BUFFER, batch.model.texturedVertexBuffer)
+    for attribute in [
+      (name: "vertPos", count: 3, offset: 0),
+      (name: "vertUv", count: 3, offset: 3),
+      (name: "normal", count: 3, offset: 6)
+    ]:
+      let location = glGetAttribLocation(program, attribute.name.cstring)
+      if location < 0: continue # depth shaders do not need normals or tint
+      glEnableVertexAttribArray(location.GLuint)
+      glVertexAttribPointer(location.GLuint, attribute.count.GLint, cGL_FLOAT,
+        GL_FALSE, (9 * sizeof(float32)).GLsizei,
+        cast[pointer](attribute.offset * sizeof(float32)))
+    glBindBuffer(GL_ARRAY_BUFFER, batch.instanceBuffer)
+    for attribute in [
+      (name: "instancePosition", count: 3, offset: 0),
+      (name: "instanceScale", count: 3, offset: 3),
+      (name: "instanceRotation", count: 2, offset: 6),
+      (name: "vertTint", count: 3, offset: 8)
+    ]:
+      let location = glGetAttribLocation(program, attribute.name.cstring)
+      if location < 0: continue
+      glEnableVertexAttribArray(location.GLuint)
+      glVertexAttribPointer(location.GLuint, attribute.count.GLint, cGL_FLOAT,
+        GL_FALSE, (11 * sizeof(float32)).GLsizei,
+        cast[pointer](attribute.offset * sizeof(float32)))
+      glVertexAttribDivisor(location.GLuint, 1)
   glBindVertexArray(0)
 
-proc bakeTexturedPlacement(placement: PropPlacement) =
-  ## Adds one painted prop to the batch for its material textures.
-  let textureArray = placement.model.textureArray
-  if textureArray == 0:
-    return
+proc addTexturedPlacement(placement: PropPlacement) =
+  if placement.model.textureArray == 0: return
   var found = -1
   for i, batch in texturedBatches:
-    if batch.textureArray == textureArray:
+    if batch.model == placement.model:
       found = i
       break
   if found < 0:
-    texturedBatches.add TexturedBatch(textureArray: textureArray)
+    texturedBatches.add TexturedBatch(model: placement.model)
     found = texturedBatches.high
-  bakeTexturedInstance(
-    placement.model,
-    placement.position,
-    placement.rotation,
-    placement.scale,
-    placement.tint,
-    placement.stretch,
-    texturedBatches[found].mesh
-  )
+  let size = placement.stretch * placement.scale
+  texturedBatches[found].instances.add [
+    placement.position.x, placement.position.y, placement.position.z,
+    size.x, size.y, size.z, cos(placement.rotation), sin(placement.rotation),
+    placement.tint.x, placement.tint.y, placement.tint.z]
 
 proc rebuildTexturedBatches() =
-  ## Bakes every textured placement into its pack's batch and uploads it.
-  # Reserve each batch once. Growing multi-million-vertex foliage buffers
-  # otherwise temporarily retains both the old and new WASM allocations.
-  var counts: Table[GLuint,int]
+  ## Rebuilding placements retains uploaded model buffers; geometry is never
+  ## duplicated for each tree or bush, on either initial load or later rebakes.
+  for batch in texturedBatches.mitems: batch.instances.setLen(0)
   for placement in rockPlacements:
-    let model=rockModels[placement.model]
-    if model.textureArray!=0:counts.mgetOrPut(model.textureArray,0)+=model.vertices.len div 9*12
-  for placement in propPlacements:
-    if placement.model.textureArray!=0:
-      counts.mgetOrPut(placement.model.textureArray,0)+=placement.model.vertices.len div 9*12
+    addTexturedPlacement(PropPlacement(
+      model: rockModels[placement.model], position: placement.position,
+      rotation: placement.rotation, scale: placement.scale,
+      tint: vec3(1), stretch: vec3(1)))
+  for placement in propPlacements: addTexturedPlacement(placement)
   for batch in texturedBatches.mitems:
-    batch.mesh = @[]
-  for texture,count in counts:
-    var found = -1
-    for i,batch in texturedBatches:
-      if batch.textureArray==texture:found=i;break
-    if found<0:
-      texturedBatches.add TexturedBatch(textureArray:texture)
-      found=texturedBatches.high
-    texturedBatches[found].mesh=newSeqOfCap[float32](count)
-  for placement in rockPlacements:
-    bakeTexturedPlacement(PropPlacement(
-      model: rockModels[placement.model],
-      position: placement.position,
-      rotation: placement.rotation,
-      scale: placement.scale,
-      tint: vec3(1),
-      stretch: vec3(1)
-    ))
-  for placement in propPlacements:
-    bakeTexturedPlacement(placement)
-  for batch in texturedBatches.mitems:
-    if batch.mesh.len == 0:
-      continue
-    if batch.vertexBuffer == 0:
-      initTexturedVertexArrays(batch)
-    glBindBuffer(GL_ARRAY_BUFFER, batch.vertexBuffer)
-    glBufferData(
-      GL_ARRAY_BUFFER,
-      batch.mesh.len * sizeof(float32),
-      batch.mesh[0].addr,
-      GL_STATIC_DRAW
-    )
+    if batch.instances.len == 0: continue
+    if batch.instanceBuffer == 0: initTexturedVertexArrays(batch)
+    glBindBuffer(GL_ARRAY_BUFFER, batch.instanceBuffer)
+    glBufferData(GL_ARRAY_BUFFER, batch.instances.len * sizeof(float32),
+      batch.instances[0].addr, GL_STATIC_DRAW)
 
 proc bakeTreeTiles(writeIndex: var int) =
   ## Tree tiles carry their tree in the tile data.
@@ -3348,6 +3291,9 @@ proc initTerrain*(
     toShader(texturedPropVert, OpenGlShaderTarget, shaderVertex),
     toShader(texturedPropFrag, OpenGlShaderTarget, shaderFragment)
   )
+  instancedDepthProgram = compileProgram(
+    toShader(texturedPropVert, OpenGlShaderTarget, shaderVertex),
+    toShader(instancedDepthFrag, OpenGlShaderTarget, shaderFragment))
   texturedPropMvpLocation = glGetUniformLocation(texturedPropProgram, "mvp")
   texturedPropEnv = envLocations(texturedPropProgram)
   texturedPropShadow = shadowLocations(texturedPropProgram)
@@ -3759,10 +3705,11 @@ proc drawTexturedBatch(batch: TexturedBatch, mvp: Mat4) =
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(texturedPropVisibilityTexLocation, 1)
   glActiveTexture(GL_TEXTURE0)
-  glBindTexture(GL_TEXTURE_2D_ARRAY, batch.textureArray)
+  glBindTexture(GL_TEXTURE_2D_ARRAY, batch.model.textureArray)
   glUniform1i(texturedPropTexturesLocation, 0)
   glBindVertexArray(batch.vertexArray)
-  glDrawArrays(GL_TRIANGLES, 0, (batch.mesh.len div 12).GLsizei)
+  glDrawArraysInstanced(GL_TRIANGLES, 0, batch.model.vertexCount,
+      (batch.instances.len div 11).GLsizei)
   glBindVertexArray(0)
 
 proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
@@ -3824,7 +3771,7 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
     drawTexturedMesh(
       treeVertexArray, treeTextureArray, treeMesh.len div 9, mvp)
   for batch in texturedBatches:
-    if batch.mesh.len > 0:
+    if batch.instances.len > 0:
       drawTexturedBatch(batch, mvp)
   glUseProgram(0)
 
@@ -3883,13 +3830,19 @@ proc drawTerrainSunDepth*(firstVertex = 0, vertexCount = -1) =
     glBindVertexArray(treeDepthVertexArray)
     glDrawArrays(GL_TRIANGLES, 0, (treeMesh.len div 9).GLsizei)
   for batch in texturedBatches:
-    if batch.mesh.len == 0:
+    if batch.instances.len == 0:
       continue
-    bindSunCutoutDepth(sunDepthPassMvp(), TreeAlphaCutoff)
+    glUseProgram(instancedDepthProgram)
+    var transform = sunDepthPassMvp()
+    glUniformMatrix4fv(glGetUniformLocation(instancedDepthProgram, "mvp"),
+      1, GL_FALSE, cast[ptr float32](transform.addr))
+    glUniform1f(glGetUniformLocation(instancedDepthProgram, "treeAlphaCutoff"), TreeAlphaCutoff)
+    glUniform1i(glGetUniformLocation(instancedDepthProgram, "treeTextures"), 0)
     glActiveTexture(GL_TEXTURE0)
-    glBindTexture(GL_TEXTURE_2D_ARRAY, batch.textureArray)
+    glBindTexture(GL_TEXTURE_2D_ARRAY, batch.model.textureArray)
     glBindVertexArray(batch.depthVertexArray)
-    glDrawArrays(GL_TRIANGLES, 0, (batch.mesh.len div 12).GLsizei)
+    glDrawArraysInstanced(GL_TRIANGLES, 0, batch.model.vertexCount,
+      (batch.instances.len div 11).GLsizei)
   glBindVertexArray(0)
 
 proc drawPropSunDepth*(
