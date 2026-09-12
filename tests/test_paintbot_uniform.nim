@@ -62,11 +62,13 @@ suite "Uniform disguises and friendly fire":
     let current = w.stateHash()
     w.uniforms[0] = true
     check current != w.stateHash()
-    visionRulesVersion = 25
-    let prior = w.stateHash()
-    w.uniforms[0] = false
-    check prior == w.stateHash()
-    check w.apparentTeam(0) == 0
+    for version in [25,26]:
+      visionRulesVersion = version
+      w.uniforms[0] = true
+      let prior = w.stateHash()
+      w.uniforms[0] = false
+      check prior == w.stateHash()
+      check w.apparentTeam(0) == 0
   test "historical worlds do not spawn uniform stations":
     visionRulesVersion = 25
     let w = newWorld(42)
