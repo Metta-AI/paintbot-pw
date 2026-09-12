@@ -74,6 +74,8 @@ type
     team*: int32 # -1 when idle
     ticks*: int32
     contested*: bool
+  SoundCue* = object
+    listener*, kind*, direction*, distance*, tick*: int32
   World* = object
     seed*, tick*: int32
     rng*: Rng
@@ -95,6 +97,7 @@ type
     bigHeart*: int32 # -1 until 30 seconds, or after all hearts have been used
     bigHeartRound*: int32
     usedBigHearts*: seq[bool]
+    sounds*: seq[SoundCue] # Listener-relative sectors; never exact source coordinates.
   TerritoryWorld = object
     seed*, tick*: int32
     rng*: Rng
@@ -128,6 +131,7 @@ type
     walk*, shoot*, direct*: bool
     goal*, aim*: Point
     chargeGrenade*: bool
+    sneak*: bool
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
@@ -145,7 +149,7 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 25
+var visionRulesVersion* = 26
 proc minX*():int = (if visionRulesVersion>=22: -4800 elif visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
 proc minZ*():int = (if visionRulesVersion>=22: -2800 elif visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
@@ -361,7 +365,7 @@ type LegacyWorld = object
   balls: seq[Paintball]
   winner: int32
 proc stateHash*(w: World): uint32 =
-  if visionRulesVersion >= 25: return hashy(w)
+  if visionRulesVersion >= 26: return hashy(w)
   if visionRulesVersion >= 13:
     result = hashy(TerritoryWorld(seed:w.seed,tick:w.tick,rng:w.rng,cogs:w.cogs,
       hearts:w.hearts,captures:w.captures,cover:w.cover,balls:w.balls,winner:w.winner,
@@ -372,6 +376,10 @@ proc stateHash*(w: World): uint32 =
       result.addHashy(w.endTick)
     if visionRulesVersion >= 24:
       result.addHashy(w.heartCaptures)
+    if visionRulesVersion >= 25:
+      result.addHashy(w.bigHeart)
+      result.addHashy(w.bigHeartRound)
+      result.addHashy(w.usedBigHearts)
     return
   if visionRulesVersion >= 6:
     return hashy(CombatWorld(seed:w.seed,tick:w.tick,rng:w.rng,cogs:w.cogs,
