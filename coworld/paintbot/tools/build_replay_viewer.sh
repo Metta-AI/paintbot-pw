@@ -18,7 +18,7 @@ python3 coworld/paintbot/tools/build_cover.py
 python3 coworld/paintbot/tools/build_cog.py
 python3 coworld/paintbot/tools/build_round_village.py
 nim c -d:emscripten -d:replayIndexer examples/paintbot/indexer.nim
-nim c -d:emscripten -d:replayViewer examples/paintbot/paintbot.nim
+nim c -d:emscripten -d:replayViewer -d:workerReplayIndex examples/paintbot/paintbot.nim
 mkdir -p "$output"
 cp examples/paintbot/emscripten/paintbot.{js,wasm,data} "$output/"
 cp examples/paintbot/emscripten/paintbot-index.{js,wasm} "$output/"

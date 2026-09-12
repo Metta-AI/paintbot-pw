@@ -1,6 +1,6 @@
 ## Painted Polyworld arena with hash-verified spectator analysis.
 import std/[math, times, algorithm]
-when defined(emscripten) and defined(replayViewer): import flatty
+when defined(emscripten) and defined(workerReplayIndex): import flatty
 import windy, opengl, vmath, chroma, jsony
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam]
 import game, sim, analysis, villagegraphics, controls
@@ -413,7 +413,7 @@ proc runGraphics*() =
   setup()
   var index: ReplayIndex
   if replayMode:
-    when defined(emscripten) and defined(replayViewer):
+    when defined(emscripten) and defined(workerReplayIndex):
       # Produced by our worker from these exact replay bytes, after all hashes
       # passed. It uses the same Flatty ABI and indexReplay implementation.
       index = readFile("/episode.index").fromFlatty(ReplayIndex)
