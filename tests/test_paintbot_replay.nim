@@ -73,3 +73,45 @@ suite "Paintbot replay analysis and metadata":
     w.scoreTicks[0] = 70000
     history.sampleGraphs(w)
     check history.momentum[^1].red == 70000.0/24
+
+  test "combat counts completed shots and armor hits at the playhead":
+    visionRulesVersion = 27
+    replayRulesVersion = 27
+    recording = Recording(seed: 42, endTick: 240)
+    world = newWorld(42, 240)
+    world.cover = @[]
+    world.trenches = @[]
+    world.pickups = @[]
+    for i in 0..<Seats:
+      world.cogs[i].shield = 0
+      world.cogs[i].pos = point(1000+i*200, 1500)
+      world.cogs[i].goal = world.cogs[i].pos
+    world.cogs[0].pos = point(1000, 1000)
+    world.cogs[0].goal = world.cogs[0].pos
+    world.cogs[1].pos = point(1200, 1000)
+    world.cogs[1].goal = world.cogs[1].pos
+    world.equipment[1].armor = 1
+    let initial = snapshot(world)
+    var commands: array[Seats, Command]
+    commands[0] = Command(shoot: true, aim: world.cogs[1].pos)
+    for tick in 0..<30:
+      world.step(commands)
+      recording.frames.add Frame(commands: commands, hash: world.stateHash())
+    world = snapshot(initial)
+    replayMode = true
+    var history = ReplayIndex(checkpoints: @[Checkpoint(state: snapshot(initial))])
+    for tick in 0..<30: history.advanceIndexed()
+    check history.combat.len == 31
+    check history.combat[5][0] == CombatStats(shots: 0, hits: 0)
+    check history.combat[6][0] == CombatStats(shots: 1, hits: 1)
+    check history.combat[29][0] == CombatStats(shots: 1, hits: 1)
+    check history.combat[30][0] == CombatStats(shots: 2, hits: 2)
+    check history.combat[30][1] == CombatStats(shots: 0, hits: 0)
+    let before = history.combat
+    for tick in [30, 0, 6, 5, 29, 30]:
+      history.restore(tick)
+      check history.combat == before
+      check world.tick == tick
+      check world.stateHash() == (if tick == 0: initial.stateHash() else: recording.frames[tick-1].hash)
+    check observeShot == nil
+    check observeHit == nil

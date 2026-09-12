@@ -12,7 +12,10 @@ type
     redHearts*, blueHearts*: int32
   Checkpoint* = object
     state*: World
+  CombatStats* = object
+    shots*, hits*: int32
   ReplayIndex* = object
+    combat*: seq[array[Seats, CombatStats]]
     events*: seq[Moment]
     hits*: seq[Moment]
     momentum*: seq[Sample]
@@ -62,17 +65,34 @@ proc sampleGraphs*(index: var ReplayIndex, w: World) =
       return
   index.momentum.add sample
 
-proc indexReplay*(progress: proc(tick, total: int) = nil): ReplayIndex =
-  var tags, hits: seq[Moment]
+proc advanceIndexed*(index: var ReplayIndex) =
+  ## Keep spectator counters outside World so rules and replay hashes are unchanged.
+  if index.combat.len == 0:
+    index.combat.add default(array[Seats, CombatStats])
+  doAssert index.combat.len == world.tick + 1
+  var counters = index.combat[^1]
+  var hits: seq[Moment]
+  observeShot = proc(tick: int32, slot: int) =
+    inc counters[slot].shots
   observeHit = proc(tick: int32, victim, attacker: int, pos: Point) =
+    inc counters[attacker].hits
     hits.add Moment(tick: tick+1, slot: attacker, side: team(attacker),
         victim: victim, kind: "hit", x: pos.x, z: pos.z)
-  defer: observeHit = nil
+  defer:
+    observeShot = nil
+    observeHit = nil
+  advance()
+  index.combat.add counters
+  index.hits.add hits
+
+proc indexReplay*(progress: proc(tick, total: int) = nil): ReplayIndex =
+  var tags: seq[Moment]
   observeTag = proc(tick: int32, victim, attacker: int, pos: Point) =
     tags.add Moment(tick: tick + 1, slot: attacker, side: team(attacker),
         victim: victim, kind: "tag", x: pos.x, z: pos.z)
   defer: observeTag = nil
   world = newWorld(recording.seed, recording.endTick)
+  result.combat.add default(array[Seats, CombatStats])
   result.checkpoints.add Checkpoint(state: snapshot(world))
   result.sampleGraphs(world)
   while world.tick < recording.frames.len:
@@ -81,13 +101,11 @@ proc indexReplay*(progress: proc(tick, total: int) = nil): ReplayIndex =
     let hearts = world.hearts
     var owners:seq[int32]
     for h in world.controlHearts:owners.add h.owner
-    advance()
+    result.advanceIndexed()
     for i,h in world.controlHearts:
       if h.owner!=owners[i] and h.owner>=0:
         result.events.add Moment(tick:world.tick,slot: -1,side:h.owner.int,
           kind:"territory",victim:i,x:h.pos.x,z:h.pos.z)
-    result.hits.add hits
-    hits.setLen(0)
     result.events.add tags
     tags.setLen(0)
     for i, cog in world.cogs:

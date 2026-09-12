@@ -390,6 +390,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         if w.equipment[i].windup == 0:
           # Integer samples follow a hitscan corridor; each victim is tested only once.
           let origin = w.cogs[i].pos
+          if observeShot != nil: observeShot(w.tick, i)
           w.emitSound(origin, 1, i, 3500)
           var aim = w.equipment[i].gunAim
           # Bounded triangular jitter approximates the original small angular spread.
