@@ -186,3 +186,22 @@ appear as coarse arcs on the minimap and as brief directional text.
 The starter policy turns toward sounds when it has no visible opponent and uses
 quiet approaches near objectives. Speech remains a separate existing channel.
 Older recordings retain their original mechanics and replay hashes.
+
+
+### Uniform disguises (rules 27)
+
+Two uniform stations let a cog impersonate the opposing team until it attacks
+or dies. Gun windup, a spray burst, or releasing a grenade reveals the cog;
+charging a grenade alone does not. A collected uniform respawns after 30 seconds.
+The cog's actual team still owns its captures and earns its score. Friendly fire
+is enabled for every cog and every weapon, including disguised cogs.
+
+Other agents see the opposite colors and a valid opposing seat number. BASIC
+`visible`, `playerX/Y/Hp/Carrying`, `playerTeam`, and `heardSlot` use that observed
+identity. The wearer's self identity is unchanged. When both a genuine cog and
+its impersonator are visible under the same seat, BASIC reports the nearer body.
+`playerTeam(i)` returns the observed team, or -1 when unseen; `hasUniform()`
+reports only your own disguise. Pickup kind 4 is a uniform. WASM receives the
+same apparent colors, a `seat N` sprite, a `uniform` pickup, and `uniform worn`
+only for itself. Spectator scoreboards keep true ownership; bodies and minimap
+markers show the disguise. Rules 26 and older keep their original replay hashes.

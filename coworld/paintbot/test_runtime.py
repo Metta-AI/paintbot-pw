@@ -15,6 +15,30 @@ from wasm_policy import decode_replies, verified_policy
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_uniform_spoofs_wasm_color_and_seat_but_preserves_self(self):
+        view = SpriteView(2)
+        view.initial = False
+        w = dict(
+            rulesVersion=27, tick=0, cover=[],
+            uniforms=[True] + [False] * 15,
+            cogs=[dict(pos=dict(x=500,z=2000),aim=dict(x=1000,z=2000),hp=3,cooldown=0)
+                  for _ in range(16)],
+            hearts=[dict(pos=dict(x=x,z=2000),carrier=-1) for x in (960,5440)],
+        )
+        with patch("sprite.visible", side_effect=lambda w, observer, other: other in (0,2)):
+            frame = view.frame(w)
+        self.assertIn(b"player blue left", frame)
+        self.assertIn(b"seat 1", frame)
+        self.assertNotIn(b"player red right", frame)
+        self.assertNotIn(b"seat 0", frame)
+        self.assertNotIn(b"uniform worn", frame)
+        view.slot = 0
+        with patch("sprite.visible", side_effect=lambda w, observer, other: other == 0):
+            frame = view.frame(w)
+        self.assertIn(b"self red right", frame)
+        self.assertIn(b"seat 0", frame)
+        self.assertIn(b"uniform worn", frame)
+
     def test_forward_cone_hides_allies_and_enemies_behind(self):
         w = {
             "cover": [],

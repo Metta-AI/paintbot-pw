@@ -2,7 +2,7 @@
 const
   GrenadeChargeTicks* = 24
   GrenadeFlightTicks* = 10
-  GrenadeBlastRadius* = 260
+  GrenadeBlastRadius* = 270
   SprayReach* = 850
   SprayDamage* = 3
   SprayTicks* = 5
@@ -64,6 +64,9 @@ proc freePickup(w: World, p: Point): Point =
   p
 
 proc initializeEquipment(w: var World) =
+  if visionRulesVersion >= 27:
+    for p in [point(2000, 1000), point(4400, 3000)]:
+      w.pickups.add Pickup(pos: w.freePickup(p), kind: uniformPickup)
   for i in 0..<Seats:
     w.equipment[i].lives = (if visionRulesVersion >= 19: 4 else: StartingLives)
     w.cogs[i].aim = home(1-team(i))
@@ -182,6 +185,7 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     w.resetHeart(1-team(victim)); w.cogs[victim].carrying = false
   let lives = if visionRulesVersion in 13..18:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
   w.equipment[victim] = Equipment(lives: lives)
+  w.uniforms[victim] = false
   w.cogs[victim].respawn = RespawnTicks
   w.cogs[victim].cooldown = 0
   if attacker >= 0 and attacker != victim:
@@ -248,7 +252,7 @@ proc sprayTouches*(w: World, slot, victim: int): bool =
   along > 0 and along <= SprayReach+Radius and across <= halfWidth+Radius and
     w.lineClear(c.pos, w.cogs[victim].pos)
 
-proc pickupEquipment(w: var World) =
+proc pickupEquipment(w: var World, attacked: array[Seats, bool]) =
   for k in 0..<w.pickups.len:
     if w.pickups[k].readyAt > w.tick: continue
     for i in 0..<Seats:
@@ -262,6 +266,11 @@ proc pickupEquipment(w: var World) =
         if not w.equipment[i].sprayCan: w.equipment[i].sprayCan = true; taken = true
       of medkitPickup:
         if w.cogs[i].hp < 3: w.cogs[i].hp = 3; taken = true
+      of uniformPickup:
+        if visionRulesVersion >= 27 and not w.uniforms[i] and not attacked[i] and
+            not w.cogs[i].firing and w.equipment[i].windup == 0 and
+            w.equipment[i].burst == 0 and w.equipment[i].charge == 0:
+          w.uniforms[i] = true; taken = true
       of armorPickup:
         if w.equipment[i].armor < 3: w.equipment[i].armor = 3; taken = true
       if taken:
@@ -271,6 +280,7 @@ proc pickupEquipment(w: var World) =
 
 proc stepEquipment(w: var World, commands: array[Seats, Command]) =
   if w.winner != -1: return
+  var attacked: array[Seats, bool]
   if visionRulesVersion in 21..22 and w.tick >= BarrageStartTick:
     # Only the life currently on the field survives the sudden-death cutoff.
     for i in 0..<Seats:
@@ -359,12 +369,16 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
       if cmd.chargeGrenade: w.equipment[i].charge = min(
           GrenadeChargeTicks.int32, w.equipment[i].charge+1)
       elif w.equipment[i].charge > 0:
+        w.uniforms[i] = false
+        attacked[i] = true
         w.grenades.add Lob(start: w.cogs[i].pos, target: w.grenadeTarget(i),
             owner: i.int32, releasedAt: w.tick,
             landsAt: w.tick+GrenadeFlightTicks)
         w.equipment[i].grenade = false; w.equipment[i].charge = 0
     if w.equipment[i].sprayCan:
       if cmd.shoot and w.equipment[i].sprayCooldown == 0:
+        w.uniforms[i] = false
+        attacked[i] = true
         w.emitSound(w.cogs[i].pos, 3, i, 1800)
         w.equipment[i].burst = SprayTicks
         w.equipment[i].sprayCooldown = SprayTicks+SprayRecoveryTicks
@@ -409,6 +423,8 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           w.balls.add Paintball(pos: endPoint, velocity: Point(
               x: endPoint.x-origin.x, z: endPoint.z-origin.z), owner: i.int32, life: (if visionRulesVersion >= 9: 6 else: 2))
       elif cmd.shoot and w.cogs[i].cooldown == 0:
+        w.uniforms[i] = false
+        attacked[i] = true
         w.equipment[i].windup = GunWindupTicks
         w.equipment[i].gunAim = if visionRulesVersion >= 10:
           Point(x: w.cogs[i].aim.x-w.cogs[i].pos.x,
@@ -434,7 +450,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     if w.tick >= g.landsAt: w.explode(g.target, g.owner.int)
     else: airborne.add g
   w.grenades = airborne
-  w.pickupEquipment()
+  w.pickupEquipment(attacked)
   if visionRulesVersion>=13:
     w.updateTerritory()
     if visionRulesVersion >= 23:

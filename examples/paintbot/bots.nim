@@ -18,11 +18,20 @@ var
   active*: World
   commands*: array[Seats, Command]
 var visionCache: array[Seats, array[Seats, int8]]
-proc visibleToBot(slot, other: int): bool =
-  if other notin 0..<Seats: return false
-  if visionCache[slot][other] == 0:
-    visionCache[slot][other] = if active.visible(slot, other): 1 else: -1
-  visionCache[slot][other] == 1
+proc bodyForSeat(observer, identity: int): int =
+  if identity notin 0..<Seats: return -1
+  if identity == observer: return observer
+  result = -1
+  for body in 0..<Seats:
+    if active.observedSeat(observer, body) != identity: continue
+    if visionCache[observer][body] == 0:
+      visionCache[observer][body] = if active.visible(observer, body): 1 else: -1
+    if visionCache[observer][body] != 1: continue
+    # If the genuine cog and its impersonator are both visible, report the
+    # nearer body under their shared identity. No real-seat side channel.
+    if result < 0 or distance2(active.cogs[observer].pos, active.cogs[body].pos) <
+        distance2(active.cogs[observer].pos, active.cogs[result].pos): result = body
+proc visibleToBot(slot, other: int): bool = bodyForSeat(slot, other) >= 0
 const DataNames = ["selfId","selfTeam","selfX","selfY","selfHp","carrying","homeX","homeY","heartX","heartY","worldTick","ownHeartX","ownHeartY","ownHeartStolen","hasGrenade","hasSpray","armorHp","livesLeft","grenadeCharge","trenchId"]
 proc limits*(): Limits =
   result=defaultLimits()
@@ -74,14 +83,17 @@ proc host(slot:int, strings:StringPool): Host =
     discard result.addFunction(["soundKind","soundDirection","soundDistance","soundAge"][field],1,getSound(field),4)
   for name in DataNames:discard result.addData(name)
   discard result.addFunction("visible",1,proc(a:openArray[int32]):int32 = int32(visibleToBot(slot,a[0].int)),4)
+  discard result.addFunction("playerTeam",1,proc(a:openArray[int32]):int32 =
+    if visibleToBot(slot,a[0].int):active.observedTeam(slot,bodyForSeat(slot,a[0].int)).int32 else: -1,4)
+  discard result.addFunction("hasUniform",0,proc(a:openArray[int32]):int32 = active.uniforms[slot].int32,4)
   discard result.addFunction("playerX",1,proc(a:openArray[int32]):int32 =
-    if visibleToBot(slot,a[0].int):active.cogs[a[0]].pos.x else: -1,4)
+    if visibleToBot(slot,a[0].int):active.cogs[bodyForSeat(slot,a[0].int)].pos.x else: -1,4)
   discard result.addFunction("playerY",1,proc(a:openArray[int32]):int32 =
-    if visibleToBot(slot,a[0].int):active.cogs[a[0]].pos.z else: -1,4)
+    if visibleToBot(slot,a[0].int):active.cogs[bodyForSeat(slot,a[0].int)].pos.z else: -1,4)
   discard result.addFunction("playerHp",1,proc(a:openArray[int32]):int32 =
-    if visibleToBot(slot,a[0].int):active.cogs[a[0]].hp else:0,4)
+    if visibleToBot(slot,a[0].int):active.cogs[bodyForSeat(slot,a[0].int)].hp else:0,4)
   discard result.addFunction("playerCarrying",1,proc(a:openArray[int32]):int32 =
-    if visibleToBot(slot,a[0].int):active.cogs[a[0]].carrying.int32 else:0,4)
+    if visibleToBot(slot,a[0].int):active.cogs[bodyForSeat(slot,a[0].int)].carrying.int32 else:0,4)
   discard result.addFunction("chargeGrenade",1,proc(a:openArray[int32]):int32 =
     commands[slot].chargeGrenade=a[0]!=0;1,4)
   discard result.addFunction("pickupCount",0,proc(a:openArray[int32]):int32 = active.pickups.len.int32,4)
@@ -167,4 +179,4 @@ proc deliverSpeech*(w: World) =
       if receiver==sender or w.cogs[receiver].hp<=0:continue
       if distance2(w.cogs[sender].pos,w.cogs[receiver].pos)>(Width div 5).int64*(Width div 5):continue
       for message in shouts[sender]:
-        heard[receiver].add HeardMessage(slot:sender,pos:w.cogs[sender].pos,text:message)
+        heard[receiver].add HeardMessage(slot:w.observedSeat(receiver,sender),pos:w.cogs[sender].pos,text:message)
