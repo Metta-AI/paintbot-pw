@@ -905,7 +905,7 @@
       const x = mapX(c.pos.x), y = mapY(c.pos.z);
       ctx.beginPath();
       ctx.arc(x, y, i === selected ? 5 : 4, 0, Math.PI * 2);
-      ctx.fillStyle = markerColors[team(i)];
+      ctx.fillStyle = markerColors[w.uniforms?.[i] ? 1-team(i) : team(i)];
       ctx.fill();
       ctx.lineWidth = 2;
       ctx.strokeStyle = "#081a18";

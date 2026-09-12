@@ -43,7 +43,7 @@ proc convertFrames(frames: seq[LegacyFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
           goal: c.goal, aim: c.aim)
     result.add next
-var replayRulesVersion* = 25
+var replayRulesVersion* = 27
 proc loadRecording*(path: string): Recording =
   replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
   visionRulesVersion = replayRulesVersion
@@ -58,7 +58,7 @@ proc loadRecording*(path: string): Recording =
   elif replayRulesVersion in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]:
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PriorRecording)
     result = Recording(seed:old.seed,frames:old.frames,names:old.names,communications:old.communications)
-  elif replayRulesVersion in [23, 24, 25]:
+  elif replayRulesVersion in [23, 24, 25, 27]:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
     if result.endTick <= 0 or result.endTick > 28800:
       raise newException(ReplayError, "Invalid match duration")

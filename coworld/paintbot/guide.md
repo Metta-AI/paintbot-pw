@@ -158,3 +158,22 @@ big heart earns no points until captured. BASIC `controlPoints(i)` returns 1 or 
 alongside the unchanged ownership and capture sprites. Choices are deterministic
 for replay verification, and seeking restores both the active heart and used-heart
 history. Rules 24 and older retain ordinary one-point hearts.
+
+
+### Uniform disguises (rules 27)
+
+Two uniform stations let a cog impersonate the opposing team until it attacks
+or dies. Gun windup, a spray burst, or releasing a grenade reveals the cog;
+charging a grenade alone does not. A collected uniform respawns after 30 seconds.
+The cog's actual team still owns its captures and earns its score. Friendly fire
+is enabled for every cog and every weapon, including disguised cogs.
+
+Other agents see the opposite colors and a valid opposing seat number. BASIC
+`visible`, `playerX/Y/Hp/Carrying`, `playerTeam`, and `heardSlot` use that observed
+identity. The wearer's self identity is unchanged. When both a genuine cog and
+its impersonator are visible under the same seat, BASIC reports the nearer body.
+`playerTeam(i)` returns the observed team, or -1 when unseen; `hasUniform()`
+reports only your own disguise. Pickup kind 4 is a uniform. WASM receives the
+same apparent colors, a `seat N` sprite, a `uniform` pickup, and `uniform worn`
+only for itself. Spectator scoreboards keep true ownership; bodies and minimap
+markers show the disguise. Rules 25 and older keep their original replay hashes.

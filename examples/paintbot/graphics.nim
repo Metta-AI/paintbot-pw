@@ -359,7 +359,7 @@ proc sprayCloud(renderer: var ShapeRenderer, world: World, slot: int,
   const Across = 12
   let origin = world.cogs[slot].pos
   let aim = world.equipment[slot].sprayAim
-  let baseColor = teamColors[team(slot)]
+  let baseColor = teamColors[world.apparentTeam(slot)]
   let color = rgbx(uint8(baseColor.r.float32*0.65),
     uint8(baseColor.g.float32*0.65), uint8(baseColor.b.float32*0.65), 255)
   # Height does not affect the game's 2D visibility query. Reuse each ray's
@@ -663,7 +663,7 @@ proc runGraphics*() =
             world.tick.float32+alpha)/24 else: 0
         let lowered = if replayRulesVersion < 9 and world.trenchAt(c.pos) >=
             0: 0.55'f32 else: 0'f32
-        drawCharacter(scene, models[team(i)], poses[i]-vec3(0, lowered, 0),
+        drawCharacter(scene, models[world.apparentTeam(i)], poses[i]-vec3(0, lowered, 0),
             facing, 0, rolling)
     # Terrain is public in a live match. Keep actor/target visibility exact;
     # thousands of terrain rays per tick otherwise stall human input.
@@ -746,6 +746,7 @@ proc runGraphics*() =
       let color = case item.kind
         of grenadePickup: rgbx(183, 237, 62, 255)
         of sprayPickup: rgbx(255, 89, 195, 255)
+        of uniformPickup: rgbx(192, 126, 245, 255)
         of armorPickup: rgbx(96, 191, 241, 255)
         of medkitPickup: rgbx(243, 238, 207, 255)
       shapes.addCircle(position(item.pos, 0.04), if special: 1.0 else: 0.55, color)
@@ -754,6 +755,11 @@ proc runGraphics*() =
       else:
         shapes.box(p.x, p.y, p.z, 0.4, 0.48, 0.32, color,
             if item.kind == medkitPickup: spin else: 0'f32)
+      if item.kind == uniformPickup:
+        # A two-tone shirt: body and sleeves make the disguise pickup legible.
+        shapes.box(p.x,p.y+0.65,p.z,0.42,0.55,0.15,rgbx(255,103,81,255),spin)
+        shapes.box(p.x-0.3,p.y+0.82,p.z,0.22,0.22,0.15,rgbx(74,192,255,255),spin)
+        shapes.box(p.x+0.3,p.y+0.82,p.z,0.22,0.22,0.15,rgbx(74,192,255,255),spin)
       if item.kind == medkitPickup:
         shapes.box(p.x, p.y+0.49, p.z, 0.26, 0.03, 0.08, rgbx(215, 69, 66, 255), spin)
         shapes.box(p.x, p.y+0.49, p.z, 0.08, 0.03, 0.26, rgbx(215, 69, 66, 255), spin)
@@ -853,7 +859,7 @@ proc runGraphics*() =
     for i, c in world.cogs:
       if c.hp <= 0 or not seen(i): continue
       let p = poses[i]
-      shapes.addCircle(p+vec3(0, 0.04, 0), 0.65, teamColors[team(i)])
+      shapes.addCircle(p+vec3(0, 0.04, 0), 0.65, teamColors[world.apparentTeam(i)])
       shapes.addCircle(p+vec3(0, 0.05, 0), 0.48, rgbx(43, 68, 55, 255))
       if i == selected: shapes.addCircle(p+vec3(0, 0.03, 0), 0.9, rgbx(250, 226,
           140, 180))
@@ -865,7 +871,7 @@ proc runGraphics*() =
           1.05, d.z.float32/100), 0.23, rgbx(255, 239, 177, 255))
       if c.shield > 0:
         let spawnProgress = clamp((36-c.shield.float32+alpha)/36,0'f32,1'f32)
-        shapes.spawnBeam(p,teamColors[team(i)],spawnProgress,i)
+        shapes.spawnBeam(p,teamColors[world.apparentTeam(i)],spawnProgress,i)
       if trails:
         shapes.addLine(p+vec3(0, 0.08, 0), position(c.goal, 0.08), teamColors[
             team(i)], halfWidth = 0.035)

@@ -27,7 +27,7 @@ bestCost = 2147483647
 thief = -1
 i = 0
 while i < 16
-  if i mod 2 <> selfTeam and visible(i) then
+  if playerTeam(i) <> selfTeam and visible(i) then
     dx = playerX(i) - selfX
     dy = playerY(i) - selfY
     cost = dx * dx + dy * dy - (3 - playerHp(i)) * 160000
@@ -184,7 +184,7 @@ if not carrying and thief < 0 then
   while j < pickupCount() and j < 32
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 120 then
       kind = pickupMemoryKind(j)
-      wanted = (kind = 0 and not hasGrenade) or (kind = 1 and not hasSpray and (selfId / 2) mod 2 = 0) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3)
+      wanted = (kind = 0 and not hasGrenade) or (kind = 1 and not hasSpray and (selfId / 2) mod 2 = 0) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3) or (kind = 4 and not hasUniform())
       if wanted then
         dx = pickupMemoryX(j) - selfX
         dy = pickupMemoryY(j) - selfY
@@ -215,7 +215,7 @@ if hasGrenade and best >= 0 then
   safe = 1
   i = 0
   while i < 16
-    if i mod 2 = selfTeam and visible(i) then
+    if playerTeam(i) = selfTeam and visible(i) then
       fx = playerX(i) - nx
       fy = playerY(i) - ny
       if fx * fx + fy * fy < 122500 then

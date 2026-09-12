@@ -360,13 +360,23 @@ class SpriteView:
         for i, c in enumerate(w["cogs"]):
             if not visible(w, self.slot, i):
                 continue
+            side = i % 2
+            if i != self.slot and w.get("rulesVersion", 0) >= 27 and w.get("uniforms", [False] * 16)[i]:
+                side = 1 - side
+            identity = i
+            if side != i % 2:
+                identity = i ^ 1
+                if identity == self.slot:
+                    identity = (identity + 2) % 16
             label = (
                 ("self " if i == self.slot else "player ")
-                + COLORS[i % 2]
+                + COLORS[side]
                 + " "
-                + ("right" if i % 2 == 0 else "left")
+                + ("right" if side == 0 else "left")
             )
             item(label, c["pos"], 12, 12)
+            if w.get("rulesVersion", 0) >= 27:
+                item("seat " + str(identity), c["pos"])
             item(
                 "hp "
                 + str(c["hp"])
@@ -380,15 +390,20 @@ class SpriteView:
                 12,
                 2,
             )
+        if w.get("uniforms", [False] * 16)[self.slot]:
+            item("uniform worn", me["pos"])
         for i, e in enumerate(w.get("equipment", [])):
             if not visible(w, self.slot, i):
                 continue
+            side = i % 2
+            if i != self.slot and w.get("rulesVersion", 0) >= 27 and w.get("uniforms", [False] * 16)[i]:
+                side = 1 - side
             p = w["cogs"][i]["pos"]
             if e["grenade"]:
                 item("grenade carried", p)
             if e["sprayCan"]:
                 item("spray can carried", p)
-                item("cog spray can " + COLORS[i % 2], p)
+                item("cog spray can " + COLORS[side], p)
             if e["armor"]:
                 item("shield", p)
             item("lives " + str(e["lives"]), p)
@@ -422,6 +437,7 @@ class SpriteView:
                     "sprayPickup": "spray can",
                     "medkitPickup": "med kit",
                     "armorPickup": "shield",
+                    "uniformPickup": "uniform",
                 }[pickup["kind"]]
                 item(label, pickup["pos"], 14, 14)
         for trench in w.get("trenches", []):

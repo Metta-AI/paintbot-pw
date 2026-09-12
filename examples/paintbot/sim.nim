@@ -51,7 +51,7 @@ type
     carrier*: int32 # -1 on ground
     returnAt*: int32
   PickupKind* = enum
-    grenadePickup, sprayPickup, medkitPickup, armorPickup
+    grenadePickup, sprayPickup, medkitPickup, armorPickup, uniformPickup
   Pickup* = object
     pos*: Point
     kind*: PickupKind
@@ -95,6 +95,7 @@ type
     bigHeart*: int32 # -1 until 30 seconds, or after all hearts have been used
     bigHeartRound*: int32
     usedBigHearts*: seq[bool]
+    uniforms*: array[Seats, bool]
   TerritoryWorld = object
     seed*, tick*: int32
     rng*: Rng
@@ -131,6 +132,18 @@ type
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
+var visionRulesVersion* = 27
+proc apparentTeam*(w: World, slot: int): int =
+  ## Uniforms change appearance only; ownership always uses team(slot).
+  if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
+proc observedTeam*(w: World, observer, slot: int): int =
+  if observer == slot: team(slot) else: w.apparentTeam(slot)
+proc observedSeat*(w: World, observer, slot: int): int =
+  if observer != slot and visionRulesVersion >= 27 and w.uniforms[slot]:
+    result = slot xor 1
+    # A disguise must never overwrite the observer's own body.
+    if result == observer: result = (result+2) mod Seats
+  else: result = slot
 proc home*(side: int): Point = point(if side ==
     0: Width*15 div 100 else: Width*85 div 100, Height div 2)
 proc distance2*(a, b: Point): int64 =
@@ -145,7 +158,6 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-var visionRulesVersion* = 25
 proc minX*():int = (if visionRulesVersion>=22: -4800 elif visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
 proc minZ*():int = (if visionRulesVersion>=22: -2800 elif visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
@@ -361,7 +373,13 @@ type LegacyWorld = object
   balls: seq[Paintball]
   winner: int32
 proc stateHash*(w: World): uint32 =
-  if visionRulesVersion >= 25: return hashy(w)
+  if visionRulesVersion >= 25:
+    result = HashySeed
+    for name, value in fieldPairs(w):
+      when name == "uniforms":
+        if visionRulesVersion >= 27: result.addHashy(value)
+      else: result.addHashy(value)
+    return
   if visionRulesVersion >= 13:
     result = hashy(TerritoryWorld(seed:w.seed,tick:w.tick,rng:w.rng,cogs:w.cogs,
       hearts:w.hearts,captures:w.captures,cover:w.cover,balls:w.balls,winner:w.winner,
