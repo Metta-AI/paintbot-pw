@@ -2,7 +2,7 @@
 import std/[math, times, algorithm]
 when defined(emscripten) and defined(workerReplayIndex): import flatty
 import windy, opengl, vmath, chroma, jsony
-import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam]
+import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam, selectionoutlines]
 import game, sim, analysis, villagegraphics, controls
 import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
@@ -589,6 +589,7 @@ proc runGraphics*() =
                 loadCharacterModel(when defined(
                     emscripten): "/paintbot-cog-blue.glb" else: "tmp/paintbot-cog-blue.glb", 1.9)]
   for model in models: model.unlitParts = @["eye", "smile"]
+  var occlusionOutline = initSelectionOutline(OccludedOutline)
   var shapes = initShapeRenderer()
   var last = epochTime()
   var heartAnimationTime = 0'f32
@@ -739,6 +740,13 @@ proc runGraphics*() =
     glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
     scene.toon.drawBackground()
     drawTerrain(vp)
+    # Reuse the visible actors and their exact animated poses. Only scenery is
+    # in the window depth buffer, so outlines reveal camera occlusion without
+    # revealing cogs excluded by the current player/team visibility lens.
+    occlusionOutline.beginMask(window.size)
+    beginCharacters(scene, window, view, projection, eye)
+    actors(); finishCharacters(scene)
+    occlusionOutline.drawOutline(OccludedOutlineColor)
     beginCharacters(scene, window, view, projection, eye)
     actors(); finishCharacters(scene)
     shapes.clear()
@@ -1012,3 +1020,4 @@ proc runGraphics*() =
         {.emit: "EM_ASM({if(Module.polyworldFrame)Module.polyworldFrame($1,0);if(Module.paintbotState)Module.paintbotState(JSON.parse(UTF8ToString($0)));}, `data`, `tick`);".}
         lastHud = world.tick
   while not window.closeRequested: pollEvents()
+  occlusionOutline.closeSelectionOutline()
