@@ -1,5 +1,6 @@
 """Build the approved Paint Crew cog as a textured-color, animated GLB.
 Rounded screen shell, cyan face, two rubber wheels, metal struts and tool arms.
+Uniform variants retain the true-team head shell and recolor the lower body.
 No human character meshes are used.
 """
 
@@ -9,20 +10,24 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[3]
 
 
-def build(team):
+TEAM_COLORS = {"red": [0.87, 0.19, 0.12, 1], "blue": [0.10, 0.48, 0.86, 1]}
+
+
+def build(team, uniform):
     blob = bytearray()
     views = []
     accessors = []
     meshes = []
     nodes = []
     colors = [
-        ([0.87, 0.19, 0.12, 1] if team == "red" else [0.10, 0.48, 0.86, 1]),
+        TEAM_COLORS[team],
         [0.065, 0.085, 0.09, 1],
         [0.24, 0.28, 0.28, 1],
         [0.54, 0.48, 0.32, 1],
         [0.025, 0.12, 0.15, 1],
         [0.15, 0.96, 1, 1],
         [0.88, 0.84, 0.67, 1],
+        TEAM_COLORS[uniform],
     ]
     materials = [
         {
@@ -36,7 +41,7 @@ def build(team):
         }
         for i, (n, c) in enumerate(
             zip(
-                ["enamel", "rubber", "steel", "brass", "screen", "cyan", "scuffs"],
+                ["enamel", "rubber", "steel", "brass", "screen", "cyan", "scuffs", "uniform"],
                 colors,
             )
         )
@@ -147,11 +152,11 @@ def build(team):
         wheels.append(wheel("wheel-" + str(side), side * 0.47))
         box("axle", [side * 0.43, 0.345, 0], [0.2, 0.12, 0.12], 3)
         box("strut", [side * 0.32, 0.63, -0.04], [0.11, 0.55, 0.13], 2)
-        box("fender", [side * 0.45, 0.64, 0], [0.16, 0.12, 0.43], 0)
+        box("fender", [side * 0.45, 0.64, 0], [0.16, 0.12, 0.43], 7)
         box("shoulder", [side * 0.47, 1.22, 0.01], [0.2, 0.22, 0.23], 3)
         box("arm", [side * 0.55, 0.99, 0.11], [0.11, 0.4, 0.13], 2)
         box("hand", [side * 0.54, 0.83, 0.25], [0.15, 0.14, 0.18], 3)
-    box("chassis", [0, 0.86, -0.02], [0.58, 0.3, 0.46], 2, 0.10)
+    box("chassis", [0, 0.86, -0.02], [0.58, 0.3, 0.46], 7 if uniform != team else 2, 0.10)
     box("shell", [0, 1.35, 0], [0.88, 0.7, 0.63], 0, 0.14)
     box("screen-rim", [0, 1.28, 0.302], [0.73, 0.45, 0.065], 3, 0.05)
     box("screen", [0, 1.28, 0.343], [0.66, 0.38, 0.035], 4, 0.05)
@@ -160,7 +165,7 @@ def build(team):
     for x, y in [(-0.055, 1.20), (0, 1.18), (0.055, 1.20)]:
         box("smile", [x, y, 0.367], [0.06, 0.03, 0.02], 5, 0.01)
     box("marker", [0.53, 0.91, 0.47], [0.10, 0.10, 0.5], 2)
-    box("hopper", [0.53, 1.06, 0.43], [0.22, 0.20, 0.27], 0, 0.05)
+    box("hopper", [0.53, 1.06, 0.43], [0.22, 0.20, 0.27], 7, 0.05)
     box("tank", [0, 1.2, -0.40], [0.3, 0.44, 0.22], 3, 0.09)
     for i in range(10):
         # Small cream nicks break up the enameled shell without obscuring the face.
@@ -209,7 +214,8 @@ def build(team):
     header = json.dumps(doc, separators=(",", ":")).encode()
     header += b" " * ((-len(header)) % 4)
     blob += b"\0" * ((-len(blob)) % 4)
-    out = root / f"tmp/paintbot-cog-{team}.glb"
+    name = team if uniform == team else f"{team}-{uniform}"
+    out = root / f"tmp/paintbot-cog-{name}.glb"
     out.write_bytes(
         struct.pack("<III", 0x46546C67, 2, 28 + len(header) + len(blob))
         + struct.pack("<II", len(header), 0x4E4F534A)
@@ -219,5 +225,6 @@ def build(team):
     )
 
 
-for team in ["red", "blue"]:
-    build(team)
+for team in TEAM_COLORS:
+    for uniform in TEAM_COLORS:
+        build(team, uniform)

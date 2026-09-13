@@ -586,10 +586,15 @@ proc runGraphics*() =
   scene.useToonShading()
   scene.setToonHour(15.4)
   setEnvironmentPalette(scene.toon)
-  let models = [loadCharacterModel(when defined(emscripten): "/paintbot-cog-red.glb" else: "tmp/paintbot-cog-red.glb", 1.9),
-                loadCharacterModel(when defined(
-                    emscripten): "/paintbot-cog-blue.glb" else: "tmp/paintbot-cog-blue.glb", 1.9)]
-  for model in models: model.unlitParts = @["eye", "smile"]
+  # Spectators can distinguish the true-team head from the uniform below it.
+  var models: array[2, array[2, CharacterModel]]
+  for side, head in ["red", "blue"]:
+    for apparent, uniform in ["red", "blue"]:
+      let name = if side == apparent: head else: head & "-" & uniform
+      let path = (when defined(emscripten): "/" else: "tmp/") &
+        "paintbot-cog-" & name & ".glb"
+      models[side][apparent] = loadCharacterModel(path, 1.9)
+      models[side][apparent].unlitParts = @["eye", "smile"]
   var occlusionOutline = initSelectionOutline(OccludedOutline)
   var shapes = initShapeRenderer()
   var last = epochTime()
@@ -716,7 +721,7 @@ proc runGraphics*() =
             world.tick.float32+alpha)/24 else: 0
         let lowered = if replayRulesVersion < 9 and world.trenchAt(c.pos) >=
             0: 0.55'f32 else: 0'f32
-        drawCharacter(scene, models[world.apparentTeam(i)], poses[i]-vec3(0, lowered, 0),
+        drawCharacter(scene, models[team(i)][world.apparentTeam(i)], poses[i]-vec3(0, lowered, 0),
             facing, 0, rolling)
     # Terrain is public in a live match. Keep actor/target visibility exact;
     # thousands of terrain rays per tick otherwise stall human input.
