@@ -3,7 +3,7 @@ import std/[math, times, algorithm]
 when defined(emscripten) and defined(workerReplayIndex): import flatty
 import windy, opengl, vmath, chroma, jsony
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam, selectionoutlines]
-import game, sim, analysis, villagegraphics, controls
+import game, sim, analysis, villagegraphics, controls, celebration
 import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
 else: {.emit: "#define EMSCRIPTEN_KEEPALIVE".}
@@ -34,6 +34,8 @@ type
     live: bool
     playerSlot: int
     paused: bool
+    celebrating: bool
+    celebrationSeconds: float32
     actionCamera: bool
     camera: array[3, float32]
     screen: array[Seats, array[2, float32]]
@@ -41,6 +43,7 @@ type
     footprint: array[4, array[2, float32]]
 var
   transport: Player
+  victory: Celebration
   playbackRate = 1'f32
   orderX, orderY: float32
   orderKind = 0
@@ -68,14 +71,17 @@ var
   tilt = 0.92'f32
 proc setPlaying(value: cint) {.exportc: "pw_play", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
-  if value == 0: transport.pause()
+  if victory.active: victory.paused = value == 0
+  elif value == 0: transport.pause()
   else: transport.play()
 proc setSpeed(value: cfloat) {.exportc: "pw_speed", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   playbackRate = clamp(value, 0.25, 32)
   transport.setSpeed(speedIndexOf(value.int32))
 proc setTick(value: cint) {.exportc: "pw_seek", cdecl,
-    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = transport.seekTo(value.int32, play = false)
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  victory = Celebration()
+  transport.seekTo(value.int32, play = false)
 proc saveLiveRecording() {.exportc: "pw_save", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   if not replayMode:
@@ -504,6 +510,8 @@ proc runGraphics*() =
       momentum: @[graphSample(world)])
   transport = initPlayer(not replayMode, if replayMode: recording.frames.len.int32 else: options.maximumTicks,
     playing = not options.pauseOnStart, speed = options.speed)
+  # Paintbot owns looping so the shared transport cannot skip the celebration.
+  transport.repeating = false
   playbackRate = options.speed.float32
   transport.sync(world.tick, recording.frames.len.int32, world.winner != -1)
   if options.playerSlot > 0:
@@ -657,7 +665,8 @@ proc runGraphics*() =
   var visibilityTick = -1
   var visibilityLens = -2
   window.onFrame = proc() =
-    let now = epochTime(); let dt = min(now-last, 0.1); last = now
+    let now = epochTime(); let frameDt = max(0.0, now-last)
+    let dt = min(frameDt, 0.1); last = now
     # Decorative hearts keep turning while playback is paused or slowed.
     heartAnimationTime = (heartAnimationTime+dt.float32)
     let restore = transport.takeRestore()
@@ -680,19 +689,43 @@ proc runGraphics*() =
       if atFrontier and world.tick mod 240 == 0:
         index.checkpoints.add Checkpoint(state: snapshot(world))
       transport.sync(world.tick, recording.frames.len.int32, world.winner != -1)
-    let paused = not transport.playing
-    let alpha = if paused: 1'f32 else: clamp(transport.accumulator*TickRate.float32, 0, 1)
+    victory.update(world.tick >= transport.timelineEnd and transport.timelineEnd > 0, frameDt.float32)
+    let paused = if victory.active: victory.paused else: not transport.playing
+    let alpha = if paused or victory.active: 1'f32 else: clamp(transport.accumulator*TickRate.float32, 0, 1)
     var poses: array[Seats, Vec3]
     for i, c in world.cogs:
       poses[i] = if previous[i].hp > 0 and c.hp > 0: mix(position(previous[
           i].pos), position(c.pos), alpha) else: position(c.pos)
+      if victory.active and world.winner == team(i).int32 and c.hp > 0:
+        let beat = victory.elapsed*5 + i.float32*0.6
+        poses[i].y += abs(sin(beat))*0.65
+        poses[i].x += sin(beat*0.5)*0.22
+    proc shown(i: int): bool =
+      seen(i) and not victory.removed(world.winner.int, team(i))
     if follow and selected >= 0:
       let blend = 1-exp(-5*dt.float32)
       camX = mix(camX, poses[selected].x, blend)
       camZ = mix(camZ, poses[selected].z, blend)
       camY = mix(camY, poses[selected].y+1, blend)
     var target = vec3(camX, camY, camZ)
-    # Keep the final frame still behind the results, including camera toggles.
+    # Frame the surviving winners while the automatic camera is enabled.
+    if autoCamera and victory.active and world.winner >= 0:
+      var center: Vec3
+      var count = 0
+      for i, c in world.cogs:
+        if c.hp > 0 and shown(i):
+          center += position(c.pos)
+          inc count
+      if count > 0:
+        center = center/count.float32 + vec3(0, 1, 0)
+        var radius = 0'f32
+        for i, c in world.cogs:
+          if c.hp > 0 and shown(i): radius = max(radius, length(position(c.pos)-center))
+        let blend = 1-exp(-2*dt.float32)
+        target = mix(target, center, blend)
+        distance = mix(distance, max(12'f32, radius*2.8+8), blend)
+        camX = target.x; camY = target.y; camZ = target.z
+    # The gameplay director stops when the match ends.
     let cameraFinished = world.winner >= 0 or world.tick >= transport.timelineEnd
     if autoCamera and not cameraFinished:
       if directorLens != lens: setActionCamera(1)
@@ -762,17 +795,18 @@ proc runGraphics*() =
       orderKind = 0
     proc actors(exclude = -1) =
       for i, c in world.cogs:
-        if c.hp <= 0 or i == exclude or not seen(i): continue
+        if c.hp <= 0 or i == exclude or not shown(i): continue
         # Teammates may overlap exactly; don't put their helmet around the eye camera.
         if exclude >= 0 and distance2(c.pos, world.cogs[exclude].pos) <
             10000: continue
         let delta = vec2((c.aim.x-c.pos.x).float32, (c.aim.z-c.pos.z).float32)
-        let facing = arctan2(delta.x.float32, delta.y.float32)
-        let rolling = if c.pos != previous[i].pos: (
-            world.tick.float32+alpha)/24 else: 0
+        let facing = arctan2(delta.x.float32, delta.y.float32) +
+          (if victory.active and world.winner == team(i).int32: victory.elapsed*2.5 + sin(victory.elapsed*5+i.float32)*0.5 else: 0)
+        let rolling = if victory.active: victory.elapsed*2 else: (if c.pos != previous[i].pos: (
+            world.tick.float32+alpha)/24 else: 0)
         let lowered = if replayRulesVersion < 9 and world.trenchAt(c.pos) >=
             0: 0.55'f32 else: 0'f32
-        drawCharacter(scene, models[team(i)][world.apparentTeam(i)], poses[i]-vec3(0, lowered, 0),
+        drawCharacter(scene, models[team(i)][if victory.active: team(i) else: world.apparentTeam(i)], poses[i]-vec3(0, lowered, 0),
             facing, 0, rolling)
     # Terrain is public in a live match. Keep actor/target visibility exact;
     # thousands of terrain rays per tick otherwise stall human input.
@@ -811,25 +845,32 @@ proc runGraphics*() =
     for trench in world.trenches: shapes.trenchCover(trench)
     # Low stone courses exactly match collision bounds; capstones and stripes read at a glance.
     # Paint splashes and short bursts follow recorded tags, so seeking reconstructs them.
-    for event in index.events:
-      let age = world.tick.float32+alpha-event.tick.float32
-      if event.kind != "tag" or age < 0 or age >= 48: continue
+    proc paintOut(p: Vec3, side: int, age, seed: float32) =
+      if age < 0 or age >= 48: return
       let fade = 1-age/48
-      if lens >= 0 and not seen(event.victim): continue
-      let p = position(point(event.x, event.z), 0.035)
-      let color = teamColors[event.side]
+      let color = teamColors[side]
       shapes.addCircle(p, 0.6, rgbx(color.r, color.g, color.b, uint8(110*fade)))
       for n in 0..4:
-        let a = n.float32*1.256+event.slot.float32
-        shapes.addCircle(p+vec3(cos(a)*0.65, 0.001, sin(a)*0.65), 0.17, rgbx(
-            color.r, color.g, color.b, uint8(120*fade)))
+        let a = n.float32*1.256+seed
+        shapes.addCircle(p+vec3(cos(a)*0.65, 0.001, sin(a)*0.65), 0.17,
+          rgbx(color.r, color.g, color.b, uint8(120*fade)))
         if age < 18:
-          let f = age.float32/18
-          shapes.gem(p+vec3(cos(a)*f*1.8, sin(f*PI.float32)*1.2+0.2, sin(
-              a)*f*1.8), 0.11, color)
+          let f = age/18
+          shapes.gem(p+vec3(cos(a)*f*1.8, sin(f*PI.float32)*1.2+0.2,
+            sin(a)*f*1.8), 0.11, color)
+    for event in index.events:
+      let age = world.tick.float32+alpha-event.tick.float32 +
+        (if victory.active: victory.elapsed*TickRate.float32 else: 0)
+      if event.kind != "tag" or (lens >= 0 and not seen(event.victim)): continue
+      paintOut(position(point(event.x, event.z), 0.035), event.side, age, event.slot.float32)
+    if victory.active and world.winner >= 0:
+      for i, c in world.cogs:
+        if c.hp > 0 and seen(i) and victory.removed(world.winner.int, team(i)):
+          paintOut(position(c.pos, 0.035), world.winner.int, victory.elapsed*TickRate.float32, i.float32)
     # Every damaging hit splashes the victim, including armor hits and survivors.
     for hit in index.hits:
-      let age=world.tick.float32+alpha-hit.tick.float32
+      let age=world.tick.float32+alpha-hit.tick.float32 +
+        (if victory.active: victory.elapsed*TickRate.float32 else: 0)
       if age<0 or age>=14 or not seen(hit.victim):continue
       let fade=1-age/14
       let center=(if world.cogs[hit.victim].hp>0:poses[hit.victim]
@@ -913,7 +954,7 @@ proc runGraphics*() =
         if stain>0:
           shapes.addCircle(floor,(0.22+(n mod 3).float32*0.13)*stain,palette[n mod 3])
     for i, e in world.equipment:
-      if world.cogs[i].hp <= 0 or not seen(i): continue
+      if world.cogs[i].hp <= 0 or not shown(i) or victory.active: continue
       if e.charge > 0: shapes.addCircle(position(world.grenadeTarget(i), 0.08),
           GrenadeBlastRadius.float32/100, rgbx(229, 199, 88, 255))
       if e.burst > 0:
@@ -969,12 +1010,13 @@ proc runGraphics*() =
               world.tick.float32/12)*0.12 else: 3.1)
           shapes.heartSculpture(p,eye,(if side==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)),heartAnimationTime*2*PI.float32/6)
     for i, c in world.cogs:
-      if c.hp <= 0 or not seen(i): continue
+      if c.hp <= 0 or not shown(i): continue
       let p = poses[i]
       shapes.addCircle(p+vec3(0, 0.04, 0), 0.65, teamColors[world.apparentTeam(i)])
       shapes.addCircle(p+vec3(0, 0.05, 0), 0.48, rgbx(43, 68, 55, 255))
       if i == selected: shapes.addCircle(p+vec3(0, 0.03, 0), 0.9, rgbx(250, 226,
           140, 180))
+      if victory.active: continue
       let d = direction(c.pos, c.aim, 105)
       shapes.addLine(p+vec3(0, 1.05, 0), p+vec3(d.x.float32/100, 1.05,
           d.z.float32/100), rgbx(49, 60, 66, 255), halfWidth = 0.13)
@@ -991,6 +1033,7 @@ proc runGraphics*() =
         for hp in 0..<c.hp: shapes.box(p.x-0.35+hp.float32*0.28, p.y+2.5, p.z,
             0.1, 0.09, 0.09, rgbx(221, 253, 180, 255))
     for b in world.balls:
+      if victory.active: continue
       if lens >= 0 and not seen(b.owner.int): continue
       let start = point(b.pos.x-b.velocity.x, b.pos.z-b.velocity.z)
       let duration = if replayRulesVersion >= 9: 6'f32 else: 2'f32
@@ -1006,7 +1049,7 @@ proc runGraphics*() =
     if islandTerrain: drawWater(vp, eye, (world.tick.float32+alpha)/24)
     shapes.draw(vp)
     # A real second 3D camera gives the selected bot's eye-level view.
-    if firstPerson and selected >= 0 and world.cogs[selected].hp > 0:
+    if firstPerson and selected >= 0 and world.cogs[selected].hp > 0 and shown(selected):
       let c = world.cogs[selected]
       let p = poses[selected]+vec3(0, 1.5, 0)
       let d = direction(c.pos, c.aim, 100)
@@ -1048,7 +1091,7 @@ proc runGraphics*() =
         let samples = index.momentum.toJson().cstring
         {.emit: "EM_ASM({if(Module.paintbotGraphs)Module.paintbotGraphs(JSON.parse(UTF8ToString($0)));}, `samples`);".}
         sentGraphSamples = index.momentum.len
-      if lastHud != world.tick or paused:
+      if lastHud != world.tick or paused or victory.active:
         var screens: array[Seats, array[2, float32]]
         var visibility: array[Seats, bool]
         var footprint: array[4, array[2, float32]]
@@ -1061,7 +1104,7 @@ proc runGraphics*() =
           let point = origin+ray*clamp(-origin.y/ray.y, 0'f32, 1'f32)
           footprint[i] = [point.x, point.z]
         for i in 0..<Seats:
-          visibility[i] = seen(i)
+          visibility[i] = shown(i)
           let clip = vp*vec4(poses[i]+vec3(0, 1, 0), 1)
           screens[i] = [(clip.x/clip.w*0.5+0.5).float32, (
               0.5-clip.y/clip.w*0.5).float32]
@@ -1091,7 +1134,7 @@ proc runGraphics*() =
           objects.add Inspectable(kind: "pickup", id: i,
             bottom: projected(position(item.pos, 0.1)), top: projected(position(item.pos, 1.7)))
         let payload = ViewerState(terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
-            paused: paused, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
+            paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint).toJson()
         let data = payload.cstring
         let tick = world.tick

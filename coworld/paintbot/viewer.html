@@ -1184,6 +1184,9 @@
   .match-graph svg { display: block; width: 100%; height: 142px; }
   .match-graph svg text { fill: #becac2; font: 10px sans-serif; }
   .match-graph .graph-note { padding: 12px; font-size: 12px; color: #becac2; }
+  #viewbar.collapsed > :not(#viewbar-toggle) { display:none !important; }
+  #viewbar:not(.collapsed) #viewbar-toggle svg { transform:rotate(180deg); }
+  #victory-banner { position:fixed; bottom:100px; left:50%; transform:translateX(-50%); z-index:20; padding:10px 18px; border-radius:12px; background:#142920e8; color:#f1dfac; font-size:18px; pointer-events:none; }
 </style>
 <header>
   <small id="modehint" hidden></small>
@@ -1232,7 +1235,8 @@
     </div>
   </div>
 </section>
-<div id="viewbar">
+<div id="viewbar" class="collapsed">
+<button id="viewbar-toggle" aria-expanded="false" aria-label="Expand view controls" title="Expand view controls">Expand view controls</button>
 <button id="fit">Fit arena</button><button id="topdown">Top down</button
   ><button id="actioncam" aria-pressed="true">Action camera</button
   ><button id="bars" aria-pressed="true">Health</button
@@ -1324,7 +1328,7 @@
     ><button id="forward" title="Forward five seconds (.)">+5s</button
     ><button id="end" title="Jump to end (E)" aria-label="Jump to end">
       ›|</button
-    ><button id="loop" title="Loop (R)" aria-pressed="false">Loop</button
+    ><button id="loop" title="Loop (R)" aria-pressed="true">Loop</button
     ><button id="skip" title="Skip lulls (F)" aria-pressed="false">
       Skip lulls</button
     ><button id="spoilers" title="Show future events (O)" aria-pressed="false">
@@ -1381,6 +1385,8 @@
   <div class="graph-values"></div><svg viewBox="0 0 360 142" role="img" aria-label="Ember and Azure points over time"></svg>
   <div class="graph-note" hidden>Points scoring is available in matches using rules 23 or later.</div>
 </section>
+
+<div id="victory-banner" role="status" hidden></div>
 
 <script src="inspector.js"></script>
 <script src="viewer.js"></script>

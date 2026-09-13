@@ -52,6 +52,7 @@
     events: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01",
     help: "M9 8a3 3 0 1 1 5 2c-2 1-2 2-2 4M12 18h.01",
     fullscreen: "M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5",
+    "viewbar-toggle": "M9 5l7 7-7 7",
     fit: "M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4M9 9h6v6H9z",
     actioncam: "M3 6h12v12H3V6ZM15 10l6-4v12l-6-4M7 9v6M5 12h4",
     topdown: "M12 3 3 8l9 5 9-5-9-5ZM3 13l9 5 9-5M3 18l9 5 9-5",
@@ -235,7 +236,7 @@
   let state = null,
     index = null,
     selected = -1,
-    loop = false,
+    loop = true,
     skip = false,
     spoilers = false,
     following = false,
@@ -438,6 +439,15 @@
       if (ready()) fn();
     });
   }
+  $("viewbar-toggle").onclick = () => {
+    const collapsed = $("viewbar").classList.toggle("collapsed");
+    const button = $("viewbar-toggle");
+    button.setAttribute("aria-expanded", String(!collapsed));
+    button.setAttribute("aria-label", collapsed ? "Expand view controls" : "Minimize view controls");
+    button.title = collapsed ? "Expand view controls" : "Minimize view controls";
+  };
+  pressed("loop", loop);
+  $("stats").disabled = loop;
   bind("play", () => Module._pw_play(+state.paused));
   bind("restart", () => seek(0));
   bind("back", () => seek(state.world.tick - 1, true));
@@ -976,7 +986,7 @@
     }
     for (let i = 0; i < 16; i++) {
       const c = w.cogs[i];
-      if (c.hp <= 0) continue;
+      if (c.hp <= 0 || (state.celebrating && w.winner >= 0 && team(i) !== w.winner)) continue;
       const x = mapX(c.pos.x), y = mapY(c.pos.z);
       ctx.beginPath();
       ctx.arc(x, y, i === selected ? 5 : 4, 0, Math.PI * 2);
@@ -1430,7 +1440,13 @@
         seek(next.tick - 48);
       } else $("skipping").textContent = "";
     } else $("skipping").textContent = "";
-    if (t === data.total && (!data.live || data.paused)) {
+    $("victory-banner").hidden = !data.celebrating;
+    if (data.celebrating) {
+      const result = w.winner < 0 ? "Match drawn" : `${w.winner ? "Azure" : "Ember"} wins`;
+      const remaining = Math.max(0, Math.ceil(30-data.celebrationSeconds));
+      $("victory-banner").textContent = `${result} · ${remaining > 0 ? `${loop ? "Replay in" : "Celebration"} ${remaining}s` : "Final result"}`;
+    }
+    if (t === data.total && data.celebrating && data.celebrationSeconds >= 30) {
       if (loop) {
         seek(0);
         Module._pw_play(1);

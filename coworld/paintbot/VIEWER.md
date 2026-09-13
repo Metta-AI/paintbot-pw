@@ -75,3 +75,15 @@ hearts unfilled. Points plots both cumulative team scores, including elimination
 bonuses. Graphs follow the playhead and hide future history unless Spoilers is on.
 Live games collect the same simulation samples as replays, including ownership
 changes between seconds. Points are available for rules 23 and later.
+
+## Victory presentation
+
+Looping starts enabled. At the end, surviving winners bounce and spin for 30
+seconds while surviving losers disappear with the normal tag-out paint splash.
+This presentation leaves the recorded result and simulation state untouched.
+Pause holds the celebration; seeking backward resets it. Draws show the result
+without removing either team. After the 30-second scene, looping restarts the
+replay; with loop disabled, the final scoreboard opens.
+
+The upper view-controls toolbar starts minimized. Its chevron button expands
+or minimizes it; the playback timeline remains available.
