@@ -10,7 +10,7 @@ from pathlib import Path
 
 p = argparse.ArgumentParser()
 p.add_argument("--policy", action="append", default=[])
-p.add_argument("--ticks", type=int, default=7200)
+p.add_argument("--ticks", type=int, default=14400)
 p.add_argument("--output", type=Path, required=True)
 p.add_argument("--port", type=int, default=8088)
 a = p.parse_args()
