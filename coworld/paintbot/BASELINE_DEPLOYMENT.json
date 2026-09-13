@@ -1,0 +1,43 @@
+{
+  "version": "0.3.19",
+  "coworld_id": "cow_901cb21c-27ee-47b6-a532-3a66acd91d11",
+  "source_commit": "2c61a0adeb040422dd752c9f38857f288355f72f",
+  "wasm_sha256": "c6b507d255e961a72479ec6903468f3cf01c1c90970d3d292394f33cea0624d5",
+  "policy_name": "paintbot-pw-territory-wasm:v1",
+  "policy_version_id": "adcd246b-8a85-47b6-b63e-7f0dfcb7c40a",
+  "player_id": "ply_d2a76018-a187-4f93-9f62-0395f465b31c",
+  "league_id": "league_b9458ff8-0854-4e21-82b8-3c99942902e0",
+  "replaced_policy_version_id": "3d27fe95-be94-4aab-bdc0-899ad2f27994",
+  "certification_job_id": "28157ec4-5f6e-4aba-8baf-50cd5d6db086",
+  "certification": "certified",
+  "canonical_verified": true,
+  "active_and_filler_verified": true,
+  "platform_ci_run": 34749375536,
+  "platform_ci_conclusion": "success",
+  "verified_smoke_episode_requests": [
+    "ereq_4cf364da-721f-4b00-97f8-048938dd36f0",
+    "ereq_188eaf0e-35ba-4efd-a5e6-c5bcd65bd49f",
+    "ereq_260b7f7f-ab1e-43c7-8845-89e5ef666c00",
+    "ereq_4fe728a9-7e0d-4503-a0c6-d1ed3698e2a6",
+    "ereq_d26272ea-0124-4154-b90b-eb93cb414fa4"
+  ],
+  "hosted_viewer_hash_verified": true,
+  "fresh_league_replay": {
+    "round_number": 306,
+    "episode_request_id": "ereq_1e4b5688-ce10-4e13-9883-b300a5156c8d",
+    "replay_url": "https://softmax-public.s3.amazonaws.com/replays/e3103550-65e8-42da-bf8c-b2d8986f40fb.replay",
+    "verified_frames": 3485,
+    "baseline_slots": [
+      3,
+      7,
+      11,
+      15
+    ],
+    "baseline_captures": [
+      3,
+      3,
+      1,
+      4
+    ]
+  }
+}

@@ -109,3 +109,33 @@ Funded 4,320 credits (the existing $432 budget) and configured a daily refill
 with the same 4,320-credit balance cap. Round #5 then started with the newly
 placed daveey-heartwick:v1 champion (policy version
 `ba035f7e-1f3a-4896-b18f-90157f46b0de`).
+
+## Baseline territory repair — 2026-09-13, 0.3.19
+
+The WASM baseline was navigating to a hard-coded capture-the-flag destination
+that is not a Heartwick control heart. It now selects actual unowned hearts,
+holds position to capture, and retargets after ownership changes. The source
+and reproducible artifact provenance are checked in alongside the baseline.
+
+Implementation `629a6ca` and provenance correction `2c61a0a` were merged into
+main by a normal fast-forward push after GitHub PR APIs failed. Linux, macOS,
+and Windows CI passed. Both actual-WASM navigation regressions fail against
+the former league artifact and pass against the replacement; eight runtime
+tests also pass. Vet could not run because its provider credentials were absent.
+
+Version 0.3.19 is certified and canonical; all ten certification steps and five
+hosted smoke episodes passed. All smoke replay hashes verified natively, and
+a fresh hosted viewer displayed Replay hash verified. The game-owned replacement
+baseline is active, the old baseline was retired, and the league filler policy
+reference was updated. Exact identifiers are in BASELINE_DEPLOYMENT.json.
+
+Replaying the reported stuck state with only the four affected baseline command
+streams replaced made all four leave the cluster within 100 ticks (4.17 seconds)
+and capture four hearts. Other seats retained recorded commands, so this is
+behavioral recovery evidence, not a competitive win-rate estimate. Private
+competitive policy source and active submissions were unchanged.
+
+Fresh league round 306 selected the replacement in all three matches. Episode
+`ereq_1e4b5688-ce10-4e13-9883-b300a5156c8d` completed on 0.3.19: all 3,485
+frame hashes verified natively and the hosted viewer showed Replay hash verified.
+The four replacement baseline seats captured 3, 3, 1, and 4 hearts respectively.
