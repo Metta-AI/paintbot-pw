@@ -135,6 +135,35 @@ proc box(r: var ShapeRenderer, x, y, z, dx, dy, dz: float32, color: ColorRGBX, y
   r.addQuad(b, b+up, e+up, e, dark)
   r.addQuad(e, e+up, d+up, d, light)
   r.addQuad(d, d+up, a+up, a, dark)
+proc sprayCan(r: var ShapeRenderer, p: Vec3) =
+  # A compact aerosol can: rolled rims, tapered shoulder and exposed nozzle.
+  const sides = 16
+  proc section(r: var ShapeRenderer, y, height, bottomRadius, topRadius: float32, color: ColorRGBX) =
+    let bottom = p+vec3(0, y, 0)
+    let top = bottom+vec3(0, height, 0)
+    for i in 0..<sides:
+      let a = i.float32*2*PI.float32/sides.float32
+      let b = (i+1).float32*2*PI.float32/sides.float32
+      let u = vec3(cos(a), 0, sin(a))
+      let v = vec3(cos(b), 0, sin(b))
+      let shade = 0.72'f32+0.22'f32*cos((a+b)/2-0.7'f32)
+      let side = rgbx(uint8(color.r.float32*shade),
+          uint8(color.g.float32*shade), uint8(color.b.float32*shade), 254)
+      r.addQuad(bottom+u*bottomRadius, top+u*topRadius,
+          top+v*topRadius, bottom+v*bottomRadius, side)
+      r.addTriangle(top, top+v*topRadius, top+u*topRadius, color)
+      r.addTriangle(bottom, bottom+u*bottomRadius, bottom+v*bottomRadius, side)
+  let metal = rgbx(192, 202, 205, 254)
+  let orange = rgbx(241, 175, 70, 254)
+  section(r, 0, 0.07, 0.29, 0.29, metal)
+  section(r, 0.07, 0.75, 0.27, 0.27, orange)
+  section(r, 0.30, 0.16, 0.273, 0.273, rgbx(248, 236, 202, 254))
+  section(r, 0.82, 0.07, 0.29, 0.29, metal)
+  section(r, 0.89, 0.13, 0.27, 0.14, metal)
+  section(r, 1.02, 0.12, 0.105, 0.105, rgbx(48, 55, 64, 254))
+  r.box(p.x, p.y+1.055, p.z-0.10, 0.045, 0.045, 0.025,
+      rgbx(16, 22, 27, 254))
+
 proc gem(r: var ShapeRenderer, p: Vec3, s: float32, color: ColorRGBX) =
   let c = rgbx(color.r,color.g,color.b,if color.a==255:254'u8 else:color.a)
   let top = p+vec3(0, s, 0); let bottom = p-vec3(0, s, 0)
@@ -874,11 +903,7 @@ proc runGraphics*() =
       if e.grenade: shapes.gem(poses[i]+vec3(-0.45, 1.0, -0.3), 0.19, rgbx(157,
           175, 66, 255))
       if e.sprayCan:
-        let can = poses[i]+vec3(0.95, 0.55, 0)
-        shapes.box(can.x, can.y, can.z, 0.5, 1.2, 0.42,
-          rgbx(241, 175, 70, 255))
-        shapes.box(can.x, can.y+1.2, can.z, 0.23, 0.22, 0.2,
-          rgbx(48, 55, 64, 255))
+        shapes.sprayCan(poses[i]+vec3(0.72, 0.65, 0))
       for hp in 0..<e.armor: shapes.box(poses[i].x-0.3+hp.float32*0.25, poses[
           i].y+2.1, poses[i].z, 0.16, 0.09, 0.09, rgbx(65, 203, 245, 255))
     if world.controlHearts.len>0:
