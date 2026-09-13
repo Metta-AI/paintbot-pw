@@ -22,7 +22,7 @@ nim c -d:emscripten -d:replayViewer -d:workerReplayIndex examples/paintbot/paint
 mkdir -p "$output"
 cp examples/paintbot/emscripten/paintbot.{js,wasm,data} "$output/"
 cp examples/paintbot/emscripten/paintbot-index.{js,wasm} "$output/"
-cp "$root/coworld/paintbot/"{viewer.js,startup.js,index-worker.js} "$output/"
+cp "$root/coworld/paintbot/"{viewer.js,inspector.js,startup.js,index-worker.js} "$output/"
 cp "$POLYWORLD_DATA/fonts/"Rubik-{Regular,Bold}.ttf "$output/"
 cp "$root/coworld/paintbot/art/paint-crew.png" "$output/portrait.png"
 python3 - "$root" "$output" <<'PY'
@@ -40,7 +40,7 @@ nim c -d:emscripten examples/paintbot/paintbot.nim
 mkdir -p "$output/play"
 cp examples/paintbot/emscripten/paintbot.{js,wasm,data} "$output/play/"
 cp examples/paintbot/players/base.bas "$output/play/base.bas"
-cp "$output/"{viewer.js,portrait.png,Rubik-Regular.ttf,Rubik-Bold.ttf} "$output/play/"
+cp "$output/"{viewer.js,inspector.js,portrait.png,Rubik-Regular.ttf,Rubik-Bold.ttf} "$output/play/"
 python3 - "$root" "$output" <<'PLAY'
 from pathlib import Path
 import sys

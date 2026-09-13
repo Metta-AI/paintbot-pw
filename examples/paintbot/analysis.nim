@@ -14,7 +14,10 @@ type
     state*: World
   CombatStats* = object
     shots*, hits*: int32
+  HeartTenure* = object
+    tick*, owner*: int32
   ReplayIndex* = object
+    heartTenures*: seq[seq[HeartTenure]]
     combat*: seq[array[Seats, CombatStats]]
     events*: seq[Moment]
     hits*: seq[Moment]
@@ -65,11 +68,26 @@ proc sampleGraphs*(index: var ReplayIndex, w: World) =
       return
   index.momentum.add sample
 
+proc sampleHeartTenures*(index: var ReplayIndex, w: World) =
+  index.heartTenures.setLen(w.controlHearts.len)
+  for i, h in w.controlHearts:
+    if index.heartTenures[i].len == 0 or
+        (w.tick > index.heartTenures[i][^1].tick and h.owner != index.heartTenures[i][^1].owner):
+      index.heartTenures[i].add HeartTenure(tick: w.tick, owner: h.owner)
+
+proc heartHeldTicks*(index: ReplayIndex, heart, tick: int): int =
+  if heart < 0 or heart >= index.heartTenures.len: return 0
+  for i in countdown(index.heartTenures[heart].high, 0):
+    let entry = index.heartTenures[heart][i]
+    if entry.tick <= tick:
+      return if entry.owner >= 0: tick-entry.tick.int else: 0
+
 proc advanceIndexed*(index: var ReplayIndex) =
   ## Keep spectator counters outside World so rules and replay hashes are unchanged.
   if index.combat.len == 0:
     index.combat.add default(array[Seats, CombatStats])
   doAssert index.combat.len == world.tick + 1
+  index.sampleHeartTenures(world)
   var counters = index.combat[^1]
   var hits: seq[Moment]
   observeShot = proc(tick: int32, slot: int) =
@@ -82,6 +100,7 @@ proc advanceIndexed*(index: var ReplayIndex) =
     observeShot = nil
     observeHit = nil
   advance()
+  index.sampleHeartTenures(world)
   index.combat.add counters
   index.hits.add hits
 
