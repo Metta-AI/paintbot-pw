@@ -14,7 +14,17 @@ type
     names: array[Seats, string]
     communications: seq[Communication]
     seed: int32
+  CogTerrain = object
+    elevation, trench, spread: int
+  Inspectable = object
+    kind: string
+    id: int
+    bottom, top: array[2, float32]
   ViewerState = object
+    terrain: array[Seats, CogTerrain]
+    objects: seq[Inspectable]
+    heartHeld: seq[int]
+    heartValues: seq[int32]
     combat: array[Seats, CombatStats]
     rulesVersion: int
     world: World
@@ -35,6 +45,8 @@ var
   orderX, orderY: float32
   orderKind = 0
   orderSeat = -1
+  inspectedKind = 0
+  inspectedId = -1
   selected = -1
   lens = -1
   follow = false
@@ -81,6 +93,10 @@ proc issueOrder(x, y: cfloat, kind, seat: cint) {.exportc: "pw_order", cdecl,
 proc selectSeat(value: cint) {.exportc: "pw_select", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = selected = clamp(value.int,
     -1, Seats-1)
+proc inspectObject(kind, id: cint) {.exportc: "pw_inspect", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  inspectedKind = kind.int
+  inspectedId = id.int
 proc setView(value: cint) {.exportc: "pw_lens", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = lens = clamp(value.int, -1, Seats+1)
 proc setCamera(x, z, d, angle, pitch: cfloat) {.exportc: "pw_camera", cdecl,
@@ -118,6 +134,12 @@ proc seen(i: int): bool =
   for s in 0..<Seats:
     if team(s) == lens-Seats and world.cogs[s].hp > 0 and world.visible(s,
         i): return true
+proc pointSeen(p: Point): bool =
+  if lens < 0: return true
+  for seat in 0..<Seats:
+    if (seat == lens or lens >= Seats and team(seat) == lens-Seats) and
+        world.canSeePoint(seat, p): return true
+
 proc box(r: var ShapeRenderer, x, y, z, dx, dy, dz: float32, color: ColorRGBX, yaw: float32 = 0) =
   let c = rgbx(color.r,color.g,color.b,if color.a==255:254'u8 else:color.a)
   let light = rgbx(uint8(c.r.float*0.78), uint8(c.g.float*0.78), uint8(
@@ -827,14 +849,11 @@ proc runGraphics*() =
           187, 111, 255))
       for x in [minX().float32/100-32, maxX().float32/100-32]: shapes.box(x, 0, 0, 0.07, 0.16, (maxZ()-minZ()).float32/200, rgbx(217,
           187, 111, 255))
-    for item in world.pickups:
+    for itemId, item in world.pickups:
       if item.readyAt > world.tick: continue
-      if lens >= 0:
-        var lit = false
-        for seat in 0..<Seats:
-          if (seat == lens or lens >= Seats and team(seat) == lens-Seats) and
-              world.canSeePoint(seat, item.pos): lit = true
-        if not lit: continue
+      if not pointSeen(item.pos): continue
+      if inspectedKind == 2 and inspectedId == itemId:
+        shapes.addCircle(position(item.pos, 0.025), 1.25, rgbx(250,226,140,180))
       let special = item.kind in {grenadePickup,sprayPickup}
       let spin = heartAnimationTime*1.08
       let p = position(item.pos, if special: 0.7+0.15*sin(spin*1.7) else: 0.28)
@@ -920,6 +939,8 @@ proc runGraphics*() =
             shapes.addQuad(position(point(x,z),0.09),position(point(x,z+200),0.09),
               position(point(x+200,z+200),0.09),position(point(x+200,z),0.09),color)
       for index, heart in world.controlHearts:
+        if inspectedKind == 1 and inspectedId == index:
+          shapes.addCircle(position(heart.pos, 0.025), 1.8, rgbx(250,226,140,180))
         let color=if heart.owner<0:rgbx(220,229,238,255)
           elif heart.owner==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)
         let big = world.heartPoints(index) == BigHeartPoints
@@ -1044,7 +1065,32 @@ proc runGraphics*() =
           let clip = vp*vec4(poses[i]+vec3(0, 1, 0), 1)
           screens[i] = [(clip.x/clip.w*0.5+0.5).float32, (
               0.5-clip.y/clip.w*0.5).float32]
-        let payload = ViewerState(combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
+        var terrain: array[Seats, CogTerrain]
+        for i, cog in world.cogs:
+          let aim = if world.equipment[i].windup > 0:
+              Point(x: cog.pos.x+world.equipment[i].gunAim.x,
+                z: cog.pos.z+world.equipment[i].gunAim.z)
+            else: cog.aim
+          terrain[i] = CogTerrain(elevation: world.elevation(cog.pos),
+            trench: world.trenchAt(cog.pos), spread: world.gunSpreadPercent(cog.pos, aim))
+        var objects: seq[Inspectable]
+        var heartHeld: seq[int]
+        var heartValues: seq[int32]
+        proc projected(p: Vec3): array[2, float32] =
+          let clip = vp*vec4(p, 1)
+          if clip.w <= 0: return [-100'f32, -100'f32]
+          [(clip.x/clip.w*0.5+0.5).float32, (0.5-clip.y/clip.w*0.5).float32]
+        for i, h in world.controlHearts:
+          heartHeld.add index.heartHeldTicks(i, world.tick.int)
+          heartValues.add world.heartPoints(i)
+          objects.add Inspectable(kind: "heart", id: i,
+            bottom: projected(position(h.pos, 0.4)),
+            top: projected(position(h.pos, if world.heartPoints(i) == BigHeartPoints: 6.2 else: 4.5)))
+        for i, item in world.pickups:
+          if item.readyAt > world.tick or not pointSeen(item.pos): continue
+          objects.add Inspectable(kind: "pickup", id: i,
+            bottom: projected(position(item.pos, 0.1)), top: projected(position(item.pos, 1.7)))
+        let payload = ViewerState(terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
             paused: paused, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint).toJson()
         let data = payload.cstring

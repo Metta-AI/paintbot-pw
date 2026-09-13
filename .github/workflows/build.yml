@@ -53,4 +53,5 @@ jobs:
       - run: nim r tests/test_paintbot_uniform.nim
       - run: nim r tests/test_paintbot_human.nim
       - run: nim r tests/test_paintbot_replay.nim
+      - run: node tests/test_paintbot_inspector.js
       - run: node tests/test_paintbot_webinputs.js

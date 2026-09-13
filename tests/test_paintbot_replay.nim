@@ -115,3 +115,26 @@ suite "Paintbot replay analysis and metadata":
       check world.stateHash() == (if tick == 0: initial.stateHash() else: recording.frames[tick-1].hash)
     check observeShot == nil
     check observeHit == nil
+
+  test "heart hold durations follow ownership at the playhead":
+    visionRulesVersion = 27
+    var w = newWorld(42, 240)
+    w.controlHearts = @[ControlHeart(owner: 0), ControlHeart(owner: -1)]
+    var history: ReplayIndex
+    history.sampleHeartTenures(w)
+    w.tick = 24
+    w.controlHearts[1].owner = 1
+    history.sampleHeartTenures(w)
+    w.tick = 72
+    w.controlHearts[0].owner = 1
+    history.sampleHeartTenures(w)
+    w.tick = 96
+    history.sampleHeartTenures(w)
+    check history.heartTenures[0].len == 2
+    check history.heartHeldTicks(0, 96) == 24
+    check history.heartHeldTicks(0, 48) == 48
+    check history.heartHeldTicks(0, 72) == 0
+    check history.heartHeldTicks(1, 12) == 0
+    check history.heartHeldTicks(1, 48) == 24
+    check history.heartHeldTicks(1, 24) == 0
+    check history.heartHeldTicks(0, 96) == 24

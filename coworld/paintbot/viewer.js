@@ -26,6 +26,8 @@
     for (const option of [...$('speed').options]) if (![1,2,4,16].includes(Number(option.value))) option.remove();
   }
   document.body.append(modes);
+  let inspectedObject = null, inspectedDetailsKey = "";
+  const inspector = window.PaintbotInspector;
   const cogReadout = $("cog-readout");
   const soundReadout = $("sound-readout");
   window.addEventListener('keydown', e => {
@@ -405,6 +407,8 @@
   }
   function select(i) {
     if (!ready()) return;
+    inspectedObject = null;
+    Module._pw_inspect(0, -1);
     selected = i;
     Module._pw_select(i);
     if (i < 0) {
@@ -420,6 +424,8 @@
   let currentLens = -1;
   function setLens(value) {
     if (!ready()) return;
+    inspectedObject = null;
+    Module._pw_inspect(0, -1);
     Module._pw_lens(Number(value));
     currentLens = Number(value);
   }
@@ -877,7 +883,7 @@
     const descriptions = [...new Set(cues.map(cue =>
       `${['Footsteps','Gunfire','Explosion','Spray'][cue.kind]} ${['E','SE','S','SW','W','NW','N','NE'][cue.direction]} · ${['near','midrange','far'][cue.distance]}`))];
     const inspected = selected >= 0 ? selected : listener;
-    const cog = w.cogs[inspected];
+    const cog = inspectedObject ? null : w.cogs[inspected];
     cogReadout.hidden = !cog;
     if (cog) {
       $("cog-name").textContent = `${name(inspected)} · Cog ${inspected + 1}`;
@@ -887,10 +893,25 @@
       $("cog-hits").textContent = state.combat?.[inspected]?.hits ?? "—";
       $("cog-lives").textContent = w.equipment?.[inspected]?.lives ?? "—";
       $("cog-captures").textContent = cog.captures;
+      $("cog-equipment").textContent = inspector.equipment(cog, w.equipment?.[inspected], w.uniforms?.[inspected]);
+      $("cog-bonuses").textContent = inspector.bonuses(cog, state.terrain?.[inspected], w.equipment?.[inspected], state.rulesVersion);
       $("cog-status").hidden = cog.hp > 0;
       $("cog-status").textContent = w.equipment?.[inspected]?.lives === 0
         ? "Eliminated" : `Respawning in ${Math.ceil(cog.respawn / 24)}s`;
     }
+    const details = inspector.objectDetails(inspectedObject, state);
+    $("object-readout").hidden = !details;
+    const detailsKey = JSON.stringify(details);
+    if (details && detailsKey !== inspectedDetailsKey) {
+      $("object-name").textContent = details.title;
+      $("object-name").style.color = colors[details.color] || '#f4e7c4';
+      $("object-description").textContent = details.description;
+      $("object-facts").replaceChildren(...details.rows.flatMap(([label, value]) => {
+        const dt = document.createElement('dt'), dd = document.createElement('dd');
+        dt.textContent = label; dd.textContent = value; return [dt, dd];
+      }));
+    }
+    inspectedDetailsKey = detailsKey;
     soundReadout.hidden = listener < 0 || !w.cogs[listener]?.hp || !descriptions.length;
     soundReadout.textContent = descriptions.slice(-3).join(' / ');
     if (listener >= 0 && w.cogs[listener]?.hp > 0) {
@@ -1157,7 +1178,12 @@
     if (e.button !== 0) return;
     pointers.delete(e.pointerId);
     if (drag && !drag.moved && state) {
-      select(agentAt(e));
+      const cog = agentAt(e);
+      const object = cog < 0 ? inspector.objectAt(state.objects,
+        $("canvas").getBoundingClientRect(), e.clientX, e.clientY) : null;
+      select(cog);
+      inspectedObject = object;
+      if (object) Module._pw_inspect(object.kind === 'heart' ? 1 : 2, object.id);
     }
     drag = null;
   });
