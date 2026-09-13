@@ -93,3 +93,34 @@ Rules v7 records the new map while v6 retains its original cover and replay hash
 - Private BASIC compatibility matches on both sides reproduce hashes 3901678753
   and 3350044769 at 1,484 and 2,201 ticks. No competitive-strength claim is made.
 - Vet was attempted after code changes but unavailable without its API credentials.
+
+## WASM territory objective repair (2026-09-13)
+
+R.301 E.2 (replay `683ac72e-9ce9-45e0-85d6-2ab1171ddbfb`, rules 28,
+seed 890754794) exposed a baseline compatibility bug. The inherited two-team
+CTF formula computes a red pedestal at map pixel (480,960), which translates
+to world (-2400,2000). All four blue baseline cogs circled that obsolete goal.
+The published WASM digest was
+`3b06b727440918ffdd883189035a250de3db0eb5ac64c4deef1487093e40ee5e`.
+
+The WASM now reads public control-heart positions and ownership, navigates to
+an uncaptured heart, holds inside the capture radius, and retargets when the
+owner changes. Frames without territory markers retain the inherited CTF path.
+The in-repository adapter and build provenance accompany the rebuilt binary.
+
+- The shipped-WASM regression exercises both teams on the expanded map,
+  departure from the obsolete goal, 90 stationary capture frames, and arrival
+  at the next uncaptured heart. The old published binary fails both cases.
+- All eight Python runtime boundary tests pass.
+- All 2,988 original replay hashes reproduce unchanged.
+- A counterfactual starting at verified tick 1700 replaces only the four blue
+  baseline command streams. All four leave the old cluster within 100 ticks;
+  the first new capture occurs before tick 1900, and the baseline records four
+  new captures by the end. Other seats retain recorded actions. This validates
+  the repair mechanism, not competitive strength against reactive opponents.
+
+Rebuild with WASI SDK 33 and the upstream revision in
+`players/baseline.build.json`:
+`WASI_SDK_PATH=/path/to/wasi-sdk python coworld/paintbot/tools/build_equipment_baseline.py /path/to/cogame-paintbot-cdx`.
+Run the actuator regressions with
+`python coworld/paintbot/test_baseline.py` (Wasmtime 48.0.0).

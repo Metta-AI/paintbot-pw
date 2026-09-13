@@ -171,7 +171,7 @@
       "name": "WASM Baseline",
       "type": "player",
       "file": "players/baseline.wasm",
-      "description": "Unchanged Paintbot CDX baseline reactor."
+      "description": "Paintbot WASM baseline with territory objectives and capture holding."
     }
   ],
   "variants": [

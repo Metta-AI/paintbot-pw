@@ -1,0 +1,6 @@
+{
+  "upstream_commit": "40d0bee8e2c5a8955ff711d96c4c1bb482a69134",
+  "upstream_baseline_sha256": "746934a1a4cdb503b9e190fd8fae1e7d4486e62c7df689e4a4eb307f20097ddd",
+  "adapted_baseline_sha256": "35085afe65f2fbe7b3698ebd78bc5d7106b58210604deb120f328ac3450e7d6b",
+  "wasm_sha256": "c6b507d255e961a72479ec6903468f3cf01c1c90970d3d292394f33cea0624d5"
+}
