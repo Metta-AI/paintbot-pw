@@ -111,7 +111,7 @@ proc initializeEquipment(w: var World) =
         w.heartCaptures.add HeartCapture(team: -1)
 
 proc updateBigHeart*(w: var World) =
-  if visionRulesVersion < 25 or w.tick >= w.endTick: return
+  if visionRulesVersion < 25 or visionRulesVersion >= 28 or w.tick >= w.endTick: return
   let round = w.tick div BigHeartInterval
   if round <= w.bigHeartRound: return
   w.bigHeartRound = round
@@ -161,7 +161,7 @@ proc updateTerritory*(w:var World) =
   for heart in w.controlHearts:
     if heart.owner>=0:inc w.captures[heart.owner]
   for side in 0..1:
-    if w.captures[side]==10:
+    if w.captures[side]==10 and visionRulesVersion < 28:
       if visionRulesVersion >= 23:
         for i in 0..<Seats:
           if team(i) != side:
@@ -457,6 +457,12 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     if visionRulesVersion >= 23:
       for index, heart in w.controlHearts:
         if heart.owner >= 0: w.scoreTicks[heart.owner] += w.heartPoints(index)
+      if visionRulesVersion >= 28:
+        inc w.tick
+        let target = w.heartMeterTarget()
+        if w.scoreTicks[0] >= target or w.scoreTicks[1] >= target or w.tick >= w.endTick:
+          w.winner = if w.scoreTicks[0] > w.scoreTicks[1]: 0 elif w.scoreTicks[1] > w.scoreTicks[0]: 1 else: -2
+        return
       var alive: array[2, bool]
       for i,c in w.cogs:
         if c.hp > 0 or w.equipment[i].lives > 0: alive[team(i)] = true

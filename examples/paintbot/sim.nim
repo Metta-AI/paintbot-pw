@@ -7,7 +7,9 @@ import std/[tables, math]
 const
   Seats* = 16
   TickRate* = 24
-  MatchTicks* = 5*60*TickRate
+  MatchTicks* = 5*60*TickRate # Historical replay duration.
+  HeartMeterMatchTicks* = 10*60*TickRate
+  HeartMeterFillTicks* = 3*60*TickRate
   Width* = 6400
   Height* = 4000
   Radius* = 55
@@ -136,7 +138,7 @@ type
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
-var visionRulesVersion* = 27
+var visionRulesVersion* = 28
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
@@ -314,14 +316,16 @@ proc spawn(w: var World, slot: int, solid = true) =
 proc resetHeart*(w: var World, side: int) =
   w.hearts[side] = Heart(pos: home(side), carrier: -1)
 proc initializeEquipment(w: var World)
-proc newWorld*(seed: int32, endTick: int32 = MatchTicks): World =
+proc newWorld*(seed: int32, endTick: int32 = 0): World =
   wideRamps = visionRulesVersion >= 11
   wilderness = visionRulesVersion >= 12
   deepWilderness = visionRulesVersion >= 14
   organicTerrain = visionRulesVersion >= 15
   islandTerrain = visionRulesVersion >= 16
   expandedIsland = visionRulesVersion >= 22
-  result.endTick = endTick
+  result.endTick = if visionRulesVersion >= 28:
+    (if endTick <= 0: HeartMeterMatchTicks.int32 else: min(endTick, HeartMeterMatchTicks.int32))
+  else: (if endTick <= 0: MatchTicks.int32 else: endTick)
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
   if visionRulesVersion >= 8:
     for lot in roundVillage():
@@ -362,7 +366,11 @@ proc newWorld*(seed: int32, endTick: int32 = MatchTicks): World =
     result.usedBigHearts = newSeq[bool](result.controlHearts.len)
 
 proc heartPoints*(w: World, index: int): int32 =
-  if visionRulesVersion >= 25 and w.bigHeart == index.int32: BigHeartPoints else: 1
+  if visionRulesVersion in 25..27 and w.bigHeart == index.int32: BigHeartPoints else: 1
+
+proc heartMeterTarget*(w: World): int32 =
+  ## Half the hearts held for three minutes, measured in integer tick-points.
+  w.controlHearts.len.int32 * HeartMeterFillTicks div 2
 
 proc scores*(w: World): seq[float] =
   for i in 0..<Seats:

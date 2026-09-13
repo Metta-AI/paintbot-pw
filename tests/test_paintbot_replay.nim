@@ -5,7 +5,7 @@ import flatty
 
 suite "Paintbot replay analysis and metadata":
   test "checkpoint seeks preserve all recorded world hashes":
-    recording=Recording(seed:2026,endTick:MatchTicks)
+    recording=Recording(seed:2026,endTick:HeartMeterMatchTicks)
     world=newWorld(recording.seed)
     var commands:array[Seats,Command]
     for i in 0..<Seats:

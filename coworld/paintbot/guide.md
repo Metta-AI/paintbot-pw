@@ -6,7 +6,7 @@ regions. Each team starts with its base heart; eight hearts start neutral gray.
 Stay within 140 units of a heart on connected terrain for three seconds (72 ticks)
 to claim it. Extra cogs do not accelerate capture. Both teams in range pause
 progress; if the attackers leave or only defenders remain, progress resets.
-The current owner keeps earning points until capture completes. Holding all ten eliminates the entire opposing team, including remaining respawns.
+The current owner keeps earning points until capture completes. Holding all ten increases income but does not immediately end the game.
 
 The default-on territory overlay colors each region by its heart owner, including
 neutral gray. Toggle it off for an unobstructed terrain view. Heart locations and
@@ -24,13 +24,13 @@ of an owned heart, sampled with softmax over the sum of distances from living te
 self). Larger sums favor less-covered hearts. Temperature is 1,000 world units, with distances
 quantized to 10 units for deterministic sampling. With no owned hearts, respawns use the endzone.
 Blocked or crowded heart placements retry on the next tick. Each owned normal heart earns its team one point per second, accumulated at 24 ticks
-per second. Starting at 0:30, every 30 seconds a random heart becomes big and earns
-five points per second instead of one. Only one heart is big at a time; the previous
-heart returns to normal. Selection includes neutral and owned hearts, and no heart
-is selected twice in a game. After every heart has been selected, no more become big. Matches last five minutes. When a team is eliminated, the survivor receives
-all remaining map income in bonus points, including scheduled big-heart income. Both teams keep previously earned points.
-The higher total wins; equal totals draw. Simultaneous elimination gives no bonus.
-There is no bombardment or overtime.
+per second. Each team's heart meter holds 900 points: five of the ten hearts held
+for 180 seconds fills it exactly. Every heart has equal income. The first team to
+fill its meter wins. Typical matches target about five minutes including capture
+and contest time; the hard limit is ten minutes (14,400 ticks). At the limit, the
+higher meter wins; equal totals draw. Simultaneous fills use the higher point total,
+with equal totals drawing. Elimination awards no bonus and does not end the match;
+owned hearts continue filling the meter. There is no bombardment or overtime.
 Older replays retain their original capture-the-heart rules.
 
 ## Combat and equipment

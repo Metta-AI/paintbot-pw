@@ -1146,7 +1146,14 @@
   }
 
   #match-score { flex:1; min-width:0; display:flex; justify-content:space-between; gap:clamp(24px,6vw,100px); }
-  .team-summary { min-width:0; }
+  .team-summary { min-width:0; flex:1; }
+  .heart-meter { display:block; width:100%; height:6px; margin:3px 0; border:0; border-radius:3px; overflow:hidden; background:#ffffff24; }
+  .heart-meter[hidden] { display:none; }
+  .heart-meter::-webkit-progress-bar { background:#ffffff24; }
+  .red .heart-meter::-webkit-progress-value { background:#ed6955; }
+  .blue .heart-meter::-webkit-progress-value { background:#59bdeb; }
+  .red .heart-meter { accent-color:#ed6955; }
+  .blue .heart-meter { accent-color:#59bdeb; }
   .team-scoreline { display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12px; line-height:16px; }
   .team-scoreline strong { max-width:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; letter-spacing:.12em; }
   .team-scoreline small { font-size:7px; letter-spacing:.08em; opacity:.7; }
@@ -1183,10 +1190,12 @@
   <div id="match-score">
     <section class="team-summary red" aria-label="Ember team">
       <div class="team-scoreline"><strong id="policy0">Policies</strong><span title="Hearts owned">♥ <b id="score0">1</b><small> HEARTS</small></span></div>
+      <progress class="heart-meter" id="meter0" max="900" value="0" aria-label="Team heart meter" hidden></progress>
       <div id="lives0" class="agent-lives" aria-label="Ember agent lives"></div>
     </section>
     <section class="team-summary blue" aria-label="Azure team">
       <div class="team-scoreline"><strong id="policy1">Policies</strong><span title="Hearts owned">♥ <b id="score1">1</b><small> HEARTS</small></span></div>
+      <progress class="heart-meter" id="meter1" max="900" value="0" aria-label="Team heart meter" hidden></progress>
       <div id="lives1" class="agent-lives" aria-label="Azure agent lives"></div>
     </section>
   </div>

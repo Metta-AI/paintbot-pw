@@ -561,7 +561,7 @@
           ? "Match drawn"
           : `${w.winner ? "Azure" : "Ember"} wins`
         : "Match scoreboard",
-      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}<br>${state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
+      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}<br>${state.rulesVersion >= 28 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; at 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
     $("dialogbody")
       .querySelectorAll("[data-seat]")
@@ -1312,7 +1312,7 @@
     const control = (w.controlHearts || []).length > 0;
     $("territorytoggle").hidden = !control;
     $("modehint").textContent = control
-      ? (data.rulesVersion >= 25 ? (w.bigHeart >= 0 ? `Big heart ${w.bigHeart + 1}: 5 points/s · ${30 - Math.floor(t / 24) % 30}s left` : w.bigHeartRound > 0 ? "All big hearts used · Normal hearts: 1 point/s" : "First big heart at 0:30 · Normal hearts: 1 point/s") : data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
+      ? (data.rulesVersion >= 28 ? "Fill the heart meter to win · 900 points · 10-minute limit" : data.rulesVersion >= 25 ? (w.bigHeart >= 0 ? `Big heart ${w.bigHeart + 1}: 5 points/s · ${30 - Math.floor(t / 24) % 30}s left` : w.bigHeartRound > 0 ? "All big hearts used · Normal hearts: 1 point/s" : "First big heart at 0:30 · Normal hearts: 1 point/s") : data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
       : "Capture the heart · Three lives";
     updatePovSignal();
     const playLabel = data.paused ? "Play" : "Pause";
@@ -1330,10 +1330,19 @@
       $(`policy${s}`).title = policyNames;
       const owned = control ? w.controlHearts.filter(h => h.owner === s).length : w.captures[s];
       $(`score${s}`).textContent = data.rulesVersion >= 23 ? (w.scoreTicks[s]/24).toFixed(1) : owned;
+      const meter = $(`meter${s}`);
+      meter.hidden = data.rulesVersion < 28;
+      if (data.rulesVersion >= 28) {
+        const target = w.controlHearts.length * 90;
+        meter.max = target;
+        meter.value = Math.min(target, w.scoreTicks[s]/24);
+        meter.title = `${(w.scoreTicks[s]/24).toFixed(1)} / ${target} heart points`;
+        meter.setAttribute('aria-valuetext', meter.title);
+      }
       const scoreLine = $(`score${s}`).parentElement;
       const bigOwned = data.rulesVersion >= 25 && w.bigHeart >= 0 && w.controlHearts[w.bigHeart].owner === s;
       scoreLine.title = `${owned} hearts held${bigOwned ? " · Big heart: 5 points/s" : ""}`;
-      scoreLine.querySelector('small').textContent = data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
+      scoreLine.querySelector('small').textContent = data.rulesVersion >= 28 ? ` / ${w.controlHearts.length * 90} · ${owned} ♥` : data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
       w.cogs.forEach((c, i) => {
         if (team(i) !== s) return;
         const unlimited = data.rulesVersion >= 13 && data.rulesVersion < 19;

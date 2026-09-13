@@ -63,7 +63,7 @@ proc convertFrames(frames: seq[PreSoundFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
         goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
     result.add next
-var replayRulesVersion* = 27
+var replayRulesVersion* = 28
 proc loadRecording*(path: string): Recording =
   replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
   visionRulesVersion = replayRulesVersion
@@ -82,7 +82,7 @@ proc loadRecording*(path: string): Recording =
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreSoundRecording)
     result = Recording(seed:old.seed,frames:convertFrames(old.frames),names:old.names,
       communications:old.communications,endTick:old.endTick)
-  elif replayRulesVersion in [26, 27]:
+  elif replayRulesVersion in [26, 27, 28]:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
@@ -109,7 +109,7 @@ var
 proc setup*() =
   when defined(coworld): options = coworldOptions(Seats)
   else:
-    options = GameOptions(seed: 2026, maximumTicks: 7200, speed: 1)
+    options = GameOptions(seed: 2026, maximumTicks: HeartMeterMatchTicks, speed: 1)
     let args = commandLineParams(); var i = 0
     while i < args.len:
       if not options.takeCommonFlag(args, i, args[i]): raise newException(
@@ -124,7 +124,7 @@ proc setup*() =
     world = newWorld(recording.seed, recording.endTick)
   else:
     world = newWorld(options.seed, options.maximumTicks); recording.seed = options.seed
-    recording.endTick = options.maximumTicks
+    recording.endTick = world.endTick
     players = loadBots(options.botGroups, options.playerSlot)
     for i in 0..<Seats:
       recording.names[i] = if i == options.playerSlot-1: "You" else: "Bot " & $(i+1)
