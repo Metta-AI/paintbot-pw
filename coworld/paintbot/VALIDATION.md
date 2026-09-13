@@ -100,8 +100,12 @@ R.301 E.2 (replay `683ac72e-9ce9-45e0-85d6-2ab1171ddbfb`, rules 28,
 seed 890754794) exposed a baseline compatibility bug. The inherited two-team
 CTF formula computes a red pedestal at map pixel (480,960), which translates
 to world (-2400,2000). All four blue baseline cogs circled that obsolete goal.
-The published WASM digest was
+The 0.3.17 packaged WASM digest was
 `3b06b727440918ffdd883189035a250de3db0eb5ac64c4deef1487093e40ee5e`.
+The league separately pinned the older `paintbot-pw-wasm:v1`, file digest
+`135538c4a166f3f0ac370204c6c0b90ddd7ed825490e1cc161fa161a8640c2e9`.
+That exact file was fetched from its original published package and also fails
+both regression cases; replacing the package alone cannot update the pinned filler.
 
 The WASM now reads public control-heart positions and ownership, navigates to
 an uncaptured heart, holds inside the capture radius, and retargets when the
