@@ -7,12 +7,27 @@ var deepWilderness* = false
 var organicTerrain* = false
 var islandTerrain* = false
 var expandedIsland* = false
+var riverTerrain* = false
+const
+  RiverBedHeight* = -200
+  RiverWaterHeight* = -162 # GOTA-style shallow water: 38 cm above the bed.
+  RiverBankWidth* = 850
 proc landWave*(value,period,amplitude:int):int =
   let phase=((value mod period)+period) mod period
   let half=period div 2
   let t=phase mod half
   let magnitude=int(4'i64*t.int64*(half-t).int64*amplitude.int64 div (half*half).int64)
   if phase<half:magnitude else: -magnitude
+proc riverCenter*(z: int): int =
+  3200 + landWave(z-2000, 6400, 420)
+
+proc riverBlend*(x, z: int): int =
+  ## GOTA's cubic bank profile, using centimetres and integer arithmetic.
+  if not riverTerrain: return 0
+  let distance = min(abs(x-riverCenter(z)), RiverBankWidth)
+  1000 - int(distance.int64*distance.int64*distance.int64*1000 div
+    (RiverBankWidth.int64*RiverBankWidth.int64*RiverBankWidth.int64))
+
 proc islandMargin*(x,z:int):int =
   # Rounded headlands with asymmetric coves, in normalized coast units.
   let nx=abs(x-3200).int64*1000 div (if expandedIsland:7733 else:5800)
@@ -70,6 +85,7 @@ proc forestLots*():seq[tuple[x,z,radius:int]] =
       let px=x+((x+3000)*17+(z+1400)*11) mod 161-80
       let pz=z+((x+3000)*7+(z+1400)*19) mod 181-90
       if islandTerrain and islandMargin(px,pz)<75:continue
+      if riverBlend(px,pz)>0:continue
       if forestRouteDistance(px,pz)<220:continue
       if (if organicTerrain:villageLaneDistance(px,pz) else:abs(pz-2000))<240:continue
       if (x+z) mod 3==0:continue
@@ -101,6 +117,9 @@ proc raisedHeight*(x,z:int):int =
 proc terrainHeight*(x,z:int):int =
   let p=landCoordinates(x,z)
   result=baseTerrainHeight(p.x,p.z)
+  if riverTerrain:
+    let amount = riverBlend(x,z)
+    result -= (result-RiverBedHeight)*amount div 1000
   if islandTerrain:
     let coast=islandMargin(x,z)
     result=min(result,(coast-35)*5)

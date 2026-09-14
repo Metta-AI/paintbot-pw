@@ -76,6 +76,7 @@ proc placeRoundVillage*() =
   if wilderness:
     for i,p in [point(-620,300),point(-620,1700),point(-620,3500),point(1200,-320),point(3100,-320),point(5400,-320)]:
       for q in [p,point(6400-p.x.int,4000-p.z.int)]:
+        if riverBlend(q.x.int,q.z.int)>0: continue
         let base=at(q.x.float32,q.z.float32)
         grove.placeProp(trees[i mod trees.len],base,i.float32*1.2,3.2)
         grove.placeProp(bushes[i mod bushes.len],base+vec3(0.5,0,0.3),i.float32,0.65)
