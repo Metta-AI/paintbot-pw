@@ -208,8 +208,9 @@ markers show the disguise. Rules 26 and older keep their original replay hashes.
 
 ### River (rules 29; slowdown from rules 30)
 
-From rules 31, a broad S-shaped river flows from rounded inland headwaters to
-the south coast, leaving a dry route around its northern end. Like GOTA's shallow water,
+From rules 32, an irregular S-shaped river winds from rounded inland headwaters
+to the coast, splitting into three thin estuary channels. Smaller bends and
+uneven banks break up the main curve. A dry route remains around its inland end. Like GOTA's shallow water,
 it has a carved bed, marsh banks, and a water surface about 38 cm above the bed.
 Cogs can wade across. From rules 30, cogs in the water move at one-quarter speed
 (7 cm/tick normally); this also stacks with sneaking and carrying penalties. Dry
