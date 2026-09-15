@@ -10,6 +10,7 @@ var expandedIsland* = false
 var riverTerrain* = false
 var curvedRiver* = false
 var fractalRiver* = false
+var lakeTerrain* = false
 const
   RiverBedHeight* = -200
   RiverWaterHeight* = -162 # GOTA-style shallow water: 38 cm above the bed.
@@ -30,6 +31,13 @@ proc riverCenter*(z: int): int =
 proc riverBlend*(x, z: int): int =
   ## GOTA's cubic bank profile, using centimetres and integer arithmetic.
   if not riverTerrain: return 0
+  if lakeTerrain:
+    # A closed, irregular basin with a broad wading shore, entirely inland.
+    let dx = (x-3200+landWave(z+300,1700,160)+landWave(x+z,650,45))*1000 div 1700
+    let dz = (z-2000+landWave(x-200,2100,120)+landWave(x-z,900,40))*1000 div 1250
+    let radius = int(sqrt((dx.int64*dx.int64+dz.int64*dz.int64).float64))
+    let bank = clamp((radius-620)*1000 div 380, 0, 1000)
+    return 1000-bank*bank div 1000
   if fractalRiver:
     let center = riverCenter(z)
     let mouth = clamp((-z-700)*1000 div 1800, 0, 1000)

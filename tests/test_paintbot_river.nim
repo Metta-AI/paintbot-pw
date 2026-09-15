@@ -21,7 +21,7 @@ suite "Heartwick river":
       check riverBlend(tree.x,tree.z) == 0
 
   test "every objective remains reachable across the river":
-    visionRulesVersion = 32
+    visionRulesVersion = 33
     for seed in [1'i32, 2026, 930220186]:
       let w = newWorld(seed)
       var seen: HashSet[(int,int)]
@@ -103,3 +103,27 @@ suite "Heartwick river":
     # The primary estuary is narrower than the channel through the village.
     check riverBlend(riverCenter(-2100)+500,-2100) == 0
     check riverBlend(riverCenter(0)+500,0) > 0
+
+  test "lake is enclosed inland and retains quarter-speed water":
+    visionRulesVersion = 33
+    var w = newWorld(2026)
+    check lakeTerrain
+    check terrainHeight(3200,2000) == RiverBedHeight
+    # A dry ring separates the lake from every coast; no river mouth remains.
+    for x in countup(1000,5500,50):
+      check riverBlend(x,400) == 0
+      check riverBlend(x,3600) == 0
+    for z in countup(400,3600,50):
+      check riverBlend(1000,z) == 0
+      check riverBlend(5500,z) == 0
+    w.cover = @[]
+    w.trenches = @[]
+    w.pickups = @[]
+    w.cogs[0].pos = point(3200,2000)
+    var commands: array[Seats,Command]
+    commands[0] = Command(walk:true,direct:true,goal:point(3200,2500))
+    w.step(commands)
+    check w.cogs[0].pos == point(3200,2007)
+    visionRulesVersion = 32
+    discard newWorld(2026)
+    check not lakeTerrain
