@@ -164,3 +164,13 @@ Run the actuator regressions with
 - GitHub CI passed on Linux, macOS, and Windows. Local certification passed all ten steps.
 - Hosted certification passed; all five 240-tick smoke replays verify hash `3318585951`. The hosted viewer reports Replay hash verified.
 - Vet review remained unavailable because Anthropic credentials are not configured.
+
+## Inland lake (0.3.24, rules 33)
+
+- Enclosed, irregular lake replaces the river and estuaries; dry land surrounds all sides. Quarter-speed water movement remains.
+- All 24 Paintbot Nim suites pass, including a dry perimeter, lake movement speed, objective connectivity, and historical river geometry.
+- Native/Python terrain parity passes at 9,660 points. Eight runtime tests, two actual-WASM tests, and Ruff pass.
+- Unchanged private Heartwick v7 completed and replayed a 3,528-tick lake match, hash `3599040568`. The previous river replay retains 3,827 ticks and hash `3524034089`.
+- Linux, macOS, and Windows CI pass. Local and hosted certification pass all ten steps; five hosted smokes verify hash `616895535`.
+- Local overview confirms an enclosed lake. The hosted viewer reports Replay hash verified.
+- Vet review unavailable because Anthropic credentials are not configured.

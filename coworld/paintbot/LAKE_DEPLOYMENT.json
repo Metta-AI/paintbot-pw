@@ -1,0 +1,128 @@
+{
+  "version": "0.3.24",
+  "rules_version": 33,
+  "coworld_id": "cow_2f181565-e883-45d4-b6bf-561a36767648",
+  "source_commit": "364399a77de6312f4b3a4853a47ccf656410827e",
+  "game_pr": "https://github.com/Metta-AI/paintbot-pw/pull/35",
+  "private_policy_validation_pr": "https://github.com/daveey/cogamer/pull/119",
+  "canonical_verified": true,
+  "certification": {
+    "coworld_id": "cow_2f181565-e883-45d4-b6bf-561a36767648",
+    "state": "certified",
+    "certified": true,
+    "contract_version": "main-d47b9dd46072",
+    "certification_job_id": "28a4c149-9331-4e57-a6b1-6bfea75bea70",
+    "failed_step": null,
+    "failure": null,
+    "transcript_summary": [
+      {
+        "id": "matriculate",
+        "status": "pass"
+      },
+      {
+        "id": "source-resolves",
+        "status": "pass"
+      },
+      {
+        "id": "images-reachable",
+        "status": "pass"
+      },
+      {
+        "id": "fixture-conforms",
+        "status": "pass"
+      },
+      {
+        "id": "smoke-episode",
+        "status": "pass"
+      },
+      {
+        "id": "results-conform",
+        "status": "pass"
+      },
+      {
+        "id": "replay-present",
+        "status": "pass"
+      },
+      {
+        "id": "replay-loadable",
+        "status": "pass"
+      },
+      {
+        "id": "players-run",
+        "status": "pass"
+      },
+      {
+        "id": "supporting-roles",
+        "status": "pass"
+      }
+    ],
+    "completed_at": "2026-09-15T18:06:29.943901Z"
+  },
+  "nim_suites_passed": 24,
+  "python_tests_passed": 10,
+  "terrain_parity_samples": 9660,
+  "hosted_viewer_hash_verified": true,
+  "hosted_viewer_url": "https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_2f181565-e883-45d4-b6bf-561a36767648/sha256%3A89c1d31a8f78e01c0833d0721b17cdf8b74ca0f812929c27073a41eeeb006f79/index.html?v=2#replay=https%3A%2F%2Fsoftmax-public.s3.amazonaws.com%2Freplays%2F0adfddc5-b2c0-443b-9b99-c7153fec083a.replay",
+  "private_policy_match": {
+    "ticks": 3528,
+    "hash": 3599040568,
+    "source_changes_required": false
+  },
+  "old_rules_32_replay": {
+    "ticks": 3827,
+    "hash": 3524034089
+  },
+  "active_policies": [
+    {
+      "id": "lpm_e65c6c38-0299-47bd-be1b-99bf25f3e8b1",
+      "policy_version_id": "adcd246b-8a85-47b6-b63e-7f0dfcb7c40a",
+      "status": "competing",
+      "substatus": "active"
+    },
+    {
+      "id": "lpm_2e1b92f6-3f28-4045-8ce6-e7dff6b981e7",
+      "policy_version_id": "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "status": "competing",
+      "substatus": "active"
+    },
+    {
+      "id": "lpm_40dc65b5-c12d-4962-868a-35b20e1ddf60",
+      "policy_version_id": "6b3c549f-c453-470b-b5c4-9a025bc1691f",
+      "status": "competing",
+      "substatus": "active"
+    },
+    {
+      "id": "lpm_f9391ea8-ba3e-417a-843b-5e81302583f8",
+      "policy_version_id": "c51834df-5ce1-4307-9134-b6e80211dece",
+      "status": "competing",
+      "substatus": "active"
+    }
+  ],
+  "hosted_smoke_replays": [
+    {
+      "episode_request_id": "ereq_ea89b001-5636-4649-ba57-7d8856c81fad",
+      "verification": "ticks=240 captures=[1, 2] hash=616895535"
+    },
+    {
+      "episode_request_id": "ereq_15170d0f-d8d6-4439-80a5-27d718321b09",
+      "verification": "ticks=240 captures=[1, 2] hash=616895535"
+    },
+    {
+      "episode_request_id": "ereq_7c655806-be88-4f5d-851b-7ed0da93e7cb",
+      "verification": "ticks=240 captures=[1, 2] hash=616895535"
+    },
+    {
+      "episode_request_id": "ereq_e69b5b9d-3a29-440b-80f0-f4914417ac4c",
+      "verification": "ticks=240 captures=[1, 2] hash=616895535"
+    },
+    {
+      "episode_request_id": "ereq_4c688b4f-43cd-4e30-87a4-addcf609e80e",
+      "verification": "ticks=240 captures=[1, 2] hash=616895535"
+    }
+  ],
+  "league_verification": {
+    "status": "pending",
+    "reason": "Round 601 still running on previous version 0.3.23; next round triggered after lake became canonical.",
+    "previous_round_id": "round_ed715ae5-3209-4e38-9d5b-4b409f408d78"
+  }
+}

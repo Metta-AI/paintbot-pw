@@ -173,3 +173,13 @@ Certified and canonical: `cow_2c7a1169-de41-442e-9b94-3bfaf3d7fff5`. All five ho
 ## Irregular river and narrow estuaries — 0.3.23
 
 Rules 32 adds bends at multiple scales, uneven banks, and three thin coastal mouths. The river ends inland and retains quarter-speed water movement. Certified and canonical as `cow_a699b645-d014-498e-a9e8-1fa479209006`. All five hosted smoke replays verify; [fresh league round 546 replay](https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_a699b645-d014-498e-a9e8-1fa479209006/sha256%3A50ff89ef0d700f7cdacc54b48ae319362955bb6ab6138b659519c1f4748c3000/index.html?v=2#replay=https%3A%2F%2Fsoftmax-public.s3.amazonaws.com%2Freplays%2F7a56d1c7-382e-4267-a4e9-a799c58af409.replay) verifies ticks=3504 captures=[10, 0] hash=4165800609. See `FRACTAL_RIVER_DEPLOYMENT.json` for evidence.
+
+## Inland lake — 0.3.24
+
+Rules 33 replaces the river with a closed, irregular inland lake. Dry land surrounds the lake; cogs in the water retain quarter-speed movement. Older replays preserve their original terrain.
+
+PR #35 merged as `364399a`. Version 0.3.24 is certified and canonical as `cow_2f181565-e883-45d4-b6bf-561a36767648`. All 24 Nim suites, ten Python/runtime and WASM checks, 9,660 terrain parity samples, and Linux/macOS/Windows CI passed. All ten certification steps and five hosted smoke episodes passed; each replay verifies 240 ticks with hash `616895535`. The hosted viewer displays Replay hash verified.
+
+The active private policy needs no source change or resubmission: its full lake match verifies 3,528 ticks, hash `3599040568`; private PR #119 records compatibility. Active memberships were read back.
+
+[Watch the hosted lake replay](https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_2f181565-e883-45d4-b6bf-561a36767648/sha256%3A89c1d31a8f78e01c0833d0721b17cdf8b74ca0f812929c27073a41eeeb006f79/index.html?v=2#replay=https%3A%2F%2Fsoftmax-public.s3.amazonaws.com%2Freplays%2F0adfddc5-b2c0-443b-9b99-c7153fec083a.replay). A fresh league round was triggered; at this verification checkpoint, round 601 still had a running match on 0.3.23, so league evidence for 0.3.24 remains pending. Exact release and verification evidence is in `LAKE_DEPLOYMENT.json`.
