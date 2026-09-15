@@ -206,11 +206,13 @@ same apparent colors, a `seat N` sprite, a `uniform` pickup, and `uniform worn`
 only for itself. Spectator scoreboards keep true ownership; bodies and minimap
 markers show the disguise. Rules 26 and older keep their original replay hashes.
 
-### River (rules 29)
+### River (rules 29; slowdown from rules 30)
 
 A winding river crosses Heartwick from coast to coast. Like GOTA's shallow water,
 it has a carved bed, marsh banks, and a water surface about 38 cm above the bed.
-Cogs can wade across; the river adds no damage or movement penalty. Terrain
+Cogs can wade across. From rules 30, cogs in the water move at one-quarter speed
+(7 cm/tick normally); this also stacks with sneaking and carrying penalties. Dry
+banks retain normal movement speed. The river causes no damage. Terrain
 height, line of sight, and navigation use the carved ground. Existing terrace
 cliffs and solid village cover still block movement. Earlier replays retain
 their original terrain.
