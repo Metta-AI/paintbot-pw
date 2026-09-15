@@ -336,6 +336,9 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         w.cogs[i].goal)
     var speed = if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed
     if visionRulesVersion >= 26 and cmd.sneak: speed = speed div 2
+    if visionRulesVersion >= 30 and riverBlend(w.cogs[i].pos.x.int, w.cogs[i].pos.z.int) > 0 and
+        terrainHeight(w.cogs[i].pos.x.int, w.cogs[i].pos.z.int) < RiverWaterHeight:
+      speed = speed div 4
     if distance2(w.cogs[i].pos, dest) > speed.int64*speed:
       var v = direction(w.cogs[i].pos, dest, speed)
       let trench = w.trenchAt(w.cogs[i].pos)

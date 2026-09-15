@@ -48,3 +48,26 @@ suite "Heartwick river":
     discard newWorld(2026)
     check not riverTerrain
     check terrainHeight(3200,2000) != RiverBedHeight
+
+  test "water quarters movement from rules 30 and dry land restores speed":
+    for rules in [29, 30]:
+      for direct in [false, true]:
+        for sneak in [false, true]:
+          visionRulesVersion = rules
+          var w = newWorld(2026)
+          w.cover = @[]
+          w.trenches = @[]
+          w.pickups = @[]
+          for i in 0..<Seats:
+            w.cogs[i].pos = point(-2000+i*150, -2000)
+            w.cogs[i].goal = w.cogs[i].pos
+          for x in [riverCenter(0), riverCenter(0)+RiverBankWidth]:
+            let start = point(x, 0)
+            w.cogs[0].pos = start
+            check (terrainHeight(x, 0) < RiverWaterHeight) == (x == riverCenter(0))
+            var commands: array[Seats, Command]
+            commands[0] = Command(walk:true, direct:direct, sneak:sneak, goal:point(x, 1000))
+            w.step(commands)
+            var expected = if sneak: MoveSpeed div 2 else: MoveSpeed
+            if rules >= 30 and x == riverCenter(0): expected = expected div 4
+            check w.cogs[0].pos == point(x, expected)
