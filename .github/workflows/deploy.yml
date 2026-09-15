@@ -1,0 +1,255 @@
+# Deploy the paintbot-pw Coworld: coworld build -> coworld certify -> (optional) coworld upload-coworld.
+#
+# Destination: Metta-AI/paintbot-pw/.github/workflows/deploy.yml
+#
+# Required repository secrets:
+#   POLYWORLD_DATA_DEPLOY_KEY  read-only SSH deploy key for the PRIVATE repo Metta-AI/polyworld-data.
+#                              Needed even for dry runs: the replay-viewer build hook
+#                              (coworld/paintbot/tools/build_replay_viewer.sh) compiles the viewer
+#                              with emscripten and preloads art from that repo, pinned in
+#                              coworld/assets.json. `coworld build` always runs that hook.
+#   SOFTMAX_TOKEN              Softmax platform bearer token. Only read when dry_run is false.
+#
+# Layout mirrors build.yml: this repo is checked out into ./paintbot-pw so the art repo can sit
+# beside it at ./polyworld_data, which is where the hook and build_round_village.py look for it
+# (build_round_village.py hard-codes <repo>/../polyworld_data and ignores POLYWORLD_DATA).
+name: Deploy Coworld
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Coworld version to build, e.g. 0.3.20. Must be newer than the latest uploaded paintbot-pw."
+        required: true
+        type: string
+      dry_run:
+        description: "Build and certify only (no upload, no Softmax token used)."
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read # to confirm build.yml passed on this commit before a real upload
+
+concurrency:
+  group: deploy-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  COWORLD_CLI_VERSION: "0.1.47" # PyPI `coworld`; pinned so CI never depends on a metta checkout
+  COWORLD_NAME: paintbot-pw
+  COWORLD_PROJECT: coworld/paintbot
+  NIM_VERSION: "2.2.10" # matches coworld/paintbot/Dockerfile and coworld/integration.md
+  EMSDK_VERSION: "4.0.15" # paintbot-pw pins no emsdk; same pin as cogame-parley's viewer build
+  SOFTMAX_API_SERVER: https://softmax.com/api
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+        working-directory: paintbot-pw
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: paintbot-pw
+          persist-credentials: false
+
+      - name: Validate inputs
+        env:
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          POLYWORLD_DATA_DEPLOY_KEY: ${{ secrets.POLYWORLD_DATA_DEPLOY_KEY }}
+          SOFTMAX_TOKEN: ${{ secrets.SOFTMAX_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "::error::version must be dotted numbers (e.g. 0.3.20), got: $VERSION"
+            exit 1
+          fi
+          if [ -z "$POLYWORLD_DATA_DEPLOY_KEY" ]; then
+            echo "::error::POLYWORLD_DATA_DEPLOY_KEY secret is not set. The replay viewer cannot be built without Metta-AI/polyworld-data."
+            exit 1
+          fi
+          if [ "$DRY_RUN" != "true" ]; then
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+              echo "::error::Real uploads must run from main (got $GITHUB_REF). Use dry_run for other refs."
+              exit 1
+            fi
+            if [ -z "$SOFTMAX_TOKEN" ]; then
+              echo "::error::SOFTMAX_TOKEN secret is not set; required when dry_run is false."
+              exit 1
+            fi
+          fi
+          echo "Deploying $COWORLD_NAME $VERSION from $GITHUB_SHA (dry_run=$DRY_RUN)"
+
+      - name: Require green build.yml on this commit
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs?head_sha=$GITHUB_SHA&status=success" --jq '.total_count')"
+          if [ "$runs" = "0" ]; then
+            echo "::error::build.yml has no successful run for $GITHUB_SHA. Wait for CI to pass (or use dry_run)."
+            exit 1
+          fi
+
+      - name: Read pinned Polyworld art revision
+        id: assets
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          assets = json.load(open("coworld/assets.json"))
+          assert assets["repository"].rstrip("/").removesuffix(".git").endswith("Metta-AI/polyworld-data"), assets
+          print(f"revision={assets['revision']}")
+          PY
+
+      - name: Check out Polyworld art (private, pinned)
+        uses: actions/checkout@v5
+        with:
+          repository: Metta-AI/polyworld-data
+          ref: ${{ steps.assets.outputs.revision }}
+          path: polyworld_data
+          ssh-key: ${{ secrets.POLYWORLD_DATA_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - uses: treeform/setup-nim-action@v6
+        with:
+          nim-version: ${{ env.NIM_VERSION }}
+
+      - name: Sync pinned Nim dependencies
+        run: |
+          set -euo pipefail
+          export POLYWORLD_DEPS="$GITHUB_WORKSPACE/paintbot-pw/tmp/coworld/deps"
+          python3 coworld/tools/sync_dependencies.py
+
+      - name: Install emsdk
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install coworld CLI
+        run: |
+          set -euo pipefail
+          uv tool install --python 3.12 "coworld==${COWORLD_CLI_VERSION}"
+          uv tool dir --bin >> "$GITHUB_PATH"
+          "$(uv tool dir --bin)/coworld" --help >/dev/null
+
+      # Credentials are materialised before the long build so a bad token fails in seconds.
+      # The CLI (softmax.auth, softmax-cli 0.26.34) reads ~/.softmax/credentials.yaml with
+      # yaml.safe_load and looks up tokens["https://softmax.com/api"]. JSON is valid YAML, and
+      # json.dump quotes any token characters. The token only travels via env, never argv/stdout.
+      - name: Write Softmax credentials
+        if: ${{ !inputs.dry_run }}
+        env:
+          SOFTMAX_TOKEN: ${{ secrets.SOFTMAX_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib
+          token = os.environ["SOFTMAX_TOKEN"].strip()
+          server = os.environ["SOFTMAX_API_SERVER"].rstrip("/")
+          path = pathlib.Path.home() / ".softmax" / "credentials.yaml"
+          path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+          fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+          with os.fdopen(fd, "w") as f:
+              json.dump({"tokens": {server: token}}, f)
+          os.chmod(path, 0o600)
+          PY
+
+      - name: Check token and version against the platform
+        if: ${{ !inputs.dry_run }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          next="$(coworld next-version "$COWORLD_NAME" --server "$SOFTMAX_API_SERVER")"
+          echo "Platform suggests next version: $next"
+          "$(uv tool dir)/coworld/bin/python" - "$VERSION" "$next" <<'PY'
+          import sys
+          from packaging.version import Version
+          requested, suggested = map(Version, sys.argv[1:])
+          if requested < suggested:
+              sys.exit(f"::error::version {requested} is not newer than the latest uploaded version (next is {suggested})")
+          PY
+
+      - name: coworld build
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          source "$RUNNER_TEMP/emsdk/emsdk_env.sh" >/dev/null
+          export POLYWORLD_DATA="$GITHUB_WORKSPACE/polyworld_data"
+          export POLYWORLD_DEPS="$GITHUB_WORKSPACE/paintbot-pw/tmp/coworld/deps"
+          command -v emcc nim docker python3
+          coworld build --project "$COWORLD_PROJECT" --version "$VERSION"
+          test -f "$COWORLD_PROJECT/dist/replay-viewer/index.html"
+
+      - name: coworld certify
+        run: |
+          set -euo pipefail
+          coworld certify "$COWORLD_PROJECT/dist/coworld_manifest.json" \
+            --no-open-report --timeout-seconds 900 2>&1 | tee "$RUNNER_TEMP/certify.log"
+          grep -q "^Certified " "$RUNNER_TEMP/certify.log"
+          grep -q "Replay liveness: skipped (static replay bundle declared" "$RUNNER_TEMP/certify.log"
+
+      - name: coworld upload-coworld
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          # Exit 2 = certification failure we control; exit 3 = platform failure/timeout (retryable).
+          coworld upload-coworld "$COWORLD_PROJECT/dist/coworld_manifest.json" \
+            --server "$SOFTMAX_API_SERVER" \
+            --timeout-seconds 900 \
+            --wait-hosted-smoke --hosted-smoke-timeout-seconds 1800 \
+            --wait-certification --certification-timeout-seconds 1800 \
+            2>&1 | tee "$RUNNER_TEMP/upload.log"
+
+      - name: Verify canonical promotion
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          cow_id="$(sed -n 's/^Coworld: \(cow_[0-9a-f-]*\)$/\1/p' "$RUNNER_TEMP/upload.log" | tail -1)"
+          if [ -z "$cow_id" ]; then
+            echo "::error::could not find the uploaded Coworld id in the upload log"
+            exit 1
+          fi
+          for attempt in $(seq 1 20); do
+            if coworld status "$cow_id" --json --server "$SOFTMAX_API_SERVER" \
+              | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["coworld"]["canonical"] else 1)'; then
+              echo "$COWORLD_NAME $cow_id is canonical"
+              echo "Uploaded \`$COWORLD_NAME\` as \`$cow_id\` (canonical)." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "not canonical yet (attempt $attempt/20)"
+            sleep 15
+          done
+          echo "::error::$cow_id uploaded but is not canonical"
+          exit 1
+
+      - name: Remove Softmax credentials
+        if: ${{ always() }}
+        working-directory: ${{ github.workspace }}
+        run: rm -f "$HOME/.softmax/credentials.yaml"
+
+      - name: Keep manifest and logs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coworld-${{ inputs.version }}
+          # Deliberately not the replay-viewer bundle: it embeds art from the private polyworld-data repo.
+          path: |
+            paintbot-pw/coworld/paintbot/dist/coworld_manifest.json
+            ${{ runner.temp }}/certify.log
+            ${{ runner.temp }}/upload.log
+          if-no-files-found: ignore
