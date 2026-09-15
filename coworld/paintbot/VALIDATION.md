@@ -128,3 +128,17 @@ Rebuild with WASI SDK 33 and the upstream revision in
 `WASI_SDK_PATH=/path/to/wasi-sdk python coworld/paintbot/tools/build_equipment_baseline.py /path/to/cogame-paintbot-cdx`.
 Run the actuator regressions with
 `python coworld/paintbot/test_baseline.py` (Wasmtime 48.0.0).
+
+## Rules 29: shallow river (2026-09-14)
+
+- All 24 Paintbot Nim test suites pass, including new river crossings,
+  three-seed heart/pickup reachability, and old-rules restoration checks.
+- Eight Python runtime checks and two actual-WASM baseline regressions pass.
+- Native and Python WASM-adapter terrain heights match at 9,660 positions.
+- Full BASIC match: 3,261 ticks, hash 589973707; native and browser replay
+  verification pass. The browser shows the carved river, marsh banks and water.
+- Existing private Heartwick BASIC source: 3,184 ticks, hash 1886620807,
+  with unchanged source and successful native replay verification.
+- Historical rules-28 league replay: all 3,485 frames still reproduce hash
+  4092349416. No competitive-strength claim is made.
+- Vet could not review because its provider credentials are not configured.
