@@ -85,11 +85,13 @@ def forest_height(x, z, expanded=False):
 
 @lru_cache(maxsize=65536)
 def terrain_height(
-    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False, expanded=False, river=False
+    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False, expanded=False, river=False, curved=False
 ):
     if river:
         height = terrain_height(x, z, wide, wilderness, deep, organic, False, expanded)
-        distance = min(abs(x - (3200 + land_wave(z - 2000, 6400, 420))), 850)
+        center = 3200 + (land_wave(min(z, 2600), 6800, 1300) if curved else land_wave(z - 2000, 6400, 420))
+        dx, dz = abs(x - center), max(z - 2600, 0) if curved else 0
+        distance = min(math.isqrt(dx * dx + dz * dz) if curved else dx, 850)
         amount = 1000 - distance**3 * 1000 // 850**3
         height -= (height + 200) * amount // 1000
         return min(height, (island_margin(x, z, expanded) - 35) * 5) if island else height
@@ -151,6 +153,7 @@ def elevation(w, p):
         w.get("rulesVersion", 0) >= 16,
         w.get("rulesVersion", 0) >= 22,
         w.get("rulesVersion", 0) >= 29,
+        w.get("rulesVersion", 0) >= 31,
     )
     for t in w.get("trenches", []):
         if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
@@ -233,6 +236,7 @@ def walkability(
     island=False,
     expanded=False,
     river=False,
+    curved=False,
 ):
     width, height = (3200, 1920) if expanded else (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
     ox, oz = (4800, 2800) if expanded else (2800, 1200) if deep else (800, 400) if wilderness else (0, 0)
@@ -276,7 +280,7 @@ def walkability(
             "i",
             (
                 terrain_height(
-                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island, expanded, river
+                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island, expanded, river, curved
                 )
                 for z in range(height)
                 for x in range(width)
@@ -360,6 +364,7 @@ class SpriteView:
                     w.get("rulesVersion", 0) >= 16,
                     w.get("rulesVersion", 0) >= 22,
                     w.get("rulesVersion", 0) >= 29,
+                    w.get("rulesVersion", 0) >= 31,
                 ),
             )
             sprite(1, "map", width, height)

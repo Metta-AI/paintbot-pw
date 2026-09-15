@@ -21,6 +21,7 @@ suite "Heartwick river":
       check riverBlend(tree.x,tree.z) == 0
 
   test "every objective remains reachable across the river":
+    visionRulesVersion = 31
     for seed in [1'i32, 2026, 930220186]:
       let w = newWorld(seed)
       var seen: HashSet[(int,int)]
@@ -71,3 +72,18 @@ suite "Heartwick river":
             var expected = if sneak: MoveSpeed div 2 else: MoveSpeed
             if rules >= 30 and x == riverCenter(0): expected = expected div 4
             check w.cogs[0].pos == point(x, expected)
+
+  test "curved river ends inland with a dry northern route":
+    visionRulesVersion = 31
+    let w = newWorld(2026)
+    check riverCenter(-1700) == 1900
+    check riverCenter(1700) == 4500
+    check riverBlend(riverCenter(2600),2600) == 1000
+    for x in countup(0,6400,100):
+      check riverBlend(x,3500) == 0
+    for z in [-1500, 0, 1700, 2600]:
+      check terrainHeight(riverCenter(z),z) == RiverBedHeight
+    # The rounded headwater shallows gradually and remains traversable.
+    let x = riverCenter(2600)
+    for z in countup(2600,3500,20):
+      check w.traversable(point(x,z),point(x,z+20))
