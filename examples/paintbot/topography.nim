@@ -9,6 +9,7 @@ var islandTerrain* = false
 var expandedIsland* = false
 var riverTerrain* = false
 var curvedRiver* = false
+var fractalRiver* = false
 const
   RiverBedHeight* = -200
   RiverWaterHeight* = -162 # GOTA-style shallow water: 38 cm above the bed.
@@ -20,12 +21,30 @@ proc landWave*(value,period,amplitude:int):int =
   let magnitude=int(4'i64*t.int64*(half-t).int64*amplitude.int64 div (half*half).int64)
   if phase<half:magnitude else: -magnitude
 proc riverCenter*(z: int): int =
-  if curvedRiver: 3200 + landWave(min(z, 2600), 6800, 1300)
+  if fractalRiver:
+    let t = min(z, 2600)
+    3200 + landWave(t, 6800, 1300) + landWave(t+300, 2100, 180) + landWave(t-170, 700, 55)
+  elif curvedRiver: 3200 + landWave(min(z, 2600), 6800, 1300)
   else: 3200 + landWave(z-2000, 6400, 420)
 
 proc riverBlend*(x, z: int): int =
   ## GOTA's cubic bank profile, using centimetres and integer arithmetic.
   if not riverTerrain: return 0
+  if fractalRiver:
+    let center = riverCenter(z)
+    let mouth = clamp((-z-700)*1000 div 1800, 0, 1000)
+    let dz = max(z-2600, 0)
+    let bank = 700-mouth*350 div 1000 + landWave(z+400, 900, 45) + landWave(x-z, 330, 20)
+    let dx = x-center
+    var distance = min(int(sqrt((dx.int64*dx.int64+dz.int64*dz.int64).float64))*1000 div bank, 1000)
+    if mouth > 0:
+      # Two slender distributaries peel away from the main channel at the coast.
+      let spread = mouth*mouth*1500 div 1000000
+      for side in [-1, 1]:
+        let branch = center + side*spread + landWave(z+side*900, 1100, 80)*mouth div 1000
+        let width = 260-mouth*100 div 1000
+        distance = min(distance, min(abs(x-branch)*1000 div width, 1000))
+    return 1000-int(distance.int64*distance.int64*distance.int64 div 1000000)
   let dx = abs(x-riverCenter(z))
   let dz = if curvedRiver: max(z-2600, 0) else: 0
   # Rounded inland headwater; the opposite end opens onto the south coast.

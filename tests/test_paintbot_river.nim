@@ -21,7 +21,7 @@ suite "Heartwick river":
       check riverBlend(tree.x,tree.z) == 0
 
   test "every objective remains reachable across the river":
-    visionRulesVersion = 31
+    visionRulesVersion = 32
     for seed in [1'i32, 2026, 930220186]:
       let w = newWorld(seed)
       var seen: HashSet[(int,int)]
@@ -87,3 +87,19 @@ suite "Heartwick river":
     let x = riverCenter(2600)
     for z in countup(2600,3500,20):
       check w.traversable(point(x,z),point(x,z+20))
+
+  test "fractal river has narrow separated coastal channels":
+    visionRulesVersion = 32
+    discard newWorld(2026)
+    for z in [3500, 4500, 5500]:
+      for x in countup(0,6400,100): check riverBlend(x,z) == 0
+    var channels = 0
+    var wet = false
+    for x in countup(0,6400,10):
+      let nextWet = riverBlend(x,-2100)>0 and terrainHeight(x,-2100)<RiverWaterHeight
+      if nextWet and not wet: inc channels
+      wet = nextWet
+    check channels == 3
+    # The primary estuary is narrower than the channel through the village.
+    check riverBlend(riverCenter(-2100)+500,-2100) == 0
+    check riverBlend(riverCenter(0)+500,0) > 0
