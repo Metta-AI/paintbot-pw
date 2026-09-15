@@ -206,15 +206,11 @@ same apparent colors, a `seat N` sprite, a `uniform` pickup, and `uniform worn`
 only for itself. Spectator scoreboards keep true ownership; bodies and minimap
 markers show the disguise. Rules 26 and older keep their original replay hashes.
 
-### River (rules 29; slowdown from rules 30)
+### Lake (rules 33)
 
-From rules 32, an irregular S-shaped river winds from rounded inland headwaters
-to the coast, splitting into three thin estuary channels. Smaller bends and
-uneven banks break up the main curve. A dry route remains around its inland end. Like GOTA's shallow water,
-it has a carved bed, marsh banks, and a water surface about 38 cm above the bed.
-Cogs can wade across. From rules 30, cogs in the water move at one-quarter speed
-(7 cm/tick normally); this also stacks with sneaking and carrying penalties. Dry
-banks retain normal movement speed. The river causes no damage. Terrain
-height, line of sight, and navigation use the carved ground. Existing terrace
-cliffs and solid village cover still block movement. Earlier replays retain
-their original terrain.
+An irregular, enclosed lake sits inland in Heartwick, surrounded by dry land.
+Its shallow water is about 38 cm above the carved bed, with sloping banks for
+wading. Cogs in the water move at one-quarter speed (7 cm/tick normally),
+stacking with sneaking and carrying penalties. Dry banks retain normal speed;
+the water causes no damage. Terrain height, line of sight, and navigation use
+the lake bed. Earlier replays preserve their original river geometry and rules.

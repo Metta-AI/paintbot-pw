@@ -85,7 +85,7 @@ def forest_height(x, z, expanded=False):
 
 @lru_cache(maxsize=65536)
 def terrain_height(
-    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False, expanded=False, river=False, curved=False, fractal=False
+    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False, expanded=False, river=False, curved=False, fractal=False, lake=False
 ):
     if river:
         height = terrain_height(x, z, wide, wilderness, deep, organic, False, expanded)
@@ -109,6 +109,14 @@ def terrain_height(
                     width = 260 - mouth * 100 // 1000
                     distance = min(distance, abs(x - branch) * 1000 // width, 1000)
             amount = 1000 - distance**3 // 1000000
+        if lake:
+            def truncdiv(a, b):
+                return (abs(a) // b) * (1 if a >= 0 else -1)
+            dx = truncdiv((x - 3200 + land_wave(z + 300, 1700, 160) + land_wave(x + z, 650, 45)) * 1000, 1700)
+            dz = truncdiv((z - 2000 + land_wave(x - 200, 2100, 120) + land_wave(x - z, 900, 40)) * 1000, 1250)
+            radius = math.isqrt(dx * dx + dz * dz)
+            bank = min(max(truncdiv((radius - 620) * 1000, 380), 0), 1000)
+            amount = 1000 - bank * bank // 1000
         height -= (height + 200) * amount // 1000
         return min(height, (island_margin(x, z, expanded) - 35) * 5) if island else height
     if island:
@@ -171,6 +179,7 @@ def elevation(w, p):
         w.get("rulesVersion", 0) >= 29,
         w.get("rulesVersion", 0) >= 31,
         w.get("rulesVersion", 0) >= 32,
+        w.get("rulesVersion", 0) >= 33,
     )
     for t in w.get("trenches", []):
         if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
@@ -255,6 +264,7 @@ def walkability(
     river=False,
     curved=False,
     fractal=False,
+    lake=False,
 ):
     width, height = (3200, 1920) if expanded else (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
     ox, oz = (4800, 2800) if expanded else (2800, 1200) if deep else (800, 400) if wilderness else (0, 0)
@@ -298,7 +308,7 @@ def walkability(
             "i",
             (
                 terrain_height(
-                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island, expanded, river, curved, fractal
+                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island, expanded, river, curved, fractal, lake
                 )
                 for z in range(height)
                 for x in range(width)
@@ -384,6 +394,7 @@ class SpriteView:
                     w.get("rulesVersion", 0) >= 29,
                     w.get("rulesVersion", 0) >= 31,
                     w.get("rulesVersion", 0) >= 32,
+                    w.get("rulesVersion", 0) >= 33,
                 ),
             )
             sprite(1, "map", width, height)
