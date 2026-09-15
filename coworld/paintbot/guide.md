@@ -205,3 +205,12 @@ reports only your own disguise. Pickup kind 4 is a uniform. WASM receives the
 same apparent colors, a `seat N` sprite, a `uniform` pickup, and `uniform worn`
 only for itself. Spectator scoreboards keep true ownership; bodies and minimap
 markers show the disguise. Rules 26 and older keep their original replay hashes.
+
+### River (rules 29)
+
+A winding river crosses Heartwick from coast to coast. Like GOTA's shallow water,
+it has a carved bed, marsh banks, and a water surface about 38 cm above the bed.
+Cogs can wade across; the river adds no damage or movement penalty. Terrain
+height, line of sight, and navigation use the carved ground. Existing terrace
+cliffs and solid village cover still block movement. Earlier replays retain
+their original terrain.

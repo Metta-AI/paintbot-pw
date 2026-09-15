@@ -593,7 +593,12 @@ proc runGraphics*() =
           let pz = gz+(corner shr 1)
           let base = terrainHeight(px*100, pz*100).float32/100
           heights[corner] += base
-          if raisedHeight(px*100, pz*100) > 0: elevated = true
+          if raisedHeight(px*100, pz*100) > 0 and
+              riverBlend(px*100, pz*100) == 0: elevated = true
+        if riverTerrain:
+          for corner in 0..3:
+            if riverBlend((gx+(corner and 1))*100,(gz+(corner shr 1))*100)>0:
+              elevated = false
         if elevated:
           var deck = tile
           deck.tops = pack(heights)
@@ -604,6 +609,8 @@ proc runGraphics*() =
           tile.kind = RockTile
         else:
           tile.tops = pack(heights)
+      if riverBlend(gx*100+50,gz*100+50)>0:
+        tile.kind = MarshTile
       if islandTerrain:
         let coast=islandMargin(gx*100+50,gz*100+50)
         if coast< -25:
@@ -620,6 +627,34 @@ proc runGraphics*() =
       tile = Tile(flags: TileExists, tops: pack([-2.75'f32, -2.75, -2.75, -2.75]),
         bottoms: pack([-3'f32, -3, -3, -3]))
     layers.add ocean
+  if riverTerrain:
+    # As in GOTA, water covers submerged ground corners and the bank clips it.
+    let river = QuadLayer(originX: ground.originX, originZ: ground.originZ,
+      width: terrainWidth, depth: terrainDepth, slab: true, water: true,
+      tiles: newSeq[Tile](terrainWidth*terrainDepth))
+    for z in 0..<terrainDepth:
+      for x in 0..<terrainWidth:
+        let gx = x-border+minX() div 100
+        let gz = z-border+minZ() div 100
+        var submerged = false
+        for corner in 0..3:
+          let px = (gx+(corner and 1))*100
+          let pz = (gz+(corner shr 1))*100
+          if riverBlend(px,pz)>0 and islandMargin(px,pz)>0 and
+              terrainHeight(px,pz)<RiverWaterHeight:
+            submerged = true
+        if submerged:
+          var levels: array[4,float32]
+          for corner in 0..3:
+            let px = (gx+(corner and 1))*100
+            let pz = (gz+(corner shr 1))*100
+            # The mouth descends to the existing sea rather than floating above it.
+            levels[corner] = min(RiverWaterHeight,
+              max(-275,(islandMargin(px,pz)-35)*5+38)).float32/100
+          river.tiles[z*terrainWidth+x] = Tile(flags: TileExists,
+            tops: pack(levels),
+            bottoms: pack([-2'f32,-2,-2,-2]))
+    layers.add river
   amplitude = 1.2
   treeHeight = 5.5
   startupPhase("Loading terrain textures")

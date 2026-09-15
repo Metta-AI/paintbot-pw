@@ -85,8 +85,14 @@ def forest_height(x, z, expanded=False):
 
 @lru_cache(maxsize=65536)
 def terrain_height(
-    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False, expanded=False
+    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False, expanded=False, river=False
 ):
+    if river:
+        height = terrain_height(x, z, wide, wilderness, deep, organic, False, expanded)
+        distance = min(abs(x - (3200 + land_wave(z - 2000, 6400, 420))), 850)
+        amount = 1000 - distance**3 * 1000 // 850**3
+        height -= (height + 200) * amount // 1000
+        return min(height, (island_margin(x, z, expanded) - 35) * 5) if island else height
     if island:
         return min(
             terrain_height(x, z, wide, wilderness, deep, organic, False, expanded),
@@ -144,6 +150,7 @@ def elevation(w, p):
         w.get("rulesVersion", 0) >= 15,
         w.get("rulesVersion", 0) >= 16,
         w.get("rulesVersion", 0) >= 22,
+        w.get("rulesVersion", 0) >= 29,
     )
     for t in w.get("trenches", []):
         if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
@@ -225,6 +232,7 @@ def walkability(
     organic=False,
     island=False,
     expanded=False,
+    river=False,
 ):
     width, height = (3200, 1920) if expanded else (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
     ox, oz = (4800, 2800) if expanded else (2800, 1200) if deep else (800, 400) if wilderness else (0, 0)
@@ -268,7 +276,7 @@ def walkability(
             "i",
             (
                 terrain_height(
-                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island, expanded
+                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island, expanded, river
                 )
                 for z in range(height)
                 for x in range(width)
@@ -351,6 +359,7 @@ class SpriteView:
                     organic,
                     w.get("rulesVersion", 0) >= 16,
                     w.get("rulesVersion", 0) >= 22,
+                    w.get("rulesVersion", 0) >= 29,
                 ),
             )
             sprite(1, "map", width, height)
