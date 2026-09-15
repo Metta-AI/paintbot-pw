@@ -142,3 +142,14 @@ Run the actuator regressions with
 - Historical rules-28 league replay: all 3,485 frames still reproduce hash
   4092349416. No competitive-strength claim is made.
 - Vet could not review because its provider credentials are not configured.
+
+## River slowdown (0.3.21, rules 30)
+
+- Water movement is one-quarter speed: 7 cm/tick normally. Sneaking and carrying reductions stack; dry banks retain normal speed.
+- All 24 Paintbot Nim suites pass, including direct/pathfinding water movement, sneaking, dry-land recovery, and rules-29 movement preservation.
+- Eight Python runtime tests and two actual-WASM baseline tests pass. GitHub CI passes on Linux, macOS, and Windows.
+- Previous live rules-29 replay reproduces all 3,179 ticks and hash `1225788627`.
+- Unchanged private Heartwick v7 completes and replays a 3,513-tick match under rules 30, hash `3238005463`.
+- All ten certification steps pass locally and hosted; five hosted smoke replays reproduce hash `2050587785`.
+- Hosted viewer loads the river and reports Replay hash verified.
+- Vet review unavailable because Anthropic credentials are not configured.

@@ -1,0 +1,308 @@
+{
+  "version": "0.3.21",
+  "rules_version": 30,
+  "coworld_id": "cow_2c7a1169-de41-442e-9b94-3bfaf3d7fff5",
+  "certification": {
+    "coworld_id": "cow_2c7a1169-de41-442e-9b94-3bfaf3d7fff5",
+    "state": "certified",
+    "certified": true,
+    "contract_version": "main-9534cfaaaee9",
+    "certification_job_id": "1e716819-808e-464f-9e2f-e076fdd11bc4",
+    "failed_step": null,
+    "failure": null,
+    "transcript_summary": [
+      {
+        "id": "matriculate",
+        "status": "pass"
+      },
+      {
+        "id": "source-resolves",
+        "status": "pass"
+      },
+      {
+        "id": "images-reachable",
+        "status": "pass"
+      },
+      {
+        "id": "fixture-conforms",
+        "status": "pass"
+      },
+      {
+        "id": "smoke-episode",
+        "status": "pass"
+      },
+      {
+        "id": "results-conform",
+        "status": "pass"
+      },
+      {
+        "id": "replay-present",
+        "status": "pass"
+      },
+      {
+        "id": "replay-loadable",
+        "status": "pass"
+      },
+      {
+        "id": "players-run",
+        "status": "pass"
+      },
+      {
+        "id": "supporting-roles",
+        "status": "pass"
+      }
+    ],
+    "completed_at": "2026-09-15T03:41:49.986170Z"
+  },
+  "canonical_verified": true,
+  "game_pr": "https://github.com/Metta-AI/paintbot-pw/pull/32",
+  "policy_validation_pr": "https://github.com/daveey/cogamer/pull/116",
+  "source_commit": "472ee178c092ea40d1ef3ad752412c90708657db",
+  "local_nim_suites_passed": 24,
+  "python_tests_passed": 10,
+  "old_rules_29_replay": {
+    "ticks": 3179,
+    "hash": 1225788627
+  },
+  "private_policy_compatibility": {
+    "ticks": 3513,
+    "hash": 3238005463,
+    "source_changes_required": false,
+    "policy_version_id": "826f88a5-86b7-480e-981a-ae06e59e3097"
+  },
+  "fresh_league_replay": {
+    "round": {
+      "id": "round_bcd9fb6d-1a6f-4439-b753-6f0e0c12af08",
+      "round_number": 532,
+      "commissioner_key": "platform",
+      "execution_backend": "dispatch",
+      "round_config": {
+        "stages": null,
+        "purpose": "ladder",
+        "entrant_attributions": [
+          {
+            "subject_id": "ply_176e1e1a-7af8-40f7-9ee3-a67b96690ad6",
+            "subject_type": "player",
+            "policy_version_id": "6b3c549f-c453-470b-b5c4-9a025bc1691f",
+            "league_policy_membership_id": "lpm_40dc65b5-c12d-4962-868a-35b20e1ddf60"
+          },
+          {
+            "subject_id": "ply_44ae9048-3242-4654-881f-6d9d43347fa3",
+            "subject_type": "player",
+            "policy_version_id": "826f88a5-86b7-480e-981a-ae06e59e3097",
+            "league_policy_membership_id": "lpm_2e1b92f6-3f28-4045-8ce6-e7dff6b981e7"
+          },
+          {
+            "subject_id": "ply_ae883aa8-6f41-4e3f-ac39-d704e8245f00",
+            "subject_type": "player",
+            "policy_version_id": "c51834df-5ce1-4307-9134-b6e80211dece",
+            "league_policy_membership_id": "lpm_f9391ea8-ba3e-417a-843b-5e81302583f8"
+          },
+          {
+            "subject_id": "ply_d2a76018-a187-4f93-9f62-0395f465b31c",
+            "subject_type": "player",
+            "policy_version_id": "adcd246b-8a85-47b6-b63e-7f0dfcb7c40a",
+            "league_policy_membership_id": "lpm_e65c6c38-0299-47bd-be1b-99bf25f3e8b1"
+          }
+        ],
+        "entrant_policy_version_ids": [
+          "6b3c549f-c453-470b-b5c4-9a025bc1691f",
+          "826f88a5-86b7-480e-981a-ae06e59e3097",
+          "c51834df-5ce1-4307-9134-b6e80211dece",
+          "adcd246b-8a85-47b6-b63e-7f0dfcb7c40a"
+        ]
+      },
+      "round_display": null,
+      "status": "pending",
+      "error": null,
+      "started_at": null,
+      "completed_at": null,
+      "division": {
+        "id": "div_d1053eaf-6e7d-4266-950a-a740d0b9bd7b",
+        "name": "Competition",
+        "level": 1,
+        "type": "competition",
+        "hidden": false,
+        "league": {
+          "id": "league_b9458ff8-0854-4e21-82b8-3c99942902e0",
+          "name": "paintbot-pw",
+          "slug": null,
+          "game": {
+            "id": "game_867ef763-0642-4259-82b0-e1a8c68fff42",
+            "name": "Paintbot Pw",
+            "slug": null,
+            "coworld_name": "paintbot-pw",
+            "coworld_id": null,
+            "description": "Heartwick: sixteen Paint Crew cogs claim ten heart towers across an organic island, using BASIC or WASM policies.",
+            "created_at": "2026-09-10T04:28:23.677833Z",
+            "owner_user_id": "system",
+            "notes": null,
+            "default_league_id": null,
+            "canonical_coworld_id": null,
+            "coworld_tags": []
+          },
+          "commissioner_key": "platform",
+          "commissioner_config": {
+            "default_variant_id": "1v1"
+          },
+          "public": true,
+          "hidden": false,
+          "is_game_of_week": false,
+          "created_at": "2026-09-10T04:28:23.712617Z",
+          "disabled_at": null,
+          "short_name": null,
+          "description": "paintbot-pw league for submitted policies and recurring competition rounds.",
+          "commissioner_migration_version": null,
+          "rounds_paused_at": null,
+          "submissions_locked_at": null,
+          "settings": {
+            "ladder": {
+              "enabled": true,
+              "ranking": {
+                "k_factor": 32.0,
+                "algorithm": "elo",
+                "initial_rating": 1500.0,
+                "round_scoring_rule": "mean"
+              },
+              "divisions": [
+                {
+                  "name": "Competition",
+                  "division_id": "div_d1053eaf-6e7d-4266-950a-a740d0b9bd7b",
+                  "disqualify_after_consecutive_failures": 3
+                }
+              ],
+              "scheduler": {
+                "strategy": "team_n",
+                "team_count": 2,
+                "team_layout": "interleaved",
+                "allied_teams": [
+                  [
+                    0
+                  ],
+                  [
+                    1
+                  ]
+                ],
+                "num_episodes": 3,
+                "variant_rotation": [
+                  "1v1"
+                ],
+                "insufficient_players": "filler_policy"
+              },
+              "fulfillment": {
+                "retry_times": 2,
+                "allowed_failures": 0.0
+              }
+            },
+            "campaign": {
+              "board": {
+                "blobs": false,
+                "width": 10,
+                "height": 10,
+                "mode_mix": {
+                  "1v1": 0.5,
+                  "2v2": 0.5
+                },
+                "board_shape": "hex",
+                "mode_layout": "scattered",
+                "board_outline": "grid"
+              },
+              "best_of": 1,
+              "enabled": false,
+              "outcomes": "episodes",
+              "emulation": {
+                "seed": 1,
+                "ratings": {},
+                "filler_elo": 800.0,
+                "style_sigma": 100.0,
+                "red_advantage": 60.0,
+                "default_rating": 1200.0
+              },
+              "max_frames": 50,
+              "strategist": {
+                "model": "us.anthropic.claude-sonnet-5",
+                "aws_region": "us-east-1",
+                "max_tokens": 1500,
+                "default_prompt": "Expand cautiously. Prefer weak neighbors and empty cells; avoid fights you keep losing.",
+                "max_tool_calls": 16,
+                "timeout_seconds": 90.0
+              },
+              "variant_ids": [
+                "1v1",
+                "2v2"
+              ],
+              "max_airdrops": 1,
+              "min_airdrops": 1,
+              "max_invasions": 3,
+              "conversation_rounds": 10,
+              "round_interval_seconds": 17280,
+              "episode_timeout_seconds": 1800,
+              "baseline_policy_version_id": "c51834df-5ce1-4307-9134-b6e80211dece"
+            },
+            "round_interval_minutes": 10
+          },
+          "filler_policy_version_ids": [
+            "c51834df-5ce1-4307-9134-b6e80211dece",
+            "adcd246b-8a85-47b6-b63e-7f0dfcb7c40a"
+          ],
+          "seed_policy_version_ids": null,
+          "seed_policy_number": null,
+          "rules": {
+            "division_leaderboard": {
+              "aggregation": "score",
+              "source_score": "mean_round_score"
+            }
+          },
+          "notes": null,
+          "mod": null,
+          "participation_url": "https://softmax.com/api/observatory/v2/leagues/league_b9458ff8-0854-4e21-82b8-3c99942902e0.md",
+          "forum_markdown_url": "https://softmax.com/api/observatory/v2/forums/paintbot-pw.md",
+          "wiki_markdown_url": "https://softmax.com/api/observatory/v2/wikis/paintbot-pw/pages.md",
+          "logs_reporter_id": null,
+          "handicaps": null,
+          "handicap_dynamic": null
+        },
+        "description": null,
+        "archived_at": null,
+        "commissioner_description": null,
+        "created_at": "2026-09-10T04:29:14.795164Z",
+        "round_schedule": null,
+        "notes": null
+      },
+      "created_at": "2026-09-15T03:42:58.760690Z",
+      "scheduled_by": "ladder",
+      "skip_kind": null
+    },
+    "episode_request_id": "ereq_0e264661-e6d4-4a4f-99a9-5f025641d4ce",
+    "replay_url": "https://softmax-public.s3.amazonaws.com/replays/d37aeee3-6a6f-4a4f-9228-99f2c0d4bfc8.replay",
+    "viewer_url": "https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_2c7a1169-de41-442e-9b94-3bfaf3d7fff5/sha256%3A7ca1b727e74d8a631303dec38cbb0d19a53a927674d249943b50e96649e7b216/index.html?v=2#replay=https%3A%2F%2Fsoftmax-public.s3.amazonaws.com%2Freplays%2Fd37aeee3-6a6f-4a4f-9228-99f2c0d4bfc8.replay",
+    "native_verification": "ticks=2851 captures=[10, 0] hash=3140797131"
+  },
+  "active_policies": [
+    {
+      "id": "lpm_e65c6c38-0299-47bd-be1b-99bf25f3e8b1",
+      "policy_version_id": "adcd246b-8a85-47b6-b63e-7f0dfcb7c40a",
+      "status": "competing",
+      "substatus": "active"
+    },
+    {
+      "id": "lpm_2e1b92f6-3f28-4045-8ce6-e7dff6b981e7",
+      "policy_version_id": "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "status": "competing",
+      "substatus": "active"
+    },
+    {
+      "id": "lpm_40dc65b5-c12d-4962-868a-35b20e1ddf60",
+      "policy_version_id": "6b3c549f-c453-470b-b5c4-9a025bc1691f",
+      "status": "competing",
+      "substatus": "active"
+    },
+    {
+      "id": "lpm_f9391ea8-ba3e-417a-843b-5e81302583f8",
+      "policy_version_id": "c51834df-5ce1-4307-9134-b6e80211dece",
+      "status": "competing",
+      "substatus": "active"
+    }
+  ],
+  "hosted_viewer_hash_verified": true
+}

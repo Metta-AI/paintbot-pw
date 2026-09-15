@@ -163,3 +163,9 @@ back after publication. Exact release identifiers are in RIVER_DEPLOYMENT.json.
 Fresh league round 520 used 0.3.20 in all three matches. Episode
 `ereq_c014500d-5ad2-4d69-ac87-6ca779efb270` completed with all 3,179 native
 frame hashes verified (`1225788627`).
+
+## River slowdown — 0.3.21
+
+Rules 30 slows cogs in river water to one-quarter movement speed. Dry banks retain normal speed and old replays preserve their original movement.
+
+Certified and canonical: `cow_2c7a1169-de41-442e-9b94-3bfaf3d7fff5`. All five hosted smokes and the hosted viewer verify. Fresh league round 532 completed a 2,891-tick game with hash `3374707603`; [watch the replay](https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_2c7a1169-de41-442e-9b94-3bfaf3d7fff5/sha256%3A7ca1b727e74d8a631303dec38cbb0d19a53a927674d249943b50e96649e7b216/index.html?v=2#replay=https%3A%2F%2Fsoftmax-public.s3.amazonaws.com%2Freplays%2Fd37aeee3-6a6f-4a4f-9228-99f2c0d4bfc8.replay). See `RIVER_SLOWDOWN_DEPLOYMENT.json` for evidence.
