@@ -1,0 +1,140 @@
+{
+  "version": "0.3.20",
+  "coworld_id": "cow_9c62356a-917b-4ee2-865b-db307ad727e1",
+  "rules_version": 29,
+  "source_commit": "51d06c2681cef74b4a684e4fe57bfe707348b7cf",
+  "game_pr": "https://github.com/Metta-AI/paintbot-pw/pull/31",
+  "policy_validation_pr": "https://github.com/daveey/cogamer/pull/115",
+  "certification": {
+    "coworld_id": "cow_9c62356a-917b-4ee2-865b-db307ad727e1",
+    "state": "certified",
+    "certified": true,
+    "contract_version": "main-9534cfaaaee9",
+    "certification_job_id": "3978873e-6e84-4d26-a34d-07ada5a50445",
+    "failed_step": null,
+    "failure": null,
+    "transcript_summary": [
+      {
+        "id": "matriculate",
+        "status": "pass"
+      },
+      {
+        "id": "source-resolves",
+        "status": "pass"
+      },
+      {
+        "id": "images-reachable",
+        "status": "pass"
+      },
+      {
+        "id": "fixture-conforms",
+        "status": "pass"
+      },
+      {
+        "id": "smoke-episode",
+        "status": "pass"
+      },
+      {
+        "id": "results-conform",
+        "status": "pass"
+      },
+      {
+        "id": "replay-present",
+        "status": "pass"
+      },
+      {
+        "id": "replay-loadable",
+        "status": "pass"
+      },
+      {
+        "id": "players-run",
+        "status": "pass"
+      },
+      {
+        "id": "supporting-roles",
+        "status": "pass"
+      }
+    ],
+    "completed_at": "2026-09-15T01:26:54.926513Z"
+  },
+  "canonical_verified": true,
+  "local_nim_suites_passed": 24,
+  "native_python_terrain_samples": 9660,
+  "verified_smoke_episodes": [
+    "ereq_f20e69f5-3f95-4e1e-8f4a-050e670b34dd",
+    "ereq_6b440d57-6531-49c9-b3ac-50ab5e2af01a",
+    "ereq_8347e3c2-5374-4570-84aa-9a5d5fb898b1",
+    "ereq_c5706c13-dc98-4c20-9a60-7d7004fb70dd",
+    "ereq_7d794103-8577-40f0-802e-c049d453d332"
+  ],
+  "smoke_replay_hash": 1426543776,
+  "old_rules_28_replay": {
+    "ticks": 3485,
+    "hash": 4092349416
+  },
+  "private_policy_compatibility": {
+    "policy_version_id": "826f88a5-86b7-480e-981a-ae06e59e3097",
+    "source_changes_required": false,
+    "ticks": 3184,
+    "hash": 1886620807
+  },
+  "manifest_hash": "sha256:6473d70c74b7226745b67ff8059175a140596e22cccfa8cf08be1ee064ed5c59",
+  "hosted_viewer_hash_verified": true,
+  "active_policies_after_release": [
+    {
+      "id": "lpm_e65c6c38-0299-47bd-be1b-99bf25f3e8b1",
+      "policy_version_id": "adcd246b-8a85-47b6-b63e-7f0dfcb7c40a",
+      "status": "competing",
+      "substatus": "active",
+      "is_champion": true
+    },
+    {
+      "id": "lpm_2e1b92f6-3f28-4045-8ce6-e7dff6b981e7",
+      "policy_version_id": "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "status": "competing",
+      "substatus": "active",
+      "is_champion": true
+    },
+    {
+      "id": "lpm_40dc65b5-c12d-4962-868a-35b20e1ddf60",
+      "policy_version_id": "6b3c549f-c453-470b-b5c4-9a025bc1691f",
+      "status": "competing",
+      "substatus": "active",
+      "is_champion": true
+    },
+    {
+      "id": "lpm_f9391ea8-ba3e-417a-843b-5e81302583f8",
+      "policy_version_id": "c51834df-5ce1-4307-9134-b6e80211dece",
+      "status": "competing",
+      "substatus": "active",
+      "is_champion": true
+    }
+  ],
+  "fresh_league_replay": {
+    "round_number": 520,
+    "round_id": "round_e9b00f03-89f7-4ba0-8403-362e736dd20e",
+    "episode_request_id": "ereq_c014500d-5ad2-4d69-ac87-6ca779efb270",
+    "replay_url": "https://softmax-public.s3.amazonaws.com/replays/ab51a3ed-257f-4d5b-958c-f6b6bcf337d9.replay",
+    "viewer_url": "https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_9c62356a-917b-4ee2-865b-db307ad727e1/sha256%3A6473d70c74b7226745b67ff8059175a140596e22cccfa8cf08be1ee064ed5c59/index.html?v=2#replay=https%3A%2F%2Fsoftmax-public.s3.amazonaws.com%2Freplays%2Fab51a3ed-257f-4d5b-958c-f6b6bcf337d9.replay",
+    "verified_frames": 3179,
+    "hash": 1225788627,
+    "policy_version_ids": [
+      "c51834df-5ce1-4307-9134-b6e80211dece",
+      "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "c51834df-5ce1-4307-9134-b6e80211dece",
+      "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "c51834df-5ce1-4307-9134-b6e80211dece",
+      "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "c51834df-5ce1-4307-9134-b6e80211dece",
+      "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "c51834df-5ce1-4307-9134-b6e80211dece",
+      "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "c51834df-5ce1-4307-9134-b6e80211dece",
+      "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "c51834df-5ce1-4307-9134-b6e80211dece",
+      "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "c51834df-5ce1-4307-9134-b6e80211dece",
+      "826f88a5-86b7-480e-981a-ae06e59e3097"
+    ]
+  }
+}

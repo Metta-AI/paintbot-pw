@@ -139,3 +139,27 @@ Fresh league round 306 selected the replacement in all three matches. Episode
 `ereq_1e4b5688-ce10-4e13-9883-b300a5156c8d` completed on 0.3.19: all 3,485
 frame hashes verified natively and the hosted viewer showed Replay hash verified.
 The four replacement baseline seats captured 3, 3, 1, and 4 hearts respectively.
+
+## Shallow river release: 0.3.20
+
+GOTA-style shallow water now winds across Heartwick, with a carved riverbed,
+marsh banks, and a mouth that joins the sea. Cogs can wade across. Rules 29
+share the new terrain with WASM observations; older replays retain their maps.
+
+PR #31 merged as `51d06c2681cef74b4a684e4fe57bfe707348b7cf`. All 24 Paintbot
+Nim suites, runtime/baseline checks, and Linux/macOS/Windows CI passed.
+Native and Python terrain match at 9,660 sampled positions.
+
+`cow_9c62356a-917b-4ee2-865b-db307ad727e1` is certified and canonical. All ten
+hosted certification checks and five smoke episodes passed; every smoke
+reproduced hash `1426543776` over 240 frames. The hosted viewer renders
+the river and displays Replay hash verified.
+
+The active private Heartwick v7 source needs no change or resubmission. Its
+full river compatibility match verified 3,184 frames, hash `1886620807`;
+private PR #115 records the evidence. Active league memberships were read
+back after publication. Exact release identifiers are in RIVER_DEPLOYMENT.json.
+
+Fresh league round 520 used 0.3.20 in all three matches. Episode
+`ereq_c014500d-5ad2-4d69-ac87-6ca779efb270` completed with all 3,179 native
+frame hashes verified (`1225788627`).
