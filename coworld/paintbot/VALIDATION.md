@@ -153,3 +153,14 @@ Run the actuator regressions with
 - All ten certification steps pass locally and hosted; five hosted smoke replays reproduce hash `2050587785`.
 - Hosted viewer loads the river and reports Replay hash verified.
 - Vet review unavailable because Anthropic credentials are not configured.
+
+## Irregular river and thin estuaries (0.3.23, rules 32)
+
+- River ends inland, bends at three spatial scales, has uneven banks, and splits into three narrow coastal channels. Water retains quarter-speed movement.
+- All 24 Paintbot Nim suites pass, including objective connectivity, the dry route around the inland end, and separated coastal channels.
+- Native and Python terrain heights match at 9,660 points. Eight runtime and two actual-WASM baseline tests pass; Ruff passes.
+- Private Heartwick v7 completed and replayed a full 3,827-tick match, hash `3524034089`, without source changes.
+- The prior rules-31 replay reproduces 4,137 ticks and hash `2456142079`.
+- GitHub CI passed on Linux, macOS, and Windows. Local certification passed all ten steps.
+- Hosted certification passed; all five 240-tick smoke replays verify hash `3318585951`. The hosted viewer reports Replay hash verified.
+- Vet review remained unavailable because Anthropic credentials are not configured.

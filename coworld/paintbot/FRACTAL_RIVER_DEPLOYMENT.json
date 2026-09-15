@@ -1,0 +1,109 @@
+{
+  "version": "0.3.23",
+  "rules_version": 32,
+  "coworld_id": "cow_a699b645-d014-498e-a9e8-1fa479209006",
+  "source_commit": "ab22006",
+  "game_pr": "https://github.com/Metta-AI/paintbot-pw/pull/34",
+  "private_policy_validation_pr": "https://github.com/daveey/cogamer/pull/118",
+  "canonical_verified": true,
+  "certification": {
+    "coworld_id": "cow_a699b645-d014-498e-a9e8-1fa479209006",
+    "state": "certified",
+    "certified": true,
+    "contract_version": "main-d47b9dd46072",
+    "certification_job_id": "901c6446-7325-4cca-9ac4-e17fc28b3c8d",
+    "failed_step": null,
+    "failure": null,
+    "transcript_summary": [
+      {
+        "id": "matriculate",
+        "status": "pass"
+      },
+      {
+        "id": "source-resolves",
+        "status": "pass"
+      },
+      {
+        "id": "images-reachable",
+        "status": "pass"
+      },
+      {
+        "id": "fixture-conforms",
+        "status": "pass"
+      },
+      {
+        "id": "smoke-episode",
+        "status": "pass"
+      },
+      {
+        "id": "results-conform",
+        "status": "pass"
+      },
+      {
+        "id": "replay-present",
+        "status": "pass"
+      },
+      {
+        "id": "replay-loadable",
+        "status": "pass"
+      },
+      {
+        "id": "players-run",
+        "status": "pass"
+      },
+      {
+        "id": "supporting-roles",
+        "status": "pass"
+      }
+    ],
+    "completed_at": "2026-09-15T06:10:46.017644Z"
+  },
+  "nim_suites_passed": 24,
+  "python_tests_passed": 10,
+  "terrain_parity_samples": 9660,
+  "hosted_smoke_hash": 3318585951,
+  "hosted_viewer_hash_verified": true,
+  "private_policy_match": {
+    "ticks": 3827,
+    "hash": 3524034089,
+    "source_changes_required": false
+  },
+  "old_rules_31_replay": {
+    "ticks": 4137,
+    "hash": 2456142079
+  },
+  "active_policies": [
+    {
+      "id": "lpm_e65c6c38-0299-47bd-be1b-99bf25f3e8b1",
+      "policy_version_id": "adcd246b-8a85-47b6-b63e-7f0dfcb7c40a",
+      "status": "competing",
+      "substatus": "active"
+    },
+    {
+      "id": "lpm_2e1b92f6-3f28-4045-8ce6-e7dff6b981e7",
+      "policy_version_id": "826f88a5-86b7-480e-981a-ae06e59e3097",
+      "status": "competing",
+      "substatus": "active"
+    },
+    {
+      "id": "lpm_40dc65b5-c12d-4962-868a-35b20e1ddf60",
+      "policy_version_id": "6b3c549f-c453-470b-b5c4-9a025bc1691f",
+      "status": "competing",
+      "substatus": "active"
+    },
+    {
+      "id": "lpm_f9391ea8-ba3e-417a-843b-5e81302583f8",
+      "policy_version_id": "c51834df-5ce1-4307-9134-b6e80211dece",
+      "status": "competing",
+      "substatus": "active"
+    }
+  ],
+  "league_replay": {
+    "round_number": 546,
+    "round_id": "round_1be5d537-bdd6-48e6-bfb1-70d661b29e32",
+    "episode_request_id": "ereq_176033db-c5ff-41c1-94ea-7b2f069431d0",
+    "replay_url": "https://softmax-public.s3.amazonaws.com/replays/7a56d1c7-382e-4267-a4e9-a799c58af409.replay",
+    "viewer_url": "https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_a699b645-d014-498e-a9e8-1fa479209006/sha256%3A50ff89ef0d700f7cdacc54b48ae319362955bb6ab6138b659519c1f4748c3000/index.html?v=2#replay=https%3A%2F%2Fsoftmax-public.s3.amazonaws.com%2Freplays%2F7a56d1c7-382e-4267-a4e9-a799c58af409.replay",
+    "verification": "ticks=3504 captures=[10, 0] hash=4165800609"
+  }
+}
