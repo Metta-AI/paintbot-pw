@@ -8,6 +8,7 @@ var organicTerrain* = false
 var islandTerrain* = false
 var expandedIsland* = false
 var riverTerrain* = false
+var curvedRiver* = false
 const
   RiverBedHeight* = -200
   RiverWaterHeight* = -162 # GOTA-style shallow water: 38 cm above the bed.
@@ -19,12 +20,17 @@ proc landWave*(value,period,amplitude:int):int =
   let magnitude=int(4'i64*t.int64*(half-t).int64*amplitude.int64 div (half*half).int64)
   if phase<half:magnitude else: -magnitude
 proc riverCenter*(z: int): int =
-  3200 + landWave(z-2000, 6400, 420)
+  if curvedRiver: 3200 + landWave(min(z, 2600), 6800, 1300)
+  else: 3200 + landWave(z-2000, 6400, 420)
 
 proc riverBlend*(x, z: int): int =
   ## GOTA's cubic bank profile, using centimetres and integer arithmetic.
   if not riverTerrain: return 0
-  let distance = min(abs(x-riverCenter(z)), RiverBankWidth)
+  let dx = abs(x-riverCenter(z))
+  let dz = if curvedRiver: max(z-2600, 0) else: 0
+  # Rounded inland headwater; the opposite end opens onto the south coast.
+  let distance = if curvedRiver: min(int(sqrt((dx.int64*dx.int64+dz.int64*dz.int64).float64)), RiverBankWidth)
+    else: min(dx, RiverBankWidth)
   1000 - int(distance.int64*distance.int64*distance.int64*1000 div
     (RiverBankWidth.int64*RiverBankWidth.int64*RiverBankWidth.int64))
 
