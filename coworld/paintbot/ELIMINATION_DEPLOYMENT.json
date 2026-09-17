@@ -1,0 +1,147 @@
+{
+  "version": "0.3.25",
+  "rules_version": 34,
+  "coworld_id": "cow_e3d191e5-f707-4761-8135-065ef128cd51",
+  "source_commit": "0d643afd335ed06e57412fa96a4337499f265500",
+  "game_pr": "https://github.com/Metta-AI/paintbot-pw/pull/36",
+  "deploy_run": "https://github.com/Metta-AI/paintbot-pw/actions/runs/35243290479",
+  "dry_run": "https://github.com/Metta-AI/paintbot-pw/actions/runs/35241655147",
+  "canonical_verified": true,
+  "certification": {
+    "coworld_id": "cow_e3d191e5-f707-4761-8135-065ef128cd51",
+    "state": "certified",
+    "certified": true,
+    "contract_version": "main-fcd2a1290f01",
+    "certification_job_id": "2a0996e6-281a-4c88-9bc9-581cac8534c8",
+    "failed_step": null,
+    "failure": null,
+    "transcript_summary": [
+      {
+        "id": "matriculate",
+        "status": "pass"
+      },
+      {
+        "id": "source-resolves",
+        "status": "pass"
+      },
+      {
+        "id": "images-reachable",
+        "status": "pass"
+      },
+      {
+        "id": "fixture-conforms",
+        "status": "pass"
+      },
+      {
+        "id": "smoke-episode",
+        "status": "pass"
+      },
+      {
+        "id": "results-conform",
+        "status": "pass"
+      },
+      {
+        "id": "replay-present",
+        "status": "pass"
+      },
+      {
+        "id": "replay-loadable",
+        "status": "pass"
+      },
+      {
+        "id": "players-run",
+        "status": "pass"
+      },
+      {
+        "id": "supporting-roles",
+        "status": "pass"
+      }
+    ],
+    "completed_at": "2026-09-17T16:05:36.586394Z"
+  },
+  "nim_suites_passed": 25,
+  "python_runtime_tests_passed": 8,
+  "hosted_viewer_hash_verified": true,
+  "hosted_viewer_url": "https://d1kovwradqjymp.cloudfront.net/bundles/d4aba273f1d3b375b82e81ac7ce65f556bf11e23afa974e8ccd099cc36d51d5d/28be0bebdf284950b81b9b2801952669/index.html?v=2#replay=https%3A%2F%2Fd1kovwradqjymp.cloudfront.net%2Freplays%2F82504b30-d53d-4e9f-aef6-5b8d3c847216.replay",
+  "hosted_smoke_replays": [
+    {
+      "episode_request_id": "ereq_105c33f2-2e7f-4c62-9ee0-212c24a20bf4",
+      "verification": "ticks=240 captures=[1, 2] hash=616895535"
+    },
+    {
+      "episode_request_id": "ereq_3399fa67-fa6e-4998-979f-47b2cafa9676",
+      "verification": "ticks=240 captures=[1, 2] hash=616895535"
+    },
+    {
+      "episode_request_id": "ereq_599674bd-013c-481b-af6a-f58e7061d7c8",
+      "verification": "ticks=240 captures=[1, 2] hash=616895535"
+    },
+    {
+      "episode_request_id": "ereq_c611fa11-7fdb-49f9-b01c-b2b9e0d96bdc",
+      "verification": "ticks=240 captures=[1, 2] hash=616895535"
+    },
+    {
+      "episode_request_id": "ereq_ef6c74fb-6ff6-4060-9b14-6540005d27ba",
+      "verification": "ticks=240 captures=[1, 2] hash=616895535"
+    }
+  ],
+  "league_verification": {
+    "status": "verified",
+    "league_id": "league_b9458ff8-0854-4e21-82b8-3c99942902e0",
+    "round_number": 815,
+    "round_id": "round_4f833fca-d896-4987-9598-b962d0ba1413",
+    "episodes": [
+      {
+        "episode_request_id": "ereq_5393c969-e530-4eed-97f1-feb224d40190",
+        "verification": "ticks=1796 captures=[1, 8] hash=2634814137",
+        "winner": 1,
+        "cogs_left": [
+          0,
+          8
+        ],
+        "scores": [
+          114.04,
+          900.0
+        ]
+      },
+      {
+        "episode_request_id": "ereq_4fa2e522-ddfa-4e3f-acdf-f37ec572d824",
+        "verification": "ticks=1426 captures=[7, 3] hash=608302538",
+        "winner": 0,
+        "cogs_left": [
+          8,
+          0
+        ],
+        "scores": [
+          900.0,
+          163.42
+        ]
+      },
+      {
+        "episode_request_id": "ereq_89c697c1-64d8-4f24-9cf7-783d80f57faf",
+        "verification": "ticks=923 captures=[1, 5] hash=3174445628",
+        "winner": 1,
+        "cogs_left": [
+          0,
+          8
+        ],
+        "scores": [
+          38.46,
+          900.0
+        ]
+      }
+    ]
+  },
+  "old_rules_33_league_replays": {
+    "round_number": 814,
+    "verifications": [
+      "ticks=2779 captures=[0, 10] hash=2904727962",
+      "ticks=3563 captures=[10, 0] hash=3420576109",
+      "ticks=2790 captures=[10, 0] hash=3963180993"
+    ]
+  },
+  "private_policy_validation": {
+    "status": "not_run",
+    "reason": "Rules 34 changes no policy API or observation; no private policy match was played for this release."
+  }
+}

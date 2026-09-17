@@ -174,3 +174,10 @@ Run the actuator regressions with
 - Linux, macOS, and Windows CI pass. Local and hosted certification pass all ten steps; five hosted smokes verify hash `616895535`.
 - Local overview confirms an enclosed lake. The hosted viewer reports Replay hash verified.
 - Vet review unavailable because Anthropic credentials are not configured.
+
+## Rules 34: elimination loses
+
+- Six elimination regressions cover immediate loss for either side, pending respawns, the last death, mutual elimination, unchanged rules 33, and a recorded match that ends by elimination and round-trips through a replay file.
+- All 25 Paintbot Nim suites, eight Python runtime tests, the web-input test, and Linux/macOS/Windows CI pass.
+- Baseline matches, seeds 1–3: rules 33 ended at ticks 4,581 / 3,991 / 4,177; rules 34 ends at 2,670 / 2,773 / 2,273 with the same winner. Rules-33 replays keep their hashes on the new binary.
+- Hosted certification passes all ten steps; five hosted smokes verify hash `616895535`. League round 815 verifies three elimination endings; the hosted viewer reports Replay hash verified.
