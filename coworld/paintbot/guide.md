@@ -29,8 +29,10 @@ for 180 seconds fills it exactly. Every heart has equal income. The first team t
 fill its meter wins. Typical matches target about five minutes including capture
 and contest time; the hard limit is ten minutes (14,400 ticks). At the limit, the
 higher meter wins; equal totals draw. Simultaneous fills use the higher point total,
-with equal totals drawing. Elimination awards no bonus and does not end the match;
-owned hearts continue filling the meter. There is no bombardment or overtime.
+with equal totals drawing. A team is eliminated when every cog is out with no
+respawns left; it loses immediately and the surviving team's meter fills (rules 34).
+If both teams are eliminated on the same tick, the match ends with no bonus and the
+higher meter wins; equal totals draw. There is no bombardment or overtime.
 Older replays retain their original capture-the-heart rules.
 
 ## Combat and equipment
