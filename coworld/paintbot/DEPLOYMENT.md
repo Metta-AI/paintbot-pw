@@ -183,3 +183,13 @@ PR #35 merged as `364399a`. Version 0.3.24 is certified and canonical as `cow_2f
 The active private policy needs no source change or resubmission: its full lake match verifies 3,528 ticks, hash `3599040568`; private PR #119 records compatibility. Active memberships were read back.
 
 [Watch the hosted lake replay](https://api.observatory.softmax-research.net/v2/coworlds/replays/static/cow_2f181565-e883-45d4-b6bf-561a36767648/sha256%3A89c1d31a8f78e01c0833d0721b17cdf8b74ca0f812929c27073a41eeeb006f79/index.html?v=2#replay=https%3A%2F%2Fsoftmax-public.s3.amazonaws.com%2Freplays%2F0adfddc5-b2c0-443b-9b99-c7153fec083a.replay). A fresh league round was triggered; at this verification checkpoint, round 601 still had a running match on 0.3.23, so league evidence for 0.3.24 remains pending. Exact release and verification evidence is in `LAKE_DEPLOYMENT.json`.
+
+## Elimination loses — 0.3.25
+
+Rules 34 makes a team with no living cogs and no respawns left lose on that tick. The survivor's heart meter fills so league scores agree with the winner; mutual elimination ends the match with no bonus and the higher meter wins. Rules 33 and older keep their behavior and replay hashes.
+
+PR #36 merged as `0d643af`. Version 0.3.25 is certified and canonical as `cow_e3d191e5-f707-4761-8135-065ef128cd51`, deployed by the Deploy Coworld workflow after a dry run on the branch. All 25 Nim suites, eight Python runtime tests, and Linux/macOS/Windows CI passed. All ten certification steps and five hosted smoke episodes passed; each smoke replay verifies 240 ticks with hash `616895535`.
+
+League round 815 was the first on 0.3.25. All three matches ended by elimination with the winner's meter at exactly 900: 1,796 ticks (hash `2634814137`), 1,426 ticks (hash `608302538`), and 923 ticks (hash `3174445628`). Round 814's rules-33 replays still verify on the new binary. [Watch a hosted elimination replay](https://d1kovwradqjymp.cloudfront.net/bundles/d4aba273f1d3b375b82e81ac7ce65f556bf11e23afa974e8ccd099cc36d51d5d/28be0bebdf284950b81b9b2801952669/index.html?v=2#replay=https%3A%2F%2Fd1kovwradqjymp.cloudfront.net%2Freplays%2F82504b30-d53d-4e9f-aef6-5b8d3c847216.replay); the viewer displays Replay hash verified.
+
+No private policy match was played for this release: rules 34 changes no policy API or observation. Exact identifiers are in `ELIMINATION_DEPLOYMENT.json`.
