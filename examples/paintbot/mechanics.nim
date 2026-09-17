@@ -463,7 +463,17 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
       if visionRulesVersion >= 28:
         inc w.tick
         let target = w.heartMeterTarget()
-        if w.scoreTicks[0] >= target or w.scoreTicks[1] >= target or w.tick >= w.endTick:
+        var eliminated = false
+        if visionRulesVersion >= 34:
+          var alive: array[2, bool]
+          for i,c in w.cogs:
+            if c.hp > 0 or w.equipment[i].lives > 0: alive[team(i)] = true
+          eliminated = not alive[0] or not alive[1]
+          # The sole survivor's meter fills; mutual elimination ranks the meters as they stand.
+          if alive[0] != alive[1]:
+            let survivor = if alive[0]: 0 else: 1
+            w.scoreTicks[survivor] = max(w.scoreTicks[survivor], target)
+        if eliminated or w.scoreTicks[0] >= target or w.scoreTicks[1] >= target or w.tick >= w.endTick:
           w.winner = if w.scoreTicks[0] > w.scoreTicks[1]: 0 elif w.scoreTicks[1] > w.scoreTicks[0]: 1 else: -2
         return
       var alive: array[2, bool]

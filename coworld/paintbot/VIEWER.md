@@ -72,7 +72,7 @@ Use **Territory graph** and **Points graph** in the view toolbar to toggle each
 floating panel independently. Drag a panel by its title bar; use × to close it.
 Territory stacks Ember and Azure ownership out of ten hearts, leaving neutral
 hearts unfilled. Points plots both cumulative team scores, including elimination
-bonuses. Graphs follow the playhead and hide future history unless Spoilers is on.
+bonuses (from rules 34, the survivor's meter jumps to full). Graphs follow the playhead and hide future history unless Spoilers is on.
 Live games collect the same simulation samples as replays, including ownership
 changes between seconds. Points are available for rules 23 and later.
 
