@@ -61,5 +61,7 @@ jobs:
       - run: node tests/test_paintbot_webinputs.js
       - run: python -m pip install wasmtime==48.0.0
       - run: python coworld/paintbot/test_baseline.py
+      # The hosted runtime is Linux-only; its file-URI handling is POSIX, so skip Windows here.
       - run: python -m unittest test_runtime
+        if: runner.os != 'Windows'
         working-directory: polyworld/coworld/paintbot
