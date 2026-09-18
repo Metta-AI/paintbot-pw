@@ -216,3 +216,27 @@ wading. Cogs in the water move at one-quarter speed (7 cm/tick normally),
 stacking with sneaking and carrying penalties. Dry banks retain normal speed;
 the water causes no damage. Terrain height, line of sight, and navigation use
 the lake bed. Earlier replays preserve their original river geometry and rules.
+
+## Advisor oracle for WASM seats (host feature, no rules change)
+
+Seats stay sandboxed and never touch the network. A WASM policy may instead import two host
+functions from module `paintbot` and let the host ask one operator-configured advisor
+endpoint on its behalf:
+
+- `oracle_ask(ptr: i32, len: i32) -> i32` hands over a UTF-8 JSON body `{"state": ..., "questions": {...}}`
+  (at most 32 KiB, 1-64 questions). It returns a request id (1 or more), or 0 when refused: no
+  oracle configured, a request still in flight for this seat, fewer than the minimum ticks since
+  the seat's last ask (default 24), or an invalid body. Asking never blocks the tick.
+- `oracle_poll(id: i32, ptr: i32, cap: i32) -> i32` copies the answer, the endpoint's `answers`
+  object as compact JSON, into the guest buffer and returns its length. It returns 0 while the
+  request is pending, -1 if it failed (deadline, transport or malformed reply) or is unknown, and
+  -2 if `cap` is too small. An answer is delivered once; at most four unread answers are kept per seat.
+
+The host sets the endpoint, model and credential from `COGAME_ORACLE_URL` (https only),
+`COGAME_ORACLE_MODEL` and `COGAME_ORACLE_KEY`, with `COGAME_ORACLE_INTERVAL` ticks between asks
+and `COGAME_ORACLE_DEADLINE` seconds per request. The guest cannot choose any of them. Answers
+land on a later tick, so a policy keeps acting on its last answer meanwhile. Replays are
+unaffected: they record accepted actions and state hashes, not how a policy chose them, so a
+replay of an advised match verifies like any other. Without `COGAME_ORACLE_URL`, as in
+certification pods with no network, every ask returns 0 and matches behave exactly as before.
+BASIC seats have no oracle access.

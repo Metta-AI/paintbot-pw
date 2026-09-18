@@ -183,5 +183,146 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(view.command(w, [(0x84,80)])["sneak"])
 
 
+
+
+ORACLE_REQUEST = b'{"state":"ping","questions":{"q":{"type":"noul","instructions":"Is this a ping?"}}}'
+# A minimal seat that asks the oracle once, then reports its state in the actuator byte:
+# 0 idle, 1 asked, 2 answered (answer JSON at 8192), 3 failed. It re-asks once idle again.
+ORACLE_GUEST = f"""
+(module
+  (import "paintbot" "oracle_ask" (func $ask (param i32 i32) (result i32)))
+  (import "paintbot" "oracle_poll" (func $poll (param i32 i32 i32) (result i32)))
+  (memory (export "memory") 1)
+  (global $req (mut i32) (i32.const 0))
+  (global $state (mut i32) (i32.const 0))
+  (data (i32.const 2048) "{ORACLE_REQUEST.decode().replace(chr(34), chr(92) + chr(34))}")
+  (func (export "paintbot_init") (param i32))
+  (func (export "paintbot_buffer") (param i32) (result i32) (i32.const 16384))
+  (func (export "paintbot_output_size") (result i32) (i32.const 10))
+  (func (export "paintbot_step") (result i32)
+    (local $n i32)
+    (if (i32.eqz (global.get $req))
+      (then
+        (global.set $req (call $ask (i32.const 2048) (i32.const {len(ORACLE_REQUEST)})))
+        (if (i32.ne (global.get $req) (i32.const 0)) (then (global.set $state (i32.const 1)))))
+      (else
+        (local.set $n (call $poll (global.get $req) (i32.const 8192) (i32.const 4096)))
+        (if (i32.gt_s (local.get $n) (i32.const 0))
+          (then (global.set $state (i32.const 2)) (global.set $req (i32.const 0))))
+        (if (i32.lt_s (local.get $n) (i32.const 0))
+          (then (global.set $state (i32.const 3)) (global.set $req (i32.const 0))))))
+    (i32.store (i32.const 4096) (i32.const 1))
+    (i32.store (i32.const 4100) (i32.const 2))
+    (i32.store8 (i32.const 4104) (i32.const 132))
+    (i32.store8 (i32.const 4105) (global.get $state))
+    (i32.const 4096)))
+"""
+
+
+class OracleTests(unittest.TestCase):
+    """The advisor oracle: sandboxed seats ask, the host calls out, answers land on a later tick."""
+
+    def _server(self, delay=0.0, body=b'{"answers":{"q":{"type":"noul","noul":0.9}}}'):
+        import http.server
+        import threading
+        import time
+
+        seen = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                time.sleep(delay)
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return f"http://127.0.0.1:{server.server_address[1]}/", seen
+
+    def _policy(self, oracle):
+        import wasmtime
+        from wasm_policy import Policy
+
+        config = wasmtime.Config()
+        config.consume_fuel = True
+        config.epoch_interruption = True
+        engine = wasmtime.Engine(config)
+        policy = Policy(engine, wasmtime.Module(engine, ORACLE_GUEST), 3, oracle)
+        self.addCleanup(policy.close)
+        return policy
+
+    def _settle(self, oracle, seconds=3.0):
+        import time
+
+        deadline = time.time() + seconds
+        while time.time() < deadline and any(s.inflight is not None for s in oracle._seats.values()):
+            time.sleep(0.02)
+
+    def test_answer_arrives_on_a_later_tick_and_asks_are_rate_limited(self):
+        from oracle import Oracle
+
+        url, seen = self._server()
+        oracle = Oracle(url, "secret", "test-model", min_interval=24, deadline=2.0)
+        self.addCleanup(oracle.close)
+        policy = self._policy(oracle)
+        self.assertEqual(policy.step(b"frame", tick=0)[0][1], 1)  # asked
+        self._settle(oracle)
+        self.assertEqual(policy.step(b"frame", tick=1)[0][1], 2)  # answered
+        answer = bytes(policy.memory.read(policy.store, 8192, 8192 + 64))
+        self.assertTrue(answer.startswith(b'{"q":{"type":"noul","noul":0.9}}'))
+        self.assertEqual(seen[0]["model"], "test-model")
+        self.assertEqual(seen[0]["questions"]["q"]["type"], "noul")
+        self.assertEqual(seen[0]["state"], "ping")
+        # Too soon: the ask is refused, the guest stays where it was, and nothing was sent.
+        self.assertEqual(policy.step(b"frame", tick=2)[0][1], 2)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(policy.step(b"frame", tick=24)[0][1], 1)
+        self._settle(oracle)
+        self.assertEqual(len(seen), 2)
+
+    def test_slow_endpoint_is_reported_as_failure_without_blocking(self):
+        import time
+
+        from oracle import Oracle
+
+        url, _ = self._server(delay=1.5)
+        oracle = Oracle(url, deadline=0.3)
+        self.addCleanup(oracle.close)
+        policy = self._policy(oracle)
+        started = time.time()
+        self.assertEqual(policy.step(b"frame", tick=0)[0][1], 1)
+        self.assertLess(time.time() - started, 0.2, "a step must never wait on the network")
+        self._settle(oracle)
+        self.assertEqual(policy.step(b"frame", tick=1)[0][1], 3)
+
+    def test_without_an_oracle_every_ask_is_refused(self):
+        policy = self._policy(None)
+        for tick in range(3):
+            self.assertEqual(policy.step(b"frame", tick=tick)[0][1], 0)
+
+    def test_guest_cannot_pick_the_endpoint_or_send_junk(self):
+        from oracle import Oracle
+
+        oracle = Oracle("https://example.invalid/")
+        self.addCleanup(oracle.close)
+        self.assertEqual(oracle.ask(0, 0, b"not json"), 0)
+        self.assertEqual(oracle.ask(0, 0, b'{"url":"https://evil","questions":{}}'), 0)
+        self.assertEqual(oracle.ask(0, 0, b'{"state":1,"questions":[]}'), 0)
+        self.assertEqual(oracle.ask(0, 0, b"x" * (40 * 1024)), 0)
+        self.assertIsNone(Oracle.from_env({}))
+        self.assertIsNone(Oracle.from_env({"COGAME_ORACLE_URL": "http://plain"}))
+        configured = Oracle.from_env({"COGAME_ORACLE_URL": "https://api.example/", "COGAME_ORACLE_INTERVAL": "48"})
+        self.assertEqual(configured.min_interval, 48)
+        configured.close()
+
+
 if __name__ == "__main__":
     unittest.main()

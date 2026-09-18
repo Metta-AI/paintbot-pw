@@ -36,7 +36,9 @@ Run `select_assets.py` after changing those dependencies or asset references.
 
 The runner supplies local `file://` URIs through `COGAME_CONFIG_URI`,
 `COGAME_PLAYER_SEATS_URI`, `COGAME_RESULTS_URI`, `COGAME_SAVE_REPLAY_URI`, and
-`COGAME_PLAYER_FAILURE_URI`. Configurations require the game's fixed-length tokens
+`COGAME_PLAYER_FAILURE_URI`. Optional `COGAME_ORACLE_URL`, `COGAME_ORACLE_KEY`, `COGAME_ORACLE_MODEL`,
+`COGAME_ORACLE_INTERVAL` and `COGAME_ORACLE_DEADLINE` enable the WASM advisor oracle (see the
+Paintbot guide); unset, seats have no advisor. Configurations require the game's fixed-length tokens
 and players arrays. Staged policy filenames may have no extension. Raw BASIC source
 is read from the disk with bounded reads and compiled with the existing game limits.
 

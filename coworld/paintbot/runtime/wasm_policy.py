@@ -130,9 +130,18 @@ def decode_replies(data: bytes) -> list[bytes]:
 
 
 class Policy:
-    """Use and close on its owning thread. No filesystem, environment, or network grants."""
+    """Use and close on its owning thread. No filesystem, environment, or network grants.
 
-    def __init__(self, engine: wasmtime.Engine, module: wasmtime.Module, slot: int):
+    The optional `paintbot.oracle_ask` / `paintbot.oracle_poll` imports let a seat ask the
+    host-side advisor oracle (see oracle.py); the seat still never touches the network itself.
+    """
+
+    def __init__(
+        self, engine: wasmtime.Engine, module: wasmtime.Module, slot: int, oracle=None
+    ):
+        self.slot = slot
+        self.oracle = oracle
+        self.tick = 0
         self.store = wasmtime.Store(engine)
         self.store.set_limits(
             memory_size=256 * 1024 * 1024, memories=1, tables=4, instances=2
@@ -142,6 +151,29 @@ class Policy:
         self.store.set_epoch_deadline(6000)
         linker = wasmtime.Linker(engine)
         linker.define_wasi()
+        i32 = wasmtime.ValType.i32()
+        linker.define(
+            self.store,
+            "paintbot",
+            "oracle_ask",
+            wasmtime.Func(
+                self.store,
+                wasmtime.FuncType([i32, i32], [i32]),
+                self._oracle_ask,
+                access_caller=True,
+            ),
+        )
+        linker.define(
+            self.store,
+            "paintbot",
+            "oracle_poll",
+            wasmtime.Func(
+                self.store,
+                wasmtime.FuncType([i32, i32, i32], [i32]),
+                self._oracle_poll,
+                access_caller=True,
+            ),
+        )
         try:
             self.instance = linker.instantiate(self.store, module)
             self.exports = self.instance.exports(self.store)
@@ -173,9 +205,10 @@ class Policy:
         finally:
             linker.close()
 
-    def step(self, frame: bytes) -> list[bytes]:
+    def step(self, frame: bytes, tick: int | None = None) -> list[bytes]:
         if len(frame) > MAX_FRAME:
             raise ValueError("observation exceeds 16 MiB")
+        self.tick = self.tick + 1 if tick is None else tick
         self.store.set_fuel(20_000_000_000)
         self.store.set_epoch_deadline(
             3000
@@ -189,6 +222,37 @@ class Policy:
             raise ValueError("policy reply exceeds limits")
         self._check_range(ptr, size)
         return decode_replies(bytes(self.memory.read(self.store, ptr, ptr + size)))
+
+    # ---- advisor oracle imports ------------------------------------------------------------
+    def _guest_range(self, caller, ptr: int, size: int) -> wasmtime.Memory:
+        memory = caller.get("memory")
+        if (
+            not isinstance(memory, wasmtime.Memory)
+            or ptr < 0
+            or size < 0
+            or ptr + size > memory.data_len(caller)
+        ):
+            raise wasmtime.Trap("oracle buffer is out of bounds")
+        return memory
+
+    def _oracle_ask(self, caller, ptr: int, size: int) -> int:
+        """Guest hands over a JSON body {state, questions}; gets a request id, or 0 if refused."""
+        if self.oracle is None or size > 1 << 20:
+            return 0
+        memory = self._guest_range(caller, ptr, size)
+        body = bytes(memory.read(caller, ptr, ptr + size))
+        return self.oracle.ask(self.slot, self.tick, body)
+
+    def _oracle_poll(self, caller, request_id: int, ptr: int, capacity: int) -> int:
+        """Copy a ready answer (JSON `answers` object) into the guest buffer. Returns its length,
+        0 while pending, -1 if failed or unknown, -2 if the buffer is too small."""
+        if self.oracle is None:
+            return -1
+        memory = self._guest_range(caller, ptr, capacity)
+        status, answer = self.oracle.poll(self.slot, request_id, capacity)
+        if status > 0:
+            memory.write(caller, answer, ptr)
+        return status
 
     def _check_range(self, ptr: int, size: int) -> None:
         if ptr < 0 or ptr + size > self.memory.data_len(self.store):

@@ -193,3 +193,20 @@ PR #36 merged as `0d643af`. Version 0.3.25 is certified and canonical as `cow_e3
 League round 815 was the first on 0.3.25. All three matches ended by elimination with the winner's meter at exactly 900: 1,796 ticks (hash `2634814137`), 1,426 ticks (hash `608302538`), and 923 ticks (hash `3174445628`). Round 814's rules-33 replays still verify on the new binary. [Watch a hosted elimination replay](https://d1kovwradqjymp.cloudfront.net/bundles/d4aba273f1d3b375b82e81ac7ce65f556bf11e23afa974e8ccd099cc36d51d5d/28be0bebdf284950b81b9b2801952669/index.html?v=2#replay=https%3A%2F%2Fd1kovwradqjymp.cloudfront.net%2Freplays%2F82504b30-d53d-4e9f-aef6-5b8d3c847216.replay); the viewer displays Replay hash verified.
 
 No private policy match was played for this release: rules 34 changes no policy API or observation. Exact identifiers are in `ELIMINATION_DEPLOYMENT.json`.
+
+## Advisor oracle for WASM seats
+
+The runtime gains two optional host imports, `paintbot.oracle_ask` and `paintbot.oracle_poll`
+(`coworld/paintbot/runtime/oracle.py`; see the guide). A seat can ask one operator-configured
+HTTPS endpoint for typed judgments through the host; the host answers on a later tick and never
+blocks. Per seat: one request in flight, `COGAME_ORACLE_INTERVAL` ticks between asks (default 24),
+`COGAME_ORACLE_DEADLINE` seconds per request (default 2), 32 KiB bodies and 64 KiB answers. The
+pod must be given network egress to that endpoint plus `COGAME_ORACLE_URL`, `COGAME_ORACLE_KEY`
+and `COGAME_ORACLE_MODEL`; without the URL the feature is off and the ask returns 0. No rules
+version, observation, replay format or BASIC behavior changes. Four new Python runtime tests
+cover the round trip, rate limiting, the deadline, the disabled path and body validation; CI now
+runs `test_runtime.py`.
+
+Whether a league enables the oracle is a league decision: an advised seat has a different
+compute class from the 20,000-instruction BASIC budget, so either every entrant gets it or an
+advised league is scored separately.

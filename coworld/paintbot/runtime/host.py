@@ -10,6 +10,7 @@ import tempfile
 import threading
 from pathlib import Path
 import wasmtime
+from oracle import Oracle
 from wasm_policy import Policy, load_seats, verified_policy, write_json
 from sprite import SpriteView
 
@@ -34,6 +35,7 @@ def run(engine):
     views = {}
     modules = {}
     child = None
+    oracle = Oracle.from_env()
     try:
         with tempfile.TemporaryDirectory(prefix="paintbot-pw-") as tmp:
             tmp = Path(tmp)
@@ -48,7 +50,7 @@ def run(engine):
                         digest = hashlib.sha256(data).digest()
                         if digest not in modules:
                             modules[digest] = wasmtime.Module(runtime, data)
-                        policies[slot] = Policy(runtime, modules[digest], slot)
+                        policies[slot] = Policy(runtime, modules[digest], slot, oracle)
                         views[slot] = SpriteView(slot)
                         seat.update(
                             file_uri=dummy.as_uri(),
@@ -90,7 +92,7 @@ def run(engine):
                     commands = []
                     for slot, p in policies.items():
                         try:
-                            replies = p.step(views[slot].frame(w))
+                            replies = p.step(views[slot].frame(w), w.get("tick"))
                         except Exception as e:
                             failure = {
                                 "message": "WASM policy failed: " + type(e).__name__,
@@ -120,6 +122,8 @@ def run(engine):
             child.wait(timeout=10)
         for p in policies.values():
             p.close()
+        if oracle is not None:
+            oracle.close()
         for module in modules.values():
             module.close()
         runtime.close()
