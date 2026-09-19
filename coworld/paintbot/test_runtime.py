@@ -77,24 +77,29 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             decode_replies(b"\x01\0\0\0\x01\0\0\0\x82")
 
-    def test_bad_wasm_is_attributed_before_engine_starts(self):
+    def test_bad_wasm_forfeits_its_seat_and_the_episode_still_runs(self):
         import host
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            p = root / "bad"
-            data = b"\0asmBAD"
-            p.write_bytes(data)
-            seats = [
-                dict(
-                    slot=i,
-                    file_uri=p.as_uri(),
-                    size_bytes=len(data),
-                    content_hash="sha256:" + hashlib.sha256(data).hexdigest(),
-                    log_uri=(root / f"{i}.log").as_uri(),
+            bad = root / "bad"
+            bad_data = b"\0asmBAD"
+            bad.write_bytes(bad_data)
+            good = root / "good"
+            good_data = b"idle = 1\n"
+            good.write_bytes(good_data)
+            seats = []
+            for i in range(16):
+                path, data = (bad, bad_data) if i == 0 else (good, good_data)
+                seats.append(
+                    dict(
+                        slot=i,
+                        file_uri=path.as_uri(),
+                        size_bytes=len(data),
+                        content_hash="sha256:" + hashlib.sha256(data).hexdigest(),
+                        log_uri=(root / f"{i}.log").as_uri(),
+                    )
                 )
-                for i in range(16)
-            ]
             doc = root / "seats.json"
             doc.write_text(
                 json.dumps(
@@ -106,14 +111,40 @@ class RuntimeTests(unittest.TestCase):
                 )
             )
             failure = root / "failure.json"
+            # A stand-in engine: with the bad seat forfeited (not fatal), `run` reaches
+            # this subprocess and returns its real exit code instead of raising.
+            engine = root / "engine"
+            engine.write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
+            engine.chmod(0o755)
             with patch.dict(
                 os.environ,
                 COGAME_PLAYER_SEATS_URI=doc.as_uri(),
                 COGAME_PLAYER_FAILURE_URI=failure.as_uri(),
             ):
-                with self.assertRaises(Exception):
-                    host.run("/must-not-start")
+                self.assertEqual(host.run(str(engine)), 0)
             self.assertEqual(json.loads(failure.read_text())["failed_policy_index"], 0)
+
+    def test_trapping_policy_forfeits_only_its_own_seat(self):
+        import host
+
+        class TrappingPolicy:
+            def step(self, frame, tick):
+                raise RuntimeError("boom")
+
+            def close(self):
+                self.closed = True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            failure = Path(tmp) / "failure.json"
+            policy = TrappingPolicy()
+            policies = {3: policy}
+            views = {3: SpriteView(3)}
+            with patch.dict(os.environ, COGAME_PLAYER_FAILURE_URI=failure.as_uri()):
+                host.forfeit_seat(3, "WASM policy failed: RuntimeError", policies, views)
+            self.assertNotIn(3, policies)
+            self.assertNotIn(3, views)
+            self.assertTrue(policy.closed)
+            self.assertEqual(json.loads(failure.read_text())["failed_policy_index"], 3)
 
     def test_wasm_receives_gun_readiness(self):
         view = SpriteView(0)
