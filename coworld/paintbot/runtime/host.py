@@ -15,6 +15,23 @@ from wasm_policy import Policy, load_seats, verified_policy, write_json
 from sprite import SpriteView
 
 
+def forfeit_seat(slot, reason, policies, views):
+    """Reports a structured player-contract failure and drops the seat from active play.
+
+    The engine already staged every WASM seat's file as the idle BASIC fallback, so once a
+    slot is out of `policies`/`views` the native side just runs that idle bot for it instead
+    of crashing the whole episode.
+    """
+    write_json(
+        os.environ["COGAME_PLAYER_FAILURE_URI"],
+        {"message": reason, "failed_policy_index": slot},
+    )
+    policy = policies.pop(slot, None)
+    if policy is not None:
+        policy.close()
+    views.pop(slot, None)
+
+
 def run(engine):
     doc = load_seats(os.environ["COGAME_PLAYER_SEATS_URI"])
     if len(doc["seats"]) != 16:
@@ -66,15 +83,21 @@ def run(engine):
                         source.write_bytes(data)
                         seat["file_uri"] = source.as_uri()
                 except Exception as e:
-                    write_json(
-                        os.environ["COGAME_PLAYER_FAILURE_URI"],
-                        {
-                            "message": "Policy initialization failed: "
-                            + type(e).__name__,
-                            "failed_policy_index": slot,
-                        },
+                    # A seat that fails to load forfeits itself: fall back to the same
+                    # idle BASIC stub a good WASM seat stages, and never step it. The
+                    # episode still starts and scores the seats that did load.
+                    forfeit_seat(
+                        slot,
+                        "Policy initialization failed: " + type(e).__name__,
+                        policies,
+                        views,
                     )
-                    raise
+                    seat.update(
+                        file_uri=dummy.as_uri(),
+                        size_bytes=dummy.stat().st_size,
+                        content_hash="sha256:"
+                        + hashlib.sha256(dummy.read_bytes()).hexdigest(),
+                    )
             seatfile = tmp / "seats.json"
             seatfile.write_text(json.dumps(staged))
             parent, other = socket.socketpair()
@@ -90,16 +113,19 @@ def run(engine):
                 for line in stream:
                     w = json.loads(line)
                     commands = []
-                    for slot, p in policies.items():
+                    for slot in list(policies):
+                        p = policies[slot]
                         try:
                             replies = p.step(views[slot].frame(w), w.get("tick"))
                         except Exception as e:
-                            failure = {
-                                "message": "WASM policy failed: " + type(e).__name__,
-                                "failed_policy_index": slot,
-                            }
-                            write_json(os.environ["COGAME_PLAYER_FAILURE_URI"], failure)
-                            raise
+                            # A policy that traps forfeits only its own seat; the engine
+                            # keeps running its idle fallback for this slot from here on,
+                            # and the episode still finishes and scores the rest.
+                            forfeit_seat(
+                                slot, "WASM policy failed: " + type(e).__name__,
+                                policies, views,
+                            )
+                            continue
                         commands.append(
                             {
                                 "slot": slot,
