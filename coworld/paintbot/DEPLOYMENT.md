@@ -210,3 +210,14 @@ runs `test_runtime.py`.
 Whether a league enables the oracle is a league decision: an advised seat has a different
 compute class from the 20,000-instruction BASIC budget, so either every entrant gets it or an
 advised league is scored separately.
+
+## Stronger BASIC baseline
+
+`coworld/paintbot/players/base.bas` and `examples/paintbot/players/base.bas` (now identical) were
+rewritten: full-windup aim lead with own-motion compensation, random evasive footwork, two
+stateless squads of four that agree on a heart from public ownership alone, and breaking off
+when visibly outnumbered (see the guide). No engine, rules, observation or API change. Against
+the previous baseline in the native engine: 100-0 over 100 side-swapped matches (seeds 1-50),
+peak 5,670 instructions and 8,722 work units per decision against limits of 20,000 and 50,000,
+no seat errors. This changes the opponent every league entrant meets; not yet deployed or
+certified.

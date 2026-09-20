@@ -217,6 +217,32 @@ stacking with sneaking and carrying penalties. Dry banks retain normal speed;
 the water causes no damage. Terrain height, line of sight, and navigation use
 the lake bed. Earlier replays preserve their original river geometry and rules.
 
+### Baseline squads, footwork and aim
+
+The BASIC baseline (`players/base.bas`) was rebuilt around four habits. Each cog still runs alone
+with fog-gated vision and no shared memory.
+
+- **Aim.** It leads a moving target by the whole gun windup (six moves) and subtracts its own
+  drift, because the ray leaves from wherever the shooter stands when the windup ends, along
+  the direction locked when the shot was ordered. BASIC cannot read its gun cooldown, so the
+  policy keeps its own estimate and only orders a shot at the start of a movement leg that lasts
+  the full windup.
+- **Footwork.** While an opponent is in sight it moves in short legs of random length across the
+  line to the threat instead of walking straight, staying inside the capture ring when it is
+  holding one. Randomness comes from a small integer generator seeded by the seat.
+- **Squads of four without talking.** Seats 1-4 and 5-8 of a team form two squads. A squad's
+  target is a pure function of public heart ownership and the squad number, so all four members,
+  including one that has just respawned, choose the same heart. Two members stand in the ring;
+  two cover from outside it on the opposing side and step in if nobody is capturing.
+- **Refusing bad fights.** A cog that sees more opponents nearby than teammates heads for the
+  heart that is far from them and close to it.
+
+It no longer collects spray cans (a can replaces the gun, which loses at range) or uniforms.
+Measured in the engine over 100 side-swapped matches it beat the previous baseline 100-0, using
+at most 5,670 of the 20,000 instructions and 8,722 of the 50,000 work units per decision, with
+no seat disabled. Removing any one habit loses to the full policy (aim 3-37, footwork 12-28,
+refusing fights 12-28, squads 16-24 over 40 matches each).
+
 ## Advisor oracle for WASM seats (host feature, no rules change)
 
 Seats stay sandboxed and never touch the network. A WASM policy may instead import two host
