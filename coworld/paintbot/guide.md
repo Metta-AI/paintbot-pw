@@ -243,7 +243,7 @@ at most 5,670 of the 20,000 instructions and 8,722 of the 50,000 work units per 
 no seat disabled. Removing any one habit loses to the full policy (aim 3-37, footwork 12-28,
 refusing fights 12-28, squads 16-24 over 40 matches each).
 
-## Advisor oracle for WASM seats (host feature, no rules change)
+## Advisor oracle (host feature, no rules change)
 
 Seats stay sandboxed and never touch the network. A WASM policy may instead import two host
 functions from module `paintbot` and let the host ask one operator-configured advisor
@@ -265,4 +265,33 @@ land on a later tick, so a policy keeps acting on its last answer meanwhile. Rep
 unaffected: they record accepted actions and state hashes, not how a policy chose them, so a
 replay of an advised match verifies like any other. Without `COGAME_ORACLE_URL`, as in
 certification pods with no network, every ask returns 0 and matches behave exactly as before.
-BASIC seats have no oracle access.
+
+### BASIC seats
+
+A BASIC script reaches the same oracle through typed host functions; the engine assembles the
+JSON, ships it to the host over the policy bridge, and the flattened answer comes back on a later
+tick. Everything is int32: string arguments are pool handles (`strNew(...)`), and probabilities,
+scores and confidences are scaled by 1000. The draft lives for one decision only, so build it and
+call `oracleAsk()` in the same tick.
+
+- `oracleAvailable()` is 1 when the host has an oracle.
+- `oracleState(key, value)`, `oracleStateText(key, text)` add fields to `state` (at most 128);
+  `oracleNote(text)` appends to `state.notes` (at most 16). Keys are 1-64 bytes.
+- `oracleQuestion(key, kind, instructions)` adds a question: kind 0 is a yes/no (`noul`), 1 a
+  `score`, 2 a `choice` (1-64 questions). `oracleCriterion(key, label, text)` appends one criterion
+  (at most 16): the ordered level text for a score (label ignored), or `label: text` for a yes/no
+  (`"true"` / `"false"`) or a choice.
+- `oracleAsk()` returns the request id (1 or more), or 0 when refused for the same reasons as
+  `oracle_ask`, when the draft has no question, or when its JSON exceeds 32 KiB. Each call clears
+  the draft. Store the id in a global: string handles do not survive the tick, integers do.
+- `oraclePoll(id)` is 0 while pending, -1 when failed or unknown, else the number of answers.
+  Answers stay readable until four newer ones have arrived for the seat.
+- `oracleAnswer(id, key)`: yes/no → P(true) × 1000; score → score × 1000; choice → the index of
+  the chosen criterion in the order it was added; -1 when missing.
+  `oracleConfidence(id, key)` is the endpoint's confidence × 1000 (-1 when absent) and
+  `oracleProbability(id, key, label)` a choice's probability for one label × 1000 (-1 when absent).
+
+`examples/paintbot/players/advised.bas` asks every 48 ticks and switches a cog between capturing
+and guarding on the answer. Host calls cost work units like any other (`oracleAsk` 68); the
+20,000-instruction budget is unchanged, and without an oracle the same script plays as if the calls
+were not there.

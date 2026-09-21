@@ -339,6 +339,150 @@ class OracleTests(unittest.TestCase):
         for tick in range(3):
             self.assertEqual(policy.step(b"frame", tick=tick)[0][1], 0)
 
+    def test_flatten_gives_basic_seats_thousandths_and_choice_indices(self):
+        from oracle import flatten
+
+        questions = {
+            "press": {"type": "noul", "criteria": {"true": "yes", "false": "no"}},
+            "caution": {"type": "score", "criteria": ["bold", "careful"]},
+            "formation": {"type": "choice", "criteria": {"spread": "alone", "pairs": "in twos"}},
+            "junk": {"type": "score"},
+        }
+        answers = {
+            "press": {"noul": 0.9, "confidence": 0.4},
+            "caution": {"score": 1.5},
+            "formation": {"choice": "pairs", "probabilities": {"spread": 0.25, "pairs": 0.75, "x": 1}},
+            "junk": {"score": "not a number"},
+            "unknown": {"noul": 1},
+        }
+        self.assertEqual(
+            flatten(answers, questions),
+            {
+                "press": {"value": 900, "confidence": 400, "probabilities": {}},
+                "caution": {"value": 1500, "confidence": -1, "probabilities": {}},
+                "formation": {
+                    "value": 1,
+                    "confidence": -1,
+                    "probabilities": {"spread": 250, "pairs": 750},
+                },
+            },
+        )
+
+    def test_basic_asks_cross_the_bridge_and_answers_return_flattened(self):
+        """The engine ships a BASIC seat's ask in its world line; the host answers on a later tick."""
+        import host
+        from oracle import Oracle
+
+        url, seen = self._server(
+            body=b'{"answers":{"guard":{"noul":0.8},"caution":{"score":2,"confidence":0.5}}}'
+        )
+        oracle = Oracle(url, min_interval=24, deadline=2.0)
+        self.addCleanup(oracle.close)
+        body = {
+            "state": {"tick": 0, "hp": 3},
+            "questions": {
+                "guard": {"type": "noul", "instructions": "?", "criteria": {"true": "t", "false": "f"}},
+                "caution": {"type": "score", "instructions": "?", "criteria": ["a", "b", "c"]},
+            },
+        }
+        pending = {}
+        replies = host.basic_oracle_round(oracle, {"tick": 0, "oracle": [{"slot": 2, "id": 1, "body": body}]}, pending)
+        self.assertEqual(replies, [])
+        self.assertEqual(set(pending), {2})
+        self._settle(oracle)
+        self.assertEqual(seen[0]["state"], body["state"])
+        self.assertEqual(seen[0]["questions"], body["questions"])
+        replies = host.basic_oracle_round(oracle, {"tick": 1, "oracle": []}, pending)
+        self.assertEqual(
+            replies,
+            [
+                {
+                    "slot": 2,
+                    "id": 1,
+                    "status": 2,
+                    "answers": {
+                        "guard": {"value": 800, "confidence": -1, "probabilities": {}},
+                        "caution": {"value": 2000, "confidence": 500, "probabilities": {}},
+                    },
+                }
+            ],
+        )
+        self.assertEqual(pending, {})
+        # A second ask inside the interval is refused at once (the engine gates this too; the
+        # host's refusal is a backstop); after the interval it goes through.
+        replies = host.basic_oracle_round(
+            oracle, {"tick": 2, "oracle": [{"slot": 2, "id": 2, "body": body}]}, pending
+        )
+        self.assertEqual(replies, [{"slot": 2, "id": 2, "status": -1, "answers": {}}])
+        replies = host.basic_oracle_round(
+            oracle, {"tick": 30, "oracle": [{"slot": 2, "id": 3, "body": body}]}, pending
+        )
+        self.assertEqual(replies, [])
+        self._settle(oracle)
+        self.assertEqual(len(seen), 2)
+        replies = host.basic_oracle_round(oracle, {"tick": 31, "oracle": []}, pending)
+        self.assertEqual([(r["id"], r["status"]) for r in replies], [(3, 2)])
+        self.assertEqual(pending, {})
+
+    def test_basic_bridge_reply_carries_oracle_replies_and_the_engine_env(self):
+        """With an oracle configured the host replies {commands, oracle} and enables BASIC asks."""
+        import host
+        from oracle import Oracle
+
+        url, _ = self._server(body=b'{"answers":{"q":{"noul":0.25}}}')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            good = root / "good"
+            good_data = b"idle = 1\n"
+            good.write_bytes(good_data)
+            seats = [
+                dict(
+                    slot=i,
+                    file_uri=good.as_uri(),
+                    size_bytes=len(good_data),
+                    content_hash="sha256:" + hashlib.sha256(good_data).hexdigest(),
+                    log_uri=(root / f"{i}.log").as_uri(),
+                )
+                for i in range(16)
+            ]
+            doc = root / "seats.json"
+            doc.write_text(
+                json.dumps(
+                    dict(schema="coworld-player-seats/1", seats=seats, player_status_uri=(root / "status").as_uri())
+                )
+            )
+            # A stand-in engine: asks once on tick 0, then reads replies until the answer lands.
+            engine = root / "engine"
+            engine.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, socket, sys, time\n"
+                "s = socket.socket(fileno=int(os.environ['PW_POLICY_FD']))\n"
+                "f = s.makefile('rw')\n"
+                "out = {'env': [os.environ.get('PW_ORACLE'), os.environ.get('PW_ORACLE_INTERVAL')], 'replies': []}\n"
+                "body = {'state': 's', 'questions': {'q': {'type': 'noul', 'instructions': '?', 'criteria': {'true': 't', 'false': 'f'}}}}\n"
+                "for tick in range(200):\n"
+                "    asks = [{'slot': 5, 'id': 1, 'body': body}] if tick == 0 else []\n"
+                "    f.write(json.dumps({'tick': tick, 'oracle': asks, 'cogs': []}) + '\\n'); f.flush()\n"
+                "    r = json.loads(f.readline())\n"
+                "    if not isinstance(r, dict): out['replies'].append(r); break\n"
+                "    if r['oracle']: out['replies'] = r['oracle']; break\n"
+                "    time.sleep(0.02)\n"
+                f"open({str(root / 'out.json')!r}, 'w').write(json.dumps(out))\n"
+            )
+            engine.chmod(0o755)
+            with patch.dict(
+                os.environ,
+                COGAME_PLAYER_SEATS_URI=doc.as_uri(),
+                COGAME_PLAYER_FAILURE_URI=(root / "failure.json").as_uri(),
+            ), patch.object(Oracle, "from_env", classmethod(lambda cls, env=None: Oracle(url, min_interval=7))):
+                self.assertEqual(host.run(str(engine)), 0)
+            out = json.loads((root / "out.json").read_text())
+            self.assertEqual(out["env"], ["1", "7"])
+            self.assertEqual(
+                out["replies"],
+                [{"slot": 5, "id": 1, "status": 1, "answers": {"q": {"value": 250, "confidence": -1, "probabilities": {}}}}],
+            )
+
     def test_guest_cannot_pick_the_endpoint_or_send_junk(self):
         from oracle import Oracle
 

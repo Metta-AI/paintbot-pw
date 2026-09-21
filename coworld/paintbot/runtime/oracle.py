@@ -73,8 +73,11 @@ class Oracle:
     def _seat(self, slot: int) -> _Seat:
         return self._seats.setdefault(slot, _Seat())
 
-    def ask(self, slot: int, tick: int, body: bytes) -> int:
-        """Queue a request. Returns a request id >= 1, or 0 when refused (rate limit, in flight, bad body)."""
+    def ask(self, slot: int, tick: int, body: bytes, request_id: int | None = None) -> int:
+        """Queue a request. Returns a request id >= 1, or 0 when refused (rate limit, in flight, bad body).
+
+        The engine assigns ids for BASIC seats (`request_id`); WASM seats take the next one here.
+        """
         if len(body) > MAX_BODY:
             return 0
         try:
@@ -90,8 +93,11 @@ class Oracle:
             seat = self._seat(slot)
             if seat.inflight is not None or tick - seat.last_tick < self.min_interval:
                 return 0
-            request_id = seat.next_id
-            seat.next_id += 1
+            if request_id is None:
+                request_id = seat.next_id
+                seat.next_id += 1
+            elif request_id < 1 or request_id in seat.answers:
+                return 0
             seat.inflight = request_id
             seat.last_tick = tick
             self.requests += 1
@@ -142,3 +148,48 @@ class Oracle:
 
     def close(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _thousandths(value) -> int | None:
+    try:
+        return max(-(10**9), min(10**9, round(float(value) * 1000)))
+    except (TypeError, ValueError):
+        return None
+
+
+def flatten(answers: dict, questions: dict) -> dict:
+    """The endpoint's answers as the int32 view a BASIC seat reads (see oracle.nim).
+
+    value: noul -> P(true) x 1000, score -> score x 1000, choice -> index in criterion order;
+    confidence x 1000 (-1 when absent); probabilities per label x 1000 for choices. Anything
+    malformed is left out so the seat sees it as missing rather than as a wrong number.
+    """
+    flat = {}
+    for key, answer in answers.items():
+        question = questions.get(key)
+        if not isinstance(answer, dict) or not isinstance(question, dict):
+            continue
+        kind = question.get("type")
+        value = None
+        probabilities = {}
+        if kind == "noul":
+            value = _thousandths(answer.get("noul"))
+        elif kind == "score":
+            value = _thousandths(answer.get("score"))
+        elif kind == "choice":
+            labels = list(question.get("criteria") or {})
+            if answer.get("choice") in labels:
+                value = labels.index(answer["choice"])
+            for label, p in (answer.get("probabilities") or {}).items():
+                scaled = _thousandths(p)
+                if label in labels and scaled is not None:
+                    probabilities[label] = scaled
+        if value is None:
+            continue
+        confidence = _thousandths(answer.get("confidence")) if "confidence" in answer else None
+        flat[key] = {
+            "value": value,
+            "confidence": -1 if confidence is None else confidence,
+            "probabilities": probabilities,
+        }
+    return flat

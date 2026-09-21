@@ -6,11 +6,12 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
 import wasmtime
-from oracle import Oracle
+from oracle import MAX_ANSWER, Oracle, flatten
 from wasm_policy import Policy, load_seats, verified_policy, write_json
 from sprite import SpriteView
 
@@ -30,6 +31,27 @@ def forfeit_seat(slot, reason, policies, views):
     if policy is not None:
         policy.close()
     views.pop(slot, None)
+
+
+def basic_oracle_round(oracle, world, pending):
+    """Forward this tick's BASIC asks and collect settled answers as flattened replies."""
+    replies = []
+    for ask in world.get("oracle") or []:
+        slot, request_id, body = ask["slot"], ask["id"], ask["body"]
+        if slot in pending or not oracle.ask(slot, world.get("tick"), json.dumps(body).encode(), request_id):
+            replies.append({"slot": slot, "id": request_id, "status": -1, "answers": {}})
+            continue
+        pending[slot] = (request_id, body["questions"])
+    for slot, (request_id, questions) in list(pending.items()):
+        status, answer = oracle.poll(slot, request_id, MAX_ANSWER)
+        if status == 0:
+            continue
+        del pending[slot]
+        answers = flatten(json.loads(answer), questions) if status > 0 else {}
+        replies.append(
+            {"slot": slot, "id": request_id, "status": len(answers) if status > 0 else -1, "answers": answers}
+        )
+    return replies
 
 
 def run(engine):
@@ -107,6 +129,10 @@ def run(engine):
                 COGAME_PLAYER_SEATS_URI=seatfile.as_uri(),
                 PW_POLICY_FD=str(other.fileno()),
             )
+            if oracle is not None:
+                # BASIC seats draft asks inside the engine; the host asks on their behalf.
+                env.update(PW_ORACLE="1", PW_ORACLE_INTERVAL=str(oracle.min_interval))
+            basic_asks = {}  # slot -> (request id, questions) awaiting an answer
             child = subprocess.Popen([engine], env=env, pass_fds=(other.fileno(),))
             other.close()
             with parent, parent.makefile("rw") as stream:
@@ -137,7 +163,11 @@ def run(engine):
                                 ],
                             }
                         )
-                    stream.write(json.dumps(commands) + "\n")
+                    if oracle is None:
+                        stream.write(json.dumps(commands) + "\n")
+                    else:
+                        replies = basic_oracle_round(oracle, w, basic_asks)
+                        stream.write(json.dumps({"commands": commands, "oracle": replies}) + "\n")
                     stream.flush()
             return child.wait()
     finally:
@@ -149,6 +179,7 @@ def run(engine):
         for p in policies.values():
             p.close()
         if oracle is not None:
+            print(f"oracle: {oracle.requests} requests, {oracle.failures} failures", file=sys.stderr)
             oracle.close()
         for module in modules.values():
             module.close()
