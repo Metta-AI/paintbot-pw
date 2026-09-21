@@ -81,11 +81,14 @@ class Oracle:
     def from_env(cls, env=os.environ) -> Oracle | None:
         if env.get("COGAME_ORACLE", "").strip().lower() == "off":
             return None
-        deadline = float(env.get("COGAME_ORACLE_DEADLINE", "2"))
         url = env.get("COGAME_ORACLE_URL", "").strip()
+        base = env.get(SIDECAR_ENV, "").strip().rstrip("/")
+        if url and not url.startswith("https://"):
+            return None
+        if not url and not base.startswith(("http://", "https://")):
+            return None
+        deadline = float(env.get("COGAME_ORACLE_DEADLINE", "2"))
         if url:
-            if not url.startswith("https://"):
-                return None
             return cls(
                 url,
                 env.get("COGAME_ORACLE_KEY") or None,
@@ -95,9 +98,6 @@ class Oracle:
             )
         # The platform owns this variable (a game manifest cannot set it) and the sidecar is
         # pod-local, so plain http is expected here and nowhere else.
-        base = env.get(SIDECAR_ENV, "").strip().rstrip("/")
-        if not base.startswith(("http://", "https://")):
-            return None
         return cls(
             base + SIDECAR_PATH,
             None,
@@ -111,7 +111,8 @@ class Oracle:
         return self._seats.setdefault(slot, _Seat())
 
     def ask(self, slot: int, tick: int, body: bytes, request_id: int | None = None) -> int:
-        """Queue a request. Returns a request id >= 1, or 0 when refused (rate limit, in flight, bad body).
+        """Queue a request. Returns a request id >= 1, or 0 when refused (rate limit, in flight, bad
+        body, or a hosted sidecar already found to have no System One route).
 
         The engine assigns ids for BASIC seats (`request_id`); WASM seats take the next one here.
         """
@@ -161,18 +162,31 @@ class Oracle:
     def _call(self, slot: int, request_id: int, payload: bytes) -> None:
         answer: bytes | None = None
         try:
-            headers = {"Content-Type": "application/json"}
-            if self.key:
-                headers["Authorization"] = f"Bearer {self.key}"
-            if self.sidecar:
-                headers[SLOT_HEADER] = str(slot)
-            request = urllib.request.Request(self.url, data=payload, headers=headers, method="POST")
+            answer = self._fetch(slot, payload)
+        except Exception as e:  # noqa: BLE001 - whatever went wrong, the seat must not be left pending
+            self._report(slot, f"{type(e).__name__}: {e}")
+        finally:
+            with self._lock:
+                seat = self._seat(slot)
+                if answer is None:
+                    self.failures += 1
+                if seat.inflight == request_id:
+                    seat.inflight = None
+                seat.answers[request_id] = answer
+                while len(seat.answers) > MAX_STORED:
+                    del seat.answers[min(seat.answers)]
+
+    def _fetch(self, slot: int, payload: bytes) -> bytes | None:
+        """The endpoint's `answers` as compact JSON, or None (reported) when there is no usable answer."""
+        headers = {"Content-Type": "application/json"}
+        if self.key:
+            headers["Authorization"] = f"Bearer {self.key}"
+        if self.sidecar:
+            headers[SLOT_HEADER] = str(slot)
+        request = urllib.request.Request(self.url, data=payload, headers=headers, method="POST")
+        try:
             with urllib.request.urlopen(request, timeout=self.deadline) as response:
                 raw = response.read(MAX_ANSWER + 1)
-            if len(raw) <= MAX_ANSWER:
-                answers = json.loads(raw).get("answers")
-                if isinstance(answers, dict):
-                    answer = json.dumps(answers, separators=(",", ":")).encode()
         except urllib.error.HTTPError as e:
             # A sidecar that predates the System One route answers 404 to every seat for the whole
             # episode. Stop asking; rate and spend limits (429) clear, so those only fail this ask.
@@ -180,20 +194,21 @@ class Oracle:
                 with self._lock:
                     self._route_missing = True
             # The body names the cause (model not allowed, spend limit, route); a bare status does not.
-            self._report(slot, f"HTTP {e.code} {e.read(LOGGED_BODY).decode('utf-8', 'replace')}")
-            answer = None
-        except (urllib.error.URLError, OSError, ValueError, TypeError) as e:
-            self._report(slot, f"{type(e).__name__}: {e}")
-            answer = None
-        with self._lock:
-            seat = self._seat(slot)
-            if answer is None:
-                self.failures += 1
-            if seat.inflight == request_id:
-                seat.inflight = None
-            seat.answers[request_id] = answer
-            while len(seat.answers) > MAX_STORED:
-                del seat.answers[min(seat.answers)]
+            try:
+                detail = e.read(LOGGED_BODY).decode("utf-8", "replace")
+            except OSError as unread:
+                detail = f"(body unread: {type(unread).__name__})"
+            self._report(slot, f"HTTP {e.code} {detail}")
+            return None
+        if len(raw) > MAX_ANSWER:
+            self._report(slot, f"answer exceeds {MAX_ANSWER} bytes")
+            return None
+        document = json.loads(raw)
+        answers = document.get("answers") if isinstance(document, dict) else None
+        if not isinstance(answers, dict):
+            self._report(slot, f"reply has no answers object: {raw[:LOGGED_BODY].decode('utf-8', 'replace')}")
+            return None
+        return json.dumps(answers, separators=(",", ":")).encode()
 
     def _report(self, slot: int, what: str) -> None:
         """The first few failures go to the game log; an advised seat that silently plays unadvised

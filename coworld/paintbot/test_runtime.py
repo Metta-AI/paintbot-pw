@@ -399,7 +399,7 @@ class OracleTests(unittest.TestCase):
     def test_sidecar_without_the_route_is_asked_once(self):
         from oracle import Oracle
 
-        # A sidecar that predates /v1/systemone answers 404. One seat finds out; nobody asks again.
+        # A sidecar that predates /v1/systemone answers 404. Asks already in flight finish; every later ask is refused.
         url, seen = self._server(status=404, body=b'{"message":"not found"}')
         oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
         self.addCleanup(oracle.close)
@@ -422,6 +422,53 @@ class OracleTests(unittest.TestCase):
         self.assertEqual(oracle.ask(2, 100, ORACLE_REQUEST), 2)  # limits clear; the seat may try again
         self._settle(oracle)
         self.assertEqual(len(seen), 2)
+
+    def test_no_reply_however_broken_leaves_a_seat_pending(self):
+        import http.server
+        import threading
+
+        from oracle import Oracle
+
+        replies = {
+            "/cut/v1/systemone": (404, b'{"message":"not', 4096),  # error body shorter than it claims
+            "/list/v1/systemone": (200, b"[1]", 3),  # valid JSON, not an object
+            "/text/v1/systemone": (200, b'{"answers":"no"}', 16),  # answers is not an object
+        }
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                status, body, claimed = replies[self.path]
+                self.send_response(status)
+                self.send_header("Content-Length", str(claimed))
+                self.end_headers()
+                self.wfile.write(body)
+                self.wfile.flush()
+                self.connection.close()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        for prefix in ("cut", "list", "text"):
+            with self.subTest(prefix):
+                base = f"http://127.0.0.1:{server.server_address[1]}/{prefix}"
+                oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": base, "COGAME_ORACLE_DEADLINE": "1"})
+                self.addCleanup(oracle.close)
+                self.assertEqual(oracle.ask(4, 0, ORACLE_REQUEST), 1)
+                self._settle(oracle)
+                # Whatever went wrong, the seat is told it failed and may ask again; it is never left waiting.
+                self.assertEqual(oracle.poll(4, 1, 4096)[0], -1)
+                self.assertEqual(oracle.failures, 1)
+                self.assertEqual(oracle._reported, 1)
+
+    def test_a_malformed_deadline_only_matters_when_there_is_an_oracle(self):
+        from oracle import Oracle
+
+        self.assertIsNone(Oracle.from_env({"COGAME_ORACLE_DEADLINE": "soon"}))
 
     def test_without_an_oracle_every_ask_is_refused(self):
         policy = self._policy(None)
