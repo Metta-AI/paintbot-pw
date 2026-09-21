@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -68,6 +69,7 @@ class Oracle:
         deadline: float = 2.0,
         workers: int = 16,
         sidecar: bool = False,
+        log_path: str | None = None,
     ):
         self.url, self.key, self.model = url, key, model
         self.min_interval, self.deadline = min_interval, deadline
@@ -78,6 +80,8 @@ class Oracle:
         self._seats: dict[int, _Seat] = {}
         self._lock = threading.Lock()
         self.requests = self.failures = 0
+        # Optional JSONL journal of every request and its raw answers, for offline replay and scoring.
+        self._log = open(log_path, "a", encoding="utf-8") if log_path else None
 
     @classmethod
     def from_env(cls, env=os.environ) -> Oracle | None:
@@ -90,6 +94,7 @@ class Oracle:
         if not url and not base.startswith(("http://", "https://")):
             return None
         deadline = float(env.get("COGAME_ORACLE_DEADLINE", "2"))
+        log_path = env.get("COGAME_ORACLE_LOG") or None
         if url:
             return cls(
                 url,
@@ -97,6 +102,7 @@ class Oracle:
                 env.get("COGAME_ORACLE_MODEL", "jev-latest"),
                 min_interval=int(env.get("COGAME_ORACLE_INTERVAL", "24")),
                 deadline=deadline,
+                log_path=log_path,
             )
         # The platform owns this variable (a game manifest cannot set it) and the sidecar is
         # pod-local, so plain http is expected here and nowhere else.
@@ -107,6 +113,7 @@ class Oracle:
             min_interval=int(env.get("COGAME_ORACLE_INTERVAL", str(SIDECAR_INTERVAL))),
             deadline=deadline,
             sidecar=True,
+            log_path=log_path,
         )
 
     def _seat(self, slot: int) -> _Seat:
@@ -141,7 +148,7 @@ class Oracle:
             seat.inflight = request_id
             seat.last_tick = tick
             self.requests += 1
-        self._pool.submit(self._call, slot, request_id, json.dumps(payload).encode())
+        self._pool.submit(self._call, slot, request_id, json.dumps(payload).encode(), tick)
         return request_id
 
     def poll(self, slot: int, request_id: int, capacity: int) -> tuple[int, bytes]:
@@ -161,14 +168,26 @@ class Oracle:
             del seat.answers[request_id]
             return len(answer), answer
 
-    def _call(self, slot: int, request_id: int, payload: bytes) -> None:
+    def _call(self, slot: int, request_id: int, payload: bytes, tick: int | None = None) -> None:
         answer: bytes | None = None
+        started = time.monotonic()
         try:
             answer = self._fetch(slot, payload)
         except Exception as e:  # noqa: BLE001 - whatever went wrong, the seat must not be left pending
             self._report(slot, f"{type(e).__name__}: {e}")
         finally:
             with self._lock:
+                if self._log is not None:
+                    row = {
+                        "slot": slot,
+                        "id": request_id,
+                        "tick": tick,
+                        "latency_ms": round((time.monotonic() - started) * 1000),
+                        "request": json.loads(payload),
+                        "answers": json.loads(answer) if answer is not None else None,
+                    }
+                    self._log.write(json.dumps(row, separators=(",", ":")) + "\n")
+                    self._log.flush()
                 seat = self._seat(slot)
                 if answer is None:
                     self.failures += 1
@@ -223,6 +242,10 @@ class Oracle:
 
     def close(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)
+        with self._lock:
+            if self._log is not None:
+                self._log.close()
+                self._log = None
 
 
 def _thousandths(value) -> int | None:

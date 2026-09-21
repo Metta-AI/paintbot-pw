@@ -707,6 +707,23 @@ class OracleTests(unittest.TestCase):
                 self.assertEqual(host.run(str(engine)), 0)
                 self.assertGreaterEqual(time.monotonic() - started, 0.35)
 
+    def test_oracle_log_journals_requests_and_answers(self):
+        from oracle import Oracle
+
+        url, _ = self._server()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "oracle.jsonl"
+            oracle = Oracle(url, log_path=str(path))
+            self.addCleanup(oracle.close)
+            body = json.dumps({"state": "ping", "questions": {"q": {"type": "noul", "instructions": "?"}}}).encode()
+            self.assertEqual(oracle.ask(4, 7, body), 1)
+            self._settle(oracle)
+            row = json.loads(path.read_text().splitlines()[0])
+            self.assertEqual((row["slot"], row["id"], row["tick"]), (4, 1, 7))
+            self.assertEqual(row["request"]["state"], "ping")
+            self.assertEqual(row["answers"], {"q": {"type": "noul", "noul": 0.9}})
+            self.assertGreaterEqual(row["latency_ms"], 0)
+
     def test_guest_cannot_pick_the_endpoint_or_send_junk(self):
         from oracle import Oracle
 
