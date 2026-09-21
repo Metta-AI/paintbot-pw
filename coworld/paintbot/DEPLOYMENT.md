@@ -260,6 +260,14 @@ and drops the late reply. Also: a sidecar is never sent a credential; a refused
 no longer claims a spend limit clears. Runtime tests cover each, and pin that only a missing route
 (404, 405, 501, sidecar only) stops the asking: 400, 403 and 5xx do not.
 
+Released in 0.3.29 (Deploy Coworld run 35640041740, from `5b9a9f1`, 2026-09-21): built, certified,
+uploaded and canonical. The hosted path itself was confirmed on 0.3.28 the same day, from the seat
+logs of league episode `ereq_aa233dfe-9805-47fe-bea0-0a2b5f95fae6`: eight advised BASIC seats, 71
+asks, 70 answered and one still open when the episode ended, no failure. Answers landed a median
+28 ticks after the ask (p90 51, max 84, n=70) against about 8 on a paced local machine. Whether
+that is provider and sidecar latency or a hosted game ticking faster than 24 a second is not
+established; a script should not assume an answer is fresh.
+
 ## Advisor oracle for BASIC seats
 
 BASIC seats reach the same oracle through typed host functions (`oracleState`, `oracleQuestion`,
