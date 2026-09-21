@@ -288,8 +288,12 @@ there. The host finds the platform's LLM sidecar at `AWS_ENDPOINT_URL_BEDROCK_RU
 to its `/v1/systemone` route, which forwards to Jev (`typesafe/jev-1.13`) on OpenRouter. Each ask
 names the asking seat, so its cost counts against that seat's per-episode LLM spend limit for the
 league and its requests against that seat's System One bucket: 120 a minute, twice what the
-24-tick interval between asks can use. A seat past either limit sees its asks fail (`-1`) until
-the limit clears; a league with a $0 limit has no advisor at all. Write the policy so that a
+24-tick interval between asks can use. A seat past its request bucket sees asks fail (`-1`) for a
+few seconds, until the bucket refills. A seat past its spend limit sees every ask fail for the
+rest of the episode, and a league with a $0 limit has no advisor at all. An ask also fails when
+its reply does not arrive whole within twice `COGAME_ORACLE_DEADLINE`, or arrives with no answer
+the host can use: `oraclePoll` returns `-1` for these, never `0`, so a script waiting on a
+request can always tell that it is over. Write the policy so that a
 failed or refused ask costs nothing: keep acting on the last answer, or on none.
 
 ### BASIC seats

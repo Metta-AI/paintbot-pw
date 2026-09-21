@@ -39,7 +39,7 @@ The runner supplies local `file://` URIs through `COGAME_CONFIG_URI`,
 `COGAME_PLAYER_FAILURE_URI`. Optional `COGAME_ORACLE_URL`, `COGAME_ORACLE_KEY`, `COGAME_ORACLE_MODEL`,
 `COGAME_ORACLE_INTERVAL` and `COGAME_ORACLE_DEADLINE` enable the advisor oracle (see the
 Paintbot guide). Hosted pods reach it through the platform's LLM sidecar instead
-(`AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, no key in the pod). With neither, seats have no advisor. Configurations require the game's fixed-length tokens
+(`AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, no key in the pod). With neither, or with `COGAME_ORACLE=off`, seats have no advisor. Configurations require the game's fixed-length tokens
 and players arrays. Staged policy filenames may have no extension. Raw BASIC source
 is read from the disk with bounded reads and compiled with the existing game limits.
 

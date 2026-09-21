@@ -245,6 +245,21 @@ spacing and the missing-route breaker, and with the BASIC oracle functions a scr
 `/v1/systemone` (Metta-AI/metta#24299), the first ask of an episode is answered 404 and logged,
 and the oracle asks nothing further: advised scripts play unadvised, and nothing else changes.
 
+### Hardening after review
+
+A review of the hosted path found, and these changes close: a reply holding a number the host
+cannot scale (JSON `1e999` parses as infinity) or a malformed `probabilities` raised out of
+`basic_oracle_round` and ended the episode for all sixteen seats, where a trapping policy forfeits
+only itself; a reply with no usable answer was sent to the engine as status 0, which a BASIC script
+reads as "still pending" and waits on for the rest of the episode; and the per-request deadline
+bounded each socket read, not the request, so a dripping reply never failed. Now `flatten` drops
+what it cannot scale and never raises, the bridge turns any flattening error or empty result into
+that ask's failure (`-1`, counted and logged), and `poll` fails a request past twice its deadline
+and drops the late reply. Also: a sidecar is never sent a credential; a refused
+`COGAME_ORACLE_URL` says so in the log; the failure log says once when it stops; the 429 comment
+no longer claims a spend limit clears. Runtime tests cover each, and pin that only a missing route
+(404, 405, 501, sidecar only) stops the asking: 400, 403 and 5xx do not.
+
 ## Advisor oracle for BASIC seats
 
 BASIC seats reach the same oracle through typed host functions (`oracleState`, `oracleQuestion`,
