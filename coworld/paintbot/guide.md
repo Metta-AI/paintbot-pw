@@ -255,7 +255,10 @@ direct orders (reply packet `0x85`, above), so the engine paths and aims for it 
 BASIC seat; the differences are that the frame's gun-ready icon replaces BASIC's cooldown
 estimate and that the `carrying` branches of the BASIC file, dead in territory play, are not
 ported. `test_baseline.py` checks the territory contract (reach an unowned heart, hold the ring
-through the capture timer, retarget). WASM_PARITY_SENTENCE
+through the capture timer, retarget). Measured through the hosted runtime over 32 side-swapped matches against `base.bas` it is
+17-15 (95% CI 36-69%), with interchangeable combat totals (246 against 234 shots, 94 against
+92 hits, 30 deaths each); red won 27 of those 32 whichever policy sat there. It beats the
+previous gamepad-only WASM baseline 16-0 over 16 side-swapped matches.
 
 ## Advisor oracle (host feature, no rules change)
 
