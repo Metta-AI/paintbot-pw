@@ -108,7 +108,7 @@ Rules 11 widen terrace ramps from 2m to 6m. The baseline assigns high-ground hol
 
 BASIC uses `shout(strNew("Contact!"))`. Messages are limited to four 256-byte lines per tick. On the next tick, living cogs within 12.8m hear both teams through `heardCount()`, `heardSlot(i)`, `heardX(i)`, `heardY(i)`, and `heardText(i)`. Hearing is independent of the vision cone. WASM receives nearby messages as `shout <slot> <text>` labelled sprites at the speaker's position. The viewer shows speech bubbles for visible living speakers for three seconds.
 
-The equipment baseline remembers visible supplies for ten seconds, sends scouts toward corner supplies, and sends equipped cogs into combat. Grenade charge follows target distance with a visible-friendly blast check. The WASM baseline uses increased grenade/spray detour budgets and the PW throw/spray ranges; rebuild with `tools/build_equipment_baseline.py` and a CTF checkout with its Nimby dependencies. This build used CTF commit `40d0bee8e2c5a8955ff711d96c4c1bb482a69134`.
+The equipment baseline remembers visible supplies for ten seconds and equips when it is safe to. Grenade charge follows target distance with a visible-friendly blast check. The WASM baseline is the same policy as the BASIC one, ported to the sprite protocol (see "Baseline squads, footwork and aim" below); rebuild with `tools/build_equipment_baseline.py`, a CTF checkout with its Nimby dependencies and wasi-sdk 33. This build used CTF commit `40d0bee8e2c5a8955ff711d96c4c1bb482a69134` for the sprite-frame parser and ABI shim only.
 
 Grenade and spray pickups are enlarged, bob, and spin. Each gun shot draws four bright paintballs for readability; this is visual only and still resolves one hit with the existing cooldown.
 
@@ -242,6 +242,22 @@ Measured in the engine over 100 side-swapped matches it beat the previous baseli
 at most 5,670 of the 20,000 instructions and 8,722 of the 50,000 work units per decision, with
 no seat disabled. Removing any one habit loses to the full policy (aim 3-37, footwork 12-28,
 refusing fights 12-28, squads 16-24 over 40 matches each).
+
+The WASM baseline (`players/base_wasm.nim`, built to `players/baseline.wasm`) is the same policy
+ported to the sprite protocol, section for section and with the same constants. Three things
+differ because the interface does: the engine walks a WASM cog straight at the requested point,
+so the policy carries its own navigation (a cost field over the walkability map, 40 cm cells,
+followed with a line-of-sight lookahead); the turret turns 5 brads (7 degrees) per tick instead
+of pointing instantly, so the aim is laid on the lead point and the shot ordered once it has
+settled there at the start of a leg that outlasts the windup, with the gun-ready icon standing in
+for BASIC's cooldown estimate; and idle scanning is a continuous sweep. The `carrying` branches
+of the BASIC file are dead in territory play and are not ported. `test_baseline.py` checks the
+territory contract (reach an unowned heart, hold still through the capture timer, retarget).
+Measured through the hosted runtime over 16 side-swapped matches each, the port beats the
+previous WASM baseline 16-0 and loses to `base.bas` 0-16: reconstructed from the replays it
+orders 17% fewer shots per match (237 against 287) at the same hit rate (32% against 34%),
+which is the turret's turning time, and that deficit decides an attrition game. A build with
+`-d:aimTrace` publishes its fire gate as chat on every gun-ready tick for diagnosis.
 
 ## Advisor oracle (host feature, no rules change)
 

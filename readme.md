@@ -4,7 +4,7 @@ Capture-the-heart Paintbot built on the Polyworld engine, following its Gods of 
 
 - [Game rules and policy API](coworld/paintbot/guide.md)
 - [BASIC baseline](examples/paintbot/players/base.bas)
-- [Original WASM baseline](coworld/paintbot/players/baseline.wasm)
+- [WASM baseline](coworld/paintbot/players/baseline.wasm) built from [base_wasm.nim](coworld/paintbot/players/base_wasm.nim)
 - [Polyworld engine documentation](docs/POLYWORLD.md)
 
 ## Run locally
@@ -47,8 +47,10 @@ The viewer resimulates recorded actions and checks every tick hash. Policy sourc
 
 ## WASM provenance
 
-`baseline.wasm` is the unchanged public CDX baseline, SHA-256
-`135538c4a166f3f0ac370204c6c0b90ddd7ed825490e1cc161fa161a8640c2e9`.
-Its Nim source, WASI build configuration and build script are available at
-[Metta-AI/cogame-paintbot-cdx, commit 40d0bee8](https://github.com/Metta-AI/cogame-paintbot-cdx/tree/40d0bee8e2c5a8955ff711d96c4c1bb482a69134/singlepod).
-The bundled BASIC baseline translates the objectives and core combat strategy; it is not instruction-for-instruction equivalent to the larger Nim policy. See the guide for the exact compatibility scope.
+`baseline.wasm` is built from `coworld/paintbot/players/base_wasm.nim`, a port of the BASIC
+baseline (`examples/paintbot/players/base.bas`) to the sprite protocol. Only the sprite-frame
+parser and the WASI ABI shim come from
+[Metta-AI/cogame-paintbot-cdx, commit 40d0bee8](https://github.com/Metta-AI/cogame-paintbot-cdx/tree/40d0bee8e2c5a8955ff711d96c4c1bb482a69134/singlepod);
+`coworld/paintbot/players/baseline.build.json` records the SHA-256 of the policy source, the
+parser and the artifact. Rebuild with
+`WASI_SDK_PATH=/path/to/wasi-sdk-33 python coworld/paintbot/tools/build_equipment_baseline.py /path/to/cogame-paintbot-cdx`.
