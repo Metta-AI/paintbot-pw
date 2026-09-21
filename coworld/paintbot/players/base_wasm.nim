@@ -350,7 +350,9 @@ proc decide(bot: Bot, f: Frame, shout: var string): Order =
     let seat = member mod 4
     var otherTarget = -1
     for pass in 0 ..< 2:
-      let refY = (if pass == 1: HomeY + 1500 else: HomeY - 1500)
+      var refY = (if pass == 1: HomeY + 1500 else: HomeY - 1500)
+      if selfTeam == 1:
+        refY = 4000 - refY   # mirror play: blue's first squad works from below home
       var choice = -1
       var choiceCost = high(int)
       for j in 0 ..< heartCount:
@@ -463,13 +465,15 @@ proc decide(bot: Bot, f: Frame, shout: var string): Order =
     let scan = (worldTick div 24 + selfId) mod 4
     var look = goal
     if holding or scan == 1:
-      look = Pt(x: me.x + 2000, y: me.y)
+      # Sweep toward the enemy side first; blue's sweep is the half turn of red's.
+      let facing = 1 - 2 * selfTeam
+      look = Pt(x: me.x + 2000 * facing, y: me.y)
       if scan == 1:
-        look = Pt(x: me.x, y: me.y + 2000)
+        look = Pt(x: me.x, y: me.y + 2000 * facing)
       if scan == 2:
-        look.x = me.x - 2000
+        look.x = me.x - 2000 * facing
       if scan == 3:
-        look = Pt(x: me.x, y: me.y - 2000)
+        look = Pt(x: me.x, y: me.y - 2000 * facing)
     if f.heard.len > 0:
       look = f.heard[0]
     if f.sounds.len > 0:

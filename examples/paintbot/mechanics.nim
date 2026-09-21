@@ -63,25 +63,39 @@ proc freePickup(w: World, p: Point): Point =
         if not w.blocked(candidate): return candidate
   p
 
+proc mirrorPoint(p: Point): Point = point(Width-p.x.int, Height-p.z.int)
+proc pairSpots(w: World, p: Point): (Point, Point) =
+  ## A feature and its mirror. Rules 35 nudge the first spot free and mirror the result,
+  ## so the pair stays exact; earlier rules nudged each side on its own.
+  let q = w.freePickup(p)
+  if visionRulesVersion >= 35: (q, mirrorPoint(q))
+  else: (q, w.freePickup(mirrorPoint(p)))
+
 proc initializeEquipment(w: var World) =
   if visionRulesVersion >= 27:
-    for p in [point(2000, 1000), point(4400, 3000)]:
-      w.pickups.add Pickup(pos: w.freePickup(p), kind: uniformPickup)
+    let spots = w.pairSpots(point(2000, 1000))
+    for q in [spots[0], spots[1]]:
+      w.pickups.add Pickup(pos: q, kind: uniformPickup)
   for i in 0..<Seats:
     w.equipment[i].lives = (if visionRulesVersion >= 19: 4 else: StartingLives)
     w.cogs[i].aim = home(1-team(i))
   # Mirrors use the same symmetry as this arena's terrain (180-degree rotation).
   for p in [point(300, 300), point(300, Height-300)]:
-    w.pickups.add Pickup(pos: w.freePickup(p), kind: grenadePickup)
-    w.pickups.add Pickup(pos: w.freePickup(point(Width-p.x.int,
-        Height-p.z.int)), kind: grenadePickup)
+    let spots = w.pairSpots(p)
+    w.pickups.add Pickup(pos: spots[0], kind: grenadePickup)
+    w.pickups.add Pickup(pos: spots[1], kind: grenadePickup)
   for spec in [(sprayPickup, point(600, 1000)), (armorPickup, point(600, 3000))]:
-    w.pickups.add Pickup(pos: w.freePickup(spec[1]), kind: spec[0])
-    w.pickups.add Pickup(pos: w.freePickup(point(Width-spec[1].x.int,
-        Height-spec[1].z.int)), kind: spec[0])
-  for z in [Height div 3, Height*2 div 3]:
-    w.pickups.add Pickup(pos: w.freePickup(point(Width div 2, z)),
-        kind: medkitPickup)
+    let spots = w.pairSpots(spec[1])
+    w.pickups.add Pickup(pos: spots[0], kind: spec[0])
+    w.pickups.add Pickup(pos: spots[1], kind: spec[0])
+  if visionRulesVersion >= 35:
+    let spots = w.pairSpots(point(Width div 2, Height div 3))
+    w.pickups.add Pickup(pos: spots[0], kind: medkitPickup)
+    w.pickups.add Pickup(pos: spots[1], kind: medkitPickup)
+  else:
+    for z in [Height div 3, Height*2 div 3]:
+      w.pickups.add Pickup(pos: w.freePickup(point(Width div 2, z)),
+          kind: medkitPickup)
   let pits = if visionRulesVersion >= 9:
       [point(1950, 650), point(2600, 2050), point(900, 2850)]
     else: [point(1100, 1100), point(2100, 2350), point(3000, 700)]
@@ -92,6 +106,7 @@ proc initializeEquipment(w: var World) =
         w: 280, h: 280)
 
   if visionRulesVersion>=13:
+    # Hearts come in mirrored pairs: each even index and the odd one after it.
     for i,p in [home(0),home(1),point(2050,950),point(4350,3050),
         point(1800,-200),point(4600,4200),point(-400,3000),point(6800,1000),
         point(3200,1250),point(3200,2750)]:
@@ -100,11 +115,16 @@ proc initializeEquipment(w: var World) =
       for i,p in [point(-1700,700),point(8100,3300),point(1200,-650),point(5200,4650),
           point(-1700,3300),point(8100,700)]:
         w.controlHearts[i+2].pos=w.freePickup(p)
-      for p in [point(-1700,2000),point(8100,2000),point(3200,-650),point(3200,4650)]:
-        w.pickups.add Pickup(pos:w.freePickup(p),kind:medkitPickup)
+      for p in [point(-1700,2000),point(3200,-650)]:
+        let spots = w.pairSpots(p)
+        w.pickups.add Pickup(pos:spots[0],kind:medkitPickup)
+        w.pickups.add Pickup(pos:spots[1],kind:medkitPickup)
     if expandedIsland:
       for i,p in [point(-3000,500),point(9400,3500),point(1000,-1600),point(5400,5600),point(-3000,3500),point(9400,500)]:
         w.controlHearts[i+2].pos=w.freePickup(p)
+    if visionRulesVersion >= 35:
+      for i in countup(0, w.controlHearts.len-2, 2):
+        w.controlHearts[i+1].pos = mirrorPoint(w.controlHearts[i].pos)
     w.captures=[1'i32,1'i32]
     if visionRulesVersion >= 24:
       for heart in w.controlHearts:
@@ -252,10 +272,27 @@ proc sprayTouches*(w: World, slot, victim: int): bool =
   along > 0 and along <= SprayReach+Radius and across <= halfWidth+Radius and
     w.lineClear(c.pos, w.cogs[victim].pos)
 
+proc waypointFor(w: World, slot: int, start, goal: Point): Point =
+  ## The path search breaks ties by scan order (north-west first, first edge first), so on
+  ## its own blue's routes are not mirror images of red's. Rules 35 route blue on the
+  ## mirrored map and mirror the answer back; the nav grid is its own mirror.
+  if visionRulesVersion >= 35 and team(slot) == 1:
+    return mirrorPoint(w.waypoint(mirrorPoint(start), mirrorPoint(goal)))
+  w.waypoint(start, goal)
+
+proc seatOrder*(w: World): array[Seats, int] =
+  ## The order seats act within a tick. Seats alternate teams, so acting in seat order every
+  ## tick let red win every contested push, supply and spray exchange. Rules 35 swap each
+  ## pair on odd ticks, so neither team is the perpetual first mover.
+  for i in 0..<Seats: result[i] = i
+  if visionRulesVersion >= 35 and w.tick mod 2 == 1:
+    for i in countup(0, Seats-2, 2): swap(result[i], result[i+1])
+
 proc pickupEquipment(w: var World, attacked: array[Seats, bool]) =
+  let order = w.seatOrder()
   for k in 0..<w.pickups.len:
     if w.pickups[k].readyAt > w.tick: continue
-    for i in 0..<Seats:
+    for i in order:
       if w.cogs[i].hp <= 0 or distance2(w.cogs[i].pos, w.pickups[k].pos) >
           120*120: continue
       var taken = false
@@ -301,7 +338,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
   for b in w.blasts:
     if w.tick-b.tick < 24: flashes.add b
   w.blasts = flashes
-  for i in 0..<Seats:
+  for i in w.seatOrder():
     if w.cogs[i].hp <= 0:
       if w.equipment[i].lives > 0:
         dec w.cogs[i].respawn
@@ -332,7 +369,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     if cmd.aim != Point(): w.cogs[i].aim = cmd.aim
     elif cmd.walk and cmd.goal != w.cogs[i].pos: w.cogs[i].aim = cmd.goal
     w.cogs[i].firing = cmd.shoot
-    let dest = if cmd.direct: w.cogs[i].goal else: w.waypoint(w.cogs[i].pos,
+    let dest = if cmd.direct: w.cogs[i].goal else: w.waypointFor(i, w.cogs[i].pos,
         w.cogs[i].goal)
     var speed = if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed
     if visionRulesVersion >= 26 and cmd.sneak: speed = speed div 2
@@ -355,7 +392,11 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
       if not w.movementBlocked(p, i, true): w.cogs[i].pos = p
       if visionRulesVersion>=22 and distance2(beforeMove,w.cogs[i].pos)<4:
         # Yield sideways around a teammate instead of pushing forever.
-        let side=if i mod 2==0:1 else: -1
+        # Which way to yield first. Seat parity is the team, and a half turn keeps handedness,
+        # so a team-keyed side is not mirror-consistent; rules 35 key it on the seat within
+        # the team instead (the same seat of each team yields the same way).
+        let side=if visionRulesVersion>=35: (if (i div 2) mod 2==0:1 else: -1)
+          else: (if i mod 2==0:1 else: -1)
         for turn in [side,-side,2*side,-2*side]:
           let escape=if abs(turn)==1:point(-v.z.int*turn,v.x.int*turn)
             else:point(-v.x.int-v.z.int*(turn div 2),-v.z.int+v.x.int*(turn div 2))
@@ -439,7 +480,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         w.cogs[i].cooldown = int32(FireCooldownTicks*(if slow: 3 else: 1))
   # Targets were selected before damage, allowing simultaneous mutual kills.
   for hit in gunTargets: w.damage(hit.victim, hit.attacker, 1)
-  for i in 0..<Seats:
+  for i in w.seatOrder():
     if w.equipment[i].burst > 0 and w.cogs[i].hp > 0:
       for j in 0..<Seats:
         let bit = 1'u32 shl j

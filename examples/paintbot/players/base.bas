@@ -175,7 +175,8 @@ end if
 
 ' Territory: two squads of four. The target is a pure function of public heart ownership and
 ' the squad number, so all four members (even one that has just respawned) choose the same
-' heart with no communication. Squad 0 works outward from above home, squad 1 from below.
+' heart with no communication. Squad 0 works outward from above home, squad 1 from below
+' (mirrored for blue, so the two teams play the half turn of each other).
 objective = -1
 if heartCount() > 0 then
   member = (selfId / 2) mod 8
@@ -187,6 +188,10 @@ if heartCount() > 0 then
     refY = homeY - 1500
     if pass = 1 then
       refY = homeY + 1500
+    end if
+    if selfTeam = 1 then
+      ' Mirror play: blue's first squad works from below home, the half turn of red's.
+      refY = 4000 - refY
     end if
     choice = -1
     choiceCost = 2147483647
@@ -342,18 +347,20 @@ if best < 0 then
   lookX = goalX
   lookY = goalY
   if holding or scan = 1 then
-    lookX = selfX + 2000
+    ' Sweep toward the enemy side first; blue's sweep is the half turn of red's.
+    facing = 1 - 2 * selfTeam
+    lookX = selfX + 2000 * facing
     lookY = selfY
     if scan = 1 then
       lookX = selfX
-      lookY = selfY + 2000
+      lookY = selfY + 2000 * facing
     end if
     if scan = 2 then
-      lookX = selfX - 2000
+      lookX = selfX - 2000 * facing
     end if
     if scan = 3 then
       lookX = selfX
-      lookY = selfY - 2000
+      lookY = selfY - 2000 * facing
     end if
   end if
   if heardCount() > 0 then

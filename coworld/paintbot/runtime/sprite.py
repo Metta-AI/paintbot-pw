@@ -56,21 +56,35 @@ def land_wave(value, period, amplitude):
     return magnitude if phase < half else -magnitude
 
 
-def island_margin(x, z, expanded=False):
+def truncdiv(a, b):
+    """Nim's `div`: truncates toward zero, so (-a) div 2 == -(a div 2)."""
+    return (abs(a) // b) * (1 if a >= 0 else -1)
+
+
+def island_margin(x, z, expanded=False, symmetric=False):
     nx, nz = abs(x - 3200) * 1000 // (7733 if expanded else 5800), abs(z - 2000) * 1000 // (4575 if expanded else 3050)
+    wobble = land_wave(x + z, 2600, 28) + land_wave(x - z + 1100, 3700, 22)
+    if symmetric:
+        # Rules 35: even under the half turn, so the coves are mirrored.
+        mx, mz = 6400 - x, 4000 - z
+        wobble = truncdiv(wobble + land_wave(mx + mz, 2600, 28) + land_wave(mx - mz + 1100, 3700, 22), 2)
+    return 980 - int(math.sqrt(math.sqrt(nx**4 + nz**4))) + wobble
+
+
+def land_shift(x, z):
     return (
-        980
-        - int(math.sqrt(math.sqrt(nx**4 + nz**4)))
-        + land_wave(x + z, 2600, 28)
-        + land_wave(x - z + 1100, 3700, 22)
+        land_wave(z + 350, 2900, 360) + land_wave(x + z, 1700, 70),
+        land_wave(x + 600, 3200, 230) + land_wave(z - x, 1900, 55),
     )
 
 
-def land_coordinates(x, z):
-    return (
-        x + land_wave(z + 350, 2900, 360) + land_wave(x + z, 1700, 70),
-        z + land_wave(x + 600, 3200, 230) + land_wave(z - x, 1900, 55),
-    )
+def land_coordinates(x, z, symmetric=False):
+    sx, sz = land_shift(x, z)
+    if symmetric:
+        # Rules 35: odd under the half turn, so mirrored points land on mirrored ground.
+        mx, mz = land_shift(6400 - x, 4000 - z)
+        return x + truncdiv(sx - mx, 2), z + truncdiv(sz - mz, 2)
+    return x + sx, z + sz
 
 
 def forest_height(x, z, expanded=False):
@@ -96,10 +110,10 @@ def forest_height(x, z, expanded=False):
 
 @lru_cache(maxsize=65536)
 def terrain_height(
-    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False, expanded=False, river=False, curved=False, fractal=False, lake=False
+    x, z, wide=False, wilderness=False, deep=False, organic=False, island=False, expanded=False, river=False, curved=False, fractal=False, lake=False, symmetric=False
 ):
     if river:
-        height = terrain_height(x, z, wide, wilderness, deep, organic, False, expanded)
+        height = terrain_height(x, z, wide, wilderness, deep, organic, False, expanded, symmetric=symmetric)
         center = 3200 + (land_wave(min(z, 2600), 6800, 1300) if curved else land_wave(z - 2000, 6400, 420))
         dx, dz = abs(x - center), max(z - 2600, 0) if curved else 0
         distance = min(math.isqrt(dx * dx + dz * dz) if curved else dx, 850)
@@ -121,22 +135,27 @@ def terrain_height(
                     distance = min(distance, abs(x - branch) * 1000 // width, 1000)
             amount = 1000 - distance**3 // 1000000
         if lake:
-            def truncdiv(a, b):
-                return (abs(a) // b) * (1 if a >= 0 else -1)
-            dx = truncdiv((x - 3200 + land_wave(z + 300, 1700, 160) + land_wave(x + z, 650, 45)) * 1000, 1700)
-            dz = truncdiv((z - 2000 + land_wave(x - 200, 2100, 120) + land_wave(x - z, 900, 40)) * 1000, 1250)
+            wx = land_wave(z + 300, 1700, 160) + land_wave(x + z, 650, 45)
+            wz = land_wave(x - 200, 2100, 120) + land_wave(x - z, 900, 40)
+            if symmetric:
+                # Rules 35: the basin's wobble is odd under the half turn.
+                mx, mz = 6400 - x, 4000 - z
+                wx = truncdiv(wx - (land_wave(mz + 300, 1700, 160) + land_wave(mx + mz, 650, 45)), 2)
+                wz = truncdiv(wz - (land_wave(mx - 200, 2100, 120) + land_wave(mx - mz, 900, 40)), 2)
+            dx = truncdiv((x - 3200 + wx) * 1000, 1700)
+            dz = truncdiv((z - 2000 + wz) * 1000, 1250)
             radius = math.isqrt(dx * dx + dz * dz)
             bank = min(max(truncdiv((radius - 620) * 1000, 380), 0), 1000)
             amount = 1000 - bank * bank // 1000
         height -= (height + 200) * amount // 1000
-        return min(height, (island_margin(x, z, expanded) - 35) * 5) if island else height
+        return min(height, (island_margin(x, z, expanded, symmetric) - 35) * 5) if island else height
     if island:
         return min(
-            terrain_height(x, z, wide, wilderness, deep, organic, False, expanded),
-            (island_margin(x, z, expanded) - 35) * 5,
+            terrain_height(x, z, wide, wilderness, deep, organic, False, expanded, symmetric=symmetric),
+            (island_margin(x, z, expanded, symmetric) - 35) * 5,
         )
     if organic:
-        x, z = land_coordinates(x, z)
+        x, z = land_coordinates(x, z, symmetric)
     if wilderness and (x < 0 or x > 6400 or z < 0 or z > 4000):
         if deep:
             return forest_height(x, z, expanded)
@@ -191,6 +210,7 @@ def elevation(w, p):
         w.get("rulesVersion", 0) >= 31,
         w.get("rulesVersion", 0) >= 32,
         w.get("rulesVersion", 0) >= 33,
+        w.get("rulesVersion", 0) >= 35,
     )
     for t in w.get("trenches", []):
         if t["x"] <= p["x"] < t["x"] + t["w"] and t["z"] <= p["z"] < t["z"] + t["h"]:
@@ -276,6 +296,7 @@ def walkability(
     curved=False,
     fractal=False,
     lake=False,
+    symmetric=False,
 ):
     width, height = (3200, 1920) if expanded else (2400, 1280) if deep else (1600, 960) if wilderness else (1280, 800)
     ox, oz = (4800, 2800) if expanded else (2800, 1200) if deep else (800, 400) if wilderness else (0, 0)
@@ -308,7 +329,7 @@ def walkability(
     if island:
         for z in range(height):
             for x in range(width):
-                if island_margin(x * 5 - ox, z * 5 - oz, expanded) < 59:
+                if island_margin(x * 5 - ox, z * 5 - oz, expanded, symmetric) < 59:
                     raw[(z * width + x) * 4 + 3] = 0
     if layered:
         # Reuse the height raster for all four slope probes. Computing the
@@ -319,7 +340,7 @@ def walkability(
             "i",
             (
                 terrain_height(
-                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island, expanded, river, curved, fractal, lake
+                    x * 5 - ox, z * 5 - oz, wide, wilderness, deep, organic, island, expanded, river, curved, fractal, lake, symmetric
                 )
                 for z in range(height)
                 for x in range(width)
@@ -407,6 +428,7 @@ class SpriteView:
                     w.get("rulesVersion", 0) >= 31,
                     w.get("rulesVersion", 0) >= 32,
                     w.get("rulesVersion", 0) >= 33,
+                    w.get("rulesVersion", 0) >= 35,
                 ),
             )
             sprite(1, "map", width, height)

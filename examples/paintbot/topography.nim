@@ -11,6 +11,7 @@ var riverTerrain* = false
 var curvedRiver* = false
 var fractalRiver* = false
 var lakeTerrain* = false
+var symmetricTerrain* = false ## rules 35: every wave is mirrored under the half turn
 const
   RiverBedHeight* = -200
   RiverWaterHeight* = -162 # GOTA-style shallow water: 38 cm above the bed.
@@ -33,8 +34,17 @@ proc riverBlend*(x, z: int): int =
   if not riverTerrain: return 0
   if lakeTerrain:
     # A closed, irregular basin with a broad wading shore, entirely inland.
-    let dx = (x-3200+landWave(z+300,1700,160)+landWave(x+z,650,45))*1000 div 1700
-    let dz = (z-2000+landWave(x-200,2100,120)+landWave(x-z,900,40))*1000 div 1250
+    var wx = landWave(z+300,1700,160)+landWave(x+z,650,45)
+    var wz = landWave(x-200,2100,120)+landWave(x-z,900,40)
+    if symmetricTerrain:
+      # The basin's wobble is made odd under the half turn, so the mirror of every shore
+      # point is a shore point; `div` truncates, which keeps (-a) div 2 == -(a div 2).
+      let mx = 6400-x
+      let mz = 4000-z
+      wx = (wx-(landWave(mz+300,1700,160)+landWave(mx+mz,650,45))) div 2
+      wz = (wz-(landWave(mx-200,2100,120)+landWave(mx-mz,900,40))) div 2
+    let dx = (x-3200+wx)*1000 div 1700
+    let dz = (z-2000+wz)*1000 div 1250
     let radius = int(sqrt((dx.int64*dx.int64+dz.int64*dz.int64).float64))
     let bank = clamp((radius-620)*1000 div 380, 0, 1000)
     return 1000-bank*bank div 1000
@@ -66,11 +76,25 @@ proc islandMargin*(x,z:int):int =
   let nx=abs(x-3200).int64*1000 div (if expandedIsland:7733 else:5800)
   let nz=abs(z-2000).int64*1000 div (if expandedIsland:4575 else:3050)
   let radius=int(sqrt(sqrt((nx*nx*nx*nx+nz*nz*nz*nz).float64)))
-  980-radius+landWave(x+z,2600,28)+landWave(x-z+1100,3700,22)
+  var wobble=landWave(x+z,2600,28)+landWave(x-z+1100,3700,22)
+  if symmetricTerrain:
+    # Even under the half turn: mirrored coves.
+    let mx=6400-x
+    let mz=4000-z
+    wobble=(wobble+landWave(mx+mz,2600,28)+landWave(mx-mz+1100,3700,22)) div 2
+  980-radius+wobble
+proc landShift(x,z:int):tuple[x,z:int] =
+  (landWave(z+350,2900,360)+landWave(x+z,1700,70),
+   landWave(x+600,3200,230)+landWave(z-x,1900,55))
 proc landCoordinates*(x,z:int):tuple[x,z:int] =
   if not organicTerrain:return (x,z)
-  (x+landWave(z+350,2900,360)+landWave(x+z,1700,70),
-   z+landWave(x+600,3200,230)+landWave(z-x,1900,55))
+  let s=landShift(x,z)
+  if symmetricTerrain:
+    # Odd under the half turn, so mirrored points land on mirrored ground: the terraces,
+    # lanes and hills below are themselves mirrored, and this keeps them that way.
+    let m=landShift(6400-x,4000-z)
+    return (x+(s.x-m.x) div 2, z+(s.z-m.z) div 2)
+  (x+s.x, z+s.z)
 
 proc terraceHeight*(x, z: int): int =
   if x >= 1000 and x <= 2200 and z >= 200 and z <= 1200:
@@ -115,6 +139,9 @@ proc forestLots*():seq[tuple[x,z,radius:int]] =
   for z in countup((if expandedIsland: -2700 else: -1000),(if expandedIsland:6700 else:4800),400):
     for x in countup((if expandedIsland: -4600 else: -2500),(if expandedIsland:11000 else:8900),400):
       if x>= -800 and x<=7200 and z>= -400 and z<=4400:continue
+      # Rules 35: the grid is its own mirror (no row sits on z=2000), so the northern half is
+      # placed as before and the southern half is its exact mirror.
+      if symmetricTerrain and z>2000:continue
       let px=x+((x+3000)*17+(z+1400)*11) mod 161-80
       let pz=z+((x+3000)*7+(z+1400)*19) mod 181-90
       if islandTerrain and islandMargin(px,pz)<75:continue
@@ -123,6 +150,7 @@ proc forestLots*():seq[tuple[x,z,radius:int]] =
       if (if organicTerrain:villageLaneDistance(px,pz) else:abs(pz-2000))<240:continue
       if (x+z) mod 3==0:continue
       result.add (px,pz,55+(abs(x+z) mod 30))
+      if symmetricTerrain:result.add (6400-px,4000-pz,55+(abs(x+z) mod 30))
 proc wildernessHeight*(x,z:int):int =
   if not wilderness or (x>=0 and x<=6400 and z>=0 and z<=4000):return 0
   if deepWilderness:return forestHeight(x,z)

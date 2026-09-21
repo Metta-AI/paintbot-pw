@@ -223,6 +223,40 @@ stacking with sneaking and carrying penalties. Dry banks retain normal speed;
 the water causes no damage. Terrain height, line of sight, and navigation use
 the lake bed. Earlier replays preserve their original river geometry and rules.
 
+### A fair map: mirrored ground (rules 35)
+
+Heartwick is meant to be the same map for both teams under a half turn, and its cottages,
+cover, trenches, supplies and hearts were always placed as mirrored pairs. The ground under
+them was not: the organic land deformation (rules 15), the coast (rules 16) and the lake
+(rules 33) are waves in absolute coordinates, so one team's trench sat on a 2.5 m plateau
+overlooking the lake while the other team's sat at its foot, 18% of the lake's shore had a
+dry mirror, and the woodland groves were jittered independently. With the same policy on
+both sides, red won 27 of 32 hosted matches.
+
+Rules 35 make every wave odd (coordinate shifts) or even (heights) under the half turn:
+`shift'(p) = (shift(p) - shift(mirror p)) / 2`, so mirrored points land on mirrored ground;
+the groves are placed on the northern half and mirrored; supplies and hearts are nudged free
+once and mirrored exactly. `tests/test_paintbot_symmetry.nim` checks heights, water, coast,
+cover, trenches, supplies and hearts at every sampled point. The native engine and the WASM
+adapter's Python terrain agree at 15,617 sampled positions.
+
+Two things in the engine were also one-sided. Seats act in seat order within a tick, and seats
+alternate teams, so red (even seats) moved, collected and sprayed first in every contested
+exchange; rules 35 swap each pair of seats on odd ticks. And the `walkTo` path search breaks
+ties by scan order (north-west first), so blue's routes were not mirror images of red's; rules
+35 route blue on the mirrored map and mirror the answer back. Policies that read the map
+(`terrainHeight`, `controlX/Y`, the walkability sprite) need no change; older recordings keep
+their terrain, order and hashes.
+
+The baseline itself was also not mirror play: its first squad worked from north of home and its
+idle sweep looked east first for both teams, so the two teams' priority squads sat on the same
+absolute side of the map. Both are now team-relative (blue plays the half turn of red), in
+`base.bas` and `base_wasm.nim` alike. Validation, same file on both sides, 400 distinct seeds
+each in the native engine: `base.bas` red 51.7% (95% CI 47-57%, p=0.52); a minimal
+capture-and-shoot policy red 52.0% (CI 47-57%, p=0.45). Before rules 35 the same `base.bas`
+mirror gave red 43% on the old map and 60% on the mirrored map with the old baseline. A policy
+that is itself one-sided can of course still favour a seat; the map and engine no longer do.
+
 ### Baseline squads, footwork and aim
 
 The BASIC baseline (`players/base.bas`) was rebuilt around four habits. Each cog still runs alone
