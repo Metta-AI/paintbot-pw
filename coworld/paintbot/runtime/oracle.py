@@ -8,14 +8,20 @@ a later tick with `paintbot.oracle_poll`. Nothing here blocks a game tick.
 Limits apply per seat: one request in flight, a minimum spacing in game ticks, bounded body
 and answer sizes, and a hard wall-clock deadline after which the request is reported failed.
 The endpoint, model and credential come only from the host environment; the guest chooses
-neither. Without `COGAME_ORACLE_URL` every ask is refused, so certification pods that run
-with no network behave exactly as before.
+neither. `COGAME_ORACLE_URL` names an endpoint directly (local play: TypeSafe, or OpenRouter's
+`https://openrouter.ai/api/v1/systemone`, which serves the same wire format). Hosted Softmax
+pods hold no provider key; there the platform's LLM sidecar does, at the reserved
+`AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, and the oracle posts to its `/v1/systemone` route naming the
+asking seat in `X-Coworld-Player-Slot`, so spend and the request-rate bucket are charged to that
+seat under the league's limits. With neither variable every ask is refused, so certification
+pods that run with no network behave exactly as before.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -29,6 +35,16 @@ MAX_STORED = 4  # unread answers kept per seat before the oldest is dropped
 STATUS_PENDING = 0
 STATUS_FAILED = -1
 STATUS_TOO_SMALL = -2
+
+SIDECAR_ENV = "AWS_ENDPOINT_URL_BEDROCK_RUNTIME"  # historical name; the value is the sidecar's base URL
+SIDECAR_PATH = "/v1/systemone"
+# The sidecar takes canonical OpenRouter slugs only, so no moving `latest` alias here.
+SIDECAR_MODEL = "typesafe/jev-1.13"
+# It admits 30 requests a minute per player slot: one ask per 48 ticks at 24 ticks a second.
+SIDECAR_INTERVAL = 48
+SLOT_HEADER = "X-Coworld-Player-Slot"
+LOGGED_FAILURES = 8
+LOGGED_BODY = 300
 
 
 @dataclass
@@ -49,9 +65,13 @@ class Oracle:
         min_interval: int = 24,
         deadline: float = 2.0,
         workers: int = 16,
+        sidecar: bool = False,
     ):
         self.url, self.key, self.model = url, key, model
         self.min_interval, self.deadline = min_interval, deadline
+        self.sidecar = sidecar
+        self._route_missing = False
+        self._reported = 0
         self._pool = ThreadPoolExecutor(max_workers=workers)
         self._seats: dict[int, _Seat] = {}
         self._lock = threading.Lock()
@@ -59,22 +79,40 @@ class Oracle:
 
     @classmethod
     def from_env(cls, env=os.environ) -> Oracle | None:
-        url = env.get("COGAME_ORACLE_URL", "").strip()
-        if not url.startswith("https://"):
+        if env.get("COGAME_ORACLE", "").strip().lower() == "off":
             return None
+        url = env.get("COGAME_ORACLE_URL", "").strip()
+        base = env.get(SIDECAR_ENV, "").strip().rstrip("/")
+        if url and not url.startswith("https://"):
+            return None
+        if not url and not base.startswith(("http://", "https://")):
+            return None
+        deadline = float(env.get("COGAME_ORACLE_DEADLINE", "2"))
+        if url:
+            return cls(
+                url,
+                env.get("COGAME_ORACLE_KEY") or None,
+                env.get("COGAME_ORACLE_MODEL", "jev-latest"),
+                min_interval=int(env.get("COGAME_ORACLE_INTERVAL", "24")),
+                deadline=deadline,
+            )
+        # The platform owns this variable (a game manifest cannot set it) and the sidecar is
+        # pod-local, so plain http is expected here and nowhere else.
         return cls(
-            url,
-            env.get("COGAME_ORACLE_KEY") or None,
-            env.get("COGAME_ORACLE_MODEL", "jev-latest"),
-            min_interval=int(env.get("COGAME_ORACLE_INTERVAL", "24")),
-            deadline=float(env.get("COGAME_ORACLE_DEADLINE", "2")),
+            base + SIDECAR_PATH,
+            None,
+            env.get("COGAME_ORACLE_MODEL", SIDECAR_MODEL),
+            min_interval=int(env.get("COGAME_ORACLE_INTERVAL", str(SIDECAR_INTERVAL))),
+            deadline=deadline,
+            sidecar=True,
         )
 
     def _seat(self, slot: int) -> _Seat:
         return self._seats.setdefault(slot, _Seat())
 
     def ask(self, slot: int, tick: int, body: bytes, request_id: int | None = None) -> int:
-        """Queue a request. Returns a request id >= 1, or 0 when refused (rate limit, in flight, bad body).
+        """Queue a request. Returns a request id >= 1, or 0 when refused (rate limit, in flight, bad
+        body, or a hosted sidecar already found to have no System One route).
 
         The engine assigns ids for BASIC seats (`request_id`); WASM seats take the next one here.
         """
@@ -91,7 +129,7 @@ class Oracle:
         payload = {"state": document["state"], "questions": document["questions"], "model": self.model}
         with self._lock:
             seat = self._seat(slot)
-            if seat.inflight is not None or tick - seat.last_tick < self.min_interval:
+            if self._route_missing or seat.inflight is not None or tick - seat.last_tick < self.min_interval:
                 return 0
             if request_id is None:
                 request_id = seat.next_id
@@ -124,27 +162,62 @@ class Oracle:
     def _call(self, slot: int, request_id: int, payload: bytes) -> None:
         answer: bytes | None = None
         try:
-            headers = {"Content-Type": "application/json"}
-            if self.key:
-                headers["Authorization"] = f"Bearer {self.key}"
-            request = urllib.request.Request(self.url, data=payload, headers=headers, method="POST")
+            answer = self._fetch(slot, payload)
+        except Exception as e:  # noqa: BLE001 - whatever went wrong, the seat must not be left pending
+            self._report(slot, f"{type(e).__name__}: {e}")
+        finally:
+            with self._lock:
+                seat = self._seat(slot)
+                if answer is None:
+                    self.failures += 1
+                if seat.inflight == request_id:
+                    seat.inflight = None
+                seat.answers[request_id] = answer
+                while len(seat.answers) > MAX_STORED:
+                    del seat.answers[min(seat.answers)]
+
+    def _fetch(self, slot: int, payload: bytes) -> bytes | None:
+        """The endpoint's `answers` as compact JSON, or None (reported) when there is no usable answer."""
+        headers = {"Content-Type": "application/json"}
+        if self.key:
+            headers["Authorization"] = f"Bearer {self.key}"
+        if self.sidecar:
+            headers[SLOT_HEADER] = str(slot)
+        request = urllib.request.Request(self.url, data=payload, headers=headers, method="POST")
+        try:
             with urllib.request.urlopen(request, timeout=self.deadline) as response:
                 raw = response.read(MAX_ANSWER + 1)
-            if len(raw) <= MAX_ANSWER:
-                answers = json.loads(raw).get("answers")
-                if isinstance(answers, dict):
-                    answer = json.dumps(answers, separators=(",", ":")).encode()
-        except (urllib.error.URLError, OSError, ValueError, TypeError):
-            answer = None
+        except urllib.error.HTTPError as e:
+            # A sidecar that predates the System One route answers 404 to every seat for the whole
+            # episode. Stop asking; rate and spend limits (429) clear, so those only fail this ask.
+            if self.sidecar and e.code in (404, 405, 501):
+                with self._lock:
+                    self._route_missing = True
+            # The body names the cause (model not allowed, spend limit, route); a bare status does not.
+            try:
+                detail = e.read(LOGGED_BODY).decode("utf-8", "replace")
+            except OSError as unread:
+                detail = f"(body unread: {type(unread).__name__})"
+            self._report(slot, f"HTTP {e.code} {detail}")
+            return None
+        if len(raw) > MAX_ANSWER:
+            self._report(slot, f"answer exceeds {MAX_ANSWER} bytes")
+            return None
+        document = json.loads(raw)
+        answers = document.get("answers") if isinstance(document, dict) else None
+        if not isinstance(answers, dict):
+            self._report(slot, f"reply has no answers object: {raw[:LOGGED_BODY].decode('utf-8', 'replace')}")
+            return None
+        return json.dumps(answers, separators=(",", ":")).encode()
+
+    def _report(self, slot: int, what: str) -> None:
+        """The first few failures go to the game log; an advised seat that silently plays unadvised
+        scores like any other episode, so nothing else would show it."""
         with self._lock:
-            seat = self._seat(slot)
-            if answer is None:
-                self.failures += 1
-            if seat.inflight == request_id:
-                seat.inflight = None
-            seat.answers[request_id] = answer
-            while len(seat.answers) > MAX_STORED:
-                del seat.answers[min(seat.answers)]
+            self._reported += 1
+            if self._reported > LOGGED_FAILURES:
+                return
+        print(f"oracle: seat {slot} ask to {self.url} failed: {what}", file=sys.stderr)
 
     def close(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)

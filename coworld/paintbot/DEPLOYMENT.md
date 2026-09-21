@@ -211,6 +211,31 @@ Whether a league enables the oracle is a league decision: an advised seat has a 
 compute class from the 20,000-instruction BASIC budget, so either every entrant gets it or an
 advised league is scored separately.
 
+### On hosted leagues: through the LLM sidecar
+
+A hosted game pod has no provider credentials and may not set `AWS_*` in its manifest; all model
+traffic goes through the platform's per-pod LLM sidecar at `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`.
+When `COGAME_ORACLE_URL` is unset and that variable is present, `Oracle.from_env` posts to
+`<sidecar>/v1/systemone` (the sidecar's System One route, which forwards to OpenRouter's
+`/api/v1/systemone`) with no credential and `X-Coworld-Player-Slot: <seat>`, so spend and the
+request-rate bucket are charged to the asking seat. Defaults there: model `typesafe/jev-1.13` (the
+sidecar takes canonical slugs only, so no moving `latest`), 48 ticks between asks (the sidecar
+admits 30 requests a minute per slot). `COGAME_ORACLE_MODEL`, `COGAME_ORACLE_INTERVAL` and
+`COGAME_ORACLE_DEADLINE` still override, and `COGAME_ORACLE=off` in the manifest's game env turns
+the advisor off for a release.
+
+The league decision above is therefore made on the platform, not in this image: the league's
+per-episode LLM spend limit applies per seat, and $0 disables the advisor. A sidecar that predates
+the System One route answers 404; the oracle then stops asking for the rest of the episode, so
+this release is safe to deploy before the platform change. The first eight failed asks are written
+to the game log with the HTTP status and response body (model not allowed, spend limit, missing
+route), because an advised seat that silently plays unadvised scores like any other episode.
+
+Locally, `COGAME_ORACLE_URL=https://openrouter.ai/api/v1/systemone` with an OpenRouter key in
+`COGAME_ORACLE_KEY` is the same wire format as TypeSafe's own endpoint; `jev-latest` resolves on
+both. Four more runtime tests cover sidecar discovery and precedence, the slot header and absent
+credential, the missing-route breaker, and a 429 failing only its own ask.
+
 ## Advisor oracle for BASIC seats
 
 BASIC seats reach the same oracle through typed host functions (`oracleState`, `oracleQuestion`,
@@ -219,7 +244,7 @@ BASIC seats reach the same oracle through typed host functions (`oracleState`, `
 `"oracle":[{slot,id,body}]`; the host forwards them to the endpoint under the same per-seat limits
 and replies `{"commands":[...],"oracle":[{slot,id,status,answers}]}` with answers flattened to
 int32 (`oracle.flatten`). The host passes `PW_ORACLE=1` and `PW_ORACLE_INTERVAL` to the engine only
-when `COGAME_ORACLE_URL` is set, so without an oracle BASIC scripts see every ask refused and the
+when it has an oracle (a `COGAME_ORACLE_URL`, or the hosted sidecar), so without one BASIC scripts see every ask refused and the
 bridge keeps its legacy list reply. No rules version, observation or replay format changes.
 Covered by `tests/test_paintbot_oracle.nim` (drafting, delivery, scaling, refusal, limits) and
 three more runtime tests (flattening, the bridge round, the engine environment).
