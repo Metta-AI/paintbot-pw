@@ -84,7 +84,7 @@ Actions: `walkTo(x,y)`, `lookAt(x,y)`, `shootAt(x,y)`, `chargeGrenade(held)`.
 Release by calling `chargeGrenade(0)` or not calling it on the next tick.
 `shout(stringHandle)` is public communication; PRINT remains private.
 Source is limited to 64 KiB, memory to 2 MiB, and each decision to 20,000
-instructions / 50,000 work units. WASM instances are isolated in the game pod.
+instructions / 50,000 work units and a string pool of 1,024 handles / 64 KiB (reset every decision). WASM instances are isolated in the game pod.
 
 ## Replays
 
@@ -290,6 +290,11 @@ call `oracleAsk()` in the same tick.
   the chosen criterion in the order it was added; -1 when missing.
   `oracleConfidence(id, key)` is the endpoint's confidence × 1000 (-1 when absent) and
   `oracleProbability(id, key, label)` a choice's probability for one label × 1000 (-1 when absent).
+
+Local evaluation: the hosted league runs in real time, but a local engine runs several times
+faster, so answers land tens of ticks late. Set `COGAME_TICK_SECONDS=0.0417` on the host to pace
+the bridge to 24 ticks per second, and `PW_BASIC_PEAKS=1` to have the engine print each seat's
+peak instructions, work units and string handles at the end of the match.
 
 `examples/paintbot/players/advised.bas` asks every 48 ticks and switches a cog between capturing
 and guarding on the answer. Host calls cost work units like any other (`oracleAsk` 68); the

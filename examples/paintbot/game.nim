@@ -198,6 +198,11 @@ proc runHeadless*() =
       options.recordPath, "paintbot_pw", replayRulesVersion.uint16, recording)
   echo "ticks=", world.tick, " captures=", world.captures, " hash=",
       world.stateHash()
+  if getEnv("PW_BASIC_PEAKS") == "1":
+    # Budget headroom per seat: limits are 20,000 instructions, 50,000 work units, 1,024 strings.
+    echo "peak_instructions=", peakInstructions
+    echo "peak_work=", peakWork
+    echo "peak_strings=", peakStrings
   when defined(coworld):
     finishCoworld(NumericCoworldResults[float](scores: world.scores(), ticks: world.tick,
         seed: world.seed, outcome: if world.winner <

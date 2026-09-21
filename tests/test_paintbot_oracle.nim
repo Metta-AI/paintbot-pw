@@ -132,3 +132,12 @@ suite "BASIC advisor oracle":
     let poll = bots("shout(strFromInt(oraclePoll(1)))\nshout(strFromInt(oraclePoll(2)))\nshout(strFromInt(oraclePoll(6)))\n")
     discard poll.decide(w)
     check shouts[2] == @["-1", "-1", "0"]
+
+  test "a text-heavy decision fits the 1,024-handle string pool":
+    var w = arena()
+    let players = bots("i = 0\nwhile i < 600\n  s = strFromInt(i)\n  i = i + 1\nwend\nshout(strFromInt(i))\n")
+    discard players.decide(w)
+    check not players[2].failed
+    check shouts[2] == @["600"]
+    check peakStrings[2] > 600
+
