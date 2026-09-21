@@ -318,3 +318,30 @@ canonical as `cow_db70d493-9a07-473c-863a-ec115ba7b588` (manifest
 certification and all five hosted smoke episodes passed (`ereq_5df3eeb7`, `ereq_7ca4fb64`,
 `ereq_7e69fd81`, `ereq_7f9bf736`, `ereq_9288d5c5`). Linux, macOS and Windows CI passed on the
 deployed commit, including `test_baseline.py` and the runtime tests.
+
+## A fair Heartwick — rules 35, 0.3.30
+
+With the same policy on both sides red had won 27 of 32 hosted matches. An audit of every
+static feature under the half turn found the ground unmirrored (the organic deformation, coast
+and lake waves are in absolute coordinates: one team's trench on a 2.5 m plateau over the lake,
+its mirror at the plateau's foot; 18% of the shore with a dry mirror; groves jittered per side;
+hearts and supplies nudged free per side), two engine-side biases (seat order acted red-first
+every tick; path-search tie-breaks made blue's routes non-mirrors of red's; the yield side was
+team-keyed), and — the largest effect — the baseline's own absolute-direction habits (priority
+squad north of home and an east-first sweep for both teams). Rules 35 mirror all of it; the
+baseline plays the half turn of itself; `tests/test_paintbot_symmetry.nim` guards the map. See
+the guide's "A fair map" section. Validation, same file on both sides, 400 distinct seeds each:
+`base.bas` red 51.7% (95% CI 47-57%), a minimal capture-and-shoot policy red 52.0%; on the old
+map the baseline mirror gave red 43%. The WASM baseline against the BASIC one through the hosted
+runtime on the new engine: 11-5, 5-3 as red and 6-2 as blue. The league champion source
+(`heartwick.bas`) runs on rules 35 without seat errors; policies read the map through the API
+and need no change. Older recordings keep their terrain, order and hashes; the replay loader
+accepts rules 35.
+
+Merged to main as `3fb68af`. Version 0.3.30 is certified and canonical as
+`cow_8baf80da-08ee-4f76-ad98-ccad0554dd1c` (manifest
+`sha256:fbcbc1b7db044353c3316c6842bbc1ba1651235ef50336b7af3add726a8d7ded`), deployed by the
+Deploy Coworld workflow after a dry run on main; hosted certification and all five hosted smoke
+episodes passed (`ereq_0d1378e0`, `ereq_5685fbfc`, `ereq_7ba95cd0`, `ereq_921324b4`,
+`ereq_a47d78d3`). All 27 paintbot Nim suites, the Python runtime and WASM baseline tests, and
+Linux/macOS/Windows CI passed on the deployed commit.
