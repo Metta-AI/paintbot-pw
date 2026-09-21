@@ -510,6 +510,185 @@ class OracleTests(unittest.TestCase):
 
         self.assertIsNone(Oracle.from_env({"COGAME_ORACLE_DEADLINE": "soon"}))
 
+    _NOUL_ASK = {"state": {"t": 0}, "questions": {"g": {"type": "noul", "instructions": "?"}}}
+
+    def _basic_round_trip(self, reply_body):
+        """One BASIC ask through the bridge against an endpoint that answers `reply_body`."""
+        import host
+        from oracle import Oracle
+
+        url, _ = self._server(body=reply_body)
+        oracle = Oracle(url, min_interval=24, deadline=2.0)
+        self.addCleanup(oracle.close)
+        pending = {}
+        host.basic_oracle_round(oracle, {"tick": 0, "oracle": [{"slot": 2, "id": 1, "body": self._NOUL_ASK}]}, pending)
+        self._settle(oracle)
+        return oracle, pending, host.basic_oracle_round(oracle, {"tick": 1, "oracle": []}, pending)
+
+    def test_flatten_drops_what_it_cannot_scale_and_never_raises(self):
+        from oracle import flatten
+
+        questions = {
+            "g": {"type": "noul"},
+            "s": {"type": "score"},
+            "c": {"type": "choice", "criteria": {"a": "", "b": ""}},
+            "ok": {"type": "noul"},
+        }
+        answers = {
+            "g": {"noul": float("inf")},  # json.loads("1e999")
+            "s": {"score": float("-inf")},
+            "c": {"choice": "a", "probabilities": [0.5, 0.5], "confidence": float("inf")},
+            "ok": {"noul": 0.25, "confidence": float("nan")},
+        }
+        self.assertEqual(
+            flatten(answers, questions),
+            {
+                "c": {"value": 0, "confidence": -1, "probabilities": {}},
+                "ok": {"value": 250, "confidence": -1, "probabilities": {}},
+            },
+        )
+        for junk in ({"g": {"noul": [1]}}, {"g": {"noul": {"x": 1}}}, {"c": {"choice": ["a"], "probabilities": "no"}}):
+            self.assertEqual(flatten(junk, questions), {})
+
+    def test_an_unscalable_answer_fails_the_ask_instead_of_ending_the_episode(self):
+        # 1e999 parses as infinity. This once raised out of the host loop and took all sixteen seats with it.
+        oracle, pending, replies = self._basic_round_trip(b'{"answers":{"g":{"type":"noul","noul":1e999}}}')
+        self.assertEqual(replies, [{"slot": 2, "id": 1, "status": -1, "answers": {}}])
+        self.assertEqual(pending, {})
+        self.assertEqual(oracle.failures, 1)
+
+    def test_a_reply_with_no_usable_answer_is_failed_not_pending(self):
+        # Status 0 means "still pending" to the engine: a seat that waits on it never asks again.
+        for body in (b'{"answers":{}}', b'{"answers":{"g":{"type":"noul","noul":null}}}', b'{"answers":{"other":{"noul":0.5}}}'):
+            with self.subTest(body):
+                oracle, pending, replies = self._basic_round_trip(body)
+                self.assertEqual(replies, [{"slot": 2, "id": 1, "status": -1, "answers": {}}])
+                self.assertEqual(pending, {})
+                self.assertEqual(oracle.failures, 1)
+
+    def test_a_bug_while_flattening_fails_that_ask_only(self):
+        import host
+
+        with patch.object(host, "flatten", side_effect=RuntimeError("boom")):
+            oracle, pending, replies = self._basic_round_trip(b'{"answers":{"g":{"type":"noul","noul":0.5}}}')
+        self.assertEqual(replies, [{"slot": 2, "id": 1, "status": -1, "answers": {}}])
+        self.assertEqual(pending, {})
+        self.assertEqual(oracle.failures, 1)
+
+    def test_only_a_missing_route_stops_the_asking(self):
+        from oracle import Oracle
+
+        # A refusal, a provider fault or a legacy-lane pod may be this seat's or this moment's
+        # problem. None of them may turn the advisor off for every seat for the rest of the episode.
+        for status in (400, 403, 500, 502, 503):
+            with self.subTest(status):
+                url, seen = self._server(status=status, body=b'{"error":{"message":"no","code":0}}')
+                oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
+                self.addCleanup(oracle.close)
+                self.assertEqual(oracle.ask(2, 0, ORACLE_REQUEST), 1)
+                self._settle(oracle)
+                self.assertEqual(oracle.poll(2, 1, 4096)[0], -1)
+                self.assertEqual(oracle.ask(9, 100, ORACLE_REQUEST), 1)
+                self._settle(oracle)
+                self.assertEqual(len(seen), 2)
+        for status in (404, 405, 501):
+            with self.subTest(status):
+                url, seen = self._server(status=status, body=b"{}")
+                oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
+                self.addCleanup(oracle.close)
+                oracle.ask(2, 0, ORACLE_REQUEST)
+                self._settle(oracle)
+                self.assertEqual(oracle.ask(9, 100, ORACLE_REQUEST), 0)
+        # A direct endpoint has no route to go missing: its 404 is one failed ask.
+        url, seen = self._server(status=404, body=b"{}")
+        direct = Oracle(url)
+        self.addCleanup(direct.close)
+        direct.ask(2, 0, ORACLE_REQUEST)
+        self._settle(direct)
+        self.assertEqual(direct.ask(9, 100, ORACLE_REQUEST), 1)
+
+    def test_failure_log_is_bounded_and_says_when_it_stops(self):
+        import contextlib
+        import io
+
+        from oracle import Oracle
+
+        url, _ = self._server(status=500, body=b"down")
+        oracle = Oracle(url, min_interval=0)
+        self.addCleanup(oracle.close)
+        captured = io.StringIO()
+        with contextlib.redirect_stderr(captured):
+            for i in range(12):
+                self.assertEqual(oracle.ask(i, 0, ORACLE_REQUEST), 1)
+            self._settle(oracle)
+        lines = [line for line in captured.getvalue().splitlines() if line.startswith("oracle:")]
+        self.assertEqual(sum("failed: HTTP 500 down" in line for line in lines), 8)
+        self.assertEqual(sum("not logged" in line for line in lines), 1)
+        self.assertEqual(len(lines), 9)
+        self.assertEqual(oracle.failures, 12)
+
+    def test_a_sidecar_never_sees_a_credential(self):
+        from oracle import Oracle
+
+        url, _ = self._server()
+        oracle = Oracle(url + "v1/systemone", "secret", sidecar=True)
+        self.addCleanup(oracle.close)
+        oracle.ask(1, 0, ORACLE_REQUEST)
+        self._settle(oracle)
+        self.assertNotIn("authorization", self.requests[0][1])  # the sidecar is reached over plain http
+
+    def test_a_refused_endpoint_says_why_there_is_no_oracle(self):
+        import contextlib
+        import io
+
+        from oracle import Oracle
+
+        captured = io.StringIO()
+        with contextlib.redirect_stderr(captured):
+            self.assertIsNone(
+                Oracle.from_env({"COGAME_ORACLE_URL": "http://plain.test/o", "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://127.0.0.1:1"})
+            )
+        self.assertIn("COGAME_ORACLE_URL must be https", captured.getvalue())
+
+    def test_a_dripping_reply_is_failed_at_the_deadline_and_dropped_when_it_lands(self):
+        import http.server
+        import threading
+        import time
+
+        from oracle import Oracle
+
+        body = b'{"answers":{"q":{"type":"noul","noul":0.9}}}'
+
+        class Drip(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers["Content-Length"]))
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                for i in range(len(body)):  # a byte every 50 ms: no single socket read ever times out
+                    self.wfile.write(body[i : i + 1])
+                    self.wfile.flush()
+                    time.sleep(0.05)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Drip)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        oracle = Oracle(f"http://127.0.0.1:{server.server_address[1]}/", deadline=0.3, min_interval=0)
+        self.addCleanup(oracle.close)
+        self.assertEqual(oracle.ask(3, 0, ORACLE_REQUEST), 1)
+        self.assertEqual(oracle.poll(3, 1, 4096)[0], 0)
+        time.sleep(0.8)  # past deadline x grace (0.6 s); the reply needs ~2.2 s
+        self.assertEqual(oracle.poll(3, 1, 4096)[0], -1)
+        self.assertEqual(oracle.failures, 1)
+        self.assertEqual(oracle.ask(3, 1, ORACLE_REQUEST), 2)  # the seat is free to ask again
+        time.sleep(2.0)  # the first reply lands now, complete and well-formed
+        self.assertEqual(oracle.poll(3, 1, 4096)[0], -1)  # and is not resurrected
+        self.assertEqual(oracle.failures, 1)
+
     def test_without_an_oracle_every_ask_is_refused(self):
         policy = self._policy(None)
         for tick in range(3):

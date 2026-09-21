@@ -48,10 +48,19 @@ def basic_oracle_round(oracle, world, pending):
         if status == 0:
             continue
         del pending[slot]
-        answers = flatten(json.loads(answer), questions) if status > 0 else {}
-        replies.append(
-            {"slot": slot, "id": request_id, "status": len(answers) if status > 0 else -1, "answers": answers}
-        )
+        answers = {}
+        if status > 0:
+            # A reply that cannot be flattened is that ask's failure. It must never leave this loop:
+            # an exception here ends the episode for all sixteen seats.
+            try:
+                answers = flatten(json.loads(answer), questions)
+            except Exception as e:  # noqa: BLE001
+                oracle.unusable(slot, f"reply could not be flattened: {type(e).__name__}: {e}")
+            else:
+                if not answers:
+                    oracle.unusable(slot, "reply held no usable answer")
+        # The engine reads status 0 as "still pending", so an empty reply is a failed one.
+        replies.append({"slot": slot, "id": request_id, "status": len(answers) or -1, "answers": answers})
     return replies
 
 

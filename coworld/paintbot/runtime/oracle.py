@@ -13,8 +13,8 @@ neither. `COGAME_ORACLE_URL` names an endpoint directly (local play: TypeSafe, o
 pods hold no provider key; there the platform's LLM sidecar does, at the reserved
 `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, and the oracle posts to its `/v1/systemone` route naming the
 asking seat in `X-Coworld-Player-Slot`, so spend and the request-rate bucket are charged to that
-seat under the league's limits. With neither variable every ask is refused, so certification
-pods that run with no network behave exactly as before.
+seat under the league's limits. With neither variable, or with `COGAME_ORACLE=off`, every ask is
+refused, so certification pods that run with no network behave exactly as before.
 """
 
 from __future__ import annotations
@@ -42,11 +42,13 @@ SIDECAR_PATH = "/v1/systemone"
 # The sidecar takes canonical OpenRouter slugs only, so no moving `latest` alias here.
 SIDECAR_MODEL = "typesafe/jev-1.13"
 # System One asks have their own sidecar bucket of 120 a minute per player slot (four times the
-# chat ceiling), so the game's own spacing of one ask a second per seat sits at half of it. A
-# sidecar that still holds them to 30 answers 429 in a long burst; that fails the ask, no more.
+# chat ceiling), so the game's own spacing of one ask a second per seat sits at half of it.
 SIDECAR_INTERVAL = 24
 SLOT_HEADER = "X-Coworld-Player-Slot"
 LOGGED_FAILURES = 8
+# `urlopen`'s timeout bounds each socket operation, not the request: a peer that drips its reply
+# never trips it. Past this multiple of the deadline `poll` reports the request failed regardless.
+DEADLINE_GRACE = 2.0
 LOGGED_BODY = 300
 
 
@@ -54,6 +56,7 @@ LOGGED_BODY = 300
 class _Seat:
     last_tick: int = -(10**9)
     inflight: int | None = None
+    started: float = 0.0  # monotonic time the in-flight request was queued
     answers: dict[int, bytes | None] = field(default_factory=dict)  # id -> bytes, or None = failed
     next_id: int = 1
 
@@ -90,6 +93,7 @@ class Oracle:
         url = env.get("COGAME_ORACLE_URL", "").strip()
         base = env.get(SIDECAR_ENV, "").strip().rstrip("/")
         if url and not url.startswith("https://"):
+            print("oracle: off, COGAME_ORACLE_URL must be https", file=sys.stderr)
             return None
         if not url and not base.startswith(("http://", "https://")):
             return None
@@ -146,6 +150,7 @@ class Oracle:
             elif request_id < 1 or request_id in seat.answers:
                 return 0
             seat.inflight = request_id
+            seat.started = time.monotonic()
             seat.last_tick = tick
             self.requests += 1
         self._pool.submit(self._call, slot, request_id, json.dumps(payload).encode(), tick)
@@ -156,7 +161,18 @@ class Oracle:
         with self._lock:
             seat = self._seat(slot)
             if request_id == seat.inflight:
-                return STATUS_PENDING, b""
+                if time.monotonic() - seat.started <= self.deadline * DEADLINE_GRACE:
+                    return STATUS_PENDING, b""
+                # Abandon it: the seat may ask again, and whatever the worker brings back late is dropped.
+                seat.inflight = None
+                self.failures += 1
+                overdue = True
+            else:
+                overdue = False
+        if overdue:
+            self._report(slot, f"no complete reply within {self.deadline * DEADLINE_GRACE:g}s")
+            return STATUS_FAILED, b""
+        with self._lock:
             if request_id not in seat.answers:
                 return STATUS_FAILED, b""
             answer = seat.answers[request_id]
@@ -189,28 +205,37 @@ class Oracle:
                     self._log.write(json.dumps(row, separators=(",", ":")) + "\n")
                     self._log.flush()
                 seat = self._seat(slot)
+                if seat.inflight != request_id:
+                    return  # abandoned past the deadline, and already reported to the seat as failed
+                seat.inflight = None
                 if answer is None:
                     self.failures += 1
-                if seat.inflight == request_id:
-                    seat.inflight = None
                 seat.answers[request_id] = answer
                 while len(seat.answers) > MAX_STORED:
                     del seat.answers[min(seat.answers)]
 
+    def unusable(self, slot: int, what: str) -> None:
+        """An answer arrived but nothing in it could be used; count and report it like any failure."""
+        with self._lock:
+            self.failures += 1
+        self._report(slot, what)
+
     def _fetch(self, slot: int, payload: bytes) -> bytes | None:
         """The endpoint's `answers` as compact JSON, or None (reported) when there is no usable answer."""
         headers = {"Content-Type": "application/json"}
-        if self.key:
-            headers["Authorization"] = f"Bearer {self.key}"
         if self.sidecar:
-            headers[SLOT_HEADER] = str(slot)
+            headers[SLOT_HEADER] = str(slot)  # and no credential: the sidecar holds it, and is plain http
+        elif self.key:
+            headers["Authorization"] = f"Bearer {self.key}"
         request = urllib.request.Request(self.url, data=payload, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=self.deadline) as response:
                 raw = response.read(MAX_ANSWER + 1)
         except urllib.error.HTTPError as e:
-            # A sidecar that predates the System One route answers 404 to every seat for the whole
-            # episode. Stop asking; rate and spend limits (429) clear, so those only fail this ask.
+            # A sidecar without the System One route answers 404 to every seat for the whole episode,
+            # so stop asking. Nothing else stops it: a 429 is this seat's request ceiling (it clears in
+            # seconds) or its spend limit (it does not, and the seat's asks fail for the rest of the
+            # episode), and a 4xx or 5xx may be one seat's or one moment's problem.
             if self.sidecar and e.code in (404, 405, 501):
                 with self._lock:
                     self._route_missing = True
@@ -236,9 +261,11 @@ class Oracle:
         scores like any other episode, so nothing else would show it."""
         with self._lock:
             self._reported += 1
-            if self._reported > LOGGED_FAILURES:
-                return
-        print(f"oracle: seat {slot} ask to {self.url} failed: {what}", file=sys.stderr)
+            reported = self._reported
+        if reported <= LOGGED_FAILURES:
+            print(f"oracle: seat {slot} ask to {self.url} failed: {what}", file=sys.stderr)
+        elif reported == LOGGED_FAILURES + 1:
+            print("oracle: further failures are not logged; the closing line counts them", file=sys.stderr)
 
     def close(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)
@@ -251,7 +278,7 @@ class Oracle:
 def _thousandths(value) -> int | None:
     try:
         return max(-(10**9), min(10**9, round(float(value) * 1000)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: infinity, which JSON `1e999` parses to
         return None
 
 
@@ -278,7 +305,8 @@ def flatten(answers: dict, questions: dict) -> dict:
             labels = list(question.get("criteria") or {})
             if answer.get("choice") in labels:
                 value = labels.index(answer["choice"])
-            for label, p in (answer.get("probabilities") or {}).items():
+            raw = answer.get("probabilities")
+            for label, p in (raw.items() if isinstance(raw, dict) else ()):
                 scaled = _thousandths(p)
                 if label in labels and scaled is not None:
                     probabilities[label] = scaled
