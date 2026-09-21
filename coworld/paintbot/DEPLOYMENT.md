@@ -265,5 +265,24 @@ stateless squads of four that agree on a heart from public ownership alone, and 
 when visibly outnumbered (see the guide). No engine, rules, observation or API change. Against
 the previous baseline in the native engine: 100-0 over 100 side-swapped matches (seeds 1-50),
 peak 5,670 instructions and 8,722 work units per decision against limits of 20,000 and 50,000,
-no seat errors. This changes the opponent every league entrant meets; not yet deployed or
-certified.
+no seat errors. This changes the opponent every league entrant meets; deployed in 0.3.27 below.
+
+## WASM baseline as a port of base.bas, and direct orders for WASM seats — 0.3.27
+
+`coworld/paintbot/players/base_wasm.nim` replaces the CTF-era WASM baseline with a
+section-for-section port of `base.bas`. Because the sprite gamepad capped any WASM policy
+(8-way steps without pathing, a turret turning 5 brads per tick), WASM seats gained reply packet
+`0x85`, a direct order the host maps to exactly the BASIC command (`walkTo` with engine
+pathing, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`; see the guide). Gamepad packets are
+unchanged, so existing WASM submissions play as before. Measured through the hosted runtime,
+side-swapped: the new baseline is 17-15 against `base.bas` over 32 matches (95% CI 36-69%,
+interchangeable combat totals) and 16-0 against the previous `baseline.wasm`.
+
+Merged to main as `490fd1a`/`bfd1c5f` (with `33ffd22`, the gamepad-only port it supersedes).
+Version 0.3.27 was built from `7a5b5a2` (which also carries the stronger BASIC baseline and the
+WASM and BASIC advisor oracles, #39-#42) after a dry run on the branch. It is certified and
+canonical as `cow_db70d493-9a07-473c-863a-ec115ba7b588` (manifest
+`sha256:55b321c6ad7e1f3744af84432ac912e23aae08a9f30a6d1789ae174b225a1f21`); hosted
+certification and all five hosted smoke episodes passed (`ereq_5df3eeb7`, `ereq_7ca4fb64`,
+`ereq_7e69fd81`, `ereq_7f9bf736`, `ereq_9288d5c5`). Linux, macOS and Windows CI passed on the
+deployed commit, including `test_baseline.py` and the runtime tests.
