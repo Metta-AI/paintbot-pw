@@ -1,6 +1,7 @@
 ## Bounded, persistent BASIC players, with the same observations as WASM seats.
 import polyworld/[basic, cli, controllers]
-import sim
+import sim, oracle
+export oracle
 when defined(coworld): import polyworld/coworld
 
 type HeardMessage* = object
@@ -42,6 +43,7 @@ proc limits*(): Limits =
 proc host(slot:int, strings:StringPool): Host =
   result=initHost()
   result.addStringFunctions(strings)
+  result.addOracleFunctions(slot,strings)
   discard result.addFunction("shout",1,proc(a:openArray[int32]):int32 =
     if shouts[slot].len>=4:return 0
     shouts[slot].add strings.getString(a[0])[0..<min(256,strings.getString(a[0]).len)];1,68)
@@ -153,6 +155,7 @@ proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
   shouts=default(array[Seats,seq[string]])
   active=w;commands=default(array[Seats,Command])
   visionCache=default(array[Seats,array[Seats,int8]])
+  beginOracleTick(w.tick)
   for slot in 0..<Seats:
     let b=bots[slot];let cog=w.cogs[slot];let home=home(team(slot));let enemyHeart=w.hearts[1-team(slot)];let own=w.hearts[team(slot)]
     let heart=if enemyHeart.carrier<0 or w.visible(slot,enemyHeart.carrier.int):enemyHeart.pos else:home(1-team(slot))

@@ -211,6 +211,19 @@ Whether a league enables the oracle is a league decision: an advised seat has a 
 compute class from the 20,000-instruction BASIC budget, so either every entrant gets it or an
 advised league is scored separately.
 
+## Advisor oracle for BASIC seats
+
+BASIC seats reach the same oracle through typed host functions (`oracleState`, `oracleQuestion`,
+`oracleCriterion`, `oracleAsk`, `oraclePoll`, `oracleAnswer`, ...; see the guide). The engine
+(`examples/paintbot/oracle.nim`) drafts the JSON and ships accepted asks in its world line as
+`"oracle":[{slot,id,body}]`; the host forwards them to the endpoint under the same per-seat limits
+and replies `{"commands":[...],"oracle":[{slot,id,status,answers}]}` with answers flattened to
+int32 (`oracle.flatten`). The host passes `PW_ORACLE=1` and `PW_ORACLE_INTERVAL` to the engine only
+when `COGAME_ORACLE_URL` is set, so without an oracle BASIC scripts see every ask refused and the
+bridge keeps its legacy list reply. No rules version, observation or replay format changes.
+Covered by `tests/test_paintbot_oracle.nim` (drafting, delivery, scaling, refusal, limits) and
+three more runtime tests (flattening, the bridge round, the engine environment).
+
 ## Stronger BASIC baseline
 
 `coworld/paintbot/players/base.bas` and `examples/paintbot/players/base.bas` (now identical) were

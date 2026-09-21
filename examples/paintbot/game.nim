@@ -44,6 +44,10 @@ type
     names*: array[Seats, string]
     communications*: seq[Communication]
     endTick*: int32
+  ExternalCommand = tuple[slot: int, command: Command, chat: seq[string]]
+  ExternalReply = object
+    commands: seq[ExternalCommand]
+    oracle: seq[OracleReply]
 type LegacyMetadataRecording = object
   seed: int32
   frames: seq[LegacyFrame]
@@ -134,6 +138,9 @@ proc setup*() =
     if getEnv("PW_POLICY_FD").len > 0:
       if not open(bridge, FileHandle(parseInt(getEnv("PW_POLICY_FD"))),
           fmReadWrite): raise newException(IOError, "Cannot open policy bridge")
+      # The host owns the advisor oracle; it tells the engine when BASIC seats may draft asks.
+      oracleEnabled = getEnv("PW_ORACLE") == "1"
+      oracleInterval = parseInt(getEnv("PW_ORACLE_INTERVAL", $DefaultOracleInterval))
 proc advance*() =
   if replayMode or world.tick < recording.frames.len:
     if world.tick >= recording.frames.len: return
@@ -152,10 +159,23 @@ proc advance*() =
               slot: slot, text: message)
     if bridge != nil:
       let snapshot = world.toJson()
+      var asks = ""
+      for ask in drainOracleAsks():
+        asks.add (if asks.len > 0: "," else: "") & "{\"slot\":" & $ask.slot &
+            ",\"id\":" & $ask.id & ",\"body\":" & ask.body & "}"
       bridge.writeLine("{\"rulesVersion\":" & $replayRulesVersion & "," &
-          "\"heard\":" & heard.toJson() & "," & snapshot[1..^1]); bridge.flushFile()
-      let external = bridge.readLine().fromJson(seq[tuple[slot: int,
-          command: Command, chat: seq[string]]])
+          "\"heard\":" & heard.toJson() & ",\"oracle\":[" & asks & "]," &
+          snapshot[1..^1]); bridge.flushFile()
+      # The host answers with the legacy command list, or with {commands, oracle} once it
+      # has oracle replies to deliver alongside the commands.
+      let line = bridge.readLine()
+      var external: seq[ExternalCommand]
+      if line.strip().startsWith("{"):
+        let reply = line.fromJson(ExternalReply)
+        external = reply.commands
+        for item in reply.oracle: deliverOracleReply(item)
+      else:
+        external = line.fromJson(seq[ExternalCommand])
       for item in external:
         if item.slot < 0 or item.slot >= Seats: raise newException(ValueError, "Invalid WASM slot")
         commands[item.slot] = item.command
