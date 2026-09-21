@@ -77,6 +77,46 @@ class RuntimeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             decode_replies(b"\x01\0\0\0\x01\0\0\0\x82")
 
+    def test_direct_order_gives_a_wasm_seat_the_basic_actuators(self):
+        import struct
+
+        def order(flags, gx, gz, ax, az):
+            packet = struct.pack("<BBiiii", 0x85, flags, gx, gz, ax, az)
+            return decode_replies(struct.pack("<II", 1, len(packet)) + packet)
+
+        with self.assertRaises(ValueError):
+            decode_replies(b"\x01\0\0\0\x03\0\0\0\x85\0\0")  # wrong size
+        view = SpriteView(0)
+        w = dict(rulesVersion=34, cogs=[dict(pos=dict(x=1000, z=2000), aim=dict(x=0, z=0))])
+        # walkTo + shootAt: engine pathing, an exact aim point, one shot.
+        command = view.command(w, order(1 | 2 | 16, 3000, 2500, 4000, -1000))
+        self.assertEqual(
+            command,
+            dict(walk=True, direct=False, shoot=True, chargeGrenade=False, sneak=False,
+                 goal=dict(x=3000, z=2500), aim=dict(x=4000, z=-1000)),
+        )
+        # The gamepad turret and its `own aim` marker follow the real aim (north-east = 32).
+        self.assertEqual(view.angle, 32)
+        # A tick without an order keeps the goal and orders nothing new: no repeated shot.
+        command = view.command(w, [])
+        self.assertEqual(
+            command,
+            dict(walk=False, direct=False, shoot=False, chargeGrenade=False, sneak=False,
+                 goal=dict(x=3000, z=2500), aim=dict(x=0, z=0)),
+        )
+        # walkTo alone aims along the walk, as it does for BASIC (aim left unset).
+        command = view.command(w, order(1, 1500, 1500, 0, 0))
+        self.assertEqual(command["aim"], dict(x=0, z=0))
+        self.assertTrue(command["walk"])
+        # chargeGrenade and sneak.
+        command = view.command(w, order(4 | 8, 0, 0, 0, 0))
+        self.assertTrue(command["chargeGrenade"] and command["sneak"])
+        self.assertFalse(command["walk"])
+        # A button mask returns the seat to the gamepad protocol.
+        command = view.command(w, [b"\x84\x08"])
+        self.assertTrue(command["direct"])
+        self.assertEqual(command["goal"], dict(x=1100, z=2000))
+
     def test_bad_wasm_forfeits_its_seat_and_the_episode_still_runs(self):
         import host
 

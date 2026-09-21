@@ -65,10 +65,16 @@ hundredths of a Polyworld tile on a 6400×4000 arena.
 
 Submit either a UTF-8 BASIC file or a WASM module implementing `paintbot_alloc`,
 `paintbot_buffer`, `paintbot_step`, `paintbot_output_size`, exported memory and
-optional WASI `_initialize`. WASM uses the existing Paintbot sprite protocol:
-movement, aim buttons, A for gun/spray, C for grenade charge/release. Observations
-include fog-gated equipment labels, grenade flights/targets/blasts, spray puffs,
-armor, lives, hearts, and static trench terrain.
+optional WASI `_initialize`. WASM observations are the Paintbot sprite protocol:
+fog-gated equipment labels, grenade flights/targets/blasts, spray puffs, armor, lives,
+hearts, and static trench terrain. Replies are either the sprite gamepad (packet `0x84`:
+movement, aim buttons, A for gun/spray, C for grenade charge/release) or a **direct order**
+(packet `0x85`, 18 bytes: flags, goal x/z, aim x/z as little-endian int32 world cm) that
+gives the seat exactly the BASIC actuators: flag 1 walks to the goal with the engine's
+pathing (`walkTo`), 16 sets the aim point (`lookAt`), 2 with 16 fires (`shootAt`), 4 holds
+the grenade, 8 sneaks. An order lasts one tick, like a BASIC decision; a tick without one
+keeps the previous goal and orders nothing new, and a gamepad packet returns the seat to
+the gamepad protocol. Chat is packet `0x81`.
 
 BASIC read-only data: `selfId`, `selfTeam`, `selfX`, `selfY`, `selfHp`, `carrying`,
 `homeX`, `homeY`, `heartX`, `heartY`, `ownHeartX`, `ownHeartY`, `ownHeartStolen`,
@@ -244,20 +250,12 @@ no seat disabled. Removing any one habit loses to the full policy (aim 3-37, foo
 refusing fights 12-28, squads 16-24 over 40 matches each).
 
 The WASM baseline (`players/base_wasm.nim`, built to `players/baseline.wasm`) is the same policy
-ported to the sprite protocol, section for section and with the same constants. Three things
-differ because the interface does: the engine walks a WASM cog straight at the requested point,
-so the policy carries its own navigation (a cost field over the walkability map, 40 cm cells,
-followed with a line-of-sight lookahead); the turret turns 5 brads (7 degrees) per tick instead
-of pointing instantly, so the aim is laid on the lead point and the shot ordered once it has
-settled there at the start of a leg that outlasts the windup, with the gun-ready icon standing in
-for BASIC's cooldown estimate; and idle scanning is a continuous sweep. The `carrying` branches
-of the BASIC file are dead in territory play and are not ported. `test_baseline.py` checks the
-territory contract (reach an unowned heart, hold still through the capture timer, retarget).
-Measured through the hosted runtime over 16 side-swapped matches each, the port beats the
-previous WASM baseline 16-0 and loses to `base.bas` 0-16: reconstructed from the replays it
-orders 17% fewer shots per match (237 against 287) at the same hit rate (32% against 34%),
-which is the turret's turning time, and that deficit decides an attrition game. A build with
-`-d:aimTrace` publishes its fire gate as chat on every gun-ready tick for diagnosis.
+ported to the sprite protocol, section for section and with the same constants. It acts through
+direct orders (reply packet `0x85`, above), so the engine paths and aims for it exactly as for the
+BASIC seat; the differences are that the frame's gun-ready icon replaces BASIC's cooldown
+estimate and that the `carrying` branches of the BASIC file, dead in territory play, are not
+ported. `test_baseline.py` checks the territory contract (reach an unowned heart, hold the ring
+through the capture timer, retarget). WASM_PARITY_SENTENCE
 
 ## Advisor oracle (host feature, no rules change)
 
