@@ -622,14 +622,15 @@
       `<div class="helpgrid">${[
         ["Space", "Play / pause"],
         ...(!state?.playerSlot ? [["C", "Toggle intelligent action camera"]] : []),
-        [", / E", "Restart / end"],
+        [", / End", "Restart / end"],
         ["B / N", "Previous / next tick"],
         [".", "Forward five seconds"],
         ["R / F / O", "Loop / skip lulls / spoilers"],
         ["Z / X", "Zoom in / out"],
         ["Escape", "Clear selection and POV"],
         ["Arrow keys", "Pan camera"],
-        ["A / D", "Rotate map left / right (hold to continue)"],
+        ["Q / E", "Rotate the map (hold to keep turning)"],
+        ["A / D", "Rotate the map one notch"],
         ["Drag", "Pan across the arena"],
         ["Shift + drag", "Orbit camera"],
         ["Pinch", "Zoom on touch screens"],
@@ -666,7 +667,6 @@
       c: state?.playerSlot ? null : "actioncam",
       n: "step",
       ".": "forward",
-      e: "end",
       r: "loop",
       f: "skip",
       o: "spoilers",
@@ -687,6 +687,9 @@
       e.preventDefault();
       camera.yaw += e.key.toLowerCase() === "a" ? -0.08 : 0.08;
       cameraUpdate();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      $("end").click();
     } else if (e.key === "Escape") {
       select(-1);
       setLens(-1);
@@ -699,6 +702,35 @@
       options();
     }
   });
+  // Q / E rotate the map while held, at a steady rate whatever the frame rate. Q keeps its
+  // sneak meaning while playing as a human, so only E rotates there.
+  const rotating = { q: false, e: false };
+  let rotateFrame = 0, rotateLast = 0;
+  function rotateStep(time) {
+    rotateFrame = 0;
+    const dt = Math.min(0.1, (time - rotateLast) / 1000);
+    rotateLast = time;
+    const dir = (rotating.e ? 1 : 0) - (rotating.q ? 1 : 0);
+    if (!dir) return;
+    camera.yaw += dir * 1.6 * dt;
+    cameraUpdate();
+    rotateFrame = requestAnimationFrame(rotateStep);
+  }
+  function rotateKey(e, down) {
+    const key = e.key.toLowerCase();
+    if (!["q", "e"].includes(key) || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (key === "q" && state?.playerSlot) return;
+    if (down && (!ready() || $("dialog").open || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName))) return;
+    e.preventDefault();
+    rotating[key] = down;
+    if (down && !rotateFrame) {
+      rotateLast = performance.now();
+      rotateFrame = requestAnimationFrame(rotateStep);
+    }
+  }
+  window.addEventListener("keydown", (e) => rotateKey(e, true));
+  window.addEventListener("keyup", (e) => rotateKey(e, false));
+  window.addEventListener("blur", () => { rotating.q = rotating.e = false; });
   function renderSeats() {
     if (!state) return;
     for (let i = 0; i < 16; i++) {
