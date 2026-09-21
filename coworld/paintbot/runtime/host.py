@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 import wasmtime
 from oracle import MAX_ANSWER, Oracle, flatten
@@ -135,8 +136,20 @@ def run(engine):
             basic_asks = {}  # slot -> (request id, questions) awaiting an answer
             child = subprocess.Popen([engine], env=env, pass_fds=(other.fileno(),))
             other.close()
+            # Local evaluation aid: pace the bridge so a tick takes at least this long. The hosted
+            # league runs in real time; an unpaced local engine runs several times faster, which
+            # makes oracle answers land tens of ticks late instead of a handful.
+            tick_seconds = float(os.environ.get("COGAME_TICK_SECONDS", "0") or 0)
             with parent, parent.makefile("rw") as stream:
+                next_tick = time.monotonic()
                 for line in stream:
+                    if tick_seconds > 0:
+                        next_tick += tick_seconds
+                        delay = next_tick - time.monotonic()
+                        if delay > 0:
+                            time.sleep(delay)
+                        elif delay < -2 * tick_seconds:
+                            next_tick = time.monotonic()
                     w = json.loads(line)
                     commands = []
                     for slot in list(policies):

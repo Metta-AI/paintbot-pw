@@ -144,13 +144,17 @@ proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
   let sources=groups.expandBotSources(controllerKinds(Seats,playerSlot))
   for slot in 0..<Seats:
     if isPlayerIndex(playerSlot, slot): continue
-    let strings=initStringPool()
+    # Oracle drafts are text-heavy: four times the default handle count, same 64 KiB arena.
+    var stringLimits=defaultStringLimits()
+    stringLimits.maxStrings=1024
+    let strings=initStringPool(stringLimits)
     let h=host(slot,strings)
     let p=when defined(coworld):compilePlayer(sources[slot],h,limits(),slot)
       else:compile(sources[slot],h,limits())
     strings.bindProgram(p)
     result[slot]=Bot(runtime:initRuntime(p,h,limits()),strings:strings)
     when defined(coworld):result[slot].output=playerPrinter(slot)
+var peakInstructions*, peakWork*, peakStrings*: array[Seats, int64] ## per-seat BASIC peaks, for PW_BASIC_PEAKS
 proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
   shouts=default(array[Seats,seq[string]])
   active=w;commands=default(array[Seats,Command])
@@ -166,7 +170,10 @@ proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
     b.strings.reset()
     try:
       for j,name in DataNames:b.runtime.setData(name,values[j])
-      discard b.runtime.run(b.output)
+      let stats = b.runtime.run(b.output)
+      peakInstructions[slot] = max(peakInstructions[slot], stats.instructions)
+      peakWork[slot] = max(peakWork[slot], stats.workUnits)
+      peakStrings[slot] = max(peakStrings[slot], b.strings.stringCount.int64)
     except BasicError as e:
       b.failed=true;commands[slot]=Command()
       when defined(coworld):playerError(slot,e.msg)

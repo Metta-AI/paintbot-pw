@@ -224,6 +224,14 @@ bridge keeps its legacy list reply. No rules version, observation or replay form
 Covered by `tests/test_paintbot_oracle.nim` (drafting, delivery, scaling, refusal, limits) and
 three more runtime tests (flattening, the bridge round, the engine environment).
 
+### Evaluation aids and a larger string pool
+
+A BASIC oracle draft is text-heavy: a realistic one (state sentences plus nine questions with
+criteria) peaks near 250 string handles, the old per-decision limit. The pool now holds 1,024
+handles (arena unchanged at 64 KiB). `COGAME_TICK_SECONDS` paces the host bridge for local
+real-time evaluation and `PW_BASIC_PEAKS=1` prints per-seat BASIC peaks; both are off by default
+and neither changes rules, observations or replays.
+
 ## Stronger BASIC baseline
 
 `coworld/paintbot/players/base.bas` and `examples/paintbot/players/base.bas` (now identical) were

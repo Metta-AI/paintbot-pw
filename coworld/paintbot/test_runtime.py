@@ -483,6 +483,54 @@ class OracleTests(unittest.TestCase):
                 [{"slot": 5, "id": 1, "status": 1, "answers": {"q": {"value": 250, "confidence": -1, "probabilities": {}}}}],
             )
 
+    def test_tick_pacing_holds_the_bridge_to_real_time(self):
+        """COGAME_TICK_SECONDS makes each bridge tick take at least that long (local evaluation aid)."""
+        import time
+
+        import host
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            good = root / "good"
+            good_data = b"idle = 1\n"
+            good.write_bytes(good_data)
+            seats = [
+                dict(
+                    slot=i,
+                    file_uri=good.as_uri(),
+                    size_bytes=len(good_data),
+                    content_hash="sha256:" + hashlib.sha256(good_data).hexdigest(),
+                    log_uri=(root / f"{i}.log").as_uri(),
+                )
+                for i in range(16)
+            ]
+            doc = root / "seats.json"
+            doc.write_text(
+                json.dumps(
+                    dict(schema="coworld-player-seats/1", seats=seats, player_status_uri=(root / "status").as_uri())
+                )
+            )
+            engine = root / "engine"
+            engine.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, os, socket\n"
+                "s = socket.socket(fileno=int(os.environ['PW_POLICY_FD']))\n"
+                "f = s.makefile('rw')\n"
+                "for tick in range(8):\n"
+                "    f.write(json.dumps({'tick': tick, 'oracle': [], 'cogs': []}) + '\\n'); f.flush()\n"
+                "    f.readline()\n"
+            )
+            engine.chmod(0o755)
+            with patch.dict(
+                os.environ,
+                COGAME_PLAYER_SEATS_URI=doc.as_uri(),
+                COGAME_PLAYER_FAILURE_URI=(root / "failure.json").as_uri(),
+                COGAME_TICK_SECONDS="0.05",
+            ):
+                started = time.monotonic()
+                self.assertEqual(host.run(str(engine)), 0)
+                self.assertGreaterEqual(time.monotonic() - started, 0.35)
+
     def test_guest_cannot_pick_the_endpoint_or_send_junk(self):
         from oracle import Oracle
 
