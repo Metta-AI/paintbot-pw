@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -13,6 +14,10 @@ p.add_argument("--policy", action="append", default=[])
 p.add_argument("--ticks", type=int, default=14400)
 p.add_argument("--output", type=Path, required=True)
 p.add_argument("--port", type=int, default=8088)
+p.add_argument("--seed", type=int, default=2026)
+p.add_argument("--engine", type=Path)
+p.add_argument("--timeout", type=float, default=600)
+p.add_argument("--drain-seconds", type=float, default=0)
 a = p.parse_args()
 root = Path(__file__).resolve().parents[2]
 out = a.output.resolve()
@@ -27,32 +32,32 @@ for i, file in enumerate(policies):
     f = Path(file).resolve()
     data = f.read_bytes()
     seats.append(
-        dict(
-            slot=i,
-            file_uri=f.as_uri(),
-            content_hash="sha256:" + hashlib.sha256(data).hexdigest(),
-            size_bytes=len(data),
-            log_uri=(out / f"player-{i}.log").as_uri(),
-            artifact_uri=(out / f"player-{i}.zip").as_uri(),
-        )
+        {
+            "slot": i,
+            "file_uri": f.as_uri(),
+            "content_hash": "sha256:" + hashlib.sha256(data).hexdigest(),
+            "size_bytes": len(data),
+            "log_uri": (out / f"player-{i}.log").as_uri(),
+            "artifact_uri": (out / f"player-{i}.zip").as_uri(),
+        }
     )
 (out / "seats.json").write_text(
     json.dumps(
-        dict(
-            schema="coworld-player-seats/1",
-            seats=seats,
-            player_status_uri=(out / "status.json").as_uri(),
-        )
+        {
+            "schema": "coworld-player-seats/1",
+            "seats": seats,
+            "player_status_uri": (out / "status.json").as_uri(),
+        }
     )
 )
 (out / "config.json").write_text(
     json.dumps(
-        dict(
-            players=[dict(name=f"Player {i}") for i in range(16)],
-            tokens=[str(i) for i in range(16)],
-            seed=2026,
-            max_ticks=a.ticks,
-        )
+        {
+            "players": [{"name": f"Player {i}"} for i in range(16)],
+            "tokens": [str(i) for i in range(16)],
+            "seed": a.seed,
+            "max_ticks": a.ticks,
+        }
     )
 )
 env = dict(
@@ -67,10 +72,10 @@ env = dict(
 with (out / "game.log").open("w") as log:
     child = subprocess.Popen(
         [
-            os.sys.executable,
+            sys.executable,
             str(root / "coworld/paintbot/runtime/host.py"),
             "--engine",
-            str(root / "tmp/paintbot-coworld"),
+            str(a.engine.resolve() if a.engine else root / "tmp/paintbot-coworld"),
         ],
         env=env,
         stdout=log,
@@ -78,13 +83,14 @@ with (out / "game.log").open("w") as log:
         start_new_session=True,
     )
     try:
-        deadline = time.monotonic() + 600
+        deadline = time.monotonic() + a.timeout
         while not (out / "results.json").exists():
             if child.poll() is not None:
                 raise RuntimeError((out / "game.log").read_text())
             if time.monotonic() > deadline:
-                raise TimeoutError("Episode exceeded ten minutes")
+                raise TimeoutError("Episode exceeded configured timeout")
             time.sleep(0.2)
+        time.sleep(a.drain_seconds)
         print((out / "results.json").read_text())
     finally:
         import signal
