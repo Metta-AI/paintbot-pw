@@ -67,23 +67,25 @@ class TerritoryBaselineTests(unittest.TestCase):
 
         def step():
             w["tick"] += 1
-            command = view.command(w, policy.step(view.frame(w)))
-            p = w["cogs"][slot]["pos"]
-            return command, (
-                command["goal"]["x"] - p["x"],
-                command["goal"]["z"] - p["z"],
-            )
+            return view.command(w, policy.step(view.frame(w)))
 
         def integrate(ticks):
-            # Only the d-pad moves the cog, in open space, at the engine's pace.
+            # Walk toward the ordered goal in open space at the engine's pace; the policy
+            # gives direct orders (walkTo), so the goal is a destination, not a direction.
             for _ in range(ticks):
-                _, (dx, dz) = step()
+                command = step()
+                self.assertFalse(command["direct"], "orders must use the engine's pathing")
                 p = w["cogs"][slot]["pos"]
-                p["x"] += (dx > 0) * 18 - (dx < 0) * 18
-                p["z"] += (dz > 0) * 18 - (dz < 0) * 18
+                dx = command["goal"]["x"] - p["x"]
+                dz = command["goal"]["z"] - p["z"]
+                length = (dx * dx + dz * dz) ** 0.5
+                if length > 18:
+                    dx, dz = dx * 18 / length, dz * 18 / length
+                p["x"] += int(dx)
+                p["z"] += int(dz)
 
-        def inside(heart):
-            p = w["cogs"][slot]["pos"]
+        def inside(heart, point=None):
+            p = point or w["cogs"][slot]["pos"]
             return (p["x"] - heart["x"]) ** 2 + (p["z"] - heart["z"]) ** 2 < RING**2
 
         try:
@@ -98,10 +100,14 @@ class TerritoryBaselineTests(unittest.TestCase):
                 taken = [i for i, h in enumerate(hearts) if inside(h)]
                 self.assertEqual(len(taken), 1, f"must reach a heart: {w['cogs'][slot]['pos']}")
                 first = taken[0]
-                # Remain still longer than the full three-second capture and
-                # stuck-recovery timers. Turret/fire outputs remain unrestricted.
+                # Stay in the ring longer than the full three-second capture and
+                # stuck-recovery timers: every order keeps the cog inside it.
                 for _ in range(90):
-                    self.assertEqual(step()[1], (0, 0))
+                    command = step()
+                    self.assertTrue(inside(hearts[first]))
+                    goal = dict(x=command["goal"]["x"], z=command["goal"]["z"])
+                    self.assertTrue(inside(hearts[first], goal), f"walked off: {goal}")
+                    integrate(1)
                 w["controlHearts"][first]["owner"] = team
                 integrate(600)
                 self.assertTrue(

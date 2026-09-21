@@ -11,6 +11,17 @@ import struct
 COLORS = ("red", "blue")
 SCALE = 5
 
+# Direct-order reply packet (0x85): the same actuators a BASIC seat has. Flags, then goal
+# x/z and aim x/z as little-endian int32 world centimetres. WALK is walkTo (engine pathing),
+# AIM is lookAt, AIM+SHOOT is shootAt, CHARGE holds the grenade, SNEAK is sneak(1). An order
+# lasts one tick, like a BASIC decision; a tick without one keeps the previous goal and
+# orders nothing new. A later button-mask packet returns the seat to the gamepad protocol.
+DIRECT_WALK = 1
+DIRECT_SHOOT = 2
+DIRECT_CHARGE = 4
+DIRECT_SNEAK = 8
+DIRECT_AIM = 16
+
 
 def compress_walkability(raw):
     """Snappy RGBA runs keep large semantic maps below the 16 MiB ABI limit."""
@@ -335,6 +346,7 @@ class SpriteView:
         self.slot = slot
         self.angle = 0 if slot % 2 == 0 else 128
         self.mask = 0
+        self.order = None  # (flags, goal x, goal z, aim x, aim z) while in direct-order mode
         self.initial = True
 
     def frame(self, w):
@@ -570,9 +582,33 @@ class SpriteView:
         return bytes(out)
 
     def command(self, w, replies):
+        fresh = False
         for reply in replies:
             if reply[0] == 0x84:
                 self.mask = reply[1]
+                self.order = None
+            elif reply[0] == 0x85:
+                self.order = struct.unpack_from("<Biiii", reply, 1)
+                fresh = True
+        if self.order is not None:
+            flags, gx, gz, ax, az = self.order
+            if not fresh:
+                flags = 0  # no order this tick: like a BASIC program that calls nothing
+            p = w["cogs"][self.slot]["pos"]
+            if flags & DIRECT_AIM:
+                # Keep the gamepad turret and the `own aim` marker on the real aim.
+                self.angle = round(
+                    math.atan2(-(az - p["z"]), ax - p["x"]) * 128 / math.pi
+                ) % 256
+            return {
+                "walk": bool(flags & DIRECT_WALK),
+                "direct": False,
+                "shoot": bool(flags & DIRECT_SHOOT),
+                "chargeGrenade": bool(flags & DIRECT_CHARGE),
+                "sneak": w.get("rulesVersion", 1) >= 26 and bool(flags & DIRECT_SNEAK),
+                "goal": {"x": gx, "z": gz},
+                "aim": {"x": ax, "z": az} if flags & DIRECT_AIM else {"x": 0, "z": 0},
+            }
         # Sprite aim buttons: B turns clockwise; Select counter-clockwise.
         self.angle = (
             self.angle + (5 if self.mask & 64 else 0) - (5 if self.mask & 16 else 0)

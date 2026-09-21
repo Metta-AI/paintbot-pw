@@ -14,6 +14,7 @@ import wasmtime
 MAX_FILE = 100 * 1024 * 1024
 MAX_FRAME = 16 * 1024 * 1024
 MAX_REPLY = 64 * 1024
+DIRECT_ORDER_SIZE = 18  # 0x85, flags, goal x/z, aim x/z as little-endian int32 world cm
 
 
 def local_path(uri: str) -> Path:
@@ -113,9 +114,12 @@ def decode_replies(data: bytes) -> list[bytes]:
         if size == 0 or offset + size > len(data):
             raise ValueError("truncated or empty reply packet")
         reply = data[offset : offset + size]
-        # A policy may control its actuator mask and shout, never join or claim another seat.
+        # A policy may control its actuator mask, give a direct order (see sprite.py) and
+        # shout, never join or claim another seat.
         if not (
-            (reply[0] == 0x84 and size == 2) or (reply[0] == 0x81 and size <= 1024)
+            (reply[0] == 0x84 and size == 2)
+            or (reply[0] == 0x85 and size == DIRECT_ORDER_SIZE)
+            or (reply[0] == 0x81 and size <= 1024)
         ):
             raise ValueError("unsupported player reply packet")
         if reply[0] == 0x81 and (

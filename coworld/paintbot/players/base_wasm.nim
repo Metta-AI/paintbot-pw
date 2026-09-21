@@ -1,53 +1,32 @@
 ## Paintbot PW WASM baseline: `players/base.bas` ported to the sprite protocol.
 ##
-## The policy is the same one the BASIC file runs, section for section and with the same
-## constants (world centimetres): a three-second progress timer, a fog-gated threat scan,
-## two stateless squads of four that agree on a heart without talking, ten-second pickup
-## memory, refusing a fight we are visibly losing, staggered callouts, short random legs
-## across the line to the threat while in contact, a gun lead of the full windup minus our
-## own drift, distance-matched grenade charges, and a quiet approach toward sounds.
+## The policy is the one the BASIC file runs, section for section and with the same constants
+## (world centimetres): a three-second progress timer, a fog-gated threat scan, two stateless
+## squads of four that agree on a heart without talking, ten-second pickup memory, refusing a
+## fight we are visibly losing, staggered callouts, short random legs across the line to the
+## threat while in contact, a gun lead of the full windup minus our own drift, distance-matched
+## grenade charges, and a quiet approach toward sounds.
 ##
-## Three things the sprite interface changes, and nothing else:
-## - Movement is an 8-way d-pad and the engine walks a WASM cog straight at the requested
-##   point, so this file carries its own navigation: a cost field over the walkability map
-##   (40 cm cells, no corner cutting) followed with a line-of-sight lookahead waypoint.
-## - `lookAt`/`shootAt` become a turret that turns 5 brads (7 degrees) per tick. The aim is
-##   laid on the lead point and the shot is ordered when the aim has settled on it at the
-##   start of a leg that lasts the whole windup. The gun-ready icon replaces BASIC's
-##   cooldown estimate. Idle scanning is a continuous sweep instead of four instant looks.
-## - Sprite pixels are five centimetres; the red endzone sprite fixes the world origin.
-## `carrying`/`thief` branches of the BASIC file are dead in territory play and not ported.
-##
-## Labels are the ones `coworld/paintbot/runtime/sprite.py` emits.
-import std/[math, strutils, heapqueue]
+## Actions go out as direct orders (reply packet 0x85, see runtime/sprite.py): the same
+## `walkTo`/`lookAt`/`shootAt`/`chargeGrenade`/`sneak` a BASIC seat has, so the engine paths and
+## aims for this cog exactly as it does for the BASIC one. Two things differ: the frame's gun-ready
+## icon replaces BASIC's cooldown estimate, and the `carrying`/`thief` branches of the BASIC file,
+## dead in territory play, are not ported. Sprite pixels are five centimetres; the red endzone
+## sprite fixes the world origin. Labels are the ones `coworld/paintbot/runtime/sprite.py` emits.
+import std/[math, strutils]
 import baseline/protocols
 
 const
   Scale = 5                    # world centimetres per sprite pixel
-  BtnUp = 1'u8
-  BtnDown = 2'u8
-  BtnLeft = 4'u8
-  BtnRight = 8'u8
-  BtnSelect = 16'u8
-  BtnA = 32'u8
-  BtnB = 64'u8
-  BtnC = 128'u8
-  AimBrads = 256
-  AimRate = 5                  # brads a held rotate button turns per tick
-  Deadband = 2                 # the turret cannot settle tighter than +-AimRate/2
-  FireMiss = 150               # cm of perpendicular miss at range the shot still tolerates:
-                               # a dodging target moves its impact point by more than this
-                               # during the windup, so the turret's last 2 brads are not
-                               # worth waiting for
-  NavCell = 8                  # sprite pixels per nav cell (40 cm)
-  RepathTicks = 10
-  Lookahead = 6
-  StepCost = 5'i32
-  DiagCost = 7'i32
   MaxHearts = 16
   MaxPickups = 32
   HomeX = [960, 5440]
   HomeY = 2000
+  OrderWalk = 1'u8
+  OrderShoot = 2'u8
+  OrderCharge = 4'u8
+  OrderSneak = 8'u8
+  OrderAim = 16'u8
 
 type
   Pt = object
@@ -76,7 +55,6 @@ type
     me: Pt
     myHp, armorHp: int
     hasGrenade, hasSpray, gunReady: bool
-    aim: int                   # own aim in brads, -1 when the marker is absent
     cogs: array[16, Cog]
     unknown: seq[Cog]          # visible bodies with no seat marker attached
     hearts: seq[Heart]
@@ -90,18 +68,15 @@ type
     kind: int
     tick: int
 
+  Order = object               # one tick's BASIC-style actions
+    walk, shoot, charge, sneak, aimSet: bool
+    goal, aim: Pt
+
   Bot = ref object
     slot, team: int
     tick: int
     originX, originY: int      # sprite pixel of world (0, 0)
     originKnown: bool
-    # navigation
-    navBuilt: bool
-    gridW, gridH: int
-    cellWalk: seq[bool]
-    navDist: seq[int32]
-    navGoal: int
-    navStamp: int
     # BASIC state, same names
     started: bool
     rngState: int
@@ -115,13 +90,7 @@ type
     lastSeen: array[16, int]
     idleCapture: int
     legX, legY, legTicks, stalled, pathUntil: int
-    # turret and actuators
-    estAim: int
-    rotSign: int
-    firedLast: bool
-    nadeCharge: int
-    stuckTicks, jinkUntil: int
-    jinkBits: uint8
+    grenadeCharge: int         # ticks the grenade has been held (the engine counts the same)
     wasDead: bool
 
 # ---- arithmetic -------------------------------------------------------------------------
@@ -133,31 +102,6 @@ proc d2(a, b: Pt): int =
   let dx = a.x - b.x
   let dy = a.y - b.y
   dx * dx + dy * dy
-
-proc bradsOf(dx, dy: int): int =
-  ## Aim angle toward (dx, dy): 0 east, 64 north (map y grows downward).
-  if dx == 0 and dy == 0:
-    return 0
-  (int(round(arctan2(-float(dy), float(dx)) * 128.0 / PI)) + AimBrads) mod AimBrads
-
-proc bradsErr(desired, current: int): int =
-  ## Signed shortest arc from current to desired; positive = counter-clockwise (B).
-  (desired - current + AimBrads + 128) mod AimBrads - 128
-
-proc octantBits(dx, dy: int): uint8 =
-  ## D-pad bits for the 8-way direction nearest to (dx, dy).
-  if dx == 0 and dy == 0:
-    return 0
-  let octant = (int(round(arctan2(float(dy), float(dx)) / (PI / 4))) + 8) mod 8
-  case octant
-  of 0: BtnRight
-  of 1: BtnRight or BtnDown
-  of 2: BtnDown
-  of 3: BtnDown or BtnLeft
-  of 4: BtnLeft
-  of 5: BtnLeft or BtnUp
-  of 6: BtnUp
-  else: BtnUp or BtnRight
 
 proc nextRandom(bot: Bot) =
   bot.rngState = (bot.rngState * 75 + 74) mod 65537
@@ -174,7 +118,6 @@ proc parseFrame(bot: Bot, client: ProtocolClient): Frame =
     seats: seq[tuple[pos: Pt, id: int]]
     hps: seq[tuple[pos: Pt, hp, shield: int]]
     marks: seq[tuple[pos: Pt, label: string]]   # per-cog items: grenade, spray, ready
-  result.aim = -1
   if not bot.originKnown:
     for o in client.spriteObjects():
       if o.label.startsWith("endzone red rect "):
@@ -216,11 +159,6 @@ proc parseFrame(bot: Bot, client: ProtocolClient): Frame =
     elif label == "grenade carried" or label == "spray can carried" or
         label == "fire icon" or label == "fire icon cooldown":
       marks.add((p, label))
-    elif label.startsWith("own aim "):
-      try:
-        result.aim = parseInt(label[8 .. ^1])
-      except ValueError:
-        discard
     elif label.startsWith("control heart "):
       let parts = label.splitWhitespace()
       if parts.len == 5:
@@ -300,145 +238,6 @@ proc parseFrame(bot: Bot, client: ProtocolClient): Frame =
     else:
       result.unknown.add(Cog(seen: true, pos: b.pos, hp: hp, team: b.team))
 
-# ---- navigation -------------------------------------------------------------------------
-
-proc pixelWalkable(client: ProtocolClient, x, y: int): bool =
-  if x < 0 or y < 0 or x >= client.walkabilityWidth or y >= client.walkabilityHeight:
-    return false
-  client.walkabilityMask[y * client.walkabilityWidth + x]
-
-proc buildNav(bot: Bot, client: ProtocolClient) =
-  bot.gridW = (client.walkabilityWidth + NavCell - 1) div NavCell
-  bot.gridH = (client.walkabilityHeight + NavCell - 1) div NavCell
-  bot.cellWalk = newSeq[bool](bot.gridW * bot.gridH)
-  for cy in 0 ..< bot.gridH:
-    for cx in 0 ..< bot.gridW:
-      let x = cx * NavCell + NavCell div 2
-      let y = cy * NavCell + NavCell div 2
-      bot.cellWalk[cy * bot.gridW + cx] =
-        client.pixelWalkable(x, y) and client.pixelWalkable(x + 3, y) and
-        client.pixelWalkable(x - 3, y) and client.pixelWalkable(x, y + 3) and
-        client.pixelWalkable(x, y - 3)
-  bot.navDist = newSeq[int32](bot.gridW * bot.gridH)
-  bot.navGoal = -1
-  bot.navBuilt = true
-
-proc cellOf(bot: Bot, p: Pt): int =
-  let cx = clamp((p.x div Scale + bot.originX) div NavCell, 0, bot.gridW - 1)
-  let cy = clamp((p.y div Scale + bot.originY) div NavCell, 0, bot.gridH - 1)
-  cy * bot.gridW + cx
-
-proc cellCenter(bot: Bot, cell: int): Pt =
-  Pt(x: ((cell mod bot.gridW) * NavCell + NavCell div 2 - bot.originX) * Scale,
-     y: ((cell div bot.gridW) * NavCell + NavCell div 2 - bot.originY) * Scale)
-
-proc nearestOpenCell(bot: Bot, cell: int): int =
-  if bot.cellWalk[cell]:
-    return cell
-  let cx = cell mod bot.gridW
-  let cy = cell div bot.gridW
-  for r in 1 .. 12:
-    for dy in -r .. r:
-      for dx in -r .. r:
-        if max(abs(dx), abs(dy)) != r:
-          continue
-        let nx = cx + dx
-        let ny = cy + dy
-        if nx < 0 or ny < 0 or nx >= bot.gridW or ny >= bot.gridH:
-          continue
-        if bot.cellWalk[ny * bot.gridW + nx]:
-          return ny * bot.gridW + nx
-  cell
-
-const Neighbours = [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
-
-proc computeField(bot: Bot, goal, start: int) =
-  ## Dijkstra from the goal until the start cell is settled; every cell with a smaller
-  ## distance than the start is final by then, which is all the descent below reads.
-  for i in 0 ..< bot.navDist.len:
-    bot.navDist[i] = -1
-  var heap = initHeapQueue[(int32, int32)]()
-  bot.navDist[goal] = 0
-  heap.push((0'i32, int32(goal)))
-  while heap.len > 0:
-    let (dcur, cur32) = heap.pop()
-    let cur = int(cur32)
-    if dcur > bot.navDist[cur]:
-      continue
-    if cur == start:
-      return
-    let cx = cur mod bot.gridW
-    let cy = cur div bot.gridW
-    for (dx, dy) in Neighbours:
-      let nx = cx + dx
-      let ny = cy + dy
-      if nx < 0 or ny < 0 or nx >= bot.gridW or ny >= bot.gridH:
-        continue
-      let nc = ny * bot.gridW + nx
-      if not bot.cellWalk[nc]:
-        continue
-      if dx != 0 and dy != 0 and
-          not (bot.cellWalk[cy * bot.gridW + nx] and bot.cellWalk[ny * bot.gridW + cx]):
-        continue
-      let nd = dcur + (if dx != 0 and dy != 0: DiagCost else: StepCost)
-      if bot.navDist[nc] < 0 or nd < bot.navDist[nc]:
-        bot.navDist[nc] = nd
-        heap.push((nd, int32(nc)))
-
-proc gridRayClear(bot: Bot, a, b: Pt): bool =
-  let steps = isqrt(d2(a, b)) div 20 + 1
-  for s in 0 .. steps:
-    let p = Pt(x: a.x + (b.x - a.x) * s div steps, y: a.y + (b.y - a.y) * s div steps)
-    if not bot.cellWalk[bot.cellOf(p)]:
-      return false
-  true
-
-proc navSteer(bot: Bot, me, target: Pt): Pt =
-  ## Direction to move: along the cost field toward `target`, beelining without a grid.
-  if not bot.navBuilt:
-    return Pt(x: target.x - me.x, y: target.y - me.y)
-  let goal = bot.nearestOpenCell(bot.cellOf(target))
-  let start = bot.nearestOpenCell(bot.cellOf(me))
-  if goal != bot.navGoal or bot.tick - bot.navStamp >= RepathTicks:
-    bot.computeField(goal, start)
-    bot.navGoal = goal
-    bot.navStamp = bot.tick
-  if bot.navDist[start] <= 0:
-    # At the goal, or no path to it (beeline until the next refresh).
-    return Pt(x: target.x - me.x, y: target.y - me.y)
-  var node = start
-  var waypoint = bot.cellCenter(start)
-  var haveClear = false
-  for _ in 0 ..< Lookahead:
-    var next = -1
-    var bestD = bot.navDist[node]
-    let cx = node mod bot.gridW
-    let cy = node div bot.gridW
-    for (dx, dy) in Neighbours:
-      let nx = cx + dx
-      let ny = cy + dy
-      if nx < 0 or ny < 0 or nx >= bot.gridW or ny >= bot.gridH:
-        continue
-      let nc = ny * bot.gridW + nx
-      if bot.navDist[nc] < 0 or bot.navDist[nc] >= bestD:
-        continue
-      if dx != 0 and dy != 0 and
-          not (bot.cellWalk[cy * bot.gridW + nx] and bot.cellWalk[ny * bot.gridW + cx]):
-        continue
-      bestD = bot.navDist[nc]
-      next = nc
-    if next < 0:
-      break
-    node = next
-    if bot.gridRayClear(me, bot.cellCenter(node)):
-      waypoint = bot.cellCenter(node)
-      haveClear = true
-    else:
-      break
-  if not haveClear:
-    waypoint = bot.cellCenter(node)
-  Pt(x: waypoint.x - me.x, y: waypoint.y - me.y)
-
 # ---- the policy ---------------------------------------------------------------------------
 
 proc planLeg(bot: Bot, minTicks, maxTicks: int, threat, goal, self: Pt, holding: bool) =
@@ -471,7 +270,7 @@ proc planLeg(bot: Bot, minTicks, maxTicks: int, threat, goal, self: Pt, holding:
     bot.legX = bot.legX * 28 div root
     bot.legY = bot.legY * 28 div root
 
-proc decide(bot: Bot, f: Frame, shout: var string): uint8 =
+proc decide(bot: Bot, f: Frame, shout: var string): Order =
   let selfId = bot.slot
   let selfTeam = bot.team
   let me = f.me
@@ -488,8 +287,6 @@ proc decide(bot: Bot, f: Frame, shout: var string): uint8 =
     # A respawn teleports us; that is not a velocity.
     myVX = 0
     myVY = 0
-  if f.aim >= 0:
-    bot.estAim = f.aim
   var trenchId = -1
   for i, t in f.trenches:
     if me.x >= t.x0 and me.x < t.x1 and me.y >= t.y0 and me.y < t.y1:
@@ -540,7 +337,7 @@ proc decide(bot: Bot, f: Frame, shout: var string): uint8 =
   for c in f.unknown:
     consider(16, c)
 
-  # Where we want to be. Later rules override earlier ones; one move is issued at the end.
+  # Where we want to be. Later rules override earlier ones; one walkTo is issued at the end.
   var goal = Pt(x: HomeX[1 - selfTeam], y: HomeY)
   var holding = false
 
@@ -603,6 +400,7 @@ proc decide(bot: Bot, f: Frame, shout: var string): uint8 =
       let dy = goal.y - me.y
       if dx * dx + dy * dy < 8100:
         holding = true
+  bot.objective = objective
 
   # Remember seen supplies for ten seconds and equip when it is safe to.
   for p in f.pickups:
@@ -660,19 +458,20 @@ proc decide(bot: Bot, f: Frame, shout: var string): uint8 =
       goal = f.hearts[away].pos
       holding = false
 
-  bot.objective = objective
-
-  # Facing with nothing to shoot: look toward the goal, sweep while holding, then turn to
-  # speech and sound.
-  var desiredAim = -1
-  var sweep = false
+  # Facing with nothing to shoot: sweep, then turn to speech and sound.
   if best < 0:
+    let scan = (worldTick div 24 + selfId) mod 4
     var look = goal
-    if holding:
-      sweep = true
+    if holding or scan == 1:
+      look = Pt(x: me.x + 2000, y: me.y)
+      if scan == 1:
+        look = Pt(x: me.x, y: me.y + 2000)
+      if scan == 2:
+        look.x = me.x - 2000
+      if scan == 3:
+        look = Pt(x: me.x, y: me.y - 2000)
     if f.heard.len > 0:
       look = f.heard[0]
-      sweep = false
     if f.sounds.len > 0:
       var soundBest = -1
       var soundCost = high(int)
@@ -698,9 +497,8 @@ proc decide(bot: Bot, f: Frame, shout: var string): uint8 =
         if bearing == 5 or bearing == 6 or bearing == 7:
           dySound = -1000
         look = Pt(x: me.x + dxSound, y: me.y + dySound)
-        sweep = false
-    if not sweep and (look.x != me.x or look.y != me.y):
-      desiredAim = bradsOf(look.x - me.x, look.y - me.y)
+    result.aimSet = true
+    result.aim = look
 
   if worldTick mod 360 == selfId * 21:
     if best >= 0:
@@ -712,63 +510,42 @@ proc decide(bot: Bot, f: Frame, shout: var string): uint8 =
 
   # Footwork. In contact, move in short random legs across the line to the threat. A shot is
   # only ordered at the start of a leg that lasts the whole windup, so our own drift is known.
-  var moveDir = Pt(x: 0, y: 0)
-  var holdStill = false
+  var move = goal
   let inContact = best >= 0 and trenchId < 0
-  var legFresh = false
-  var wantShot = false
   if inContact:
     if bot.legTicks > 0 and myVX * myVX + myVY * myVY < 64:
       bot.stalled += 1
     else:
       bot.stalled = 0
     if bot.stalled >= 3:
-      # Blocked for three ticks: let the navigation field take over for a second.
+      # Blocked for three ticks: let the engine's pathing take over for a second.
       bot.pathUntil = worldTick + 24
       bot.stalled = 0
       bot.legTicks = 0
-    wantShot = f.gunReady and (not f.hasSpray or bestCost < 640000)
+    let wantShot = f.gunReady and (not f.hasSpray or bestCost < 640000)
     if worldTick >= bot.pathUntil:
-      if bot.legTicks <= 0:
+      if bot.legTicks <= 0 or (wantShot and bot.legTicks < 6):
         if wantShot:
           bot.planLeg(6, 9, bestPos, goal, me, holding)
         else:
           bot.planLeg(3, 6, bestPos, goal, me, holding)
-      elif wantShot and bot.legTicks < 6:
-        # BASIC re-plans here every tick until it fires. With a turret that must settle on
-        # the lead point first, a fresh leg each tick would move that point by up to 280 cm
-        # every tick, so extend the current leg instead and keep its direction.
-        bot.nextRandom()
-        bot.legTicks = 6 + bot.rngState mod 4
-      legFresh = bot.legTicks >= 6
       bot.legTicks -= 1
-      moveDir = Pt(x: bot.legX, y: bot.legY)
+      move = Pt(x: me.x + bot.legX * 4, y: me.y + bot.legY * 4)
       if holding:
         # Stay inside the ring: turn back toward its centre when the leg would leave it.
         let dx = me.x + bot.legX * 2 - goal.x
         let dy = me.y + bot.legY * 2 - goal.y
         if dx * dx + dy * dy > 9000:
-          moveDir = Pt(x: goal.x - me.x, y: goal.y - me.y)
+          move = goal
           bot.legTicks = 0
-          legFresh = false
-    else:
-      moveDir = bot.navSteer(me, goal)
   else:
     bot.legTicks = 0
     bot.stalled = 0
-    if holding or (objective >= 0 and d2(me, f.hearts[objective].pos) < 16900 and
-        bot.stuckTicks >= 6):
-      # Inside the ring (or blocked by a squadmate inside the capture radius): stand.
-      holdStill = true
-    else:
-      moveDir = bot.navSteer(me, goal)
-      if d2(me, goal) < 400:
-        holdStill = true
+  result.walk = true
+  result.goal = move
 
-  # Gun: the ray leaves after the windup from wherever we then stand, along the direction
-  # locked at the order. Lay the aim where they will be, minus our own drift, and fire when
-  # the turret has settled there at the start of a leg that outlasts the windup.
-  var wantFire = false
+  # Gun: the ray leaves six moves after the order, from wherever we then stand, along the
+  # direction locked one move from now. Aim where they will be, minus our own drift.
   if best >= 0:
     var tx = bestPos.x
     var ty = bestPos.y
@@ -797,28 +574,18 @@ proc decide(bot: Bot, f: Frame, shout: var string): uint8 =
             across = 0 - across
           if along > 0 and along < reach and across < 95:
             clear = false
-    desiredAim = bradsOf(sx, sy)
-    let err = abs(bradsErr(desiredAim, bot.estAim))
-    let perpMiss = int(float(reach) * sin(float(err) * PI / 128.0))
-    let settled = err <= Deadband and perpMiss <= FireMiss
-    if (not f.hasSpray or bestCost < 640000) and clear and f.gunReady and settled and
-        (not inContact or worldTick < bot.pathUntil or legFresh):
-      wantFire = true
-    when defined(aimTrace):
-      # Diagnostic build: publish the fire gate as chat on every gun-ready tick.
-      if f.gunReady:
-        shout = "T err=" & $err & " miss=" & $perpMiss & " reach=" & $reach & " clear=" &
-          $int(clear) & " ic=" & $int(inContact) & " leg=" & $bot.legTicks & " fresh=" &
-          $int(legFresh) & " path=" & $int(worldTick < bot.pathUntil) & " fire=" & $int(wantFire)
+    result.aimSet = true
+    result.aim = Pt(x: tx, y: ty)
+    if (not f.hasSpray or bestCost < 640000) and clear and f.gunReady:
+      result.shoot = true
 
   for i in 0 ..< 16:
     if f.cogs[i].seen:
       bot.oldPos[i] = f.cogs[i].pos
       bot.lastSeen[i] = worldTick
 
-  # Grenade: match the charge to the distance, never onto a visible teammate. The throw
-  # leaves along the current aim, so the turret lays on the target before charging.
-  var nadeC = false
+  # Grenade: match the charge to the distance, never onto a visible teammate.
+  var charging = false
   if f.hasGrenade and best >= 0:
     let nx = bestPos.x
     let ny = bestPos.y
@@ -832,113 +599,68 @@ proc decide(bot: Bot, f: Frame, shout: var string): uint8 =
       var need = (isqrt(dd) - 150) * 24 div 1130 + 1
       if need < 1:
         need = 1
-      desiredAim = bradsOf(nx - me.x, ny - me.y)
-      wantFire = false
-      let err = abs(bradsErr(desiredAim, bot.estAim))
-      if bot.nadeCharge > 0 or err <= Deadband + 2:
-        if bot.nadeCharge < need:
-          nadeC = true
-          bot.nadeCharge += 1
-        else:
-          bot.nadeCharge = 0          # release this tick = the throw
-          shout = "Grenade out!"
-  if not nadeC:
-    bot.nadeCharge = 0
-
-  # Stuck outside of contact: burst in a random direction and force a repath.
-  if not holdStill and myVX * myVX + myVY * myVY < 4:
-    bot.stuckTicks += 1
-  else:
-    bot.stuckTicks = 0
-  var moveMask = (if holdStill: 0'u8 else: octantBits(moveDir.x, moveDir.y))
-  if bot.stuckTicks > 20 and best < 0:
-    bot.stuckTicks = 0
-    bot.jinkUntil = worldTick + 10
-    bot.nextRandom()
-    bot.jinkBits = octantBits(bot.rngState mod 7 - 3, (bot.rngState div 7) mod 7 - 3)
-    if bot.jinkBits == 0:
-      bot.jinkBits = BtnUp
-    bot.navGoal = -1
-  if worldTick < bot.jinkUntil and best < 0:
-    moveMask = bot.jinkBits
+      result.aimSet = true
+      result.aim = Pt(x: nx, y: ny)
+      if bot.grenadeCharge < need:
+        result.charge = true
+        charging = true
+        bot.grenadeCharge += 1
+      else:
+        shout = "Grenade out!"
+  if not charging:
+    bot.grenadeCharge = 0
 
   # Quiet approach to the objective when nothing is in sight but something was heard.
-  var sneak = false
   if best < 0 and f.sounds.len > 0 and objective >= 0:
     if d2(f.hearts[objective].pos, me) < 810000:
-      sneak = true
+      result.sneak = true
 
-  # Rotate toward the desired aim by the shortest arc; never on the tick a shot is ordered.
-  var rotBits = 0'u8
-  if wantFire:
-    discard
-  elif sweep:
-    rotBits = BtnB
-  elif desiredAim >= 0:
-    let err = bradsErr(desiredAim, bot.estAim)
-    if err > Deadband:
-      rotBits = BtnB
-    elif err < -Deadband:
-      rotBits = BtnSelect
-  var mask = moveMask or rotBits
-  if wantFire:
-    mask = mask or BtnA
-  if nadeC:
-    mask = mask or BtnC
-  if sneak and rotBits == 0 and not wantFire:
-    mask = mask or BtnB or BtnSelect
-  bot.rotSign =
-    if (mask and BtnB) != 0 and (mask and BtnSelect) != 0: 0
-    elif (mask and BtnB) != 0: 1
-    elif (mask and BtnSelect) != 0: -1
-    else: 0
-  bot.firedLast = wantFire
   bot.lastPos = me
-  mask
 
 # ---- component wrapper (the ABI shim in singlepod/baseline_wasm.nim calls these) ----------
+
+proc orderBlob(order: Order): string =
+  ## Reply packet 0x85: flags, goal x/z, aim x/z as little-endian int32 world centimetres.
+  var flags = 0'u8
+  if order.walk: flags = flags or OrderWalk
+  if order.shoot: flags = flags or OrderShoot
+  if order.charge: flags = flags or OrderCharge
+  if order.sneak: flags = flags or OrderSneak
+  if order.aimSet: flags = flags or OrderAim
+  result = newStringOfCap(18)
+  result.add(char(0x85))
+  result.add(char(flags))
+  for v in [order.goal.x, order.goal.y, order.aim.x, order.aim.y]:
+    let u = cast[uint32](int32(v))
+    for shift in [0, 8, 16, 24]:
+      result.add(char((u shr shift) and 255))
 
 type BaselineComponent* = object
   bot: Bot
   client: ProtocolClient
-  lastMask: uint8
-  hasSent: bool
 
 proc initBaselineComponent*(slot: int): BaselineComponent =
-  result.bot = Bot(slot: slot, team: slot mod 2, navGoal: -1, objective: -1)
+  result.bot = Bot(slot: slot, team: slot mod 2, objective: -1)
   result.client = initProtocolClient()
 
 proc onMessage*(component: var BaselineComponent, message: string): seq[string] =
-  ## Applies one game frame and returns the changed input mask and any shout.
+  ## Applies one game frame and returns this tick's order and any shout.
   component.client.applyFrame(message)
   let bot = component.bot
   bot.tick += component.client.frameAdvance
-  if bot.rotSign != 0 and component.client.frameAdvance > 1:
-    bot.estAim = floorMod(bot.estAim + bot.rotSign * AimRate * (component.client.frameAdvance - 1),
-                          AimBrads)
   if not component.client.mapCameraReady:
     return
   let frame = bot.parseFrame(component.client)
-  if not bot.navBuilt and component.client.walkabilityReady and bot.originKnown:
-    bot.buildNav(component.client)
-  var mask = 0'u8
-  var shout = ""
-  if frame.alive:
-    if bot.wasDead:
-      bot.wasDead = false
-      bot.legTicks = 0
-      bot.nadeCharge = 0
-      bot.navGoal = -1
-      bot.stuckTicks = 0
-      bot.lastPos = frame.me
-    mask = bot.decide(frame, shout)
-  else:
+  if not frame.alive:
     bot.wasDead = true
-    bot.rotSign = 0
-    bot.firedLast = false
-  if not component.hasSent or mask != component.lastMask:
-    result.add(inputBlob(mask))
-    component.lastMask = mask
-    component.hasSent = true
+    return
+  if bot.wasDead:
+    bot.wasDead = false
+    bot.legTicks = 0
+    bot.grenadeCharge = 0
+    bot.lastPos = frame.me
+  var shout = ""
+  let order = bot.decide(frame, shout)
+  result.add(orderBlob(order))
   if shout.len > 0:
     result.add(chatBlob(shout))
