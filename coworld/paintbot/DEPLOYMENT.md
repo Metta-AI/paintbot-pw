@@ -219,8 +219,8 @@ When `COGAME_ORACLE_URL` is unset and that variable is present, `Oracle.from_env
 `<sidecar>/v1/systemone` (the sidecar's System One route, which forwards to OpenRouter's
 `/api/v1/systemone`) with no credential and `X-Coworld-Player-Slot: <seat>`, so spend and the
 request-rate bucket are charged to the asking seat. Defaults there: model `typesafe/jev-1.13` (the
-sidecar takes canonical slugs only, so no moving `latest`), 48 ticks between asks (the sidecar
-admits 30 requests a minute per slot). `COGAME_ORACLE_MODEL`, `COGAME_ORACLE_INTERVAL` and
+sidecar takes canonical slugs only, so no moving `latest`), 24 ticks between asks (the sidecar's
+System One bucket admits 120 requests a minute per slot, four times its chat ceiling). `COGAME_ORACLE_MODEL`, `COGAME_ORACLE_INTERVAL` and
 `COGAME_ORACLE_DEADLINE` still override, and `COGAME_ORACLE=off` in the manifest's game env turns
 the advisor off for a release.
 
