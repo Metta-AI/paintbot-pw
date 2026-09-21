@@ -287,8 +287,8 @@ In hosted Softmax episodes the game pod holds no provider key, so `COGAME_ORACLE
 there. The host finds the platform's LLM sidecar at `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` and posts
 to its `/v1/systemone` route, which forwards to Jev (`typesafe/jev-1.13`) on OpenRouter. Each ask
 names the asking seat, so its cost counts against that seat's per-episode LLM spend limit for the
-league and its requests against that seat's bucket: 30 a minute, which is why the hosted interval
-between asks is 48 ticks rather than 24. A seat past either limit sees its asks fail (`-1`) until
+league and its requests against that seat's System One bucket: 120 a minute, twice what the
+24-tick interval between asks can use. A seat past either limit sees its asks fail (`-1`) until
 the limit clears; a league with a $0 limit has no advisor at all. Write the policy so that a
 failed or refused ask costs nothing: keep acting on the last answer, or on none.
 

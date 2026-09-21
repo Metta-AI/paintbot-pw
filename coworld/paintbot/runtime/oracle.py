@@ -40,8 +40,10 @@ SIDECAR_ENV = "AWS_ENDPOINT_URL_BEDROCK_RUNTIME"  # historical name; the value i
 SIDECAR_PATH = "/v1/systemone"
 # The sidecar takes canonical OpenRouter slugs only, so no moving `latest` alias here.
 SIDECAR_MODEL = "typesafe/jev-1.13"
-# It admits 30 requests a minute per player slot: one ask per 48 ticks at 24 ticks a second.
-SIDECAR_INTERVAL = 48
+# System One asks have their own sidecar bucket of 120 a minute per player slot (four times the
+# chat ceiling), so the game's own spacing of one ask a second per seat sits at half of it. A
+# sidecar that still holds them to 30 answers 429 in a long burst; that fails the ask, no more.
+SIDECAR_INTERVAL = 24
 SLOT_HEADER = "X-Coworld-Player-Slot"
 LOGGED_FAILURES = 8
 LOGGED_BODY = 300

@@ -385,8 +385,8 @@ class OracleTests(unittest.TestCase):
         self.assertEqual(oracle.url, "http://127.0.0.1:9100/v1/systemone")
         self.assertIsNone(oracle.key)
         self.assertEqual(oracle.model, "typesafe/jev-1.13")
-        # The sidecar admits 30 requests a minute per player slot: one ask per 48 ticks at 24 ticks/s.
-        self.assertEqual(oracle.min_interval, 48)
+        # The sidecar's System One bucket is 120 a minute per player slot; one ask a second is half of it.
+        self.assertEqual(oracle.min_interval, 24)
         self.assertTrue(oracle.sidecar)
 
         explicit = Oracle.from_env(
