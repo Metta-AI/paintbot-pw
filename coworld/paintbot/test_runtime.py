@@ -253,18 +253,20 @@ ORACLE_GUEST = f"""
 class OracleTests(unittest.TestCase):
     """The advisor oracle: sandboxed seats ask, the host calls out, answers land on a later tick."""
 
-    def _server(self, delay=0.0, body=b'{"answers":{"q":{"type":"noul","noul":0.9}}}'):
+    def _server(self, delay=0.0, body=b'{"answers":{"q":{"type":"noul","noul":0.9}}}', status=200):
         import http.server
         import threading
         import time
 
         seen = []
+        requests = self.requests = []  # (path, headers) per POST, for the tests that care
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_POST(self):
                 seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                requests.append((self.path, {k.lower(): v for k, v in self.headers.items()}))
                 time.sleep(delay)
-                self.send_response(200)
+                self.send_response(status)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -333,6 +335,93 @@ class OracleTests(unittest.TestCase):
         self.assertLess(time.time() - started, 0.2, "a step must never wait on the network")
         self._settle(oracle)
         self.assertEqual(policy.step(b"frame", tick=1)[0][1], 3)
+
+    def test_hosted_pods_reach_the_oracle_through_the_llm_sidecar(self):
+        from oracle import Oracle
+
+        # Hosted game pods hold no provider key: the platform's sidecar does, at this reserved variable.
+        oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://127.0.0.1:9100/"})
+        self.addCleanup(oracle.close)
+        self.assertEqual(oracle.url, "http://127.0.0.1:9100/v1/systemone")
+        self.assertIsNone(oracle.key)
+        self.assertEqual(oracle.model, "typesafe/jev-1.13")
+        # The sidecar admits 30 requests a minute per player slot: one ask per 48 ticks at 24 ticks/s.
+        self.assertEqual(oracle.min_interval, 48)
+        self.assertTrue(oracle.sidecar)
+
+        explicit = Oracle.from_env(
+            {"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://127.0.0.1:9100", "COGAME_ORACLE_URL": "https://example.test/o"}
+        )
+        self.addCleanup(explicit.close)
+        self.assertEqual((explicit.url, explicit.model, explicit.min_interval), ("https://example.test/o", "jev-latest", 24))
+        self.assertFalse(explicit.sidecar)
+
+        tuned = Oracle.from_env(
+            {
+                "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://127.0.0.1:9100",
+                "COGAME_ORACLE_MODEL": "typesafe/jev-2",
+                "COGAME_ORACLE_INTERVAL": "96",
+            }
+        )
+        self.addCleanup(tuned.close)
+        self.assertEqual((tuned.model, tuned.min_interval), ("typesafe/jev-2", 96))
+
+        self.assertIsNone(Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://127.0.0.1:9100", "COGAME_ORACLE": "off"}))
+        self.assertIsNone(Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "ftp://127.0.0.1"}))
+        self.assertIsNone(Oracle.from_env({"COGAME_ORACLE_URL": "http://plain.test/o"}))
+        self.assertIsNone(Oracle.from_env({}))
+
+    def test_sidecar_asks_name_the_seat_and_carry_no_credential(self):
+        from oracle import Oracle
+
+        url, seen = self._server()
+        oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
+        self.addCleanup(oracle.close)
+        self.assertEqual(oracle.ask(5, 0, ORACLE_REQUEST), 1)
+        self._settle(oracle)
+        path, headers = self.requests[0]
+        self.assertEqual(path, "/v1/systemone")
+        # The platform charges spend and the request-rate bucket to the seat the game names.
+        self.assertEqual(headers["x-coworld-player-slot"], "5")
+        self.assertNotIn("authorization", headers)
+        self.assertEqual(seen[0]["model"], "typesafe/jev-1.13")
+        self.assertEqual(oracle.poll(5, 1, 4096)[1], b'{"q":{"type":"noul","noul":0.9}}')
+
+        direct_url, _ = self._server()
+        direct = Oracle(direct_url, "secret")
+        self.addCleanup(direct.close)
+        direct.ask(5, 0, ORACLE_REQUEST)
+        self._settle(direct)
+        _, headers = self.requests[0]
+        self.assertEqual(headers["authorization"], "Bearer secret")
+        self.assertNotIn("x-coworld-player-slot", headers)  # seat numbers stay inside the platform
+
+    def test_sidecar_without_the_route_is_asked_once(self):
+        from oracle import Oracle
+
+        # A sidecar that predates /v1/systemone answers 404. One seat finds out; nobody asks again.
+        url, seen = self._server(status=404, body=b'{"message":"not found"}')
+        oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
+        self.addCleanup(oracle.close)
+        self.assertEqual(oracle.ask(2, 0, ORACLE_REQUEST), 1)
+        self._settle(oracle)
+        self.assertEqual(oracle.poll(2, 1, 4096)[0], -1)
+        self.assertEqual(oracle.ask(2, 100, ORACLE_REQUEST), 0)
+        self.assertEqual(oracle.ask(9, 100, ORACLE_REQUEST), 0)
+        self.assertEqual(len(seen), 1)
+
+    def test_sidecar_rate_or_spend_limit_fails_the_ask_and_nothing_else(self):
+        from oracle import Oracle
+
+        url, seen = self._server(status=429, body=b'{"error":{"message":"spend limit","code":429}}')
+        oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
+        self.addCleanup(oracle.close)
+        self.assertEqual(oracle.ask(2, 0, ORACLE_REQUEST), 1)
+        self._settle(oracle)
+        self.assertEqual(oracle.poll(2, 1, 4096)[0], -1)
+        self.assertEqual(oracle.ask(2, 100, ORACLE_REQUEST), 2)  # limits clear; the seat may try again
+        self._settle(oracle)
+        self.assertEqual(len(seen), 2)
 
     def test_without_an_oracle_every_ask_is_refused(self):
         policy = self._policy(None)

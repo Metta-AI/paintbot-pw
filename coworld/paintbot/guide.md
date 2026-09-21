@@ -279,8 +279,17 @@ The host sets the endpoint, model and credential from `COGAME_ORACLE_URL` (https
 and `COGAME_ORACLE_DEADLINE` seconds per request. The guest cannot choose any of them. Answers
 land on a later tick, so a policy keeps acting on its last answer meanwhile. Replays are
 unaffected: they record accepted actions and state hashes, not how a policy chose them, so a
-replay of an advised match verifies like any other. Without `COGAME_ORACLE_URL`, as in
-certification pods with no network, every ask returns 0 and matches behave exactly as before.
+replay of an advised match verifies like any other. Without an oracle, as in certification pods
+with no network, every ask returns 0 and matches behave exactly as before.
+
+In hosted Softmax episodes the game pod holds no provider key, so `COGAME_ORACLE_URL` is not used
+there. The host finds the platform's LLM sidecar at `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` and posts
+to its `/v1/systemone` route, which forwards to Jev (`typesafe/jev-1.13`) on OpenRouter. Each ask
+names the asking seat, so its cost counts against that seat's per-episode LLM spend limit for the
+league and its requests against that seat's bucket: 30 a minute, which is why the hosted interval
+between asks is 48 ticks rather than 24. A seat past either limit sees its asks fail (`-1`) until
+the limit clears; a league with a $0 limit has no advisor at all. Write the policy so that a
+failed or refused ask costs nothing: keep acting on the last answer, or on none.
 
 ### BASIC seats
 
