@@ -236,6 +236,15 @@ Locally, `COGAME_ORACLE_URL=https://openrouter.ai/api/v1/systemone` with an Open
 both. Four more runtime tests cover sidecar discovery and precedence, the slot header and absent
 credential, the missing-route breaker, and a 429 failing only its own ask.
 
+### Released in 0.3.28
+
+0.3.28 (Deploy Coworld run 35632280384, from `53aae22`, 2026-09-21) was built, certified, uploaded
+and promoted to canonical. It is the first hosted release with the sidecar route, 24-tick hosted
+spacing and the missing-route breaker, and with the BASIC oracle functions a script such as
+`cogames/paintbot/jev/players/jevbot.bas` needs to compile. Until the platform sidecar serves
+`/v1/systemone` (Metta-AI/metta#24299), the first ask of an episode is answered 404 and logged,
+and the oracle asks nothing further: advised scripts play unadvised, and nothing else changes.
+
 ## Advisor oracle for BASIC seats
 
 BASIC seats reach the same oracle through typed host functions (`oracleState`, `oracleQuestion`,
