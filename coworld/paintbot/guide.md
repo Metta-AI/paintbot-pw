@@ -317,6 +317,9 @@ call `oracleAsk()` in the same tick.
   `oracleConfidence(id, key)` is the endpoint's confidence × 1000 (-1 when absent) and
   `oracleProbability(id, key, label)` a choice's probability for one label × 1000 (-1 when absent).
 
+`COGAME_ORACLE_LOG=<path>` makes the host append one JSON line per request (slot, id, tick,
+latency, the exact request and the raw answers) for offline replay and scoring.
+
 Local evaluation: the hosted league runs in real time, but a local engine runs several times
 faster, so answers land tens of ticks late. Set `COGAME_TICK_SECONDS=0.0417` on the host to pace
 the bridge to 24 ticks per second, and `PW_BASIC_PEAKS=1` to have the engine print each seat's
