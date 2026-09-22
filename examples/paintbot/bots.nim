@@ -1,4 +1,4 @@
-## Bounded, persistent BASIC players, with the same observations as WASM seats.
+## Bounded, persistent BASIC players: every seat is a BASIC script with typed observations.
 import polyworld/[basic, cli, controllers]
 import sim, oracle, neural_host
 export oracle

@@ -64,10 +64,10 @@ jobs:
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim
       - run: nim r -d:headless tests/test_paintbot_neural_host.nim
       - run: python -m unittest discover -s coworld/paintbot -p test_neural_package.py
+      - run: nim r tests/test_paintbot_jev_baseline.nim
       - run: node tests/test_paintbot_inspector.js
       - run: node tests/test_paintbot_webinputs.js
-      - run: python -m pip install wasmtime==48.0.0
-      - run: python coworld/paintbot/test_baseline.py
+      - run: python coworld/paintbot/tools/make_jev_baseline.py --check
       # The hosted runtime is Linux-only; its file-URI handling is POSIX, so skip Windows here.
       - run: python -m unittest test_runtime
         if: runner.os != 'Windows'

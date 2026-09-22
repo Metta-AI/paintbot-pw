@@ -1,4 +1,4 @@
-"""Policy-boundary checks independent of the renderer and engine executable."""
+"""Host-boundary checks independent of the engine executable: seat staging, the bridge, the oracle."""
 
 import hashlib
 import json
@@ -10,55 +10,10 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
-from sprite import SpriteView, visible
-from wasm_policy import decode_replies, verified_policy
+from seats import verified_policy
 
 
 class RuntimeTests(unittest.TestCase):
-    def test_uniform_spoofs_wasm_color_and_seat_but_preserves_self(self):
-        view = SpriteView(2)
-        view.initial = False
-        w = dict(
-            rulesVersion=27, tick=0, cover=[],
-            uniforms=[True] + [False] * 15,
-            cogs=[dict(pos=dict(x=500,z=2000),aim=dict(x=1000,z=2000),hp=3,cooldown=0)
-                  for _ in range(16)],
-            hearts=[dict(pos=dict(x=x,z=2000),carrier=-1) for x in (960,5440)],
-        )
-        with patch("sprite.visible", side_effect=lambda w, observer, other: other in (0,2)):
-            frame = view.frame(w)
-        self.assertIn(b"player blue left", frame)
-        self.assertIn(b"seat 1", frame)
-        self.assertNotIn(b"player red right", frame)
-        self.assertNotIn(b"seat 0", frame)
-        self.assertNotIn(b"uniform worn", frame)
-        view.slot = 0
-        with patch("sprite.visible", side_effect=lambda w, observer, other: other == 0):
-            frame = view.frame(w)
-        self.assertIn(b"self red right", frame)
-        self.assertIn(b"seat 0", frame)
-        self.assertIn(b"uniform worn", frame)
-
-    def test_forward_cone_hides_allies_and_enemies_behind(self):
-        w = {
-            "cover": [],
-            "cogs": [
-                {"hp": 3, "pos": {"x": 3000, "z": 2000}, "aim": {"x": 4000, "z": 2000}}
-                for _ in range(3)
-            ],
-        }
-        for other in (1, 2):
-            for x, z, expected in [
-                (3500, 2000, True),
-                (2500, 2000, False),
-                (3000, 2500, False),
-                (3500, 2800, True),
-                (3500, 2900, False),
-                (5100, 2000, True),
-            ]:
-                w["cogs"][other]["pos"] = {"x": x, "z": z}
-                self.assertEqual(visible(w, 0, other), expected)
-
     def test_hash_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "policy"
@@ -73,230 +28,7 @@ class RuntimeTests(unittest.TestCase):
                     )
                 )
 
-    def test_foreign_seat_packet_is_rejected(self):
-        with self.assertRaises(ValueError):
-            decode_replies(b"\x01\0\0\0\x01\0\0\0\x82")
-
-    def test_direct_order_gives_a_wasm_seat_the_basic_actuators(self):
-        import struct
-
-        def order(flags, gx, gz, ax, az):
-            packet = struct.pack("<BBiiii", 0x85, flags, gx, gz, ax, az)
-            return decode_replies(struct.pack("<II", 1, len(packet)) + packet)
-
-        with self.assertRaises(ValueError):
-            decode_replies(b"\x01\0\0\0\x03\0\0\0\x85\0\0")  # wrong size
-        view = SpriteView(0)
-        w = dict(rulesVersion=34, cogs=[dict(pos=dict(x=1000, z=2000), aim=dict(x=0, z=0))])
-        # walkTo + shootAt: engine pathing, an exact aim point, one shot.
-        command = view.command(w, order(1 | 2 | 16, 3000, 2500, 4000, -1000))
-        self.assertEqual(
-            command,
-            dict(walk=True, direct=False, shoot=True, chargeGrenade=False, sneak=False,
-                 goal=dict(x=3000, z=2500), aim=dict(x=4000, z=-1000)),
-        )
-        # The gamepad turret and its `own aim` marker follow the real aim (north-east = 32).
-        self.assertEqual(view.angle, 32)
-        # A tick without an order keeps the goal and orders nothing new: no repeated shot.
-        command = view.command(w, [])
-        self.assertEqual(
-            command,
-            dict(walk=False, direct=False, shoot=False, chargeGrenade=False, sneak=False,
-                 goal=dict(x=3000, z=2500), aim=dict(x=0, z=0)),
-        )
-        # walkTo alone aims along the walk, as it does for BASIC (aim left unset).
-        command = view.command(w, order(1, 1500, 1500, 0, 0))
-        self.assertEqual(command["aim"], dict(x=0, z=0))
-        self.assertTrue(command["walk"])
-        # chargeGrenade and sneak.
-        command = view.command(w, order(4 | 8, 0, 0, 0, 0))
-        self.assertTrue(command["chargeGrenade"] and command["sneak"])
-        self.assertFalse(command["walk"])
-        # A button mask returns the seat to the gamepad protocol.
-        command = view.command(w, [b"\x84\x08"])
-        self.assertTrue(command["direct"])
-        self.assertEqual(command["goal"], dict(x=1100, z=2000))
-
-    def test_bad_wasm_forfeits_its_seat_and_the_episode_still_runs(self):
-        import host
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            bad = root / "bad"
-            bad_data = b"\0asmBAD"
-            bad.write_bytes(bad_data)
-            good = root / "good"
-            good_data = b"idle = 1\n"
-            good.write_bytes(good_data)
-            seats = []
-            for i in range(16):
-                path, data = (bad, bad_data) if i == 0 else (good, good_data)
-                seats.append(
-                    dict(
-                        slot=i,
-                        file_uri=path.as_uri(),
-                        size_bytes=len(data),
-                        content_hash="sha256:" + hashlib.sha256(data).hexdigest(),
-                        log_uri=(root / f"{i}.log").as_uri(),
-                    )
-                )
-            doc = root / "seats.json"
-            doc.write_text(
-                json.dumps(
-                    dict(
-                        schema="coworld-player-seats/1",
-                        seats=seats,
-                        player_status_uri=(root / "status").as_uri(),
-                    )
-                )
-            )
-            failure = root / "failure.json"
-            # A stand-in engine: with the bad seat forfeited (not fatal), `run` reaches
-            # this subprocess and returns its real exit code instead of raising.
-            engine = root / "engine"
-            engine.write_text("#!/usr/bin/env python3\nimport sys\nsys.exit(0)\n")
-            engine.chmod(0o755)
-            with patch.dict(
-                os.environ,
-                COGAME_PLAYER_SEATS_URI=doc.as_uri(),
-                COGAME_PLAYER_FAILURE_URI=failure.as_uri(),
-            ):
-                self.assertEqual(host.run(str(engine)), 0)
-            self.assertEqual(json.loads(failure.read_text())["failed_policy_index"], 0)
-
-    def test_trapping_policy_forfeits_only_its_own_seat(self):
-        import host
-
-        class TrappingPolicy:
-            def step(self, frame, tick):
-                raise RuntimeError("boom")
-
-            def close(self):
-                self.closed = True
-
-        with tempfile.TemporaryDirectory() as tmp:
-            failure = Path(tmp) / "failure.json"
-            policy = TrappingPolicy()
-            policies = {3: policy}
-            views = {3: SpriteView(3)}
-            with patch.dict(os.environ, COGAME_PLAYER_FAILURE_URI=failure.as_uri()):
-                host.forfeit_seat(3, "WASM policy failed: RuntimeError", policies, views)
-            self.assertNotIn(3, policies)
-            self.assertNotIn(3, views)
-            self.assertTrue(policy.closed)
-            self.assertEqual(json.loads(failure.read_text())["failed_policy_index"], 3)
-
-    def test_wasm_receives_gun_readiness(self):
-        view = SpriteView(0)
-        view.initial = False
-        w = dict(
-            cogs=[
-                dict(
-                    pos=dict(x=500 if i % 2 == 0 else 6000, z=2000),
-                    aim=dict(x=0, z=0),
-                    hp=3,
-                    cooldown=0,
-                )
-                for i in range(16)
-            ],
-            cover=[],
-            hearts=[dict(pos=dict(x=x, z=2000), carrier=-1) for x in (960, 5440)],
-        )
-        frame = view.frame(w)
-        self.assertIn(b"fire icon", frame)
-        self.assertNotIn(b"fire icon cooldown", frame)
-        self.assertIn(b"game teams 2 map 1280x800", frame)
-        w["cogs"][0]["cooldown"] = 8
-        self.assertIn(b"fire icon cooldown", view.frame(w))
-
-    def test_wasm_receives_public_capture_progress_without_changing_owner_label(self):
-        view = SpriteView(0)
-        view.initial = False
-        w = dict(
-            cogs=[dict(pos=dict(x=500, z=2000), aim=dict(x=0,z=0), hp=3, cooldown=0)
-                  for _ in range(16)],
-            cover=[],
-            hearts=[dict(pos=dict(x=x,z=2000), carrier=-1) for x in (960,5440)],
-            controlHearts=[dict(pos=dict(x=3200,z=2000), owner=-1)],
-            heartCaptures=[dict(team=1, ticks=36, contested=True)],
-        )
-        frame = view.frame(w)
-        self.assertIn(b"control heart 0 owner -1", frame)
-        self.assertIn(b"control capture 0 team 1 ticks 36 contested 1", frame)
-        w["rulesVersion"] = 25
-        w["bigHeart"] = 0
-        self.assertIn(b"control value 0 points 5", view.frame(w))
-        w["bigHeart"] = -1
-        self.assertIn(b"control value 0 points 1", view.frame(w))
-        del w["heartCaptures"]
-        self.assertNotIn(b"control capture", view.frame(w))
-        w["controlHearts"].append(dict(pos=dict(x=3400, z=2000), owner=-1))
-        w["glory"] = [587, 300]
-        self.assertNotIn(b"glory team", view.frame(w))
-        w["rulesVersion"] = 36
-        frame = view.frame(w)
-        self.assertIn(b"glory team 0 value 587", frame)
-        self.assertIn(b"glory team 1 value 300", frame)
-
-    def test_sound_sprites_are_listener_relative_and_quiet_chord_is_opt_in(self):
-        view = SpriteView(0)
-        view.initial = False
-        w = dict(tick=20, rulesVersion=26, cover=[],
-                 cogs=[dict(pos=dict(x=500,z=2000),aim=dict(x=0,z=0),hp=3,cooldown=0) for _ in range(16)],
-                 hearts=[dict(pos=dict(x=x,z=2000),carrier=-1) for x in (960,5440)],
-                 sounds=[dict(listener=0,kind=1,direction=7,distance=2,tick=12),
-                         dict(listener=1,kind=2,direction=4,distance=0,tick=12),
-                         dict(listener=0,kind=3,direction=1,distance=0,tick=-20)])
-        frame = view.frame(w)
-        self.assertIn(b"sound kind 1 direction 7 distance 2 age 8", frame)
-        self.assertNotIn(b"sound kind 2", frame)
-        self.assertNotIn(b"sound kind 3", frame)
-        w["cogs"][0]["hp"] = 0
-        self.assertNotIn(b"sound kind", view.frame(w))
-        w["cogs"][0]["hp"] = 3
-        # B+Select is the quiet chord; existing single-button aim turns stay unchanged.
-        self.assertTrue(view.command(w, [(0x84,80)])["sneak"])
-        self.assertFalse(view.command(w, [(0x84,64)])["sneak"])
-        w["rulesVersion"] = 25
-        self.assertFalse(view.command(w, [(0x84,80)])["sneak"])
-
-
-
-
 ORACLE_REQUEST = b'{"state":"ping","questions":{"q":{"type":"noul","instructions":"Is this a ping?"}}}'
-# A minimal seat that asks the oracle once, then reports its state in the actuator byte:
-# 0 idle, 1 asked, 2 answered (answer JSON at 8192), 3 failed. It re-asks once idle again.
-ORACLE_GUEST = f"""
-(module
-  (import "paintbot" "oracle_ask" (func $ask (param i32 i32) (result i32)))
-  (import "paintbot" "oracle_poll" (func $poll (param i32 i32 i32) (result i32)))
-  (memory (export "memory") 1)
-  (global $req (mut i32) (i32.const 0))
-  (global $state (mut i32) (i32.const 0))
-  (data (i32.const 2048) "{ORACLE_REQUEST.decode().replace(chr(34), chr(92) + chr(34))}")
-  (func (export "paintbot_init") (param i32))
-  (func (export "paintbot_buffer") (param i32) (result i32) (i32.const 16384))
-  (func (export "paintbot_output_size") (result i32) (i32.const 10))
-  (func (export "paintbot_step") (result i32)
-    (local $n i32)
-    (if (i32.eqz (global.get $req))
-      (then
-        (global.set $req (call $ask (i32.const 2048) (i32.const {len(ORACLE_REQUEST)})))
-        (if (i32.ne (global.get $req) (i32.const 0)) (then (global.set $state (i32.const 1)))))
-      (else
-        (local.set $n (call $poll (global.get $req) (i32.const 8192) (i32.const 4096)))
-        (if (i32.gt_s (local.get $n) (i32.const 0))
-          (then (global.set $state (i32.const 2)) (global.set $req (i32.const 0))))
-        (if (i32.lt_s (local.get $n) (i32.const 0))
-          (then (global.set $state (i32.const 3)) (global.set $req (i32.const 0))))))
-    (i32.store (i32.const 4096) (i32.const 1))
-    (i32.store (i32.const 4100) (i32.const 2))
-    (i32.store8 (i32.const 4104) (i32.const 132))
-    (i32.store8 (i32.const 4105) (global.get $state))
-    (i32.const 4096)))
-"""
-
-
 class OracleTests(unittest.TestCase):
     """The advisor oracle: sandboxed seats ask, the host calls out, answers land on a later tick."""
 
@@ -327,18 +59,6 @@ class OracleTests(unittest.TestCase):
         self.addCleanup(server.shutdown)
         return f"http://127.0.0.1:{server.server_address[1]}/", seen
 
-    def _policy(self, oracle):
-        import wasmtime
-        from wasm_policy import Policy
-
-        config = wasmtime.Config()
-        config.consume_fuel = True
-        config.epoch_interruption = True
-        engine = wasmtime.Engine(config)
-        policy = Policy(engine, wasmtime.Module(engine, ORACLE_GUEST), 3, oracle)
-        self.addCleanup(policy.close)
-        return policy
-
     def _settle(self, oracle, seconds=3.0):
         import time
 
@@ -352,19 +72,20 @@ class OracleTests(unittest.TestCase):
         url, seen = self._server()
         oracle = Oracle(url, "secret", "test-model", min_interval=24, deadline=2.0)
         self.addCleanup(oracle.close)
-        policy = self._policy(oracle)
-        self.assertEqual(policy.step(b"frame", tick=0)[0][1], 1)  # asked
+        self.assertEqual(oracle.ask(3, 0, ORACLE_REQUEST), 1)  # asked
+        self.assertEqual(oracle.poll(3, 1, 4096)[0], 0)  # nothing yet on the asking tick
         self._settle(oracle)
-        self.assertEqual(policy.step(b"frame", tick=1)[0][1], 2)  # answered
-        answer = bytes(policy.memory.read(policy.store, 8192, 8192 + 64))
+        status, answer = oracle.poll(3, 1, 4096)  # answered on a later tick
+        self.assertEqual(status, len(answer))
         self.assertTrue(answer.startswith(b'{"q":{"type":"noul","noul":0.9}}'))
         self.assertEqual(seen[0]["model"], "test-model")
         self.assertEqual(seen[0]["questions"]["q"]["type"], "noul")
         self.assertEqual(seen[0]["state"], "ping")
-        # Too soon: the ask is refused, the guest stays where it was, and nothing was sent.
-        self.assertEqual(policy.step(b"frame", tick=2)[0][1], 2)
+        # Too soon: the ask is refused, the answer already collected is gone, and nothing was sent.
+        self.assertEqual(oracle.ask(3, 2, ORACLE_REQUEST), 0)
+        self.assertEqual(oracle.poll(3, 1, 4096)[0], -1)
         self.assertEqual(len(seen), 1)
-        self.assertEqual(policy.step(b"frame", tick=24)[0][1], 1)
+        self.assertEqual(oracle.ask(3, 24, ORACLE_REQUEST), 2)
         self._settle(oracle)
         self.assertEqual(len(seen), 2)
 
@@ -376,12 +97,13 @@ class OracleTests(unittest.TestCase):
         url, _ = self._server(delay=1.5)
         oracle = Oracle(url, deadline=0.3)
         self.addCleanup(oracle.close)
-        policy = self._policy(oracle)
         started = time.time()
-        self.assertEqual(policy.step(b"frame", tick=0)[0][1], 1)
-        self.assertLess(time.time() - started, 0.2, "a step must never wait on the network")
+        self.assertEqual(oracle.ask(3, 0, ORACLE_REQUEST), 1)
+        self.assertEqual(oracle.poll(3, 1, 4096)[0], 0)
+        self.assertLess(time.time() - started, 0.2, "an ask or poll must never wait on the network")
         self._settle(oracle)
-        self.assertEqual(policy.step(b"frame", tick=1)[0][1], 3)
+        self.assertEqual(oracle.poll(3, 1, 4096)[0], -1)  # failed, and the seat is free to ask again
+        self.assertEqual(oracle.ask(3, 24, ORACLE_REQUEST), 2)
 
     def test_hosted_pods_reach_the_oracle_through_the_llm_sidecar(self):
         from oracle import Oracle
@@ -697,9 +419,24 @@ class OracleTests(unittest.TestCase):
         self.assertEqual(oracle.failures, 1)
 
     def test_without_an_oracle_every_ask_is_refused(self):
-        policy = self._policy(None)
-        for tick in range(3):
-            self.assertEqual(policy.step(b"frame", tick=tick)[0][1], 0)
+        """No oracle configured: the engine is not told to ask (no PW_ORACLE), and every bridge
+        reply is the empty {"oracle": []} object, never the legacy bare list."""
+        import host
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            engine = _stand_in_engine(root, ticks=3, ask_on_tick=(0, 1, 2))
+            with patch.dict(
+                os.environ,
+                COGAME_PLAYER_SEATS_URI=_seat_document(root, {}).as_uri(),
+                COGAME_PLAYER_FAILURE_URI=(root / "failure.json").as_uri(),
+                COGAME_ORACLE="off",
+            ):
+                self.assertEqual(host.run(str(engine)), 0)
+            out = json.loads((root / "out.json").read_text())
+            self.assertEqual(out["env"], [None, None])
+            self.assertEqual(out["replies"], [{"oracle": []}] * 3)
+            self.assertFalse((root / "failure.json").exists())
 
     def test_flatten_gives_basic_seats_thousandths_and_choice_indices(self):
         from oracle import flatten
@@ -824,9 +561,9 @@ class OracleTests(unittest.TestCase):
                 "body = {'state': 's', 'questions': {'q': {'type': 'noul', 'instructions': '?', 'criteria': {'true': 't', 'false': 'f'}}}}\n"
                 "for tick in range(200):\n"
                 "    asks = [{'slot': 5, 'id': 1, 'body': body}] if tick == 0 else []\n"
-                "    f.write(json.dumps({'tick': tick, 'oracle': asks, 'cogs': []}) + '\\n'); f.flush()\n"
+                "    f.write(json.dumps({'rulesVersion': 36, 'tick': tick, 'oracle': asks}) + '\\n'); f.flush()\n"
                 "    r = json.loads(f.readline())\n"
-                "    if not isinstance(r, dict): out['replies'].append(r); break\n"
+                "    assert isinstance(r, dict) and set(r) == {'oracle'}, r\n"
                 "    if r['oracle']: out['replies'] = r['oracle']; break\n"
                 "    time.sleep(0.02)\n"
                 f"open({str(root / 'out.json')!r}, 'w').write(json.dumps(out))\n"
@@ -879,8 +616,8 @@ class OracleTests(unittest.TestCase):
                 "s = socket.socket(fileno=int(os.environ['PW_POLICY_FD']))\n"
                 "f = s.makefile('rw')\n"
                 "for tick in range(8):\n"
-                "    f.write(json.dumps({'tick': tick, 'oracle': [], 'cogs': []}) + '\\n'); f.flush()\n"
-                "    f.readline()\n"
+                "    f.write(json.dumps({'rulesVersion': 36, 'tick': tick, 'oracle': []}) + '\\n'); f.flush()\n"
+                "    assert isinstance(json.loads(f.readline()), dict)\n"
             )
             engine.chmod(0o755)
             with patch.dict(
@@ -924,6 +661,146 @@ class OracleTests(unittest.TestCase):
         configured = Oracle.from_env({"COGAME_ORACLE_URL": "https://api.example/", "COGAME_ORACLE_INTERVAL": "48"})
         self.assertEqual(configured.min_interval, 48)
         configured.close()
+
+
+GOOD_SOURCE = b"idle = 1\n"
+IDLE_STUB = b"idle = 1\n"  # what the host stages for a forfeited seat
+
+
+def _seat_document(root, files):
+    """A sixteen-seat document; `files` maps a slot to the bytes it submits (others submit GOOD_SOURCE)."""
+    seats = []
+    for slot in range(16):
+        data = files.get(slot, GOOD_SOURCE)
+        path = root / f"seat-{slot}"
+        path.write_bytes(data)
+        seats.append(
+            dict(
+                slot=slot,
+                file_uri=path.as_uri(),
+                size_bytes=len(data),
+                content_hash="sha256:" + hashlib.sha256(data).hexdigest(),
+                log_uri=(root / f"{slot}.log").as_uri(),
+            )
+        )
+    doc = root / "seats.json"
+    doc.write_text(
+        json.dumps(dict(schema="coworld-player-seats/1", seats=seats, player_status_uri=(root / "status").as_uri()))
+    )
+    return doc
+
+
+def _stand_in_engine(root, ticks=1, ask_on_tick=()):
+    """An engine that records what the host staged for it and every bridge reply, then exits 0.
+
+    It writes {staged, contents (slot -> sha256 of the staged file), replies, env} to root/out.json.
+    """
+    engine = root / "engine"
+    engine.write_text(
+        "#!/usr/bin/env python3\n"
+        "import hashlib, json, os, socket\n"
+        "from urllib.parse import unquote, urlsplit\n"
+        "path = lambda uri: unquote(urlsplit(uri).path)\n"
+        "doc = json.load(open(path(os.environ['COGAME_PLAYER_SEATS_URI'])))\n"
+        "contents = {str(s['slot']): hashlib.sha256(open(path(s['file_uri']), 'rb').read()).hexdigest() for s in doc['seats']}\n"
+        "s = socket.socket(fileno=int(os.environ['PW_POLICY_FD']))\n"
+        "f = s.makefile('rw')\n"
+        "body = {'state': 's', 'questions': {'q': {'type': 'noul', 'instructions': '?'}}}\n"
+        "replies = []\n"
+        f"for tick in range({ticks}):\n"
+        f"    asks = [{{'slot': 1, 'id': tick + 1, 'body': body}}] if tick in {tuple(ask_on_tick)!r} else []\n"
+        "    f.write(json.dumps({'rulesVersion': 36, 'tick': tick, 'oracle': asks}) + '\\n'); f.flush()\n"
+        "    replies.append(json.loads(f.readline()))\n"
+        "out = {'staged': doc, 'contents': contents, 'replies': replies,\n"
+        "       'env': [os.environ.get('PW_ORACLE'), os.environ.get('PW_ORACLE_INTERVAL')]}\n"
+        f"open({str(root / 'out.json')!r}, 'w').write(json.dumps(out))\n"
+    )
+    engine.chmod(0o755)
+    return engine
+
+
+class SeatStagingTests(unittest.TestCase):
+    """Every seat is a BASIC source file; anything else forfeits that seat alone and the episode still runs."""
+
+    def _run(self, files):
+        import host
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            engine = _stand_in_engine(root)
+            failure = root / "failure.json"
+            with patch.dict(
+                os.environ,
+                COGAME_PLAYER_SEATS_URI=_seat_document(root, files).as_uri(),
+                COGAME_PLAYER_FAILURE_URI=failure.as_uri(),
+                COGAME_ORACLE="off",
+            ):
+                rc = host.run(str(engine))
+            out = json.loads((root / "out.json").read_text())
+            out["rc"] = rc
+            out["failure"] = json.loads(failure.read_text()) if failure.exists() else None
+            return out
+
+    def _assert_forfeited(self, out, slot, message):
+        self.assertEqual(out["rc"], 0)
+        self.assertEqual(out["failure"], {"message": message, "failed_policy_index": slot})
+        staged = {seat["slot"]: seat for seat in out["staged"]["seats"]}
+        self.assertEqual(len(staged), 16)
+        idle = staged[slot]
+        self.assertTrue(idle["file_uri"].endswith("/idle.bas"), idle["file_uri"])
+        self.assertEqual(idle["size_bytes"], len(IDLE_STUB))
+        self.assertEqual(idle["content_hash"], "sha256:" + hashlib.sha256(IDLE_STUB).hexdigest())
+        self.assertEqual(out["contents"][str(slot)], hashlib.sha256(IDLE_STUB).hexdigest())
+        for other in range(16):
+            if other == slot:
+                continue
+            seat = staged[other]
+            self.assertTrue(seat["file_uri"].endswith(f"/player-{other}.bas"), seat["file_uri"])
+            self.assertEqual(seat["size_bytes"], len(GOOD_SOURCE))
+            self.assertEqual(seat["content_hash"], "sha256:" + hashlib.sha256(GOOD_SOURCE).hexdigest())
+            self.assertEqual(out["contents"][str(other)], hashlib.sha256(GOOD_SOURCE).hexdigest())
+        # No oracle configured: the reply is the empty object, never a bare list.
+        self.assertEqual(out["replies"], [{"oracle": []}])
+        self.assertIsInstance(out["replies"][0], dict)
+
+    def test_a_wasm_module_is_forfeited_and_the_other_seats_keep_their_source(self):
+        out = self._run({7: b"\x00asm\x01\x00\x00\x00" + b"\x00" * 40})
+        self._assert_forfeited(
+            out, 7, "Policy initialization failed: WASM modules are no longer accepted; submit a BASIC source file"
+        )
+
+    def test_a_non_utf8_or_oversize_source_is_forfeited(self):
+        with self.subTest("not UTF-8"):
+            out = self._run({3: b"\xff\xfe idle = 1\n"})
+            self._assert_forfeited(out, 3, "Policy initialization failed: BASIC source is not UTF-8")
+        with self.subTest("over 64 KiB"):
+            out = self._run({12: b"x" * 65537})
+            self._assert_forfeited(out, 12, "Policy initialization failed: BASIC source exceeds 64 KiB")
+        with self.subTest("exactly 64 KiB is accepted"):
+            out = self._run({12: b"x" * 65536})
+            self.assertEqual((out["rc"], out["failure"]), (0, None))
+            self.assertEqual(out["contents"]["12"], hashlib.sha256(b"x" * 65536).hexdigest())
+
+    def test_a_hash_mismatch_still_forfeits_by_exception_name(self):
+        import host
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            doc = _seat_document(root, {})
+            seats = json.loads(doc.read_text())
+            seats["seats"][2]["content_hash"] = "sha256:wrong"
+            doc.write_text(json.dumps(seats))
+            failure = root / "failure.json"
+            with patch.dict(
+                os.environ,
+                COGAME_PLAYER_SEATS_URI=doc.as_uri(),
+                COGAME_PLAYER_FAILURE_URI=failure.as_uri(),
+                COGAME_ORACLE="off",
+            ):
+                self.assertEqual(host.run(str(_stand_in_engine(root))), 0)
+            self.assertEqual(
+                json.loads(failure.read_text()), {"message": "Policy initialization failed: ValueError", "failed_policy_index": 2}
+            )
 
 
 if __name__ == "__main__":

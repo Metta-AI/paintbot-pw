@@ -13,7 +13,7 @@ COPY src src
 COPY examples/paintbot examples/paintbot
 RUN nim c -d:coworld -o:/out/paintbot examples/paintbot/paintbot.nim
 FROM python:3.12-slim
-RUN pip install --no-cache-dir wasmtime==48.0.0 boto3==1.40.18
+RUN pip install --no-cache-dir boto3==1.40.18
 COPY --from=compiler /out/paintbot /usr/local/bin/paintbot
 COPY coworld/paintbot/runtime /runtime
 EXPOSE 8080
