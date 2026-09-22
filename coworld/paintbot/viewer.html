@@ -1159,12 +1159,14 @@
   .team-scoreline small { font-size:7px; letter-spacing:.08em; opacity:.7; }
   .meter-row { display:flex; align-items:center; gap:6px; }
   .meter-row .heart-meter { flex:1; min-width:0; }
-  .meter-label { font-size:9px; letter-spacing:.06em; opacity:.8; white-space:nowrap; flex:0 0 auto; font-variant-numeric:tabular-nums; }
+  .meter-label { font-size:9px; line-height:1; letter-spacing:.06em; opacity:.8; white-space:nowrap; flex:0 0 auto; font-variant-numeric:tabular-nums; }
   .meter-label[hidden] { display:none; }
   /* Rules 37: glory is the score, so it gets the big type; the meter keeps its own count beside the bar. */
-  header.glory .team-scoreline { align-items:baseline; }
+  header.glory #match-score { gap:clamp(12px,3vw,48px); }
+  header.glory .team-scoreline { align-items:center; gap:8px; }
+  header.glory .team-scoreline strong { flex:1; }
   header.glory .team-scoreline .score-prefix { display:none; }
-  header.glory .team-scoreline b { font-size:26px; line-height:26px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+  header.glory .team-scoreline b { font-size:24px; line-height:24px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
   header.glory .red .team-scoreline b { color:#ed6955; text-shadow:0 0 12px #ed695566; }
   header.glory .blue .team-scoreline b { color:#59bdeb; text-shadow:0 0 12px #59bdeb66; }
   header.glory .team-scoreline small { font-size:9px; letter-spacing:.14em; opacity:.85; }
