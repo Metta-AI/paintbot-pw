@@ -1,7 +1,8 @@
 ## In-process training ABI. Build with --app:lib --mm:arc --threads:on -d:pwTraining.
 ## A handle may migrate between threads but must never be used concurrently.
 ## The caller owns flat buffers; no Nim-managed values cross the C boundary.
-import sim, neural_contract
+import sim, neural_contract, bots
+import polyworld/basic
 
 when not defined(pwTraining): {.error: "native_env requires -d:pwTraining".}
 
@@ -15,6 +16,15 @@ type
     bodies: array[Seats,array[Seats,int]]
     bodiesReady: array[Seats,bool]
     stats: CombatTelemetry # Cumulative since the last create/reset; see pw_seat_stats.
+    # BASIC seats: the production interpreter, host functions, limits and per-decision
+    # budget from bots.nim drive these slots instead of the caller's actions.
+    scripts: array[Seats,string]
+    scriptBots: array[Seats,Bot]
+    scriptStatus: array[Seats,int32] # 0 none, 1 running, 2 compile failed, 3 disabled at runtime
+    scriptErrors: array[Seats,string]
+    scriptHeard: array[Seats,seq[HeardMessage]] # Speech carried from the previous decision.
+    scriptOrders: array[Seats,Command] # What each scripted seat ordered on the last step.
+    scriptCount: int
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -28,6 +38,26 @@ proc invalidateBodies(env: ptr NativeEnv) =
   for slot in 0..<Seats: env.bodiesReady[slot] = false
 proc resetStats(env: ptr NativeEnv) =
   for slot in 0..<Seats: env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
+proc installScript(env: ptr NativeEnv, slot: int) =
+  ## A fresh runtime for the seat's source, as a new match loads its bots.
+  env.scriptBots[slot] = nil
+  env.scriptErrors[slot] = ""
+  env.scriptOrders[slot] = Command()
+  if env.scripts[slot].len == 0:
+    env.scriptStatus[slot] = 0
+    return
+  try:
+    env.scriptBots[slot] = loadScriptBot(env.scripts[slot], slot)
+    env.scriptStatus[slot] = 1
+  except BasicError as e:
+    env.scriptStatus[slot] = 2
+    env.scriptErrors[slot] = e.msg
+proc resetScripts(env: ptr NativeEnv) =
+  env.scriptCount = 0
+  for slot in 0..<Seats:
+    env.scriptHeard[slot] = @[]
+    env.installScript(slot)
+    if env.scripts[slot].len > 0: inc env.scriptCount
 proc bodiesFor(env: ptr NativeEnv, slot: int): array[Seats,int] =
   if not env.bodiesReady[slot]:
     env.bodies[slot] = env.world.observedBodies(slot)
@@ -68,6 +98,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     for i in 0..<Seats: env.resets[i] = 1
     env.invalidateBodies()
     env.resetStats()
+    env.resetScripts()
     return 0
   except CatchableError: return -1
 
@@ -102,10 +133,27 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
     var wasDead: array[Seats,bool]
     for slot in 0..<Seats:
       wasDead[slot] = env.world.cogs[slot].hp <= 0
+      if env.scripts[slot].len > 0: continue
       let offset = slot*ActionSizes.len
       commands[slot] = if actions[offset+1] in 1'i32..16'i32:
           decodeActions(env.world,slot,actions.toOpenArray(offset,offset+ActionSizes.len-1),env.bodiesFor(slot))
         else: decodeActions(env.world,slot,actions.toOpenArray(offset,offset+ActionSizes.len-1))
+    if env.scriptCount > 0:
+      # The production tick: every BASIC seat decides on the pre-step world (hearing
+      # what was shouted last tick), shouts are delivered for next tick, then the world
+      # steps. Unscripted seats hold no bot and shout nothing.
+      heard = env.scriptHeard
+      let decided = decide(env.scriptBots, env.world)
+      deliverSpeech(env.world)
+      env.scriptHeard = heard
+      for slot in 0..<Seats:
+        if env.scripts[slot].len == 0: continue
+        let b = env.scriptBots[slot]
+        if b != nil and b.failed and env.scriptStatus[slot] == 1:
+          env.scriptStatus[slot] = 3
+          env.scriptErrors[slot] = b.error
+        commands[slot] = decided[slot]
+        env.scriptOrders[slot] = decided[slot]
     combatTelemetry = addr env.stats
     try: env.world.step(commands)
     finally: combatTelemetry = nil
@@ -173,6 +221,55 @@ proc pw_seat_stats*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.
     output[o+4] = s.kills; output[o+5] = s.deaths
     output[o+6] = env.world.cogs[slot].captures; output[o+7] = s.firstFriendlyFireTick
   return 0
+
+proc pw_set_seat_script*(handle: pointer, seat: cint, source: ptr UncheckedArray[char],
+    length: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Drive one seat from BASIC source text with the production interpreter, host
+  ## functions, limits and per-decision budget; the caller's actions for that seat are
+  ## ignored while a script is installed. Compiles now; a fresh runtime with cleared
+  ## persistent variables is installed here and again on every pw_reset. length 0
+  ## removes the script. Returns 0 (running), 1 (compile failed: the seat is disabled and
+  ## idles, as a hosted seat would), -1 (bad arguments).
+  if handle == nil or seat notin 0..<Seats or length < 0 or (length > 0 and source == nil): return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  if env.scripts[seat].len > 0: dec env.scriptCount
+  env.scripts[seat] = newString(length)
+  if length > 0: copyMem(addr env.scripts[seat][0], source, length)
+  env.scriptHeard[seat] = @[]
+  env.installScript(seat)
+  if env.scripts[seat].len > 0: inc env.scriptCount
+  if env.scriptStatus[seat] == 2: 1 else: 0
+
+proc pw_seat_script_status*(handle: pointer, seat: cint, message: ptr UncheckedArray[char],
+    capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## 0 unscripted, 1 running, 2 compile failed, 3 disabled by a runtime error (budget
+  ## overrun, bad host call, ...), exactly the errors that disable a hosted seat. The
+  ## error text is copied, NUL-terminated and truncated to capacity, when given.
+  if handle == nil or seat notin 0..<Seats: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  if message != nil and capacity > 0:
+    let n = min(capacity.int-1, env.scriptErrors[seat].len)
+    if n > 0: copyMem(message, unsafeAddr env.scriptErrors[seat][0], n)
+    message[n] = '\0'
+  env.scriptStatus[seat]
+
+proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## The command a scripted seat issued on the last pw_step, ten int32:
+  ## [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct, scripted].
+  ## walkTo sets walk+goal; lookAt sets aim; shootAt sets shoot+aim (the last call of
+  ## each kind wins, as in the game). aim (0,0) means no aim order, as the game reads
+  ## it. Unscripted seats report zeros with scripted=0.
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  let c = env.scriptOrders[seat]
+  output[0] = c.walk.int32; output[1] = c.goal.x; output[2] = c.goal.z
+  output[3] = c.shoot.int32; output[4] = c.aim.x; output[5] = c.aim.z
+  output[6] = c.chargeGrenade.int32; output[7] = c.sneak.int32; output[8] = c.direct.int32
+  output[9] = int32(env.scripts[seat].len > 0)
+  0
 
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
   ## Diagnostic: resident 64x64 terrain blocks (16 KiB each) across all tables.

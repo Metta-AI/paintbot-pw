@@ -54,13 +54,24 @@ type
     nextId: int32
     answers: OrderedTable[int32, Stored]
 
-var
-  oracleEnabled*: bool
-  oracleInterval* = DefaultOracleInterval
-  currentTick: int32
-  seats: array[Seats, Seat]
-  pendingAsks: seq[OracleAsk]
-  seatsReady: bool
+when defined(pwTraining):
+  # Training worlds never have an advisor: every ask is refused. The per-seat drafts are
+  # still written by scripts, so they are thread-local like the rest of the seat state.
+  var
+    oracleEnabled* {.threadvar.}: bool
+    oracleInterval* {.threadvar.}: int
+    currentTick {.threadvar.}: int32
+    seats {.threadvar.}: array[Seats, Seat]
+    pendingAsks {.threadvar.}: seq[OracleAsk]
+    seatsReady {.threadvar.}: bool
+else:
+  var
+    oracleEnabled*: bool
+    oracleInterval* = DefaultOracleInterval
+    currentTick: int32
+    seats: array[Seats, Seat]
+    pendingAsks: seq[OracleAsk]
+    seatsReady: bool
 
 proc newDraft(): Draft =
   # Default-initialised OrderedTables cannot be iterated, so build every table explicitly.
