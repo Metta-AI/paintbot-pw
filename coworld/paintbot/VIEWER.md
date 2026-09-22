@@ -31,7 +31,7 @@ The viewer displays finite lives, armor, grenade pickups/throws/blasts, spray pi
 
 The viewer reads original v1 files and v2 files. V2 adds bounded player display names and public policy shouts; recorded inputs and world hashes are unchanged. Old files show numbered team seats because names/comms were never recorded. Previously published episodes retain their original viewer bundle; new episodes use the newly published package.
 
-WASM public shout packets are recorded. BASIC policies can explicitly publish a shout with `result = shout(strNew("Guard the heart"))`. BASIC `PRINT` remains a private diagnostic log. Shouts are currently spectator messages; they do not add a new policy observation channel. BASIC permits four shouts per seat per tick, maximum 1024 bytes per string; the replay caps public messages at 20,000.
+Policies can explicitly publish a shout with `result = shout(strNew("Guard the heart"))`. BASIC `PRINT` remains a private diagnostic log. Shouts are currently spectator messages; they do not add a new policy observation channel. BASIC permits four shouts per seat per tick, maximum 1024 bytes per string; the replay caps public messages at 20,000.
 
 ## Build
 

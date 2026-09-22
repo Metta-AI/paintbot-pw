@@ -1,4 +1,4 @@
-"""Exercise the exact hosted handoff locally with BASIC or WASM file seats."""
+"""Exercise the exact hosted handoff locally with BASIC file seats."""
 
 import argparse
 import hashlib
