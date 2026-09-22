@@ -345,3 +345,17 @@ Deploy Coworld workflow after a dry run on main; hosted certification and all fi
 episodes passed (`ereq_0d1378e0`, `ereq_5685fbfc`, `ereq_7ba95cd0`, `ereq_921324b4`,
 `ereq_a47d78d3`). All 27 paintbot Nim suites, the Python runtime and WASM baseline tests, and
 Linux/macOS/Windows CI passed on the deployed commit.
+
+## Top-bar heart strip — 0.3.31
+
+The viewer's header now shows the ten territory hearts between the Ember and Azure plates,
+ordered along the camp-to-camp axis so the strip mirrors the map: owned hearts fill in the
+team color, unclaimed hearts stay outlined, a capture in progress traces the outline in the
+capturing team's color, and a contested heart pulses (#48). Viewer only; rules, recordings and
+hashes are unchanged.
+
+Merged to main as `491ae56`. Version 0.3.31 is certified and canonical as
+`cow_1fa948f7-11dd-4925-8ba2-a016b980da30` (manifest `sha256:54a09ab25c7d6641f5c05db4b5babf223e7f692c7903bfbdfbb0dadd2d3b22a0`), deployed by the Deploy
+Coworld workflow (run 35682382373) after build.yml passed on the merge commit; hosted
+certification and all five hosted smoke episodes passed (`ereq_2ff98632`, `ereq_70212521`,
+`ereq_8f243930`, `ereq_a6e4c3ba`, `ereq_ba8b8574`).
