@@ -49,9 +49,12 @@ proc bodyForSeat(observer, identity: int): int =
 proc visibleToBot(slot, other: int): bool = bodyForSeat(slot, other) >= 0
 const DataNames = ["selfId","selfTeam","selfX","selfY","selfHp","carrying","homeX","homeY","heartX","heartY","worldTick","ownHeartX","ownHeartY","ownHeartStolen","hasGrenade","hasSpray","armorHp","livesLeft","grenadeCharge","trenchId"]
 proc limits*(): Limits =
+  # A seat that drafts an advisor request pays a flat string cost per operation (68 units at
+  # the 1,024-byte string limit), so a structured request is charged like a long one. The
+  # budget is headroom for that, not a target: the shipped baselines peak far below it.
   result=defaultLimits()
-  result.maxSourceBytes=64*1024; result.maxInstructions=20000
-  result.maxMemoryBytes=2*1024*1024; result.maxWorkUnits=50000
+  result.maxSourceBytes=64*1024; result.maxInstructions=60000
+  result.maxMemoryBytes=2*1024*1024; result.maxWorkUnits=200000
   result.maxArrayElements=4096;result.maxGlobals=256;result.maxCallDepth=16
   result.maxPrintBytes=1024;result.maxPrintEvents=128
 proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
@@ -170,7 +173,7 @@ proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
     if isPlayerIndex(playerSlot, slot): continue
     # Oracle drafts are text-heavy: four times the default handle count, same 64 KiB arena.
     var stringLimits=defaultStringLimits()
-    stringLimits.maxStrings=1024
+    stringLimits.maxStrings=2048
     let strings=initStringPool(stringLimits)
     var neural: NeuralSeat
     var neuralFailed = false
@@ -202,7 +205,7 @@ when defined(pwTraining):
     ## neural package: same string limits, host functions, compile limits and runtime
     ## budget. Raises BasicError when the source does not compile.
     var stringLimits=defaultStringLimits()
-    stringLimits.maxStrings=1024
+    stringLimits.maxStrings=2048
     let strings=initStringPool(stringLimits)
     let neural = loadNeuralSeat("/nonexistent/paintbot-pw-script-seat", slot)
     let h=host(slot,strings,neural)
