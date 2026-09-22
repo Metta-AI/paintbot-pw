@@ -35,7 +35,12 @@ produce a safe empty command. All seats observe the pre-action world.
 Native inference has a separate deterministic operation count and a maximum of
 4,000,000 operations per seat/tick. This cannot be bypassed by repeated host
 calls. Bytecode and ordinary host work retain their existing limits. `PW_BASIC_PEAKS=1`
-reports `peak_neural_operations` separately from bytecode work. Recurrent
+reports `peak_neural_operations` separately from bytecode work. On the hosted platform
+each seat that loaded a neural package also gets one line in its private seat log at
+match end, `neural: peak_ops=238080 budget=4000000 model=w128 ticks=1200` (peak native
+operations in any tick, the budget, the hidden width, ticks played); a package rejected
+for exceeding the budget gets the same line with the rejected model's cost and `ticks=0`
+before its `BASIC error`. Plain BASIC seats log nothing. Recurrent
 state resets at initial use, match reset, death, and respawn. Training must use
 the same reset convention. Output selection is deterministic headwise argmax;
 training samples categorical heads and evaluates the deployed argmax artifact.

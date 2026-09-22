@@ -188,6 +188,9 @@ proc runHeadless*() =
     echo "peak_strings=", peakStrings
     echo "peak_neural_operations=", peakNativeWork
   when defined(coworld):
+    # Hosted seat logs are the only per-seat channel a player can read back, so each neural
+    # seat's inference cost goes there before the platform's "completed" line.
+    if not replayMode: players.logNeuralTelemetry(world.tick, playerLog)
     finishCoworld(NumericCoworldResults[float](scores: world.scores(), ticks: world.tick,
         seed: world.seed, outcome: if world.winner <
         0: "time_limit" else: $world.winner))
