@@ -212,10 +212,12 @@ proc coverBlocks(c: Cover, p: Point, radius: int): bool {.inline.} =
     let r = c.w div 2
     return distance2(p, point(c.x.int+r.int, c.z.int+r.int)) < (r+radius).int64*(r+radius)
   p.x > c.x-radius and p.x < c.x+c.w+radius and p.z > c.z-radius and p.z < c.z+c.h+radius
-proc boundsBlocked(p: Point, radius: int): bool {.inline.} =
-  if p.x < minX()+radius or p.z < minZ()+radius or p.x > maxX()-radius or p.z >
-      maxZ()-radius: return true
+proc boundsBlocked(p: Point, radius: int, bounds: array[4,int]): bool {.inline.} =
+  if p.x < bounds[0]+radius or p.z < bounds[1]+radius or p.x > bounds[2]-radius or p.z >
+      bounds[3]-radius: return true
   islandTerrain and islandMargin(p.x.int,p.z.int)<radius div 3+40
+proc boundsBlocked(p: Point, radius: int): bool {.inline.} =
+  boundsBlocked(p, radius, [minX(),minZ(),maxX(),maxZ()])
 # Training builds index cover on a coarse grid so point and segment tests visit only
 # nearby obstacles instead of all of them (224 under rules 37). The index belongs to the
 # thread and is keyed by the cover it was built from: a world whose cover payload address
@@ -347,12 +349,14 @@ proc lineClear*(w: World, a, b: Point): bool =
     let filtered = rayCount <= RayCoverLimit
   else:
     let g = coverIndexFor(w)
-  let startHeight = if visionRulesVersion >= 9: w.elevation(a) else: 0
-  let endHeight = if visionRulesVersion >= 9: w.elevation(b) else: 0
+  let bounds = [minX(),minZ(),maxX(),maxZ()]
+  let elevated = visionRulesVersion >= 9
+  let startHeight = if elevated: w.elevation(a) else: 0
+  let endHeight = if elevated: w.elevation(b) else: 0
   let steps = max(abs(b.x-a.x), abs(b.z-a.z)) div 25 + 1
   for i in 1..steps:
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
-    if boundsBlocked(p, 0): return false
+    if boundsBlocked(p, 0, bounds): return false
     when defined(pwTraining):
       if coverBlockedIndexed(g, w, p, 0): return false
     else:
@@ -362,7 +366,7 @@ proc lineClear*(w: World, a, b: Point): bool =
       else:
         for c in w.cover:
           if c.coverBlocks(p, 0): return false
-    if visionRulesVersion >= 9:
+    if elevated:
       let eye = startHeight+120+(endHeight-startHeight)*i.int div steps.int
       if w.elevation(p) > eye: return false
   true

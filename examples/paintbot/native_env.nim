@@ -9,6 +9,11 @@ type
   NativeEnv = object
     world: World
     resets: array[Seats,float32]
+    # Apparent identities per seat, valid for the current unchanged world only: the
+    # observer, the action decoder and the training bot all resolve the same bodies on
+    # one tick, so each seat's fog is computed at most once between steps.
+    bodies: array[Seats,array[Seats,int]]
+    bodiesReady: array[Seats,bool]
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -17,6 +22,14 @@ const NativeRules* = 37
 proc ready() =
   setupForeignThreadGc()
   configureRules(NativeRules)
+
+proc invalidateBodies(env: ptr NativeEnv) =
+  for slot in 0..<Seats: env.bodiesReady[slot] = false
+proc bodiesFor(env: ptr NativeEnv, slot: int): array[Seats,int] =
+  if not env.bodiesReady[slot]:
+    env.bodies[slot] = env.world.observedBodies(slot)
+    env.bodiesReady[slot] = true
+  env.bodies[slot]
 
 proc pw_env_version*(): cint {.exportc, cdecl, dynlib.} = 1
 proc pw_observation_size*(): cint {.exportc, cdecl, dynlib.} = ObservationSize
@@ -29,6 +42,7 @@ proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
   try:
     env.world = newWorld(seed,maxTicks)
     for i in 0..<Seats: env.resets[i] = 1
+    env.invalidateBodies()
     result = env
   except CatchableError:
     `=destroy`(env[])
@@ -48,19 +62,28 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
   try:
     env.world = newWorld(seed,maxTicks)
     for i in 0..<Seats: env.resets[i] = 1
+    env.invalidateBodies()
     return 0
   except CatchableError: return -1
 
-proc pw_observe*(handle: pointer, observations, resets: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
+proc pw_observe_seats*(handle: pointer, seats: uint32, observations, resets: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
+  ## Encode only the seats whose bit is set; the other seats' buffer rows are left as
+  ## they are. A host training one side against built-in bots need not pay for the
+  ## bots' observations. Bit s is slot s. Same bytes as pw_observe for chosen seats.
   if handle == nil or observations == nil or resets == nil: return -1
   ready()
   let env = cast[ptr NativeEnv](handle)
   try:
     for slot in 0..<Seats:
-      encodeObservation(env.world,slot,observations.toOpenArray(slot*ObservationSize,(slot+1)*ObservationSize-1))
+      if (seats and (1'u32 shl slot)) == 0: continue
+      encodeObservation(env.world,slot,observations.toOpenArray(slot*ObservationSize,(slot+1)*ObservationSize-1),
+        env.bodiesFor(slot))
       resets[slot] = env.resets[slot]
     return 0
   except CatchableError: return -1
+
+proc pw_observe*(handle: pointer, observations, resets: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
+  pw_observe_seats(handle, 0xffff'u32, observations, resets)
 
 proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
   ## Settled score reward only, normalized by 1000. Optional shaping belongs in
@@ -74,8 +97,12 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
     var wasDead: array[Seats,bool]
     for slot in 0..<Seats:
       wasDead[slot] = env.world.cogs[slot].hp <= 0
-      commands[slot] = decodeActions(env.world,slot,actions.toOpenArray(slot*ActionSizes.len,(slot+1)*ActionSizes.len-1))
+      let offset = slot*ActionSizes.len
+      commands[slot] = if actions[offset+1] in 1'i32..16'i32:
+          decodeActions(env.world,slot,actions.toOpenArray(offset,offset+ActionSizes.len-1),env.bodiesFor(slot))
+        else: decodeActions(env.world,slot,actions.toOpenArray(offset,offset+ActionSizes.len-1))
     env.world.step(commands)
+    env.invalidateBodies()
     let done = env.world.winner != -1 or env.world.tick >= env.world.endTick
     for slot in 0..<Seats:
       rewards[slot] = if done: float32(env.world.glory[team(slot)])/1000 else: 0
@@ -113,8 +140,12 @@ proc pw_bot_actions*(handle: pointer, side, level: cint,
   let env = cast[ptr NativeEnv](handle)
   for slot in 0..<Seats:
     if team(slot) == side:
-      trainingBotActions(env.world,slot,level.int,
-        actions.toOpenArray(slot*ActionSizes.len,(slot+1)*ActionSizes.len-1))
+      if level == 2 and env.world.cogs[slot].hp > 0:
+        trainingBotActions(env.world,slot,level.int,
+          actions.toOpenArray(slot*ActionSizes.len,(slot+1)*ActionSizes.len-1),env.bodiesFor(slot))
+      else:
+        trainingBotActions(env.world,slot,level.int,
+          actions.toOpenArray(slot*ActionSizes.len,(slot+1)*ActionSizes.len-1))
   return 0
 
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =

@@ -13,8 +13,10 @@ const
   ActionContractHash* = "55922d42d4065a069b3193f31e056c3a53cd34175b10fed7ff0d8c22b50a473e"
   Directions = [(1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1)]
 
-proc observedBodies(w: World, slot: int): array[Seats, int] =
+proc observedBodies*(w: World, slot: int): array[Seats, int] =
   ## Match BASIC identity resolution, including uniforms and duplicate identities.
+  ## Pure in the world: hosts that observe, decode and drive bots on one unchanged
+  ## tick may compute it once per seat and pass it to the overloads below.
   for i in 0..<Seats: result[i] = -1
   result[slot] = slot
   for body in 0..<Seats:
@@ -30,7 +32,8 @@ proc relativeTeam(value, side: int): float32 =
   elif value == side: 1'f32
   else: -1'f32
 
-proc encodeObservation*(w: World, slot: int, output: var openArray[float32]) =
+proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
+    bodies: array[Seats, int]) =
   if slot notin 0..<Seats or output.len != ObservationSize:
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   for i in 0..<output.len: output[i] = 0
@@ -86,7 +89,6 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32]) =
     else: k += 3
     put(float32(w.heartPoints(i))/5)
   # Fog-gated apparent identities (16 * 8). No true-team or real-seat leakage.
-  let bodies = w.observedBodies(slot)
   for identity in 0..<Seats:
     let body = bodies[identity]
     if body < 0: k += 8; continue
@@ -127,8 +129,13 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32]) =
       p.z.int<=maxZ() and not w.blocked(p) and w.traversable(me.pos,p)).int)
     put(float32(w.elevation(p)-w.elevation(me.pos))/1000)
   doAssert k == 442 # Six reserved zeros preserve the fixed-width contract.
+proc encodeObservation*(w: World, slot: int, output: var openArray[float32]) =
+  if slot notin 0..<Seats or output.len != ObservationSize:
+    raise newException(ValueError, "invalid neural observation dimensions or seat")
+  w.encodeObservation(slot, output, w.observedBodies(slot))
 
-proc decodeActions*(w: World, slot: int, actions: openArray[int32]): Command =
+proc decodeActions*(w: World, slot: int, actions: openArray[int32],
+    bodies: array[Seats, int]): Command =
   if slot notin 0..<Seats or actions.len != ActionSizes.len:
     raise newException(ValueError, "invalid neural action dimensions or seat")
   for i,size in ActionSizes:
@@ -153,7 +160,6 @@ proc decodeActions*(w: World, slot: int, actions: openArray[int32]): Command =
                         clamp(me.pos.z.int+flip*delta[1]*200,minZ(),maxZ()))
   let aim = actions[1].int
   if aim in 1..16:
-    let bodies = w.observedBodies(slot)
     if bodies[aim-1] >= 0: result.aim = w.cogs[bodies[aim-1]].pos
   elif aim >= 17:
     let delta = Directions[aim-17]
@@ -162,6 +168,15 @@ proc decodeActions*(w: World, slot: int, actions: openArray[int32]): Command =
   result.shoot = actions[2] != 0
   result.chargeGrenade = actions[3] != 0
   result.sneak = actions[4] != 0
+proc decodeActions*(w: World, slot: int, actions: openArray[int32]): Command =
+  if slot notin 0..<Seats or actions.len != ActionSizes.len:
+    raise newException(ValueError, "invalid neural action dimensions or seat")
+  # Identity aim is the only head that resolves bodies; keep the cost to that case.
+  if actions.len == ActionSizes.len and actions[1] in 1'i32..16'i32:
+    return w.decodeActions(slot, actions, w.observedBodies(slot))
+  var none: array[Seats, int]
+  for i in 0..<Seats: none[i] = -1
+  w.decodeActions(slot, actions, none)
 
 proc decodeLogits*(w: World, slot: int, logits: openArray[float32]): Command =
   if logits.len != LogitSize: raise newException(ValueError,"invalid neural logit size")
@@ -178,7 +193,7 @@ proc decodeLogits*(w: World, slot: int, logits: openArray[float32]): Command =
   w.decodeActions(slot,actions)
 
 proc trainingBotActions*(w: World, slot, level: int,
-    actions: var openArray[int32]) =
+    actions: var openArray[int32], bodies: array[Seats, int]) =
   ## Deliberately simple policy-visible curriculum opponent, never the learner.
   ## Level 1 idles; level 2 captures and fires at the nearest apparent enemy.
   if actions.len != ActionSizes.len or level notin 1..2:
@@ -196,7 +211,6 @@ proc trainingBotActions*(w: World, slot, level: int,
   # Keep looking in different directions when no opponent is seen.
   actions[1] = int32(17+(w.tick.int div 24+slot div 2) mod 8)
   best = high(int64)
-  let bodies = w.observedBodies(slot)
   for identity,body in bodies:
     if body < 0 or w.observedTeam(slot,body) == team(slot): continue
     let d = distance2(me.pos,w.cogs[body].pos)
@@ -204,3 +218,10 @@ proc trainingBotActions*(w: World, slot, level: int,
       best = d
       actions[1] = int32(identity+1)
       actions[2] = 1
+proc trainingBotActions*(w: World, slot, level: int, actions: var openArray[int32]) =
+  if actions.len != ActionSizes.len or level notin 1..2:
+    raise newException(ValueError,"invalid training bot configuration")
+  if level == 1 or slot notin 0..<Seats or w.cogs[slot].hp <= 0:
+    for i in 0..<actions.len: actions[i] = 0
+    return
+  w.trainingBotActions(slot, level, actions, w.observedBodies(slot))
