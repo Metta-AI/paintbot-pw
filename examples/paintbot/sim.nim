@@ -154,7 +154,8 @@ type
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
-# Rules 36 headers were emitted by rules 35 games; glory starts at rules 37.
+# Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
+# still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
 when defined(pwTraining):
   var visionRulesVersion* {.threadvar.}: int
 else:
