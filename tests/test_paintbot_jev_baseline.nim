@@ -182,7 +182,8 @@ suite "Jev-advised BASIC baseline":
       "wide": @[("useWide", 1)],
       "retreat and dial": @[("useRetreat", 1), ("useDial", 1)],
     }
-    let shipped = readFile(Jev)
+    # Git may check the file out with CRLF, so normalise before matching on line boundaries.
+    let shipped = readFile(Jev).replace("\r\n", "\n")
     for (name, flips) in Arms:
       var source = shipped
       for (switch, value) in flips:
