@@ -228,15 +228,25 @@ when defined(pwTraining):
   const
     CoverCell = 200
     CoverReach = 90 # Largest radius any caller passes to blocked; larger falls back.
-  type CoverIndex = object
-    payload: pointer
-    length: int
-    bounds: array[4, int]
-    cover: seq[Cover]
-    originX, originZ, nx, nz: int
-    cellStart, items: seq[int32]
-    seen: seq[int32]
-    stamp: int32
+  const RayMemoBits = 16
+  type
+    RayKey = object
+      a, b: Point
+    CoverIndex = object
+      payload: pointer
+      length: int
+      bounds: array[4, int]
+      cover: seq[Cover]
+      originX, originZ, nx, nz: int
+      cellStart, items: seq[int32]
+      seen: seq[int32]
+      stamp: int32
+      # lineClear is a function of its endpoints and the static geometry (cover,
+      # trenches, terrain, rules), so rays repeat exactly while cogs stand still.
+      rayTrenches: seq[Cover]
+      rayRules: int
+      rayKeys: seq[RayKey]
+      rayState: seq[uint8] # 0 empty, 1 blocked, 2 clear
   var coverIndex {.threadvar.}: CoverIndex
   proc coverSpan(c: Cover): tuple[x0, x1, z0, z1: int] =
     let depth = if c.h == 0: c.w else: c.h
@@ -252,6 +262,9 @@ when defined(pwTraining):
     g.cellStart = newSeq[int32](g.nx*g.nz+1)
     g.seen = newSeq[int32](w.cover.len)
     g.stamp = 0
+    g.rayKeys = newSeq[RayKey](1 shl RayMemoBits)
+    g.rayState = newSeq[uint8](1 shl RayMemoBits)
+    g.rayRules = -1
     template cells(c: Cover, body: untyped) =
       let span = coverSpan(c)
       let cx0 = clamp((span.x0-g.originX) div CoverCell, 0, g.nx-1)
@@ -282,6 +295,12 @@ when defined(pwTraining):
       buildCoverIndex(w)
     result.payload = payload
     result.length = w.cover.len
+  proc raySlot(a, b: Point): int {.inline.} =
+    var h = uint64(uint32(a.x))*0x9E3779B97F4A7C15'u64
+    h = (h xor uint64(uint32(a.z)))*0xC2B2AE3D27D4EB4F'u64
+    h = (h xor uint64(uint32(b.x)))*0x165667B19E3779F9'u64
+    h = (h xor uint64(uint32(b.z)))*0x9E3779B97F4A7C15'u64
+    int((h shr 40) and uint64((1 shl RayMemoBits)-1))
   template cellAt(g: ptr CoverIndex, x, z: int): int =
     ## -1 when the point lies outside the indexed span.
     let cx = x-g.originX
@@ -331,7 +350,7 @@ proc blocked*(w: World, p: Point, radius = Radius): bool =
     for c in w.cover:
       if c.coverBlocks(p, radius): return true
 const RayCoverLimit = 512
-proc lineClear*(w: World, a, b: Point): bool =
+proc lineClearRay(w: World, a, b: Point): bool =
   # Only obstacles overlapping the ray bounds can block its sampled points, so the
   # sampled predicate is evaluated against that subset (from the cover index in training
   # builds, otherwise indexed on the stack; too many for the stack means the full set,
@@ -370,6 +389,23 @@ proc lineClear*(w: World, a, b: Point): bool =
       let eye = startHeight+120+(endHeight-startHeight)*i.int div steps.int
       if w.elevation(p) > eye: return false
   true
+proc lineClear*(w: World, a, b: Point): bool =
+  when defined(pwTraining):
+    # Remembered per thread for the geometry the cover index was built from; the
+    # trenches and rules are checked on every call and any change empties the memo.
+    let g = coverIndexFor(w)
+    if g.rayRules != visionRulesVersion or g.rayTrenches != w.trenches:
+      g.rayRules = visionRulesVersion
+      g.rayTrenches = w.trenches
+      for state in g.rayState.mitems: state = 0
+    let slot = raySlot(a, b)
+    if g.rayState[slot] != 0 and g.rayKeys[slot].a == a and g.rayKeys[slot].b == b:
+      return g.rayState[slot] == 2
+    result = lineClearRay(w, a, b)
+    g.rayKeys[slot] = RayKey(a: a, b: b)
+    g.rayState[slot] = if result: 2 else: 1
+  else:
+    lineClearRay(w, a, b)
 proc canSeePoint*(w: World, slot: int, p: Point): bool =
   if slot notin 0..<Seats or w.cogs[slot].hp <= 0: return false
   let c = w.cogs[slot]
