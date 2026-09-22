@@ -3,14 +3,32 @@
     python3 coworld/paintbot/tools/jev_experiment.py --coworld-id cow_xxxxxxxx --out dist/jev-xp
 
 Each arm is `players/jev.bas` with one group of switches flipped, so a run separates one change
-at a time instead of measuring the whole rewrite at once. Every arm faces the same opponent over
-the same number of episodes with the same seat layout, which is what makes the margins
-comparable; the notes field carries the arm name so `coworld xp-request list --mine` reads as a
-table of the experiment.
+at a time instead of measuring the whole rewrite at once.
 
-The Coworld id must be a version that carries the structured oracle API (path state keys,
-`oracleCriterionField`, `oracleReady`). Against an older version the arm files do not compile
-and every seat fails, so the tool refuses to write bodies without one.
+The design follows what 100 hosted episodes on this Coworld established (see the guide,
+"Comparing two builds on hosted episodes"):
+
+- **Head-to-head against the shipped build, not against the plain baseline.** Two advised arms
+  that could not be told apart from each other both beat `paintbot-pw-basic` 20 of 20, so a
+  battery against it is pure ceiling and carries no information. `a0-vs-baseline` is the one
+  exception, a sanity arm that only asks whether the shipped build still beats the baseline.
+- **Every arm is split into equal halves with the sides swapped**, so each arm is two requests.
+  Not because Red is favoured - rules 35 mirrored the map - but because 60 head-to-head
+  episodes came out 35/60 to the even side from noise alone, which is the size of the effects
+  these batteries chase. An unbalanced battery measures the draw.
+- **Win rate is the only usable statistic.** The loser's glory is zeroed at the final tick, so
+  the score margin carries no information; count paired wins and take a Wilson interval.
+- **`episode_player_llm_spend_limit_usd` is not optional.** A seat with no budget has no
+  advisor, plays as the baseline and still scores, so the request looks healthy and measures
+  nothing.
+
+At 60 episodes an arm's Wilson interval is about +/-0.12: enough to reject a 70/30 effect, not
+enough to separate 0.62 from a coin flip. Raise `--episodes` to about 250 to claim a win that
+size; episodes are cheap and run in parallel, so the limit is patience.
+
+The Coworld id must be a version carrying the structured oracle API (path state keys,
+`oracleCriterionField`, `oracleReady`). Against an older version the arms do not compile and
+every seat fails, so the tool refuses to write bodies without one.
 
 Prints the upload and create commands; it runs nothing itself.
 """
@@ -24,11 +42,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 JEV = ROOT / "coworld/paintbot/players/jev.bas"
-LEAGUE = "league_b9458ff8-0854-4e21-82b8-3c99942902e0"
-OPPONENT = "paintbot-pw-basic-r22"   # the game's own BASIC baseline, champion in the league
+VARIANT = "competition"
+BASELINE = "paintbot-pw-basic-v22:v1"   # the league's plain BASIC filler
 SEATS = 16
-EPISODES = 24            # 8 was never enough to separate two arms; 24 full-length games was
-SPEND_LIMIT_USD = 0.10   # a measured Jev game costs about $0.016 across all its seats
+EPISODES = 60            # 30 a side; about +/-0.12 Wilson. ~250 to call a 0.62 effect.
+SPEND_LIMIT_USD = 0.50
+
+REFERENCE = "a1-structured"
 
 # name -> (what the arm tests, switch overrides)
 ARMS: dict[str, tuple[str, dict[str, int]]] = {
@@ -44,9 +64,8 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
                 {"useWide": 1}),
     "a6-retreat": ("the retreat choice and break-off dial, now that retSent and the question's "
                    "polarity are fixed", {"useRetreat": 1, "useDial": 1}),
-    "a7-echo": ("squadmates repeating the callout they adopted, which reaches past the 12.8 m "
-                "shout radius but pins the hold and the leader-takeover timer open",
-                {"useEcho": 1}),
+    "a7-echo": ("the old echoing relay, where every adopter repeats the callout, as the control "
+                "arm for the one-voice change", {"useEcho": 1}),
 }
 
 
@@ -60,25 +79,21 @@ def arm_source(base: str, overrides: dict[str, int]) -> str:
     return out
 
 
-def roster() -> list[dict]:
-    """Even slots are the candidate, odd slots the opponent: in Paintbot PW slot parity is the
-    team, so this is one policy against the other with no seat advantage either way."""
-    return [
-        {"player": ({"policy_ref": "%CANDIDATE%"} if slot % 2 == 0 else {"top_n": 1}),
-         "slot": slot}
-        for slot in range(SEATS)
-    ]
-
-
-def body(arm: str, coworld_id: str, purpose: str) -> dict:
+def body(*, coworld_id: str, candidate: str, opponent: str, candidate_even: bool,
+         episodes: int, note: str) -> dict:
+    """All sixteen seats pinned: even seats are Red, odd are Blue."""
+    roster = []
+    for slot in range(SEATS):
+        even = slot % 2 == 0
+        ref = candidate if even == candidate_even else opponent
+        roster.append({"slot": slot, "player": {"policy_ref": ref}})
     return {
-        "idempotency_key": f"jev-{arm}-{coworld_id}",
-        "coworld_id": coworld_id,
-        "roster": roster(),
-        "included_players": [OPPONENT],
-        "num_episodes": EPISODES,
+        "target": {"coworld_id": coworld_id, "variant_id": VARIANT},
+        "roster": roster,
+        "num_episodes": episodes,
+        "execution_backend": "k8s",
         "episode_player_llm_spend_limit_usd": SPEND_LIMIT_USD,
-        "notes": f"jev experiment arm {arm}: {purpose}",
+        "notes": note,
     }
 
 
@@ -87,28 +102,51 @@ def main() -> None:
     parser.add_argument("--coworld-id", required=True,
                         help="uploaded paintbot-pw version carrying the structured oracle API")
     parser.add_argument("--out", default="dist/jev-xp", help="directory for arm files and bodies")
+    parser.add_argument("--episodes", type=int, default=EPISODES,
+                        help="episodes per arm, split evenly between the two side assignments")
     args = parser.parse_args()
+
+    assert args.episodes % 2 == 0, "episodes must be even so the two side halves are equal"
+    half = args.episodes // 2
 
     out = ROOT / args.out
     out.mkdir(parents=True, exist_ok=True)
-    base = JEV.read_text()
+    base = JEV.read_text(encoding="utf-8")
     assert "oracleReady()" in base, f"{JEV} predates the readiness probe; regenerate it first"
 
-    print(f"# {len(ARMS)} arms, {EPISODES} episodes each, opponent {OPPONENT}\n")
+    def policy(arm: str) -> str:
+        return f"daveey1-jev-{arm}:v1"
+
+    print(f"# {len(ARMS)} arms, {args.episodes} episodes each ({half} a side), "
+          f"head-to-head against {REFERENCE}\n")
     for arm, (purpose, overrides) in ARMS.items():
-        source = arm_source(base, overrides)
         bas = out / f"{arm}.bas"
-        bas.write_text(source)
-        name = f"daveey1-jev-{arm}"
-        request = body(arm, args.coworld_id, purpose)
-        text = json.dumps(request, indent=2).replace("%CANDIDATE%", f"{name}:v1")
-        (out / f"{arm}.json").write_text(text + "\n")
+        bas.write_text(arm_source(base, overrides), encoding="utf-8")
         flips = ", ".join(f"{k}={v}" for k, v in overrides.items()) or "shipped defaults"
         print(f"# {arm}: {flips}")
-        print(f"coworld upload-policy --file {bas.relative_to(ROOT)} --name {name}")
-        print(f"coworld xp-request create {(out / f'{arm}.json').relative_to(ROOT)}\n")
-    print("# then: coworld xp-request list --mine")
-    print("# and per arm: coworld xp-request episodes <xreq_id>")
+        print(f"coworld upload-policy --file {bas.relative_to(ROOT)} --name daveey1-jev-{arm}")
+
+    print()
+    for arm, (purpose, _) in ARMS.items():
+        # The reference arm has nothing to play against itself; check it against the baseline.
+        opponent = BASELINE if arm == REFERENCE else policy(REFERENCE)
+        against = "the plain BASIC baseline" if arm == REFERENCE else REFERENCE
+        for candidate_even in (True, False):
+            side = "even" if candidate_even else "odd"
+            name = f"{arm}-{side}"
+            note = (f"jev arm {arm} vs {against}, candidate on {side} seats, {half} episodes: "
+                    f"{purpose}")
+            path = out / f"{name}.json"
+            path.write_text(json.dumps(
+                body(coworld_id=args.coworld_id, candidate=policy(arm), opponent=opponent,
+                     candidate_even=candidate_even, episodes=half, note=note), indent=2) + "\n")
+            print(f"coworld xp-request create {path.relative_to(ROOT)}")
+
+    print("\n# then: coworld xp-request list --mine")
+    print("# per request: coworld xp-request get <xreq_id> --json")
+    print("# instrument check before trusting a score, per arm:")
+    print("#   coworld episode-logs <ereq_id> -d logs/ && grep -c '^ans ' logs/*  "
+          "# a seat whose asks all fail plays as the baseline and still scores")
 
 
 if __name__ == "__main__":

@@ -394,13 +394,22 @@ tick. Everything is int32: string arguments are pool handles (`strNew(...)`), an
 scores and confidences are scaled by 1000. The draft lives for one decision only, so build it and
 call `oracleAsk()` in the same tick.
 
-- `oracleAvailable()` is 1 when the host has an oracle.
-- `oracleState(key, value)`, `oracleStateText(key, text)` add fields to `state` (at most 128);
-  `oracleNote(text)` appends to `state.notes` (at most 16). Keys are 1-64 bytes.
+- `oracleAvailable()` is 1 when the host has an oracle. `oracleReady()` is 0 when a fresh
+  `oracleAsk()` would be accepted, the ticks still to wait when it would not, and -1 when there
+  is no oracle or this seat already has a request in flight. Drafting costs string operations
+  whether or not the request ships, so test it before building anything.
+- `oracleState(key, value)`, `oracleStateText(key, text)` add fields to `state` (at most 256);
+  `oracleNote(text)` appends to `state.notes` (at most 16). Keys are 1-64 bytes. A key may be a
+  **path**: `candidates[0].reach_seconds` builds nested objects and arrays, so facts go out as
+  fields rather than spliced into a sentence. A key that is not a well-formed path is used as a
+  flat field name.
 - `oracleQuestion(key, kind, instructions)` adds a question: kind 0 is a yes/no (`noul`), 1 a
   `score`, 2 a `choice` (1-64 questions). `oracleCriterion(key, label, text)` appends one criterion
   (at most 16): the ordered level text for a score (label ignored), or `label: text` for a yes/no
-  (`"true"` / `"false"`) or a choice.
+  (`"true"` / `"false"`) or a choice. `oracleCriterionField(key, label, field, text)` turns one
+  criterion into an object - its own text becomes `what` and this adds another field such as
+  `not_for` or `examples`; a field name used twice becomes an array. Score criteria take no
+  fields.
 - `oracleAsk()` returns the request id (1 or more), or 0 when refused for the same reasons as
   `oracle_ask`, when the draft has no question, or when its JSON exceeds 32 KiB. Each call clears
   the draft. Store the id in a global: string handles do not survive the tick, integers do.
@@ -428,10 +437,16 @@ were not there.
 advisor layer spliced in by `coworld/paintbot/tools/make_jev_baseline.py`; regenerate it whenever
 `base.bas` changes (`--check` in CI keeps the two copies honest). Reflexes stay in code. One cog
 per squad asks Jev to pick the squad's objective from a code-ranked list (the three cheapest
-capture candidates or keep current, each with its consequence spelled out) and relays the answer
-by shout so the squad keeps agreeing. The draft also carries a retreat choice and a survival
-estimate, journaled but switched off (`useRetreat`, `useDial`, `useWide` in the init block) because
-they lost full-length games in the ablations. Asks are event-driven with a 24-tick debounce.
+capture candidates or keep current) and relays the answer by shout so the squad keeps agreeing.
+The facts go out as structured fields - each candidate is a `candidates[k]` row of its owner,
+distance, reach time, threat and capture state - and each criterion is one line naming its row,
+rather than a sentence with the facts spliced into it. Three narrow yes/no questions ride along
+in the same request (outnumbered, a heart of ours falling, the squad arriving together): they
+steer nothing, and each is journaled against what the game went on to do so it can be scored.
+The draft also carries a retreat choice and a "loses a life" estimate, journaled but switched
+off (`useRetreat`, `useDial`, `useWide`, `useScore` in the init block) because they lost
+full-length games in the ablations. Asks are event-driven with a 24-tick debounce, and a pick
+that arrives more than `kStale` ticks after its ask is dropped rather than applied.
 
 The callout is three words — `Alpha, push Forge.`, `Bravo, hold Chapel.`, `Alpha, carry on.` — and
 a listener decodes only the squad word, the verb's first letter and the heart's first letter (A +
