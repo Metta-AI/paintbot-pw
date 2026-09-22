@@ -396,16 +396,19 @@ proc pw_action_contract_hash*(version: int32, output: ptr UncheckedArray[char],
   output[hash.len] = '\0'
   0
 
-proc pw_action_candidates*(handle: pointer, seat: cint, goals, aims: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+proc pw_action_candidates*(handle: pointer, seat: cint, movement, sneak: int32,
+    goals, aims: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## Diagnostic for demonstration mapping: the point every head index of the movement
   ## head (51 x {x, z}) and the aim head (25 x {x, z}) resolves to for this seat on the
   ## current pre-step world under the selected contract, from the seat's own fog and,
-  ## under v2, its aim memory, exactly as the coming pw_step would decode them. Index 0
-  ## is the seat's position / current aim (the "keep" candidates). A candidate that does
-  ## not exist now (missing heart, unavailable or unseen pickup, identity nobody visible
-  ## carries) and every entry of a dead seat is INT32_MIN in both coordinates. Reading
-  ## changes no state. Returns 0, -1 on bad arguments.
-  if handle == nil or seat notin 0..<Seats or goals == nil or aims == nil: return -1
+  ## under v2, its aim memory and the planned move of the given movement and sneak
+  ## heads (a v2 identity aim depends on them), exactly as the coming pw_step would
+  ## decode them. Index 0 is the seat's position / current aim (the "keep" candidates).
+  ## A candidate that does not exist now (missing heart, unavailable or unseen pickup,
+  ## identity nobody visible carries) and every entry of a dead seat is INT32_MIN in both
+  ## coordinates. Reading changes no state. Returns 0, -1 on bad arguments.
+  if handle == nil or seat notin 0..<Seats or goals == nil or aims == nil or
+      movement notin 0..<ActionSizes[0].int32 or sneak notin 0..1: return -1
   ready()
   let env = cast[ptr NativeEnv](handle)
   let slot = seat.int
@@ -413,14 +416,18 @@ proc pw_action_candidates*(handle: pointer, seat: cint, goals, aims: ptr Uncheck
   for i in 0..<ActionSizes[1]*2: aims[i] = low(int32)
   if env.world.cogs[slot].hp <= 0: return 0
   let bodies = env.bodiesFor(slot)
-  for movement in 0..<ActionSizes[0]:
-    let (found, p) = if movement == 0: (true, env.world.cogs[slot].pos)
-                     else: env.world.goalCandidate(slot, movement)
+  var chosenGoal = env.world.cogs[slot].pos
+  for index in 0..<ActionSizes[0]:
+    let (found, p) = if index == 0: (true, env.world.cogs[slot].pos)
+                     else: env.world.goalCandidate(slot, index)
     if found:
-      goals[movement*2] = p.x; goals[movement*2+1] = p.z
+      goals[index*2] = p.x; goals[index*2+1] = p.z
+      if index == movement.int: chosenGoal = p
+  let ownStep = if env.contract == acV2: env.world.plannedStep(slot, chosenGoal, sneak != 0)
+                else: Point()
   for aim in 0..<ActionSizes[1]:
     let (found, p) = if aim == 0: (true, env.world.cogs[slot].aim)
-                     else: env.world.aimCandidate(slot, aim, bodies, env.contract, env.aimMemory[slot])
+                     else: env.world.aimCandidate(slot, aim, bodies, env.contract, env.aimMemory[slot], ownStep)
     if found:
       aims[aim*2] = p.x; aims[aim*2+1] = p.z
   0

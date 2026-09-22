@@ -21,11 +21,11 @@ const
   # the tick a shoot order is applied the shooter first moves, then gunAim = aim - pos is
   # locked; the ray leaves GunWindupTicks ticks later from wherever the shooter then
   # stands, along the locked vector. With one move per tick the shooter has made 6 moves
-  # when the ray leaves and the direction was fixed after the first, so for velocities u
-  # (target) and v (shooter) the ray through the target's future position needs
-  # aim = body + (GunWindupTicks+1)*u - GunWindupTicks*v. base.bas ("the ray leaves six
-  # moves after the order... aim where they will be, minus our own drift") uses the same
-  # 6 and 5.
+  # when the ray leaves and the direction was fixed after the first, so for a target
+  # velocity u and the shooter's own per-tick step v the ray through the target's future
+  # position needs aim = body + (GunWindupTicks+1)*u - GunWindupTicks*v. base.bas ("the
+  # ray leaves six moves after the order... aim where they will be, minus our own drift")
+  # uses the same 6 and 5, with its planned leg as v while in contact.
   LeadTargetMoves* = GunWindupTicks + 1
   LeadOwnMoves* = GunWindupTicks
   # A larger per-axis displacement than any one-tick move (MoveSpeed 28, diagonal yield
@@ -38,11 +38,10 @@ type
     acV1 = 1, acV2 = 2
   AimMemory* = object
     ## What a seat saw one tick ago, kept by the host outside the World (never hashed,
-    ## never serialized): the pre-step tick it was recorded on, the seat's own position
-    ## and, per apparent identity, the body it resolved to and that body's position.
-    ## Contract v2 derives its lead velocities from it; contract v1 never reads it.
+    ## never serialized): the pre-step tick it was recorded on and, per apparent
+    ## identity, the body it resolved to and that body's position. Contract v2 derives
+    ## the target's velocity from it; contract v1 never reads it.
     tick*: int32 # -1 when nothing is recorded
-    self*: Point
     bodies*: array[Seats, int]
     positions*: array[Seats, Point]
 
@@ -183,7 +182,6 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32]) =
 
 proc resetAimMemory*(m: var AimMemory) =
   m.tick = -1
-  m.self = Point()
   for i in 0..<Seats:
     m.bodies[i] = -1
     m.positions[i] = Point()
@@ -192,7 +190,6 @@ proc recordAimMemory*(m: var AimMemory, w: World, slot: int, bodies: array[Seats
   ## Record once per decided tick, on the same pre-step world the actions were decoded
   ## against, with the identities that decode resolved.
   m.tick = w.tick
-  m.self = w.cogs[slot].pos
   for identity in 0..<Seats:
     let body = bodies[identity]
     m.bodies[identity] = body
@@ -204,24 +201,45 @@ proc oneTickStep(a, b: Point): Point =
   let dz = b.z - a.z
   if abs(dx) > TeleportStep or abs(dz) > TeleportStep: Point() else: Point(x: dx, z: dz)
 
-proc leadAimPoint*(w: World, slot, identity, body: int, m: AimMemory): Point =
+proc plannedStep*(w: World, slot: int, goal: Point, sneak: bool): Point =
+  ## The move the world will make for the seat on the coming tick towards `goal` (the
+  ## command's goal, clamped as the step clamps it): the same waypoint, speed (carrying,
+  ## sneaking, wading) and trench damping as mechanics.nim, before any blocking or
+  ## yielding. Zero when the seat is already there.
+  let me = w.cogs[slot]
+  let clamped = Point(x: clamp(goal.x, (minX()+100).int32, (maxX()-100).int32),
+                      z: clamp(goal.z, (minZ()+100).int32, (maxZ()-100).int32))
+  let dest = w.waypointFor(slot, me.pos, clamped)
+  var speed = if me.carrying: MoveSpeed*7 div 10 else: MoveSpeed
+  if visionRulesVersion >= 26 and sneak: speed = speed div 2
+  if visionRulesVersion >= 30 and riverBlend(me.pos.x.int, me.pos.z.int) > 0 and
+      terrainHeight(me.pos.x.int, me.pos.z.int) < RiverWaterHeight:
+    speed = speed div 4
+  if distance2(me.pos, dest) <= speed.int64*speed: return Point()
+  result = direction(me.pos, dest, speed)
+  let trench = w.trenchAt(me.pos)
+  if trench >= 0:
+    let t = w.trenches[trench]
+    if abs(me.pos.x+result.x-(t.x+t.w div 2)) > abs(me.pos.x-(t.x+t.w div 2)): result.x = result.x div 5
+    if abs(me.pos.z+result.z-(t.z+t.h div 2)) > abs(me.pos.z-(t.z+t.h div 2)): result.z = result.z div 5
+
+proc leadAimPoint*(w: World, slot, identity, body: int, m: AimMemory, ownStep: Point): Point =
   ## Contract v2 identity aim: the point a shoot order issued now must name so that the
-  ## gun's ray meets `body` if both keep last tick's velocity (see LeadTargetMoves). The
-  ## velocities are last tick's displacements as the seat itself could observe them:
-  ## the body's only when the same body was seen under the same identity one tick ago,
-  ## the seat's own only when it decided one tick ago; a first tick, a gap, a respawn or
-  ## a teleport counts as zero, and with both zero the point is the body's position,
-  ## exactly the contract v1 aim.
+  ## gun's ray meets `body` if the body keeps last tick's velocity and the seat keeps
+  ## making `ownStep` (see LeadTargetMoves). The body's velocity is its last-tick
+  ## displacement as the seat itself could observe it: only when the same body was seen
+  ## under the same identity one tick ago; a first tick, a gap, a respawn or a teleport
+  ## counts as zero. The seat's own step is the move its movement head orders this tick
+  ## (plannedStep), which is what the world will do, not a guess from the past. With a
+  ## still target and a still seat the point is the body's position, the contract v1 aim.
   let now = w.cogs[body].pos
   result = now
-  if m.tick != w.tick - 1: return
-  if m.bodies[identity] == body:
+  if m.tick == w.tick - 1 and m.bodies[identity] == body:
     let u = oneTickStep(m.positions[identity], now)
     result.x += u.x * LeadTargetMoves.int32
     result.z += u.z * LeadTargetMoves.int32
-  let v = oneTickStep(m.self, w.cogs[slot].pos)
-  result.x -= v.x * LeadOwnMoves.int32
-  result.z -= v.z * LeadOwnMoves.int32
+  result.x -= ownStep.x * LeadOwnMoves.int32
+  result.z -= ownStep.z * LeadOwnMoves.int32
 
 proc goalCandidate*(w: World, slot, movement: int): (bool, Point) =
   ## Where movement head index `movement` sends the seat, and whether that candidate
@@ -241,15 +259,16 @@ proc goalCandidate*(w: World, slot, movement: int): (bool, Point) =
   (false, me.pos)
 
 proc aimCandidate*(w: World, slot, aim: int, bodies: array[Seats, int],
-    version: ActionContractVersion, memory: AimMemory): (bool, Point) =
+    version: ActionContractVersion, memory: AimMemory, ownStep: Point): (bool, Point) =
   ## Where aim head index `aim` points under `version`, and whether that candidate
-  ## exists now (an identity nobody visible carries keeps the aim).
+  ## exists now (an identity nobody visible carries keeps the aim). `ownStep` is the
+  ## seat's planned move for this tick (read under v2 only).
   let me = w.cogs[slot]
   let flip = if team(slot)==0: 1 else: -1
   if aim in 1..16:
     let body = bodies[aim-1]
     if body >= 0:
-      return (true, if version == acV2: w.leadAimPoint(slot, aim-1, body, memory)
+      return (true, if version == acV2: w.leadAimPoint(slot, aim-1, body, memory, ownStep)
                     else: w.cogs[body].pos)
   elif aim >= 17 and aim <= 24:
     let delta = Directions[aim-17]
@@ -275,11 +294,14 @@ proc decodeActions*(w: World, slot: int, actions: openArray[int32],
   result.walk = true
   let (goalFound, goal) = w.goalCandidate(slot, actions[0].int)
   if goalFound: result.goal = goal
-  let (aimFound, aim) = w.aimCandidate(slot, actions[1].int, bodies, version, memory)
-  if aimFound: result.aim = aim
   result.shoot = actions[2] != 0
   result.chargeGrenade = actions[3] != 0
   result.sneak = actions[4] != 0
+  let ownStep = if version == acV2 and actions[1] in 1'i32..16'i32:
+      w.plannedStep(slot, result.goal, result.sneak)
+    else: Point()
+  let (aimFound, aim) = w.aimCandidate(slot, actions[1].int, bodies, version, memory, ownStep)
+  if aimFound: result.aim = aim
 proc decodeActions*(w: World, slot: int, actions: openArray[int32],
     bodies: array[Seats, int]): Command =
   ## Contract v1: an identity aim is the body's current position.

@@ -71,12 +71,13 @@ int pw_set_seat_damage_scale(void *handle, int seat, int32_t permille);
  * decoded: 1 = contract v1 "paintbot-pw.rules37.action.v1.51-25-2-2-2" (an identity aim
  * is the body's current position; the default, byte-identical to a library without this
  * call), 2 = contract v2 "paintbot-pw.rules37.action.v2.51-25-2-2-2" (an identity aim is
- * the body's lead-compensated aim point: body + 6*u - 5*v with u the body's and v the
- * seat's last-tick displacement as the seat itself could observe them, zero on a first
- * tick, gap, respawn or teleport; see neural_contract.nim). Same head sizes; movement,
- * directional aim, fire, grenade and sneak decode identically. Kept across pw_reset; the
- * per-seat one-tick aim memory v2 reads is cleared here and by every reset. Returns 0, -1
- * for a bad handle or version. pw_action_contract returns the selected version.
+ * the body's lead-compensated aim point: body + 6*u - 5*v with u the body's last-tick
+ * displacement as the seat itself could observe it (zero on a first tick, gap, respawn
+ * or teleport) and v the move the seat's own movement/sneak heads order this tick; see
+ * neural_contract.nim). Same head sizes; movement, directional aim, fire, grenade and
+ * sneak decode identically. Kept across pw_reset; the per-seat one-tick aim memory v2
+ * reads is cleared here and by every reset. Returns 0, -1 for a bad handle or version.
+ * pw_action_contract returns the selected version.
  * pw_action_contract_hash writes the 64-hex SHA-256 an actor and manifest must carry to
  * be decoded under that version (NUL-terminated, capacity >= 65). */
 int pw_set_action_contract(void *handle, int32_t version);
@@ -84,11 +85,13 @@ int pw_action_contract(void *handle);
 int pw_action_contract_hash(int32_t version, char *sixty_five_bytes, int32_t capacity);
 /* Demonstration-mapping diagnostic: the point every movement head index (51 x {x, z})
  * and aim head index (25 x {x, z}) resolves to for the seat on the current pre-step
- * world under the selected contract, exactly as the coming pw_step would decode it.
- * Index 0 is the seat's position / current aim. Candidates that do not exist now
+ * world under the selected contract, exactly as the coming pw_step would decode it
+ * (a v2 identity aim depends on the movement and sneak head indices given, through the
+ * seat's planned move). Index 0 is the seat's position / current aim. Candidates that do not exist now
  * (missing heart, unavailable or unseen pickup, identity nobody visible carries) and
  * every entry of a dead seat are INT32_MIN in both coordinates. Reads only. */
-int pw_action_candidates(void *handle, int seat, int32_t *goals_51x2, int32_t *aims_25x2);
+int pw_action_candidates(void *handle, int seat, int32_t movement, int32_t sneak,
+                         int32_t *goals_51x2, int32_t *aims_25x2);
 /* Mapping-ceiling diagnostics (pw-bc). pw_script_decide runs the scripted seats'
  * decision for the current tick now (once; later calls before the next pw_step are
  * no-ops) so pw_seat_orders reports the orders the coming pw_step will execute; with

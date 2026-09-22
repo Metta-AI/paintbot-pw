@@ -132,12 +132,13 @@ suite "Native action contract v2":
       var identityCandidates = 0
       for tick in 0..<200:
         for slot in 0..<Seats:
-          require pw_action_candidates(handle, slot.cint, ibuf(goals), ibuf(aims)) == 0
           let bodies = reference.observedBodies(slot)
           for movement in 0..<ActionSizes[0]:
+            if (movement + tick) mod 5 != 0: continue # A thinned grid keeps the test fast.
+            let sneak = int32((movement + slot) mod 2)
+            require pw_action_candidates(handle, slot.cint, movement.int32, sneak, ibuf(goals), ibuf(aims)) == 0
             for aim in 0..<ActionSizes[1]:
-              if movement mod 7 != aim mod 7: continue # A thinned grid keeps the test fast.
-              let a = [movement.int32, aim.int32, 0'i32, 0, 0]
+              let a = [movement.int32, aim.int32, 0'i32, 0, sneak]
               let c = decodeActions(reference, slot, a, bodies, ActionContractVersion(version), memories[slot])
               if reference.cogs[slot].hp <= 0:
                 check goals[movement*2] == low(int32) and aims[aim*2] == low(int32)
@@ -162,7 +163,9 @@ suite "Native action contract v2":
         require pw_step(handle, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
         require pw_state_hash(handle) == reference.stateHash()
       check identityCandidates > 0
-    check pw_action_candidates(handle, 16, ibuf(goals), ibuf(aims)) == -1
+    check pw_action_candidates(handle, 16, 0, 0, ibuf(goals), ibuf(aims)) == -1
+    check pw_action_candidates(handle, 0, 51, 0, ibuf(goals), ibuf(aims)) == -1
+    check pw_action_candidates(handle, 0, 0, 2, ibuf(goals), ibuf(aims)) == -1
     pw_destroy(handle)
   test "mask 0 with pw_script_decide reproduces exact scripted play; a masked head follows the caller":
     let baseSource = readFile(Base)

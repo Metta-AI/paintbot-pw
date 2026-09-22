@@ -105,8 +105,13 @@ suite "Neural policy contract v2 (lead-compensated identity aim)":
           check plain == w.decodeActions(slot, a, bodies)
           check plain == w.decodeActions(slot, a, bodies, acV1, memory)
           check plain == w.decodeActions(slot, a, acV1, memory)
-          # With nothing remembered v2 resolves every head exactly as v1.
-          check plain == w.decodeActions(slot, a, bodies, acV2, memory)
+          # With nothing remembered and the seat holding still (movement head 0),
+          # v2 resolves every head exactly as v1; directional aims always do.
+          let still = [0'i32, a[1], a[2], a[3], a[4]]
+          check w.decodeActions(slot, still, bodies, acV1, memory) ==
+            w.decodeActions(slot, still, bodies, acV2, memory)
+          if a[1] notin 1'i32..16'i32:
+            check plain == w.decodeActions(slot, a, bodies, acV2, memory)
           commands[slot] = plain
         w.step(commands)
   test "a v2 identity aim at a moving target lands where the v1 aim misses":
@@ -157,7 +162,7 @@ suite "Neural policy contract v2 (lead-compensated identity aim)":
     let v2 = w.decodeActions(shooter, actions, bodies, acV2, memory)
     check v1.aim == t
     check v2.aim == point(t.x.int, t.z.int + LeadTargetMoves*MoveSpeed)
-    check v1.shoot and v2.shoot and not v1.walk == false
+    check v1.shoot and v2.shoot and v1.walk and v2.walk
     # Fire each aim in its own copy of the world; the ray leaves after the windup.
     for (name, command, expectedHp) in [("v1", v1, 3'i32), ("v2", v2, 2'i32)]:
       var trial = w
@@ -199,24 +204,30 @@ suite "Neural policy contract v2 (lead-compensated identity aim)":
     # Stale memory (not last tick) resolves to the body, as v1 does.
     w.tick = 5
     check w.decodeActions(0, actions, bodies, acV2, memory).aim == t
-    # Last tick: the target moved 20 in x, the seat 10 in z.
+    # Last tick: the target moved 20 in x; the seat stays (movement head 0: no drift).
     w.tick = 1
     w.cogs[1].pos = point(t.x.int+20, t.z.int)
-    w.cogs[0].pos = point(s.x.int, s.z.int+10)
     check w.decodeActions(0, actions, bodies, acV2, memory).aim ==
-      point(t.x.int + 20 + 6*20, t.z.int - 5*10)
-    # A body that was hidden last tick gets no lead; the seat's own drift still applies.
+      point(t.x.int + 20 + 6*20, t.z.int)
+    # A body that was hidden last tick gets no lead.
     var hidden = memory
     hidden.bodies[identity] = -1
-    check w.decodeActions(0, actions, bodies, acV2, hidden).aim ==
-      point(t.x.int + 20, t.z.int - 50)
+    check w.decodeActions(0, actions, bodies, acV2, hidden).aim == point(t.x.int + 20, t.z.int)
     # A displacement beyond one tick's reach is a respawn, not a velocity.
     w.cogs[1].pos = point(t.x.int+TeleportStep+1, t.z.int)
     check w.decodeActions(0, actions, bodies, acV2, memory).aim ==
-      point(t.x.int+TeleportStep+1, t.z.int - 50)
-    w.cogs[0].pos = point(s.x.int, s.z.int+TeleportStep+1)
-    check w.decodeActions(0, actions, bodies, acV2, memory).aim ==
       point(t.x.int+TeleportStep+1, t.z.int)
+    # The seat's own drift is the move its movement head orders now: a compass step
+    # east (team 0, index 43) walks 28 units a tick in the open, so the aim point moves
+    # 5 x 28 back against it; sneaking halves the step; a heart far away, the same.
+    w.cogs[1].pos = t
+    let east = [43'i32, int32(identity+1), 0, 0, 0]
+    let step = w.plannedStep(0, point(s.x.int+200, s.z.int), false)
+    check step == point(MoveSpeed, 0)
+    check w.decodeActions(0, east, bodies, acV2, memory).aim == point(t.x.int - 5*MoveSpeed, t.z.int)
+    let sneakEast = [43'i32, int32(identity+1), 0, 0, 1]
+    check w.decodeActions(0, sneakEast, bodies, acV2, memory).aim == point(t.x.int - 5*(MoveSpeed div 2), t.z.int)
+    check w.decodeActions(0, east, bodies, acV1, memory).aim == t
     # Directional aim, movement and the other heads ignore the version entirely.
     let compass = [45'i32, 19, 1, 1, 1]
     check w.decodeActions(0, compass, bodies, acV1, memory) ==
