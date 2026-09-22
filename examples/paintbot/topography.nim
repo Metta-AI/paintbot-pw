@@ -202,28 +202,29 @@ proc terrainHeightDirect*(x,z:int):int =
 
 # Rules-static terrain lookups. terrainHeight and islandMargin are pure functions of a
 # point and the flags above, and the sampled visibility, walk and navigation rays call
-# them millions of times per match. Training builds keep lazily filled blocks of exact
-# results, computed by the direct functions above, shared by every world and thread
-# whose flags agree; a point outside the tabled span falls through to the direct code.
+# them millions of times per match. Training builds remember exact results per point
+# in 64x64 blocks shared by every world and thread whose flags agree: a block is
+# allocated on first touch, and each cell is computed by the direct functions above the
+# first time that point is asked for, so no point ever costs more than it did before.
+# A point outside the tabled span falls through to the direct code.
 when defined(pwTraining):
-  import std/[atomics, locks]
+  import std/atomics
   const
     TerrainCacheMinX = -5120
     TerrainCacheMinZ = -3072
     TerrainCacheBlock = 64
     TerrainCacheBlocksX = 264 # 16896 units, covers rules 22+ span [-4800, 11200] with margin
     TerrainCacheBlocksZ = 160 # 10240 units, covers [-2800, 6800] with margin
+    TerrainUnknown = 0xffffffff'u32 # No real cell packs to this: margin never reaches 0xffff.
   type
     TerrainCell* = object
-      height*, margin*: int16 # Together: one cache line serves both lookups at a point.
+      height*, margin*: int16
     TerrainBlock = object
-      cells: array[TerrainCacheBlock*TerrainCacheBlock, TerrainCell]
+      cells: array[TerrainCacheBlock*TerrainCacheBlock, Atomic[uint32]] # margin shl 16 or height
     TerrainTable = object
       key: int
       blocks: array[TerrainCacheBlocksX*TerrainCacheBlocksZ, Atomic[ptr TerrainBlock]]
   var terrainTables: array[2048, Atomic[ptr TerrainTable]] # one per flag combination
-  var terrainLock: Lock
-  initLock(terrainLock)
   var terrainCurrent {.threadvar.}: ptr TerrainTable
   proc terrainFlagsKey(): int =
     for i, flag in [wideRamps, wilderness, deepWilderness, organicTerrain, islandTerrain,
@@ -237,33 +238,34 @@ when defined(pwTraining):
     if terrainCurrent != nil and terrainCurrent.key == key: return
     var table = terrainTables[key].load(moAcquire)
     if table == nil:
-      withLock terrainLock:
-        table = terrainTables[key].load(moAcquire)
-        if table == nil:
-          table = cast[ptr TerrainTable](allocShared0(sizeof(TerrainTable)))
-          table.key = key
-          terrainTables[key].store(table, moRelease)
+      let fresh = cast[ptr TerrainTable](allocShared0(sizeof(TerrainTable)))
+      fresh.key = key
+      var expected: ptr TerrainTable = nil
+      if terrainTables[key].compareExchange(expected, fresh, moAcquireRelease, moAcquire):
+        table = fresh
+      else:
+        deallocShared(fresh)
+        table = expected
     terrainCurrent = table
   proc terrainTable(): ptr TerrainTable {.inline.} =
     if terrainCurrent == nil: refreshTerrainTable()
     terrainCurrent
-  proc fillTerrainBlock(table: ptr TerrainTable, index: int): ptr TerrainBlock =
-    ## Computed outside any lock; the first publisher wins and a loser frees its copy.
+  proc newTerrainBlock(table: ptr TerrainTable, index: int): ptr TerrainBlock =
+    ## Every cell starts unknown; the first publisher wins and a loser frees its copy.
     let entry = cast[ptr TerrainBlock](allocShared0(sizeof(TerrainBlock)))
-    let x0 = TerrainCacheMinX+(index mod TerrainCacheBlocksX)*TerrainCacheBlock
-    let z0 = TerrainCacheMinZ+(index div TerrainCacheBlocksX)*TerrainCacheBlock
-    for dz in 0..<TerrainCacheBlock:
-      for dx in 0..<TerrainCacheBlock:
-        let height = terrainHeightDirect(x0+dx, z0+dz)
-        let margin = islandMarginDirect(x0+dx, z0+dz)
-        doAssert height >= low(int16) and height <= high(int16) and
-          margin >= low(int16) and margin <= high(int16), "terrain outside int16"
-        entry.cells[dz*TerrainCacheBlock+dx] = TerrainCell(height: int16(height), margin: int16(margin))
+    for cell in entry.cells.mitems: cell.store(TerrainUnknown, moRelaxed)
     var expected: ptr TerrainBlock = nil
     if table.blocks[index].compareExchange(expected, entry, moAcquireRelease, moAcquire):
       return entry
     deallocShared(entry)
     expected
+  proc packTerrain(x, z: int): uint32 =
+    let height = terrainHeightDirect(x, z)
+    let margin = islandMarginDirect(x, z)
+    doAssert height >= low(int16) and height <= high(int16) and
+      margin >= low(int16) and margin <= high(int16), "terrain outside int16"
+    result = (uint32(cast[uint16](int16(margin))) shl 16) or uint32(cast[uint16](int16(height)))
+    doAssert result != TerrainUnknown
   template terrainCellAt(x, z: int, found: untyped, missing: untyped): untyped =
     let cx = x-TerrainCacheMinX
     let cz = z-TerrainCacheMinZ
@@ -274,8 +276,15 @@ when defined(pwTraining):
       let table = terrainTable()
       let index = (cz div TerrainCacheBlock)*TerrainCacheBlocksX+cx div TerrainCacheBlock
       var b = table.blocks[index].load(moAcquire)
-      if b == nil: b = fillTerrainBlock(table, index)
-      let cell {.inject.} = b.cells[(cz mod TerrainCacheBlock)*TerrainCacheBlock+cx mod TerrainCacheBlock]
+      if b == nil: b = newTerrainBlock(table, index)
+      let slot = (cz mod TerrainCacheBlock)*TerrainCacheBlock+cx mod TerrainCacheBlock
+      var packed = b.cells[slot].load(moRelaxed)
+      if packed == TerrainUnknown:
+        # Two threads may both compute a point; they store the same bits.
+        packed = packTerrain(x, z)
+        b.cells[slot].store(packed, moRelaxed)
+      let cell {.inject.} = TerrainCell(height: cast[int16](uint16(packed and 0xffff'u32)),
+        margin: cast[int16](uint16(packed shr 16)))
       found
   proc terrainHeight*(x,z:int):int =
     terrainCellAt(x, z, int(cell.height), terrainHeightDirect(x, z))
@@ -286,7 +295,7 @@ when defined(pwTraining):
     terrainCellAt(x, z, cell, TerrainCell(height: int16(terrainHeightDirect(x, z)),
       margin: int16(islandMarginDirect(x, z))))
   proc terrainCacheResidentBlocks*(): int =
-    ## Filled blocks across every table; each holds 16 KiB of exact results.
+    ## Allocated blocks across every table; each holds 16 KiB of cells.
     for i in 0..<terrainTables.len:
       let table = terrainTables[i].load(moAcquire)
       if table == nil: continue
