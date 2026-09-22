@@ -198,7 +198,26 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     w.earnGlory(team(victim), gloryFriendlyFire, GloryFriendlyFire)
   let absorbed = min(w.equipment[victim].armor, amount.int32)
   w.equipment[victim].armor-=absorbed
+  when defined(pwTraining):
+    let hpBefore = w.cogs[victim].hp
   w.cogs[victim].hp = max(0'i32, w.cogs[victim].hp-(amount.int32-absorbed))
+  when defined(pwTraining):
+    if combatTelemetry != nil:
+      # Telemetry only: a hit is a damage event past shield and life checks; damage is
+      # the health it removed (armor absorbs first). Attacker -1 is the map itself.
+      let t = combatTelemetry
+      let removed = hpBefore-w.cogs[victim].hp
+      let killed = w.cogs[victim].hp == 0
+      inc t[victim].hitsTaken
+      if killed: inc t[victim].deaths
+      if attacker >= 0 and attacker != victim:
+        if team(attacker) == team(victim):
+          t[attacker].damageDealtTeam += removed
+          if t[attacker].firstFriendlyFireTick < 0: t[attacker].firstFriendlyFireTick = w.tick
+        else:
+          t[attacker].damageDealtEnemy += removed
+          inc t[attacker].hitsEnemy
+          if killed: inc t[attacker].kills
   if w.equipment[victim].armor == 0 and not w.cogs[victim].carrying and
       w.trenchAt(w.cogs[victim].pos) < 0:
     w.cogs[victim].cooldown = min(w.cogs[victim].cooldown,

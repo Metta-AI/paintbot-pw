@@ -66,3 +66,21 @@ For numerical stability, sigmoid uses `z=exp(-abs(x))` and returns
 `x>=0 ? 1/(1+z) : z/(1+z)`. Interpolation uses the GPU kernel's equivalent
 branch `abs(gate)<0.5 ? old+gate*(candidate-old) : candidate-(candidate-old)*(1-gate)`.
 This can differ by a few FP32 rounding units from upstream's scalar CPU actor.
+
+# Native training ABI (`native_env.nim`, `-d:pwTraining`)
+
+Version 1, declared in `native_env.h`: `pw_create/pw_reset/pw_destroy`,
+`pw_observe` (all seats) and `pw_observe_seats` (chosen seats), `pw_step`,
+`pw_results`, `pw_bot_actions`, `pw_state_hash`, and the telemetry call below. Every
+entry is additive to v1; a host that ignores the newer ones sees the same bytes.
+
+`pw_seat_stats(handle, int32 out[16*8])` fills, per seat in seat order,
+`{damage_dealt_enemy, damage_dealt_team, hits_enemy, hits_taken, kills, deaths,
+captures, first_friendly_fire_tick}` (`pw_seat_stats_t` in the header), cumulative
+since the last create/reset. Damage is health removed (armor absorbs first); a hit is a
+damage event that passed the shield and life checks; kills and deaths are the
+victim's health reaching zero, credited to an enemy attacker; captures are the world's
+own credit for flipping a heart; `first_friendly_fire_tick` is -1 until the seat first
+damages a teammate. The counters are pure telemetry held by the host handle, never
+by the world: they are outside the state hash, no decision reads them, and a build
+that never calls `pw_seat_stats` pays one pointer test per damage event.
