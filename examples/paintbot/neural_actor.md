@@ -91,7 +91,11 @@ Decoder options are not contracts. A schema-2 bundle may ask for `decoder.fire_h
 (`neural_basic.md`): the decoded shoot order is dropped when a visible teammate stands in
 the gun's corridor to the aim point. The candidates every head resolves to and both
 contract hashes are unchanged by it; the training ABI's `pw_set_seat_fire_hold` is the
-same rule (`native_env.h`).
+same rule (`native_env.h`). It may also ask for `decoder.sampling` (`neural_basic.md`):
+the listed heads are drawn from `softmax(logits / temperature)` on a seat-owned SplitMix64
+stream seeded from the match seed and the slot (`neural_contract.sampleActions`,
+`samplingRng`), the rest keep argmax; the candidates and hashes are again unchanged, and
+the training ABI's `pw_set_seat_sampling` / `pw_sample_actions` draw from the same stream.
 
 Movement (heart, visible pickup or `pos+200*compass`), directional aim
 (`pos+5000*compass`), fire, grenade and sneak decode identically under both.
@@ -135,7 +139,11 @@ indices given), for exact demonstration mapping. `pw_script_decide(handle)` runs
 scripted seats' decision ahead of `pw_step` and `pw_set_seat_override(handle, seat,
 mask)` (bits 1 walk, 2 aim, 4 shoot, 8 grenade, 16 sneak) makes a scripted seat execute
 the caller's decoded action for the masked heads: the mapping-ceiling diagnostics, exact
-with mask 0.
+with mask 0. `pw_set_seat_sampling(handle, seat, temperature_permille, head_mask)` and
+`pw_sample_actions(handle, seat, float[82], int32[5])` select a seat's head actions from
+logits the way a sampling bundle would (the seat's stream is seeded from the match seed
+and the seat on every create/reset; `pw_seat_sample_draws` counts); with sampling off
+(the default) it is plain argmax, and `pw_step` is untouched either way.
 
 `pw_seat_stats(handle, int32 out[16*8])` fills, per seat in seat order,
 `{damage_dealt_enemy, damage_dealt_team, hits_enemy, hits_taken, kills, deaths,

@@ -13,10 +13,39 @@ MAX_MANIFEST_BYTES = 8192
 # contract hashes are what the host binds and decodes by.
 SCHEMA = "paintbot-neural-basic/1"
 SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
-# Schema-2 decoder options: "decoder": {"fire_hold_teammates": true}. Every key must be
-# one the host knows and every value the declared type, so a bundle asking for an option
-# this release lacks is rejected at staging rather than played without it.
-DECODER_OPTIONS = {"fire_hold_teammates": bool}
+# Schema-2 decoder options: "decoder": {"fire_hold_teammates": true, "sampling": {...}}.
+# Every key must be one the host knows and every value the declared type, so a bundle
+# asking for an option this release lacks is rejected at staging rather than played
+# without it. The rules here mirror neural_host.nim's exactly.
+DECODER_OPTIONS = {"fire_hold_teammates": bool, "sampling": dict}
+SAMPLING_HEADS = 5
+MIN_SAMPLING_TEMPERATURE, MAX_SAMPLING_TEMPERATURE = 0.01, 10.0
+
+
+def validate_sampling(value):
+    """decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}."""
+    if not isinstance(value, dict):
+        raise ValueError("decoder.sampling must be an object")
+    if value.get("mode") != "categorical":
+        raise ValueError('decoder.sampling.mode must be "categorical"')
+    for key, field in value.items():
+        if key == "mode":
+            continue
+        if key == "temperature":
+            if isinstance(field, bool) or not isinstance(field, (int, float)):
+                raise ValueError("decoder.sampling.temperature must be a number")
+            if not (MIN_SAMPLING_TEMPERATURE <= field <= MAX_SAMPLING_TEMPERATURE):
+                raise ValueError("decoder.sampling.temperature must be within [0.01, 10]")
+        elif key == "heads":
+            if not isinstance(field, list) or not field:
+                raise ValueError("decoder.sampling.heads must be a non-empty array")
+            for item in field:
+                if isinstance(item, bool) or not isinstance(item, int) or not 0 <= item < SAMPLING_HEADS:
+                    raise ValueError("decoder.sampling.heads entries must be head indices 0 .. %d" % (SAMPLING_HEADS - 1))
+            if len(set(field)) != len(field):
+                raise ValueError("decoder.sampling.heads repeats a head")
+        else:
+            raise ValueError("unknown decoder.sampling field: " + str(key))
 
 
 def unpack_package(data):
@@ -62,6 +91,8 @@ def unpack_package(data):
                 raise ValueError("unknown decoder option: " + str(key))
             if type(value) is not DECODER_OPTIONS[key]:
                 raise ValueError("decoder." + key + " must be a " + DECODER_OPTIONS[key].__name__)
+            if key == "sampling":
+                validate_sampling(value)
     files["policy.bas"].decode("utf-8")
     if not files["model.bin"]:
         raise ValueError("empty neural model")

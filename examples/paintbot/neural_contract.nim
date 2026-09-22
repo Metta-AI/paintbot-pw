@@ -1,6 +1,7 @@
 ## Versioned policy-visible float observations and categorical actuators.
 ## Used unchanged by BASIC deployment and native Puffer rollouts.
 import std/math
+import polyworld/rngs
 import sim
 
 const
@@ -383,6 +384,73 @@ proc argmaxActions*(logits: openArray[float32]): array[ActionSizes.len, int32] =
       if logits[offset+i] > logits[offset+best]: best = i
     result[head] = best.int32
     offset += size
+
+# Decoder sampling (bundle option decoder.sampling, schema 2; not a contract change): the
+# categorical heads are drawn from softmax(logits / temperature) instead of taken by argmax,
+# from a stream the seat owns. The stream is SplitMix64 (polyworld/rngs, the engine's own
+# replay-portable generator) seeded from the match seed and the seat's slot, so a replay of
+# the same match reproduces the same draws on the same engine build, two seats never share
+# a stream, and the world's own rng (which the state hash covers) is never touched: with the
+# option absent nothing here runs and every hash is byte-identical. One draw per sampled
+# head per call, in head order, so the stream position depends only on how many decisions
+# the seat has taken. Probabilities are formed in float64 from the float32 logits; the draw
+# is (next() shr 11) * 2^-53, the standard 53-bit uniform. Determinism holds per engine
+# build: the actor's float32 logits are themselves only argmax-stable across CPU
+# architectures (a one-ulp logit difference can move a sampled draw, never an argmax).
+type
+  SamplingOptions* = object
+    enabled*: bool
+    temperature*: float32      # > 0; 1.0 = the training-time distribution
+    heads*: array[ActionSizes.len, bool]  # which heads are sampled; the rest take argmax
+
+const
+  SamplingSalt* = 0x53414d504c450000'u64  # "SAMPLE" in the high bytes, slot below it
+  MinSamplingTemperature* = 0.01'f32
+  MaxSamplingTemperature* = 10'f32
+
+proc samplingRng*(matchSeed: int32, slot: int): Rng =
+  ## The seat's sampling stream for a match: the match seed (the world's) salted with the
+  ## slot so every seat draws differently.
+  initRng(matchSeed, SamplingSalt xor (uint64(slot+1) shl 32))
+
+proc samplingSeed*(matchSeed: int32, slot: int): uint64 =
+  ## The stream's initial state, for telemetry.
+  samplingRng(matchSeed, slot).state
+
+proc uniform53(rng: var Rng): float64 =
+  float64(rng.next() shr 11) * (1.0 / 9007199254740992.0)
+
+proc sampleActions*(logits: openArray[float32], options: SamplingOptions,
+    rng: var Rng): array[ActionSizes.len, int32] =
+  ## Headwise categorical draw for the heads the options sample, argmax for the others;
+  ## with the options disabled exactly argmaxActions (no draw). Exactly one draw per
+  ## sampled head per call. Non-finite logits are rejected like argmax rejects them.
+  if not options.enabled: return argmaxActions(logits)
+  if logits.len != LogitSize: raise newException(ValueError,"invalid neural logit size")
+  if options.temperature < MinSamplingTemperature or options.temperature > MaxSamplingTemperature:
+    raise newException(ValueError,"invalid sampling temperature")
+  let argmax = argmaxActions(logits)   # also the finiteness check
+  var offset = 0
+  for head,size in ActionSizes:
+    if not options.heads[head]:
+      result[head] = argmax[head]
+      offset += size
+      continue
+    let top = float64(logits[offset+argmax[head]])
+    let inverse = 1.0 / float64(options.temperature)
+    var total = 0.0
+    for i in 0..<size: total += exp((float64(logits[offset+i]) - top) * inverse)
+    let threshold = rng.uniform53() * total
+    var cumulative = 0.0
+    var pick = size-1
+    for i in 0..<size:
+      cumulative += exp((float64(logits[offset+i]) - top) * inverse)
+      if threshold < cumulative:
+        pick = i
+        break
+    result[head] = pick.int32
+    offset += size
+
 proc decodeLogits*(w: World, slot: int, logits: openArray[float32],
     bodies: array[Seats, int], version: ActionContractVersion,
     memory: AimMemory, fireHold = false): Command =

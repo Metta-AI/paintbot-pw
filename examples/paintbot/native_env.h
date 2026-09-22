@@ -116,6 +116,21 @@ int pw_set_seat_override(void *handle, int seat, int32_t mask);
  * seat since the last create/reset (telemetry; 0 with the hold off; -1 bad args). */
 int pw_set_seat_fire_hold(void *handle, int seat, int32_t enabled);
 int pw_seat_fire_held(void *handle, int seat);
+/* Decoder sampling (additive; the hosted bundle option decoder.sampling so probes and
+ * deployment draw alike). pw_set_seat_sampling: temperature_permille 10..10000 (0.01..10.0)
+ * turns categorical sampling on for the heads in head_mask (bit h = head h; 0 = every
+ * head): pw_sample_actions then draws those heads from softmax(logits / T) with the
+ * seat's own SplitMix64 stream, seeded from the match seed and the seat exactly as the
+ * hosted seat seeds its own on every create/reset, one draw per sampled head per call;
+ * the other heads take argmax. temperature_permille 0 (the default) = plain argmax, no
+ * draw. Only pw_sample_actions is affected: pw_step takes the caller's actions as before,
+ * so a library with these calls is byte-identical when they are never made. Options are
+ * kept across pw_reset; the stream is reseeded. pw_sample_actions: logits float[82],
+ * actions int32[5] out; returns 0, -1 bad args or non-finite logits. pw_seat_sample_draws:
+ * decisions drawn for the seat since the last create/reset (telemetry; -1 bad args). */
+int pw_set_seat_sampling(void *handle, int seat, int32_t temperature_permille, int32_t head_mask);
+int pw_sample_actions(void *handle, int seat, const float *logits, int32_t *actions);
+int pw_seat_sample_draws(void *handle, int seat);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
 #ifdef __cplusplus

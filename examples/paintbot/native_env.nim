@@ -2,6 +2,7 @@
 ## A handle may migrate between threads but must never be used concurrently.
 ## The caller owns flat buffers; no Nim-managed values cross the C boundary.
 import sim, neural_contract, bots
+import polyworld/rngs
 import polyworld/basic
 
 when not defined(pwTraining): {.error: "native_env requires -d:pwTraining".}
@@ -50,6 +51,14 @@ type
     # the last create/reset. Off on every seat = byte-identical to a library without it.
     fireHold: array[Seats,bool]
     fireHeld: array[Seats,int32]
+    # Decoder sampling (pw_set_seat_sampling, kept across resets like the knobs): the
+    # seat's draw stream, seeded from the match seed and the slot exactly as the hosted
+    # seat seeds its own (neural_contract.samplingRng) on every create/reset, so a probe
+    # that feeds pw_sample_actions the logits the hosted actor would produce takes the
+    # hosted seat's draws. Never part of the world or its hash; pw_step is untouched.
+    sampling: array[Seats,SamplingOptions]
+    sampleRng: array[Seats,Rng]
+    sampleDraws: array[Seats,int32]
     decided: array[Seats,Command]
     decidedTick: int32
     decidedValid: bool
@@ -70,6 +79,11 @@ proc resetStats(env: ptr NativeEnv) =
   for slot in 0..<Seats:
     env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
     env.fireHeld[slot] = 0
+proc resetSampling(env: ptr NativeEnv) =
+  ## Fresh streams for the new match (options persist); draw counts belong to the match.
+  for slot in 0..<Seats:
+    env.sampleRng[slot] = samplingRng(env.world.seed, slot)
+    env.sampleDraws[slot] = 0
 proc resetCurriculum(env: ptr NativeEnv) =
   ## Knob values persist; the shot history belongs to the match.
   for slot in 0..<Seats:
@@ -170,6 +184,7 @@ proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
     env.initCurriculum()
     env.contract = acV1
     env.resetAimMemories()
+    env.resetSampling()
     result = env
   except CatchableError:
     `=destroy`(env[])
@@ -194,6 +209,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     env.resetScripts()
     env.resetCurriculum()
     env.resetAimMemories()
+    env.resetSampling()
     return 0
   except CatchableError: return -1
 
@@ -512,6 +528,53 @@ proc pw_seat_fire_held*(handle: pointer, seat: cint): cint {.exportc, cdecl, dyn
   if handle == nil or seat notin 0..<Seats: return -1
   ready()
   cint(cast[ptr NativeEnv](handle).fireHeld[seat])
+
+proc pw_set_seat_sampling*(handle: pointer, seat: cint, temperaturePermille, headMask: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Decoder sampling for one seat (the hosted bundle option decoder.sampling): with
+  ## temperaturePermille > 0 (10 .. 10000 = 0.01 .. 10.0), pw_sample_actions draws the
+  ## heads in headMask (bit h = head h; 0 = every head) from softmax(logits / T) with the
+  ## seat's stream and takes argmax for the rest; 0 (the default) makes it plain argmax
+  ## with no draw. Only pw_sample_actions is affected: pw_step takes the caller's actions
+  ## as before, so a library with this call is byte-identical when it is never made.
+  ## Kept across pw_reset (the stream itself is reseeded). Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats: return -1
+  if temperaturePermille < 0 or temperaturePermille > 10_000 or headMask < 0 or headMask >= (1 shl ActionSizes.len): return -1
+  if temperaturePermille != 0 and temperaturePermille < 10: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  var options: SamplingOptions
+  if temperaturePermille > 0:
+    options.enabled = true
+    options.temperature = float32(temperaturePermille) / 1000'f32
+    for head in 0..<ActionSizes.len:
+      options.heads[head] = headMask == 0 or (headMask and (1 shl head)) != 0
+  env.sampling[seat] = options
+  0
+
+proc pw_sample_actions*(handle: pointer, seat: cint, logits: FloatBuffer, actions: ActionBuffer): cint {.exportc, cdecl, dynlib.} =
+  ## Select the seat's five head actions from 82 logits: the seat's sampling options and
+  ## stream (neural_contract.sampleActions; exactly one draw per sampled head, advancing
+  ## the stream) or, with sampling off, deterministic argmax and no draw. The actions are
+  ## what the caller then hands to pw_step for the seat. Returns 0, -1 for bad arguments
+  ## or non-finite logits.
+  if handle == nil or seat notin 0..<Seats or logits == nil or actions == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  try:
+    var input: array[LogitSize, float32]
+    for i in 0..<LogitSize: input[i] = logits[i]
+    let picked = sampleActions(input, env.sampling[seat], env.sampleRng[seat])
+    if env.sampling[seat].enabled: inc env.sampleDraws[seat]
+    for head in 0..<ActionSizes.len: actions[head] = picked[head]
+    return 0
+  except CatchableError: return -1
+
+proc pw_seat_sample_draws*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Decisions pw_sample_actions drew for the seat since the last create/reset (0 with
+  ## sampling off). Pure telemetry. Returns -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats: return -1
+  ready()
+  cint(cast[ptr NativeEnv](handle).sampleDraws[seat])
 
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
   ## Diagnostic: resident 64x64 terrain blocks (16 KiB each) across all tables.
