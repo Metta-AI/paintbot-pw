@@ -456,3 +456,28 @@ was refused (real uploads must run from main). Version 0.3.34 is certified and c
 natively for all 240 ticks (a 240-tick smoke match draws, so glory is zero for both teams). The
 paintbot-pw league, paused at 07:35Z to stop recording unplayable 0.3.32 episodes, was unpaused
 once 0.3.34 was canonical.
+
+## Action contract v2, lead-compensated identity aim — 0.3.35
+
+#61 adds action contract v2 (`paintbot-pw.rules37.action.v2.51-25-2-2-2`, `51f602ef…`): a
+neural bundle's identity aim resolves to the target's lead-compensated point instead of its
+body position. The v1 decoder is kept and selected by the bundle's embedded contract hash, so
+every existing v1 bundle plays exactly as before; manifests may use schema
+`paintbot-neural-basic/2`. Decoder-only: no `sim.nim` change, no rules bump, replays and
+hashes of earlier versions are unaffected, and the league was not paused (every competing
+membership is plain BASIC).
+
+Deployed from main `e30c12a` (build.yml run 35765037969 green; dry run 35766589038 first).
+Version 0.3.35 is certified and canonical as `cow_ad9eb10f-f539-4e42-8278-c4e9d1a79f83`
+(manifest `sha256:b031962fe583ef295278db78d2476183883c7f322ad610a0591dd9432e5e95f9`),
+Deploy Coworld run 35767016530; hosted smoke passed (`ereq_96cea902`, `ereq_9fb25f8d`,
+`ereq_b146885a`, `ereq_cdbc5ed9`, `ereq_d097790f`). The paintbot-pw league picked the row up
+with round #1354.
+
+Neural canaries on the new version, both 16 seats exit 0 with hash-verified replays:
+
+- v1 preserved: the contract-v1 bundle that produced `ereq_15c41877` on 0.3.34 re-ran on
+  0.3.35 as `ereq_280e00ba` and produced a byte-identical replay (993 ticks, hash 301441621).
+- v2 runs: a schema-2, contract-v2 bundle ran as `ereq_895e3c3c` (1139 ticks, hash
+  3871687001); each neural seat's log carries #59's `neural: peak_ops=… budget=4000000
+  model=w128` line.
