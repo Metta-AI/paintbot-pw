@@ -207,38 +207,205 @@ proc traversable*(w: World, a, b: Point): bool =
     if abs(h-last) > 25: return false
     last = h
   true
-proc blocked*(w: World, p: Point, radius = Radius): bool =
-  if p.x < minX()+radius or p.z < minZ()+radius or p.x > maxX()-radius or p.z >
-      maxZ()-radius: return true
-  if islandTerrain and islandMargin(p.x.int,p.z.int)<radius div 3+40: return true
-  for c in w.cover:
-    if c.h == 0:
-      let r = c.w div 2
-      if distance2(p, point(c.x.int+r.int, c.z.int+r.int)) < (r+radius).int64*(
-          r+radius): return true
-      continue
-    if p.x > c.x-radius and p.x < c.x+c.w+radius and p.z > c.z-radius and p.z <
-        c.z+c.h+radius: return true
-proc lineClear*(w: World, a, b: Point): bool =
-  # Only obstacles overlapping the ray bounds can block its sampled points.
-  # Keep the exact sample positions and collision predicates for replay parity.
-  var rayWorld = w
-  rayWorld.cover = @[]
-  for c in w.cover:
+proc coverBlocks(c: Cover, p: Point, radius: int): bool {.inline.} =
+  if c.h == 0:
+    let r = c.w div 2
+    return distance2(p, point(c.x.int+r.int, c.z.int+r.int)) < (r+radius).int64*(r+radius)
+  p.x > c.x-radius and p.x < c.x+c.w+radius and p.z > c.z-radius and p.z < c.z+c.h+radius
+proc boundsBlocked(p: Point, radius: int, bounds: array[4,int]): bool {.inline.} =
+  if p.x < bounds[0]+radius or p.z < bounds[1]+radius or p.x > bounds[2]-radius or p.z >
+      bounds[3]-radius: return true
+  islandTerrain and islandMargin(p.x.int,p.z.int)<radius div 3+40
+proc boundsBlocked(p: Point, radius: int): bool {.inline.} =
+  boundsBlocked(p, radius, [minX(),minZ(),maxX(),maxZ()])
+# Training builds index cover on a coarse grid so point and segment tests visit only
+# nearby obstacles instead of all of them (224 under rules 37). The index belongs to the
+# thread and is keyed by the cover it was built from: a world whose cover payload address
+# or length differs is compared by content and the index rebuilt if it differs. Every
+# candidate set is a superset of the obstacles that can satisfy the predicate, so the
+# answers are identical to the full scans below. Other builds keep the full scans.
+when defined(pwTraining):
+  const
+    CoverCell = 200
+    CoverReach = 90 # Largest radius any caller passes to blocked; larger falls back.
+  const RayMemoBits = 16
+  type
+    RayKey = object
+      a, b: Point
+    CoverIndex = object
+      payload: pointer
+      length: int
+      bounds: array[4, int]
+      cover: seq[Cover]
+      originX, originZ, nx, nz: int
+      cellStart, items: seq[int32]
+      seen: seq[int32]
+      stamp: int32
+      # lineClear is a function of its endpoints and the static geometry (cover,
+      # trenches, terrain, rules), so rays repeat exactly while cogs stand still.
+      rayTrenches: seq[Cover]
+      rayRules: int
+      rayKeys: seq[RayKey]
+      rayState: seq[uint8] # 0 empty, 1 blocked, 2 clear
+  var coverIndex {.threadvar.}: CoverIndex
+  proc coverSpan(c: Cover): tuple[x0, x1, z0, z1: int] =
     let depth = if c.h == 0: c.w else: c.h
-    if c.x <= max(a.x,b.x) and c.x+c.w >= min(a.x,b.x) and
-        c.z <= max(a.z,b.z) and c.z+depth >= min(a.z,b.z):
-      rayWorld.cover.add c
-  let startHeight = if visionRulesVersion >= 9: w.elevation(a) else: 0
-  let endHeight = if visionRulesVersion >= 9: w.elevation(b) else: 0
+    (c.x.int-CoverReach-1, c.x.int+c.w.int+CoverReach+1, c.z.int-CoverReach-1, c.z.int+depth.int+CoverReach+1)
+  proc buildCoverIndex(w: World) =
+    let g = addr coverIndex
+    g.cover = w.cover
+    g.bounds = [minX(), minZ(), maxX(), maxZ()]
+    g.originX = minX()-2*CoverCell
+    g.originZ = minZ()-2*CoverCell
+    g.nx = (maxX()-minX()) div CoverCell+5
+    g.nz = (maxZ()-minZ()) div CoverCell+5
+    g.cellStart = newSeq[int32](g.nx*g.nz+1)
+    g.seen = newSeq[int32](w.cover.len)
+    g.stamp = 0
+    g.rayKeys = newSeq[RayKey](1 shl RayMemoBits)
+    g.rayState = newSeq[uint8](1 shl RayMemoBits)
+    g.rayRules = -1
+    template cells(c: Cover, body: untyped) =
+      let span = coverSpan(c)
+      let cx0 = clamp((span.x0-g.originX) div CoverCell, 0, g.nx-1)
+      let cx1 = clamp((span.x1-g.originX) div CoverCell, 0, g.nx-1)
+      let cz0 = clamp((span.z0-g.originZ) div CoverCell, 0, g.nz-1)
+      let cz1 = clamp((span.z1-g.originZ) div CoverCell, 0, g.nz-1)
+      if span.x1 >= g.originX and span.z1 >= g.originZ:
+        for cz in cz0..cz1:
+          for cx in cx0..cx1:
+            let cell {.inject.} = cz*g.nx+cx
+            body
+    for c in w.cover:
+      cells(c): inc g.cellStart[cell+1]
+    for i in 1..g.nx*g.nz: g.cellStart[i] += g.cellStart[i-1]
+    g.items = newSeq[int32](g.cellStart[^1])
+    var fill = g.cellStart
+    for index, c in w.cover:
+      cells(c):
+        g.items[fill[cell]] = index.int32
+        inc fill[cell]
+  proc coverIndexFor(w: World): ptr CoverIndex =
+    result = addr coverIndex
+    let payload = if w.cover.len > 0: cast[pointer](unsafeAddr w.cover[0]) else: nil
+    if result.payload == payload and result.length == w.cover.len and
+        result.bounds == [minX(), minZ(), maxX(), maxZ()]: return
+    if result.length != w.cover.len or result.bounds != [minX(), minZ(), maxX(), maxZ()] or
+        result.cover != w.cover:
+      buildCoverIndex(w)
+    result.payload = payload
+    result.length = w.cover.len
+  proc raySlot(a, b: Point): int {.inline.} =
+    var h = uint64(uint32(a.x))*0x9E3779B97F4A7C15'u64
+    h = (h xor uint64(uint32(a.z)))*0xC2B2AE3D27D4EB4F'u64
+    h = (h xor uint64(uint32(b.x)))*0x165667B19E3779F9'u64
+    h = (h xor uint64(uint32(b.z)))*0x9E3779B97F4A7C15'u64
+    int((h shr 40) and uint64((1 shl RayMemoBits)-1))
+  template cellAt(g: ptr CoverIndex, x, z: int): int =
+    ## -1 when the point lies outside the indexed span.
+    let cx = x-g.originX
+    let cz = z-g.originZ
+    if cx < 0 or cz < 0 or cx >= g.nx*CoverCell or cz >= g.nz*CoverCell: -1
+    else: (cz div CoverCell)*g.nx+cx div CoverCell
+  proc coverBlockedIndexed(g: ptr CoverIndex, w: World, p: Point, radius: int): bool =
+    if radius > CoverReach:
+      for c in w.cover:
+        if c.coverBlocks(p, radius): return true
+      return false
+    let cell = cellAt(g, p.x.int, p.z.int)
+    if cell < 0:
+      for c in w.cover:
+        if c.coverBlocks(p, radius): return true
+      return false
+    for k in g.cellStart[cell]..<g.cellStart[cell+1]:
+      if w.cover[g.items[k]].coverBlocks(p, radius): return true
+    false
+  iterator segmentCover(w: World, a, b: Point): int =
+    ## Indices of cover that may lie within CoverReach of segment ab, each once, or every
+    ## index when the segment leaves the indexed span. Rebuilding is impossible mid-loop.
+    let g = coverIndexFor(w)
+    let c0 = cellAt(g, min(a.x, b.x).int, min(a.z, b.z).int)
+    let c1 = cellAt(g, max(a.x, b.x).int, max(a.z, b.z).int)
+    if c0 < 0 or c1 < 0:
+      for index in 0..<w.cover.len: yield index
+    else:
+      inc g.stamp
+      if g.stamp == high(int32):
+        for s in g.seen.mitems: s = 0
+        g.stamp = 1
+      let stamp = g.stamp
+      for cz in c0 div g.nx..c1 div g.nx:
+        for cx in c0 mod g.nx..c1 mod g.nx:
+          let cell = cz*g.nx+cx
+          for k in g.cellStart[cell]..<g.cellStart[cell+1]:
+            let index = g.items[k]
+            if g.seen[index] == stamp: continue
+            g.seen[index] = stamp
+            yield index.int
+proc blocked*(w: World, p: Point, radius = Radius): bool =
+  if boundsBlocked(p, radius): return true
+  when defined(pwTraining):
+    coverBlockedIndexed(coverIndexFor(w), w, p, radius)
+  else:
+    for c in w.cover:
+      if c.coverBlocks(p, radius): return true
+const RayCoverLimit = 512
+proc lineClearRay(w: World, a, b: Point): bool =
+  # Only obstacles overlapping the ray bounds can block its sampled points, so the
+  # sampled predicate is evaluated against that subset (from the cover index in training
+  # builds, otherwise indexed on the stack; too many for the stack means the full set,
+  # which gives the same answer). Keep the exact sample positions and collision
+  # predicates for replay parity. No world copy, no allocation.
+  when not defined(pwTraining):
+    var rayCover: array[RayCoverLimit, int32]
+    var rayCount = 0
+    for index, c in w.cover:
+      let depth = if c.h == 0: c.w else: c.h
+      if c.x <= max(a.x,b.x) and c.x+c.w >= min(a.x,b.x) and
+          c.z <= max(a.z,b.z) and c.z+depth >= min(a.z,b.z):
+        if rayCount < RayCoverLimit: rayCover[rayCount] = index.int32
+        inc rayCount
+    let filtered = rayCount <= RayCoverLimit
+  else:
+    let g = coverIndexFor(w)
+  let bounds = [minX(),minZ(),maxX(),maxZ()]
+  let elevated = visionRulesVersion >= 9
+  let startHeight = if elevated: w.elevation(a) else: 0
+  let endHeight = if elevated: w.elevation(b) else: 0
   let steps = max(abs(b.x-a.x), abs(b.z-a.z)) div 25 + 1
   for i in 1..steps:
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
-    if rayWorld.blocked(p, 0): return false
-    if visionRulesVersion >= 9:
+    if boundsBlocked(p, 0, bounds): return false
+    when defined(pwTraining):
+      if coverBlockedIndexed(g, w, p, 0): return false
+    else:
+      if filtered:
+        for k in 0..<rayCount:
+          if w.cover[rayCover[k]].coverBlocks(p, 0): return false
+      else:
+        for c in w.cover:
+          if c.coverBlocks(p, 0): return false
+    if elevated:
       let eye = startHeight+120+(endHeight-startHeight)*i.int div steps.int
       if w.elevation(p) > eye: return false
   true
+proc lineClear*(w: World, a, b: Point): bool =
+  when defined(pwTraining):
+    # Remembered per thread for the geometry the cover index was built from; the
+    # trenches and rules are checked on every call and any change empties the memo.
+    let g = coverIndexFor(w)
+    if g.rayRules != visionRulesVersion or g.rayTrenches != w.trenches:
+      g.rayRules = visionRulesVersion
+      g.rayTrenches = w.trenches
+      for state in g.rayState.mitems: state = 0
+    let slot = raySlot(a, b)
+    if g.rayState[slot] != 0 and g.rayKeys[slot].a == a and g.rayKeys[slot].b == b:
+      return g.rayState[slot] == 2
+    result = lineClearRay(w, a, b)
+    g.rayKeys[slot] = RayKey(a: a, b: b)
+    g.rayState[slot] = if result: 2 else: 1
+  else:
+    lineClearRay(w, a, b)
 proc canSeePoint*(w: World, slot: int, p: Point): bool =
   if slot notin 0..<Seats or w.cogs[slot].hp <= 0: return false
   let c = w.cogs[slot]
@@ -351,6 +518,7 @@ proc configureRules*(version: int) =
   fractalRiver = visionRulesVersion >= 32
   lakeTerrain = visionRulesVersion >= 33
   symmetricTerrain = visionRulesVersion >= 35
+  refreshTerrainTable()
 
 proc newWorld*(seed: int32, endTick: int32 = 0): World =
   configureRules(visionRulesVersion)
@@ -522,34 +690,46 @@ proc legacyWaypoint(w: World, start, goal: Point): Point =
   point(minX()+n mod nx*200+100, minZ()+n div nx*200+100)
 # Navigation uses body clearance, never the visibility ray. Cached flow fields
 # share static terrain work across cogs headed for the same objective.
+type NavCache = object
+  cover: seq[Cover]
+  payload: pointer
+  length: int
+  bounds: array[4,int]
+  edges: seq[seq[int]]
+  fields: Table[int,seq[int32]] # target cell -> BFS distance per cell, -1 unreachable
+  recent: seq[int]              # targets, least recently used first
+  targets: Table[Point,int]     # goal -> nearest connected cell (or -1)
 when defined(pwTraining):
-  var navCover {.threadvar.}: seq[Cover]
-  var navBounds {.threadvar.}: array[4,int]
-  var navEdges {.threadvar.}: seq[seq[int]]
-  var navFields {.threadvar.}: Table[int,seq[int]]
+  var nav {.threadvar.}: NavCache
 else:
-  var navCover: seq[Cover]
-  var navBounds: array[4,int]
-  var navEdges: seq[seq[int]]
-  var navFields: Table[int,seq[int]]
-const NavCell = 100
+  var nav: NavCache
+const
+  NavCell = 100
+  NavFieldLimit = 64
+  NavTargetLimit = 4096
+proc walkCoverBlocks(c: Cover, a,b: Point, dx,dz,length: float64): bool {.inline.} =
+  if c.h==0:
+    let r=c.w.float64/2
+    let cx=c.x.float64+r;let cz=c.z.float64+r
+    let t=if length==0:0.0 else:clamp(((cx-a.x.float64)*dx+(cz-a.z.float64)*dz)/length,0.0,1.0)
+    let ex=a.x.float64+t*dx-cx;let ez=a.z.float64+t*dz-cz
+    if ex*ex+ez*ez<(r+Radius.float64)*(r+Radius.float64):return true
+  else:
+    let steps=max(abs(b.x-a.x),abs(b.z-a.z)).int div 15+1
+    for i in 1..steps:
+      let x=a.x.int+(b.x-a.x).int*i div steps
+      let z=a.z.int+(b.z-a.z).int*i div steps
+      if x>c.x-Radius and x<c.x+c.w+Radius and z>c.z-Radius and z<c.z+c.h+Radius:return true
 proc walkClear*(w: World, a,b: Point):bool =
   if w.blocked(b) or not w.traversable(a,b):return false
   let dx=(b.x-a.x).float64;let dz=(b.z-a.z).float64
   let length=dx*dx+dz*dz
-  for c in w.cover:
-    if c.h==0:
-      let r=c.w.float64/2
-      let cx=c.x.float64+r;let cz=c.z.float64+r
-      let t=if length==0:0.0 else:clamp(((cx-a.x.float64)*dx+(cz-a.z.float64)*dz)/length,0.0,1.0)
-      let ex=a.x.float64+t*dx-cx;let ez=a.z.float64+t*dz-cz
-      if ex*ex+ez*ez<(r+Radius.float64)*(r+Radius.float64):return false
-    else:
-      let steps=max(abs(b.x-a.x),abs(b.z-a.z)).int div 15+1
-      for i in 1..steps:
-        let x=a.x.int+(b.x-a.x).int*i div steps
-        let z=a.z.int+(b.z-a.z).int*i div steps
-        if x>c.x-Radius and x<c.x+c.w+Radius and z>c.z-Radius and z<c.z+c.h+Radius:return false
+  when defined(pwTraining):
+    for index in segmentCover(w,a,b):
+      if w.cover[index].walkCoverBlocks(a,b,dx,dz,length):return false
+  else:
+    for c in w.cover:
+      if c.walkCoverBlocks(a,b,dx,dz,length):return false
   let steps=max(abs(b.x-a.x),abs(b.z-a.z)).int div 50+1
   for i in 1..steps:
     let x=a.x.int+(b.x-a.x).int*i div steps
@@ -559,15 +739,44 @@ proc walkClear*(w: World, a,b: Point):bool =
 proc navigationPoint(n,nx:int):Point =
   point(minX()+(n mod nx)*NavCell+NavCell div 2,
         minZ()+(n div nx)*NavCell+NavCell div 2)
+proc nearestConnectedCell(goal:Point,nx,nz:int):int =
+  ## The connected cell whose centre is nearest the goal, lowest index on ties: the
+  ## same answer as scanning every cell, found by rings of cells around the goal that
+  ## stop once a ring cannot hold a centre as near as the best so far.
+  result = -1
+  var best=high(int64)
+  let originX=minX(); let originZ=minZ()
+  let gx=floorDiv(goal.x.int-originX,NavCell)
+  let gz=floorDiv(goal.z.int-originZ,NavCell)
+  for ring in 0..max(nx,nz)+max(abs(gx),abs(gz))+1:
+    if ring>0:
+      let nearest=int64((ring-1)*NavCell+NavCell div 2)
+      if nearest*nearest>best:break
+    for z in max(0,gz-ring)..min(nz-1,gz+ring):
+      let edge=abs(z-gz)==ring
+      var x=max(0,gx-ring)
+      while x<=min(nx-1,gx+ring):
+        if edge or abs(x-gx)==ring:
+          let n=z*nx+x
+          if nav.edges[n].len>0:
+            let d=distance2(goal,point(originX+x*NavCell+NavCell div 2,originZ+z*NavCell+NavCell div 2))
+            if d<best or (d==best and n<result):best=d;result=n
+        if edge or x>=gx+ring:inc x
+        else:x=gx+ring
 proc waypoint*(w:World,start,goal:Point):Point =
   if visionRulesVersion<22:return w.legacyWaypoint(start,goal)
   if w.walkClear(start,goal):return goal
   let nx=(maxX()-minX()) div NavCell
   let nz=(maxZ()-minZ()) div NavCell
   let bounds=[minX(),minZ(),maxX(),maxZ()]
-  if navEdges.len!=nx*nz or navCover!=w.cover or navBounds!=bounds:
-    navCover=w.cover;navBounds=bounds;navFields.clear()
-    navEdges=newSeq[seq[int]](nx*nz)
+  let payload=if w.cover.len>0:cast[pointer](unsafeAddr w.cover[0]) else:nil
+  # The grid depends only on cover and bounds. A world whose cover payload address or
+  # length differs from the last is compared by content; the grid survives if it agrees.
+  let same=nav.edges.len==nx*nz and nav.bounds==bounds and nav.length==w.cover.len and
+    ((nav.payload==payload and defined(pwTraining)) or nav.cover==w.cover)
+  if not same:
+    nav.cover=w.cover;nav.bounds=bounds;nav.fields.clear();nav.recent.setLen(0);nav.targets.clear()
+    nav.edges=newSeq[seq[int]](nx*nz)
     for n in 0..<nx*nz:
       let a=navigationPoint(n,nx)
       if w.blocked(a):continue
@@ -576,29 +785,35 @@ proc waypoint*(w:World,start,goal:Point):Point =
         if x>=nx or z>=nz:continue
         let j=z*nx+x
         if w.walkClear(a,navigationPoint(j,nx)):
-          navEdges[n].add j;navEdges[j].add n
+          nav.edges[n].add j;nav.edges[j].add n
+  nav.payload=payload;nav.length=w.cover.len
   var target = -1
-  var best=high(int64)
-  for n in 0..<navEdges.len:
-    if navEdges[n].len==0:continue
-    let d=distance2(goal,navigationPoint(n,nx))
-    if d<best:best=d;target=n
+  if goal in nav.targets:target=nav.targets[goal]
+  else:
+    target=nearestConnectedCell(goal,nx,nz)
+    if nav.targets.len>=NavTargetLimit:nav.targets.clear()
+    nav.targets[goal]=target
   if target<0:return start
-  if target notin navFields:
-    var distances=newSeq[int](nx*nz)
+  if target notin nav.fields:
+    var distances=newSeq[int32](nx*nz)
     for d in distances.mitems:d = -1
     var queue = @[target];distances[target]=0
     var head=0
     while head<queue.len:
       let n=queue[head];inc head
-      for j in navEdges[n]:
+      for j in nav.edges[n]:
         if distances[j]<0:
           distances[j]=distances[n]+1;queue.add j
-    if navFields.len>=64:navFields.clear()
-    navFields[target]=distances
-  let distances=navFields[target]
+    if nav.fields.len>=NavFieldLimit:
+      # Bounded eviction of the least recently used field; results never depend on it.
+      nav.fields.del(nav.recent[0]);nav.recent.delete(0)
+    nav.fields[target]=distances
+    nav.recent.add target
+  elif nav.recent[^1]!=target:
+    nav.recent.delete(nav.recent.find(target));nav.recent.add target
+  let distances=addr nav.fields[target]
   result=start
-  best=high(int64)
+  var best=high(int64)
   var anchor = -1
   let sx=(start.x.int-minX()) div NavCell
   let sz=(start.z.int-minZ()) div NavCell
@@ -614,7 +829,7 @@ proc waypoint*(w:World,start,goal:Point):Point =
   result=navigationPoint(anchor,nx)
   for step in 0..<8:
     var next = -1
-    for j in navEdges[anchor]:
+    for j in nav.edges[anchor]:
       if distances[j]>=0 and distances[j]<distances[anchor]:next=j;break
     if next<0:break
     let p=navigationPoint(next,nx)

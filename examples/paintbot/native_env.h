@@ -14,10 +14,15 @@ void *pw_create(int32_t seed, int32_t max_ticks);
 void pw_destroy(void *handle);
 int pw_reset(void *handle, int32_t seed, int32_t max_ticks);
 int pw_observe(void *handle, float *observations, float *state_resets);
+/* Same bytes as pw_observe for every seat whose bit (1u << slot) is set; the other
+ * seats' rows of both buffers are left untouched. Additive to v1. */
+int pw_observe_seats(void *handle, uint32_t seats, float *observations, float *state_resets);
 int pw_step(void *handle, const int32_t *actions, float *rewards, float *terminals);
 uint32_t pw_state_hash(void *handle);
 int pw_results(void *handle, float *eight_results);
 int pw_bot_actions(void *handle, int side, int level, int32_t *actions);
+/* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
+int pw_terrain_cache_blocks(void);
 #ifdef __cplusplus
 }
 #endif
