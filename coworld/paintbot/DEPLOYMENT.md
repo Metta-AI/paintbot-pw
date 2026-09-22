@@ -481,3 +481,32 @@ Neural canaries on the new version, both 16 seats exit 0 with hash-verified repl
 - v2 runs: a schema-2, contract-v2 bundle ran as `ereq_895e3c3c` (1139 ticks, hash
   3871687001); each neural seat's log carries #59's `neural: peak_ops=… budget=4000000
   model=w128` line.
+
+## Decoder option `fire_hold_teammates` — 0.3.36
+
+#65 adds a per-bundle decoder option under manifest schema `paintbot-neural-basic/2`:
+`"decoder": {"fire_hold_teammates": true}` drops a shoot order aimed through a visible teammate.
+Default off is byte-identical to 0.3.35 (option-off parity proven over 100 807 ticks in the PR; here
+the R17a bundle's option-off replay is whole-file identical between a 0.3.35 and a 0.3.36 engine).
+Decoder-only: no `sim.nim` change, no rules bump, replays and hashes of earlier versions are
+unaffected, and the league was not paused (every competing membership is plain BASIC).
+
+Deployed from main `d529636` (build.yml run 35774926860 green on all three OSes). Two sessions
+dispatched the release in parallel: runs 35776537613 (dry) and 35776950564 (real) uploaded the
+version; a second pair, 35776637751 (dry, green) and 35777253640 (real), was stopped by the
+workflow's own version guard ("0.3.36 is not newer than the latest uploaded version") and uploaded
+nothing. Version 0.3.36 is certified and canonical as `cow_abd8cb4a-2601-4f1d-80a0-fb973fd2487e`
+(manifest `sha256:09c231baa1222116acfa083882e0dec8159571c2b32b76bc0430cd46bf4f9b0c`), Deploy
+Coworld run 35776950564; hosted smoke passed (`ereq_50b4d7de`, `ereq_82253922`, `ereq_99003a6e`,
+`ereq_ba5064a2`, `ereq_db0159f9`). The paintbot-pw league picked the row up with round #1364.
+
+Neural canaries on the new version, all 16 seats exit 0 with hash-verified replays:
+
+- v1 preserved: the contract-v1 bundle behind `ereq_15c41877` (0.3.34) and `ereq_280e00ba` (0.3.35)
+  re-ran as `ereq_0594ef14` and produced the same replay file (993 ticks, hash 301441621).
+- option on: the same contract-v2 weights that ran option-off as `ereq_f7e7870a` on 0.3.35 (996 ticks,
+  hash 3385542036) re-packaged with `fire_hold_teammates` ran as `ereq_bc730dad` (1661 ticks, hash
+  2301985526); each neural seat log now carries `fire_holds=N` beside the peak-ops telemetry, and the
+  replay's per-seat telemetry shows the neural team's damage to its own side falling from 21 to 4
+  against the same opponent and seed.
+- schema-2 fixture without the option: `ereq_54ee9b00` (1287 ticks, hash 1085495096).
