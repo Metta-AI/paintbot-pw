@@ -44,6 +44,12 @@ type
     # for the current tick ahead of pw_step so the caller can read the orders, map them
     # and hand the mapped action to the same step.
     overrideMask: array[Seats,int32]
+    # Decoder fire hold (pw_set_seat_fire_hold, kept across resets like the knobs): the
+    # seat's final shoot order, whoever issued it (caller, Nim bot, script, override
+    # mix), goes through neural_contract.holdFire; fireHeld counts the orders held since
+    # the last create/reset. Off on every seat = byte-identical to a library without it.
+    fireHold: array[Seats,bool]
+    fireHeld: array[Seats,int32]
     decided: array[Seats,Command]
     decidedTick: int32
     decidedValid: bool
@@ -61,7 +67,9 @@ proc invalidateBodies(env: ptr NativeEnv) =
 proc resetAimMemories(env: ptr NativeEnv) =
   for slot in 0..<Seats: env.aimMemory[slot].resetAimMemory()
 proc resetStats(env: ptr NativeEnv) =
-  for slot in 0..<Seats: env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
+  for slot in 0..<Seats:
+    env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
+    env.fireHeld[slot] = 0
 proc resetCurriculum(env: ptr NativeEnv) =
   ## Knob values persist; the shot history belongs to the match.
   for slot in 0..<Seats:
@@ -244,7 +252,9 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
           if (mask and 8) != 0: cmd.chargeGrenade = caller.chargeGrenade
           if (mask and 16) != 0: cmd.sneak = caller.sneak
           commands[slot] = cmd
-    for slot in 0..<Seats: env.gateFire(slot, commands[slot])
+    for slot in 0..<Seats:
+      if env.fireHold[slot] and env.world.holdFire(slot, commands[slot]): inc env.fireHeld[slot]
+      env.gateFire(slot, commands[slot])
     combatTelemetry = addr env.stats
     damageScale = addr env.damagePermille
     try: env.world.step(commands)
@@ -480,6 +490,28 @@ proc pw_set_seat_damage_scale*(handle: pointer, seat: cint, permille: int32): ci
   let env = cast[ptr NativeEnv](handle)
   env.damagePermille[seat] = permille
   0
+
+proc pw_set_seat_fire_hold*(handle: pointer, seat: cint, enabled: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The decoder fire hold for one seat (the hosted bundle option
+  ## decoder.fire_hold_teammates): with 1, the seat's final shoot order on every pw_step,
+  ## whoever issued it (the caller's decoded action, the Nim bot, a script, an override
+  ## mix), is dropped when a teammate it can see stands within the gun's hit tolerance
+  ## of the segment from the seat to the aim the order leaves and no farther along it
+  ## than the aim point (neural_contract.holdFire); the aim and everything else in the
+  ## order stand. 0 (the default) is byte-identical to a library without this call.
+  ## Kept across pw_reset. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or enabled notin 0..1: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.fireHold[seat] = enabled == 1
+  0
+
+proc pw_seat_fire_held*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Shoot orders the fire hold dropped for the seat since the last create/reset (0 with
+  ## the hold off). Pure telemetry. Returns -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats: return -1
+  ready()
+  cint(cast[ptr NativeEnv](handle).fireHeld[seat])
 
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
   ## Diagnostic: resident 64x64 terrain blocks (16 KiB each) across all tables.

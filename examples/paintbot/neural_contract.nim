@@ -32,6 +32,14 @@ const
   # steps included) is a respawn or teleport, not a velocity; base.bas uses the same 60.
   TeleportStep* = 60
 static: doAssert LeadTargetMoves == 6 and LeadOwnMoves == 5 and TeleportStep > 2*MoveSpeed
+const
+  # Decoder fire hold (a per-bundle option, off by default; not part of any action
+  # contract: candidates and hashes are untouched). A shoot order is held when a teammate
+  # the seat can see stands within the gun's own hit tolerance (mechanics.nim tests every
+  # ray sample against Radius) of the segment from the seat to the aim the order leaves,
+  # and no farther along it than the aim point itself.
+  FireHoldRadius* = Radius
+static: doAssert FireHoldRadius == 55
 
 type
   ActionContractVersion* = enum
@@ -276,12 +284,55 @@ proc aimCandidate*(w: World, slot, aim: int, bodies: array[Seats, int],
                         clamp(me.pos.z.int+flip*delta[1]*5000,minZ(),maxZ())))
   (false, me.aim)
 
+proc orderedAim*(w: World, slot: int, command: Command): Point =
+  ## The aim the world holds once `command` is applied, as mechanics.nim applies it: an
+  ## aim order wins; else a walk towards somewhere else aims there; else the current aim.
+  if command.aim != Point(): command.aim
+  elif command.walk and command.goal != w.cogs[slot].pos: command.goal
+  else: w.cogs[slot].aim
+
+proc teammateInLine*(w: World, slot: int, aim: Point): bool =
+  ## Whether a teammate's body, as the seat itself can see it (fog-gated, apparent team,
+  ## and the gun's own line-of-sight test), lies within FireHoldRadius of the segment
+  ## from the seat to `aim` and no farther along it than `aim`. Integer geometry only.
+  let origin = w.cogs[slot].pos
+  let dx = int64(aim.x) - origin.x
+  let dz = int64(aim.z) - origin.z
+  let len2 = dx*dx + dz*dz
+  if len2 == 0: return false
+  for body in 0..<Seats:
+    if body == slot or w.cogs[body].hp <= 0: continue
+    if not w.visible(slot, body) or w.observedTeam(slot, body) != team(slot): continue
+    let p = w.cogs[body].pos
+    let ex = int64(p.x) - origin.x
+    let ez = int64(p.z) - origin.z
+    let along = ex*dx + ez*dz
+    if along < 0 or along > len2: continue
+    # perpendicular^2 = e2 - along^2/len2 <= R^2  <=>  e2*len2 - along^2 <= R^2*len2
+    # (|e|^2, |d|^2 < 2^27 on a 6400 x 4000 map, so every product fits in 63 bits).
+    let e2 = ex*ex + ez*ez
+    if e2*len2 - along*along > FireHoldRadius.int64*FireHoldRadius*len2: continue
+    if visionRulesVersion >= 9 and not w.lineClear(origin, p): continue
+    return true
+  false
+
+proc holdFire*(w: World, slot: int, command: var Command): bool =
+  ## The decoder fire hold: drop the shoot order when a teammate is in the line of fire
+  ## (teammateInLine of the aim the order leaves). The aim, movement and every other part
+  ## of the command are untouched, so the world still turns to face the target. Applies to
+  ## the shoot order whichever weapon it would fire. Returns whether the order was held.
+  if not command.shoot or w.cogs[slot].hp <= 0: return false
+  if not w.teammateInLine(slot, w.orderedAim(slot, command)): return false
+  command.shoot = false
+  true
+
 proc decodeActions*(w: World, slot: int, actions: openArray[int32],
     bodies: array[Seats, int], version: ActionContractVersion,
-    memory: AimMemory): Command =
+    memory: AimMemory, fireHold = false): Command =
   ## The shared decoder of every host. `version` selects the identity-aim rule; the
   ## memory is read only under contract v2 (the host records it with recordAimMemory
-  ## after decoding each tick).
+  ## after decoding each tick). `fireHold` applies holdFire to the decoded command (the
+  ## bundle's decoder option; false decodes exactly as before).
   if slot notin 0..<Seats or actions.len != ActionSizes.len:
     raise newException(ValueError, "invalid neural action dimensions or seat")
   for i,size in ActionSizes:
@@ -302,6 +353,7 @@ proc decodeActions*(w: World, slot: int, actions: openArray[int32],
     else: Point()
   let (aimFound, aim) = w.aimCandidate(slot, actions[1].int, bodies, version, memory, ownStep)
   if aimFound: result.aim = aim
+  if fireHold: discard w.holdFire(slot, result)
 proc decodeActions*(w: World, slot: int, actions: openArray[int32],
     bodies: array[Seats, int]): Command =
   ## Contract v1: an identity aim is the body's current position.
@@ -333,8 +385,8 @@ proc argmaxActions*(logits: openArray[float32]): array[ActionSizes.len, int32] =
     offset += size
 proc decodeLogits*(w: World, slot: int, logits: openArray[float32],
     bodies: array[Seats, int], version: ActionContractVersion,
-    memory: AimMemory): Command =
-  w.decodeActions(slot, argmaxActions(logits), bodies, version, memory)
+    memory: AimMemory, fireHold = false): Command =
+  w.decodeActions(slot, argmaxActions(logits), bodies, version, memory, fireHold)
 proc decodeLogits*(w: World, slot: int, logits: openArray[float32]): Command =
   w.decodeActions(slot, argmaxActions(logits))
 

@@ -71,6 +71,25 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(consts["ActionContractV2"], "paintbot-pw.rules37.action.v2.51-25-2-2-2")
         self.assertNotEqual(consts["ActionContractHash"], consts["ActionContractV2Hash"])
 
+    def test_decoder_options(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        _, _, manifest = unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": True}}))
+        self.assertEqual(manifest["decoder"], {"fire_hold_teammates": True})
+        _, _, manifest = unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": False}}))
+        self.assertEqual(manifest["decoder"], {"fire_hold_teammates": False})
+        _, _, manifest = unpack_package(package({**schema2, "decoder": {}}))
+        self.assertEqual(manifest["decoder"], {})
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {"fire_hold_teammates": True}}))
+        with self.assertRaisesRegex(ValueError, "unknown decoder option"):
+            unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": True, "other": 1}}))
+        for value in (1, 0, "true", None, [True]):
+            with self.assertRaisesRegex(ValueError, "must be a bool"):
+                unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": value}}))
+        for value in ([True], "fire_hold_teammates", None):
+            with self.assertRaisesRegex(ValueError, "must be an object"):
+                unpack_package(package({**schema2, "decoder": value}))
+
     def test_decompression_bound(self):
         out = io.BytesIO()
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:

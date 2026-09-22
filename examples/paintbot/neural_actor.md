@@ -87,6 +87,12 @@ a host that also knows v2.
 | v1 | `paintbot-pw.rules37.action.v1.51-25-2-2-2` | `55922d42d4065a069b3193f31e056c3a53cd34175b10fed7ff0d8c22b50a473e` | the body's current position |
 | v2 | `paintbot-pw.rules37.action.v2.51-25-2-2-2` | `51f602ef167919ca825595f9d81777cb807afbb0938a20102457d0594e2b4317` | the body's lead-compensated aim point |
 
+Decoder options are not contracts. A schema-2 bundle may ask for `decoder.fire_hold_teammates`
+(`neural_basic.md`): the decoded shoot order is dropped when a visible teammate stands in
+the gun's corridor to the aim point. The candidates every head resolves to and both
+contract hashes are unchanged by it; the training ABI's `pw_set_seat_fire_hold` is the
+same rule (`native_env.h`).
+
 Movement (heart, visible pickup or `pos+200*compass`), directional aim
 (`pos+5000*compass`), fire, grenade and sneak decode identically under both.
 

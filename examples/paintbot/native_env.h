@@ -103,6 +103,19 @@ int pw_action_candidates(void *handle, int seat, int32_t movement, int32_t sneak
  * pw_reset. Returns 0, -1 bad args. */
 int pw_script_decide(void *handle);
 int pw_set_seat_override(void *handle, int seat, int32_t mask);
+/* Decoder fire hold (additive; the hosted bundle option decoder.fire_hold_teammates so
+ * training and deployment agree). With enabled = 1 the seat's final shoot order on every
+ * pw_step, whoever issued it (the caller's decoded action, the Nim bot, a script, an
+ * override mix), is dropped when a teammate the seat can see (fog-gated, apparent team,
+ * the gun's line-of-sight test) stands within the gun's hit tolerance (Radius = 55) of
+ * the segment from the seat to the aim the order leaves and no farther along it than
+ * the aim point; the aim, movement and every other head stand, so the network keeps
+ * choosing fire and the decoder gates it. Action candidates and contract hashes are
+ * untouched. 0 (the default) is byte-identical to a library without this call. Kept
+ * across pw_reset. Returns 0, -1 bad args. pw_seat_fire_held: the orders held for the
+ * seat since the last create/reset (telemetry; 0 with the hold off; -1 bad args). */
+int pw_set_seat_fire_hold(void *handle, int seat, int32_t enabled);
+int pw_seat_fire_held(void *handle, int seat);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
 #ifdef __cplusplus

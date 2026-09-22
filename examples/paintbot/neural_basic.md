@@ -14,6 +14,22 @@ schema 1 rejects them at staging instead of at model load. Actor metadata must m
 both contracts, 448 inputs, 82 outputs, and categorical head sizes `[51,25,2,2,2]`.
 The actor's binary format is documented in `neural_actor.md`.
 
+A schema-2 manifest may carry a `decoder` object of per-bundle decoder options. Every
+key must be one the host knows and every value the declared type; anything else is
+rejected at staging and again at model load, so a bundle asking for an option a release
+lacks never plays without it. Options change nothing in the action contract: the head
+candidates and the contract hashes are the same with or without them.
+
+- `"decoder": {"fire_hold_teammates": true}` (default false = byte-identical to before):
+  after the network's heads are decoded, the shoot order is dropped when a teammate the
+  seat can see (fog-gated, apparent team, the gun's line-of-sight test) stands within the
+  gun's hit tolerance (`Radius` = 55 units) of the segment from the seat to the aim the
+  order leaves and no farther along it than the aim point (`neural_contract.holdFire`).
+  The aim, movement and every other head stand: the network keeps choosing fire and the
+  decoder gates it. The same rule is the native training ABI's `pw_set_seat_fire_hold`,
+  so a policy trained under it is deployed under it. With the option on, the seat's
+  telemetry line ends in ` fire_holds=<n>`, the orders held in the match.
+
 The archive is bounded to 16 MiB model, 64 KiB BASIC, and 8 KiB manifest.
 Duplicates, unexpected paths/files, encryption, incorrect hashes, and oversized
 expanded entries are rejected. Files are never extracted by archive path.
@@ -60,6 +76,8 @@ Validation:
 ```
 python3 -m unittest coworld/paintbot/test_neural_package.py
 nim c -r -d:headless tests/test_paintbot_neural_host.nim
+nim c -r -d:headless tests/test_paintbot_neural_contract.nim
+nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold.nim
 ```
 
 A successful local loader test is not hosted certification. Release must still

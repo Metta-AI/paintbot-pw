@@ -13,6 +13,10 @@ MAX_MANIFEST_BYTES = 8192
 # contract hashes are what the host binds and decodes by.
 SCHEMA = "paintbot-neural-basic/1"
 SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
+# Schema-2 decoder options: "decoder": {"fire_hold_teammates": true}. Every key must be
+# one the host knows and every value the declared type, so a bundle asking for an option
+# this release lacks is rejected at staging rather than played without it.
+DECODER_OPTIONS = {"fire_hold_teammates": bool}
 
 
 def unpack_package(data):
@@ -47,6 +51,17 @@ def unpack_package(data):
         digest = manifest.get(field, "")
         if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ValueError("invalid contract hash")
+    if "decoder" in manifest:
+        if manifest.get("schema") != "paintbot-neural-basic/2":
+            raise ValueError("decoder options need package schema 2")
+        decoder = manifest["decoder"]
+        if not isinstance(decoder, dict):
+            raise ValueError("decoder options must be an object")
+        for key, value in decoder.items():
+            if key not in DECODER_OPTIONS:
+                raise ValueError("unknown decoder option: " + str(key))
+            if type(value) is not DECODER_OPTIONS[key]:
+                raise ValueError("decoder." + key + " must be a " + DECODER_OPTIONS[key].__name__)
     files["policy.bas"].decode("utf-8")
     if not files["model.bin"]:
         raise ValueError("empty neural model")
