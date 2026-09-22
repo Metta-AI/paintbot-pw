@@ -14,6 +14,9 @@
 # beside it at ./polyworld_data, which is where the hook and build_round_village.py look for it
 # (build_round_village.py hard-codes <repo>/../polyworld_data and ignores POLYWORLD_DATA).
 name: Deploy Coworld
+# The display title carries the inputs (the runs API does not expose them), so the duplicate
+# guard below and `gh run list` can tell "0.3.36 upload" from "0.3.36 dry run" without opening logs.
+run-name: "Deploy Coworld ${{ inputs.version }} (${{ inputs.dry_run && 'dry run' || 'upload' }})"
 
 on:
   workflow_dispatch:
@@ -85,6 +88,41 @@ jobs:
             fi
           fi
           echo "Deploying $COWORLD_NAME $VERSION from $GITHUB_SHA (dry_run=$DRY_RUN)"
+
+      # 2026-09-22: two sessions dispatched 0.3.36 for the same SHA (d529636) within minutes
+      # (dry runs 35776537613 19:52Z and 35776637751 19:53Z, then uploads 35776950564 19:55Z and
+      # 35777253640 19:58Z). The concurrency group only serializes; the second upload ran to the
+      # platform's next-version check and failed there, which was the only thing stopping a
+      # duplicate 0.3.36/0.3.37. This step refuses it here, from the run list alone. Dry runs
+      # upload nothing, so they never block and are never blocked. A real upload fails when a
+      # real upload of the same SHA and version is ahead of it (created earlier, not completed),
+      # or completed successfully in the last 30 minutes. A later queued duplicate does not fail
+      # this run: it fails itself when its turn comes and it sees this run's success. Runs from
+      # before this title format have the bare title "Deploy Coworld" and are not matched.
+      - name: Refuse a duplicate upload of this SHA and version
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          title="Deploy Coworld $VERSION (upload)"
+          mine="$(gh run view "$GITHUB_RUN_ID" --json createdAt --jq .createdAt)"
+          gh run list --workflow deploy.yml --commit "$GITHUB_SHA" --limit 100 \
+            --json databaseId,displayTitle,status,conclusion,createdAt,updatedAt > "$RUNNER_TEMP/deploy-runs.json"
+          dup="$(jq -r --arg title "$title" --arg me "$GITHUB_RUN_ID" --arg mine "$mine" '
+            map(select(.displayTitle == $title and (.databaseId | tostring) != $me))
+            | map(select(
+                (.status != "completed" and .createdAt < $mine)
+                or (.conclusion == "success" and (now - (.updatedAt | fromdateiso8601)) < 1800)))
+            | .[] | "\(.databaseId) \(.status)/\(.conclusion // "-") created \(.createdAt)"' \
+            "$RUNNER_TEMP/deploy-runs.json")"
+          if [ -n "$dup" ]; then
+            echo "::error::another upload of $COWORLD_NAME $VERSION from $GITHUB_SHA is in flight ahead of this run or succeeded in the last 30 minutes; not uploading twice:"
+            echo "$dup"
+            exit 1
+          fi
+          echo "No other upload of $VERSION from $GITHUB_SHA is in flight or recently succeeded."
 
       - name: Require green build.yml on this commit
         if: ${{ !inputs.dry_run }}
