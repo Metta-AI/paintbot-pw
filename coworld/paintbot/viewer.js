@@ -1431,6 +1431,7 @@
     $("territorytoggle").hidden = !control;
     updateHeartStrip(w, control);
     updateGloryToast(w, data.rulesVersion);
+    document.querySelector("header")?.classList.toggle("glory", data.rulesVersion >= 37);
     $("modehint").textContent = control
       ? (data.rulesVersion >= 37 ? "Fill the heart meter or eliminate the enemy to win · Only the winner keeps its glory" : data.rulesVersion >= 34 ? "Fill the heart meter or eliminate the enemy to win · 900 points · 10-minute limit" : data.rulesVersion >= 28 ? "Fill the heart meter to win · 900 points · 10-minute limit" : data.rulesVersion >= 25 ? (w.bigHeart >= 0 ? `Big heart ${w.bigHeart + 1}: 5 points/s · ${30 - Math.floor(t / 24) % 30}s left` : w.bigHeartRound > 0 ? "All big hearts used · Normal hearts: 1 point/s" : "First big heart at 0:30 · Normal hearts: 1 point/s") : data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
       : "Capture the heart · Three lives";
@@ -1453,19 +1454,22 @@
       $(`score${s}`).textContent = glory !== null ? glory : data.rulesVersion >= 23 ? (w.scoreTicks[s]/24).toFixed(1) : owned;
       const meter = $(`meter${s}`);
       meter.hidden = data.rulesVersion < 28;
+      const meterLabel = $(`meterlabel${s}`);
+      if (meterLabel) meterLabel.hidden = glory === null;
       if (data.rulesVersion >= 28) {
         const target = w.controlHearts.length * 90;
         meter.max = target;
         meter.value = Math.min(target, w.scoreTicks[s]/24);
         meter.title = `${(w.scoreTicks[s]/24).toFixed(1)} / ${target} heart points`;
         meter.setAttribute('aria-valuetext', meter.title);
+        if (meterLabel && glory !== null) meterLabel.textContent = `${Math.floor(w.scoreTicks[s]/24)} / ${target} · ${owned} ♥`;
       }
       const scoreLine = $(`score${s}`).parentElement;
       const bigOwned = data.rulesVersion >= 25 && w.bigHeart >= 0 && w.controlHearts[w.bigHeart].owner === s;
       scoreLine.title = glory !== null
         ? `Glory ${glory} · ${owned} hearts held. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10, friendly fire taken in the opening thirty seconds 30 per hit. Only the winner keeps it.`
         : `${owned} hearts held${bigOwned ? " · Big heart: 5 points/s" : ""}`;
-      scoreLine.querySelector('small').textContent = glory !== null ? ` GLORY · ${Math.floor(w.scoreTicks[s]/24)} / ${w.controlHearts.length * 90} · ${owned} ♥` : data.rulesVersion >= 28 ? ` / ${w.controlHearts.length * 90} · ${owned} ♥` : data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
+      scoreLine.querySelector('small').textContent = glory !== null ? ` GLORY` : data.rulesVersion >= 28 ? ` / ${w.controlHearts.length * 90} · ${owned} ♥` : data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
       w.cogs.forEach((c, i) => {
         if (team(i) !== s) return;
         const unlimited = data.rulesVersion >= 13 && data.rulesVersion < 19;

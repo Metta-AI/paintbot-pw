@@ -1157,6 +1157,18 @@
   .team-scoreline { display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:12px; line-height:16px; }
   .team-scoreline strong { max-width:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; letter-spacing:.12em; }
   .team-scoreline small { font-size:7px; letter-spacing:.08em; opacity:.7; }
+  .meter-row { display:flex; align-items:center; gap:6px; }
+  .meter-row .heart-meter { flex:1; min-width:0; }
+  .meter-label { font-size:9px; letter-spacing:.06em; opacity:.8; white-space:nowrap; flex:0 0 auto; font-variant-numeric:tabular-nums; }
+  .meter-label[hidden] { display:none; }
+  /* Rules 37: glory is the score, so it gets the big type; the meter keeps its own count beside the bar. */
+  header.glory .team-scoreline { align-items:baseline; }
+  header.glory .team-scoreline .score-prefix { display:none; }
+  header.glory .team-scoreline b { font-size:26px; line-height:26px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.02em; }
+  header.glory .red .team-scoreline b { color:#ed6955; text-shadow:0 0 12px #ed695566; }
+  header.glory .blue .team-scoreline b { color:#59bdeb; text-shadow:0 0 12px #59bdeb66; }
+  header.glory .team-scoreline small { font-size:9px; letter-spacing:.14em; opacity:.85; }
+  @media(max-width:700px) { header.glory .team-scoreline b { font-size:20px; line-height:20px; } .meter-label { font-size:8px; } }
   .agent-lives { display:flex; gap:3px; }
   #heart-strip { display:flex; align-items:center; gap:4px; flex:0 0 auto; align-self:center; }
   #heart-strip[hidden] { display:none; }
@@ -1218,14 +1230,14 @@
   <small id="modehint" hidden></small>
   <div id="match-score">
     <section class="team-summary red" aria-label="Ember team">
-      <div class="team-scoreline"><strong id="policy0">Policies</strong><span title="Hearts owned">♥ <b id="score0">1</b><small> HEARTS</small></span></div>
-      <progress class="heart-meter" id="meter0" max="900" value="0" aria-label="Team heart meter" hidden></progress>
+      <div class="team-scoreline"><strong id="policy0">Policies</strong><span title="Hearts owned"><span class="score-prefix">♥ </span><b id="score0">1</b><small> HEARTS</small></span></div>
+      <div class="meter-row"><progress class="heart-meter" id="meter0" max="900" value="0" aria-label="Team heart meter" hidden></progress><small class="meter-label" id="meterlabel0" hidden></small></div>
       <div id="lives0" class="agent-lives" aria-label="Ember agent lives"></div>
     </section>
     <div id="heart-strip" role="img" aria-label="Territory hearts" hidden></div>
     <section class="team-summary blue" aria-label="Azure team">
-      <div class="team-scoreline"><strong id="policy1">Policies</strong><span title="Hearts owned">♥ <b id="score1">1</b><small> HEARTS</small></span></div>
-      <progress class="heart-meter" id="meter1" max="900" value="0" aria-label="Team heart meter" hidden></progress>
+      <div class="team-scoreline"><strong id="policy1">Policies</strong><span title="Hearts owned"><span class="score-prefix">♥ </span><b id="score1">1</b><small> HEARTS</small></span></div>
+      <div class="meter-row"><progress class="heart-meter" id="meter1" max="900" value="0" aria-label="Team heart meter" hidden></progress><small class="meter-label" id="meterlabel1" hidden></small></div>
       <div id="lives1" class="agent-lives" aria-label="Azure agent lives"></div>
     </section>
   </div>
