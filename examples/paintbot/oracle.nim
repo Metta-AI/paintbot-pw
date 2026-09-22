@@ -8,7 +8,7 @@ import polyworld/basic
 import sim
 
 const
-  MaxStateFields* = 128
+  MaxStateFields* = 256
   MaxNotes* = 16
   MaxQuestions* = 64
   MaxCriteria* = 16
@@ -27,6 +27,9 @@ type
     kind: QuestionKind
     instructions: string
     labels, texts: seq[string]
+    ## Extra fields per criterion (`what` is its own text). A name used twice becomes an
+    ## array, so a criterion can carry several `examples`.
+    extras: seq[seq[tuple[name, text: string]]]
   Draft = object
     ints: OrderedTable[string, int32]
     texts: OrderedTable[string, string]
@@ -101,8 +104,10 @@ proc deliverOracleReply*(reply: OracleReply) =
   if reply.slot < 0 or reply.slot >= Seats: return
   template seat: untyped = seats[reply.slot]
   if seat.inflight == reply.id.int32: seat.inflight = 0
-  seat.answers[reply.id.int32] = Stored(status: (if reply.status < 0: OracleFailed
-      else: reply.answers.len.int32), answers: reply.answers)
+  # An answered request with nothing usable in it must not settle as 0: `oraclePoll` reports 0
+  # as OraclePending, so the asking seat would wait on it for the rest of the match.
+  seat.answers[reply.id.int32] = Stored(status: (if reply.status < 0 or reply.answers.len == 0:
+      OracleFailed else: reply.answers.len.int32), answers: reply.answers)
   while seat.answers.len > MaxStoredAnswers:
     var oldest = high(int32)
     for id in seat.answers.keys: oldest = min(oldest, id)
@@ -110,10 +115,87 @@ proc deliverOracleReply*(reply: OracleReply) =
 
 proc validKey(key: string): bool = key.len > 0 and key.len <= MaxKeyLength
 
+type PathStep = object
+  index: int ## -1 for a named field
+  name: string
+
+proc parsePath(key: string): seq[PathStep] =
+  ## `hearts[2].reach_seconds` -> field, index, field. An empty result means the key is not a
+  ## path and is used as a flat field name, so any key a script used before still works.
+  var i = 0
+  while i < key.len:
+    case key[i]
+    of '.':
+      if i == 0 or i == key.high or key[i+1] in {'.', '['}: return @[]
+      inc i
+    of '[':
+      var j = i + 1
+      var index = 0
+      while j < key.len and key[j] in '0'..'9':
+        index = index * 10 + (key[j].ord - '0'.ord)
+        inc j
+      if j == i + 1 or j >= key.len or key[j] != ']' or index > MaxStateFields: return @[]
+      result.add PathStep(index: index, name: "")
+      i = j + 1
+    else:
+      var j = i
+      while j < key.len and key[j] notin {'.', '['}: inc j
+      result.add PathStep(index: -1, name: key[i ..< j])
+      i = j
+
+proc container(parent: JsonNode, step: PathStep, want: JsonNodeKind): JsonNode =
+  ## The child a path step names, created (or replaced when it holds the wrong shape) as `want`.
+  let fresh = proc(): JsonNode = (if want == JArray: newJArray() else: newJObject())
+  if step.index < 0:
+    if parent.kind != JObject: return nil
+    if not parent.hasKey(step.name) or parent[step.name].kind != want: parent[step.name] = fresh()
+    parent[step.name]
+  else:
+    if parent.kind != JArray: return nil
+    while parent.len <= step.index: parent.add newJNull()
+    if parent.elems[step.index].kind != want: parent.elems[step.index] = fresh()
+    parent.elems[step.index]
+
+proc setField(state: JsonNode, key: string, value: JsonNode) =
+  ## Writes `value` at a dotted/indexed path, or at the flat key when the path does not parse.
+  let steps = parsePath(key)
+  if steps.len == 0 or steps[0].index >= 0:
+    state[key] = value
+    return
+  var node = state
+  for i in 0 ..< steps.high:
+    node = node.container(steps[i], if steps[i+1].index >= 0: JArray else: JObject)
+    if node == nil:
+      state[key] = value
+      return
+  let last = steps[^1]
+  if last.index < 0:
+    if node.kind == JObject: node[last.name] = value else: state[key] = value
+  elif node.kind == JArray:
+    while node.len <= last.index: node.add newJNull()
+    node.elems[last.index] = value
+  else:
+    state[key] = value
+
+proc criterionJson(text: string, extras: seq[tuple[name, text: string]]): JsonNode =
+  ## A plain string, or an object carrying the criterion's own text as `what` plus its extras.
+  if extras.len == 0: return %text
+  result = newJObject()
+  result["what"] = %text
+  for extra in extras:
+    if not result.hasKey(extra.name):
+      result[extra.name] = %extra.text
+    else:
+      if result[extra.name].kind != JArray:
+        let first = result[extra.name]
+        result[extra.name] = newJArray()
+        result[extra.name].add first
+      result[extra.name].add %extra.text
+
 proc bodyJson(draft: Draft): string =
   var state = newJObject()
-  for key, value in draft.ints: state[key] = %value
-  for key, value in draft.texts: state[key] = %value
+  for key, value in draft.ints: state.setField(key, %value)
+  for key, value in draft.texts: state.setField(key, %value)
   if draft.notes.len > 0: state["notes"] = %draft.notes
   var questions = newJObject()
   for key, q in draft.questions:
@@ -127,7 +209,7 @@ proc bodyJson(draft: Draft): string =
       item["criteria"] = %q.texts
     else:
       var criteria = newJObject()
-      for i, label in q.labels: criteria[label] = %q.texts[i]
+      for i, label in q.labels: criteria[label] = criterionJson(q.texts[i], q.extras[i])
       item["criteria"] = criteria
     questions[key] = item
   $(%*{"state": state, "questions": questions})
@@ -165,7 +247,20 @@ proc addOracleFunctions*(host: var Host, slot: int, strings: StringPool) =
     if seat.draft.questions[key].kind != scoreQuestion and
         (label.len == 0 or label in seat.draft.questions[key].labels): return 0
     seat.draft.questions[key].labels.add label
-    seat.draft.questions[key].texts.add strings.getString(a[2]); 1, 16)
+    seat.draft.questions[key].texts.add strings.getString(a[2])
+    seat.draft.questions[key].extras.add @[]; 1, 16)
+  discard host.addFunction("oracleCriterionField", 4, proc(a: openArray[int32]): int32 =
+    ## Turns one criterion into an object: `what` keeps its own text and this names another
+    ## field (`not_for`, `examples`, ...). Used twice with one name, the field becomes an array.
+    let key = strings.getString(a[0])
+    if key notin seat.draft.questions: return 0
+    if seat.draft.questions[key].kind == scoreQuestion: return 0
+    let label = strings.getString(a[1])
+    let field = strings.getString(a[2])
+    if not validKey(field): return 0
+    let at = seat.draft.questions[key].labels.find(label)
+    if at < 0 or seat.draft.questions[key].extras[at].len >= MaxCriteria: return 0
+    seat.draft.questions[key].extras[at].add (field, strings.getString(a[3])); 1, 16)
   discard host.addFunction("oracleAsk", 0, proc(a: openArray[int32]): int32 =
     let draft = seat.draft
     seat.draft = newDraft()
@@ -177,6 +272,14 @@ proc addOracleFunctions*(host: var Host, slot: int, strings: StringPool) =
     seat.inflight = seat.nextId; seat.asked = true; seat.lastTick = currentTick
     pendingAsks.add OracleAsk(slot: slot, id: seat.nextId, body: body)
     seat.nextId, 68)
+  discard host.addFunction("oracleReady", 0, proc(a: openArray[int32]): int32 =
+    ## 0 when a fresh `oracleAsk` would be accepted, the ticks still to wait when the interval
+    ## has not elapsed, and -1 when there is no oracle or this seat already has one in flight.
+    ## Drafting costs string operations, so a script checks this before it builds anything.
+    if not oracleEnabled or seat.inflight != 0: return -1
+    if not seat.asked: return 0
+    let waited = currentTick - seat.lastTick
+    if waited >= oracleInterval.int32: 0'i32 else: oracleInterval.int32 - waited, 4)
   discard host.addFunction("oraclePoll", 1, proc(a: openArray[int32]): int32 =
     if a[0] != 0 and a[0] == seat.inflight: return OraclePending
     if a[0] notin seat.answers: return OracleFailed

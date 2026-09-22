@@ -102,7 +102,10 @@ Earlier replay versions retain their original rules and hashes.
 A hosted experience request runs a batch of episodes you define, on a pinned Coworld, without
 touching a league seat. `uv run coworld xp-request create body.json`, then
 `uv run coworld xp-request get <xreq_...> --json` for the scores and
-`uv run coworld episode-logs <ereq_...> -d <dir>` for the seat logs.
+`uv run coworld episode-logs <ereq_...> -d <dir>` for the seat logs. For the Jev baseline's own
+switches, `coworld/paintbot/tools/jev_experiment.py` writes the arm files and the bodies for
+you and prints the upload and create commands; the rest of this section is what to put in a
+body it does not cover, and how to read what comes back.
 
 ```json
 {"target": {"coworld_id": "cow_...", "variant_id": "competition"},
@@ -113,17 +116,25 @@ touching a league seat. `uv run coworld xp-request create body.json`, then
 ```
 
 Give the roster one entry per seat, all sixteen (two are shown above) — even seats are Red, odd
-are Blue. Two traps in the body itself: `variant_id` belongs in `target` **or** at the top level, never both, and `policy_ref`
-takes the bare `name:vN` or a policy-version UUID, not the player-prefixed
-`player/name:vN` form that the request echo prints back. An advised build also needs
-`episode_player_llm_spend_limit_usd`: a seat with no budget has no advisor, plays as the
-baseline and still scores normally, so the request looks healthy and measures nothing.
+are Blue, so seat parity is the team. Two traps in the body itself: `variant_id` belongs in
+`target` **or** at the top level, never both, and `policy_ref` takes the bare `name:vN` or a
+policy-version UUID, not the player-prefixed `player/name:vN` form that the request echo prints
+back. An advised build also needs `episode_player_llm_spend_limit_usd`: a seat with no budget has
+no advisor, plays as the baseline and still scores normally, so the request looks healthy and
+measures nothing.
 
 Four things about reading the result:
 
-- **Win rate, not margin.** The loser's glory is set to zero at the final tick, so a score
-  difference is one bit dressed up as a number. Over 60 measured episodes every single one had
-  one side at exactly 0 (winners 473-789, median 601).
+- **The gap between the two scores is one bit; the winner's glory is not.** The loser's glory
+  is zeroed at the final tick, so subtracting one side's score from the other only restates who
+  won. The winner's number is a real measurement — roughly the match length in seconds minus
+  the seconds it took, plus event awards — so it says how *fast* the win was. Which statistic
+  to use follows from the matchup. Against an opponent an arm nearly always beats, compare the
+  arms' **mean winning glory**: win rate is saturated and carries nothing (two arms both went
+  20/20 against the plain BASIC baseline, but their winning glory, 676.7 +/- 83.7 against
+  672.6 +/- 91.5 over 20 episodes each, is a comparison with real resolution). Between arms
+  that are close, use **win rate**: each arm only has a glory number for the games it won, so
+  the means are computed over selected and non-comparable subsets.
 - **Split each arm into equal halves with the sides swapped.** Rules 35 mirrored the map and
   validated it at red 51.7% over 400 native seeds, so neither side is favoured — but 60
   episodes of one build against another still came out 35/60 to Red by chance alone
@@ -136,10 +147,6 @@ Four things about reading the result:
 - **Check the seats before trusting a score.** Each seat's BASIC `print` output comes back from
   `coworld episode-logs`; count its asks against its failures and refusals. Locally,
   `PW_BASIC_PEAKS=1` prints each seat's peak instructions, work units and string handles.
-
-The plain BASIC baseline is the right opponent for a new build and the wrong one for a strong
-build: two advised arms that could not be told apart from each other both beat it 20 of 20. Put
-those episodes into the head-to-head instead.
 
 ## Heartwick arena
 

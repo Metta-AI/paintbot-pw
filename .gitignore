@@ -45,3 +45,6 @@ coworld/evidence/
 coworld/**/__pycache__/
 
 /examples/paintbot/emscripten/
+
+# Generated Jev experiment arms and Experience Request bodies.
+dist/jev-xp/

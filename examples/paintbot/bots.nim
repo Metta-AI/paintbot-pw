@@ -49,10 +49,14 @@ proc bodyForSeat(observer, identity: int): int =
 proc visibleToBot(slot, other: int): bool = bodyForSeat(slot, other) >= 0
 const DataNames = ["selfId","selfTeam","selfX","selfY","selfHp","carrying","homeX","homeY","heartX","heartY","worldTick","ownHeartX","ownHeartY","ownHeartStolen","hasGrenade","hasSpray","armorHp","livesLeft","grenadeCharge","trenchId"]
 proc limits*(): Limits =
+  # Only the global count needed raising: a seat that drafts a structured advisor request names
+  # a field per fact instead of concatenating one sentence, which costs variables rather than
+  # work. Measured peaks for the advised baseline with every switch on are about 10,900
+  # instructions, 25,500 work units and 101 string handles, all inside the original budget.
   result=defaultLimits()
   result.maxSourceBytes=64*1024; result.maxInstructions=20000
   result.maxMemoryBytes=2*1024*1024; result.maxWorkUnits=50000
-  result.maxArrayElements=4096;result.maxGlobals=256;result.maxCallDepth=16
+  result.maxArrayElements=4096;result.maxGlobals=512;result.maxCallDepth=16
   result.maxPrintBytes=1024;result.maxPrintEvents=128
 proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
   result=initHost()

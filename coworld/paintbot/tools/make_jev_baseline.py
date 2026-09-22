@@ -11,17 +11,27 @@ are exact lines of the baseline, and the generator fails loudly when one has mov
 was developed and measured as `jevbot.bas` v2 in daveey/cogamer (`cogames/paintbot/jev`), where
 the ablations, the duel harness and the offline scoring tools live.
 
-The layer keeps what those ablations showed works and switches the rest off (the `use*`
+The request is structured: the facts go out as fields under path keys (`candidates[0].owner`,
+`me.hp_of_3`) and each question refers to them by path, rather than being spliced into prose
+sentences. That follows TypeSafe's own guidance - state carries the content, questions carry the
+judgment, dynamic values belong in fields - and it costs no more than the sentences did, because
+a BASIC string operation is charged the same flat cost whatever its length.
+
+The layer keeps what the ablations showed works and switches the rest off (the `use*`
 lines in the init block; the generated file states the measurements):
 - Live: one asker per squad (seat 0, then the next seat if it goes quiet) has Jev choose the
-  squad objective among the three cheapest capture candidates or "keep current", each with
-  its consequence in the text, and relays the pick by shout so squads keep agreeing. The
-  listeners adopt without repeating (`useEcho = 0`): four cogs echoing one directive every two
-  seconds also kept each other's hold and leader-takeover timers alive forever.
+  squad objective among the three cheapest capture candidates or "keep current", and relays the
+  pick by shout so squads keep agreeing. The listeners adopt without repeating (`useEcho = 0`):
+  four cogs echoing one directive every two seconds also kept each other's hold and
+  leader-takeover timers alive forever. Three narrow yes/no questions ride along in the same
+  request (`useNouls`); they steer nothing yet and exist to be scored.
 - Drafted and journaled but not acted on with the shipped switches: a retreat choice for a cog
-  in danger (`useRetreat`), the survival estimate as a break-off dial (`useDial`), and the wider
-  objective list with a guard option, the big heart and a strike (`useWide`).
-- Every applied objective is journaled with its outcome 15 s later for off-policy scoring.
+  in danger (`useRetreat`), the break-off dial (`useDial`), the wider objective list (`useWide`)
+  and per-candidate Score questions instead of one Choice (`useScore`).
+- Every applied objective, every survival forecast and every "a heart of ours falls" forecast is
+  journaled with the outcome the game went on to produce, and the answer line carries the whole
+  probability distribution, so a run can be re-scored offline for a different rule instead of
+  costing another battery of games.
 """
 
 from __future__ import annotations
@@ -61,8 +71,10 @@ dim heartOwnerPrev(16)
 dim heartThreat(16)
 dim candHeart(6)
 dim candKind(6)
-dim candText(6)
-dim candLabel(6)
+dim viewD(4)
+dim viewHp(4)
+dim viewCarry(4)
+dim viewClose(4)
 dim retX(4)
 dim retY(4)
 """
@@ -135,77 +147,92 @@ sub callout(kind, heart)
   shout(line)
 end sub
 
-' One heart as a candidate sentence with computed facts, into line; "H<j>" into label.
-sub heartLine(j)
-  label = strCatInt(strNew("H"), j)
-  whereLine(controlX(j) - selfX, controlY(j) - selfY)
-  myD = whereD
+' One candidate heart as plain numbers for the oracle's structured state. Numbers are free
+' where a sentence is not: every string operation is charged the same flat cost whatever its
+' length, so the facts go out as fields and the question refers to them by path.
+sub heartFacts(j, kind)
+  fAction = strNew("capture")
+  if kind = 1 then
+    fAction = strNew("defend")
+  end if
+  fOwner = strNew("neutral")
   if controlOwner(j) = selfTeam then
-    line = strCat(strNew("ours, "), line)
+    fOwner = strNew("ours")
   else
     if controlOwner(j) >= 0 then
-      line = strCat(strNew("enemy-held, "), line)
-    else
-      line = strCat(strNew("neutral, "), line)
+      fOwner = strNew("enemy")
     end if
   end if
+  fx = controlX(j) - selfX
+  fy = controlY(j) - selfY
+  isqrt(fx * fx + fy * fy)
+  fRaw = root
+  fDist = root / 100
   ' Walking speed is 28 units a tick, 24 ticks a second.
-  line = strCat(strCatInt(strCat(line, strNew(", reach in ")), myD / 672 + 1), strNew(" s"))
-  if heartThreat(j) then
-    line = strCat(line, strNew(", enemy seen near it in the last 5 s"))
-  else
-    line = strCat(line, strNew(", no enemy seen near it"))
-  end if
+  fReach = root / 672 + 1
+  fThreat = heartThreat(j)
   ' Did an enemy we saw in the last five seconds stand closer to it than we do?
-  closer = 0
+  fCloser = 0
   e = 1 - selfTeam
   while e < 16
     if lastSeen(e) > 0 then
       if worldTick - lastSeen(e) < 120 then
         ex = oldX(e) - controlX(j)
         ey = oldY(e) - controlY(j)
-        if ex * ex + ey * ey < myD * myD then
-          closer = 1
+        if ex * ex + ey * ey < fRaw * fRaw then
+          fCloser = 1
         end if
       end if
     end if
     e = e + 2
   wend
-  if closer then
-    line = strCat(line, strNew(", an enemy was closer to it than I am"))
-  end if
+  fCapture = strNew("nobody")
   if controlCaptureTeam(j) >= 0 then
     if controlCaptureTeam(j) = selfTeam then
-      line = strCat(line, strNew(", we are capturing it"))
+      fCapture = strNew("us")
     else
-      line = strCat(line, strNew(", enemy is capturing it now"))
+      fCapture = strNew("the enemy")
     end if
   end if
-  if controlPoints(j) > 1 then
-    line = strCat(line, strNew(", big heart worth 5 points a second"))
+  fPoints = controlPoints(j)
+  fOther = 0
+  if j = otherSquadObj then
+    if worldTick - otherSquadTick < 240 then
+      fOther = 1
+    end if
   end if
-  if j = otherSquadObj and worldTick - otherSquadTick < 240 then
-    line = strCat(line, strNew(", our other squad is heading there"))
-  end if
+  fCurrent = 0
   if j = objective then
-    line = strCat(line, strNew(", my squad's default"))
+    fCurrent = 1
   end if
 end sub
 
-' One enemy in view as a sentence, into line; "E<i>" into label.
-sub enemyLine(i)
-  label = strCatInt(strNew("E"), i)
-  whereLine(playerX(i) - selfX, playerY(i) - selfY)
-  line = strCat(strCatInt(strCat(line, strNew(", hp ")), playerHp(i)), strNew("/3"))
+' One retreat option: its distance out as a field, and "R<k>" into retLabel for the criterion.
+sub retOption(k, bx, by)
+  isqrt(bx * bx + by * by)
+  oracleState(strCat(strCatInt(strNew("retreat_options["), k), strNew("].distance_m")), root / 100)
+  retLabel = strCatInt(strNew("R"), k)
+end sub
+
+' One enemy in view as plain numbers, into the view arrays at slot `n`.
+sub enemyFacts(i, n)
+  ex = playerX(i) - selfX
+  ey = playerY(i) - selfY
+  isqrt(ex * ex + ey * ey)
+  viewD(n) = root / 100
+  viewHp(n) = playerHp(i)
+  viewCarry(n) = 0
   if playerCarrying(i) then
-    line = strCat(line, strNew(", carrying our heart"))
+    viewCarry(n) = 1
   end if
+  ' -1 moving away, 0 holding range, 1 closing on me.
+  viewClose(n) = 0
   if i = nearSeat then
     if closing > 4 then
-      line = strCat(line, strNew(", closing on me"))
+      viewClose(n) = 1
     end if
     if closing < -4 then
-      line = strCat(line, strNew(", moving away"))
+      viewClose(n) = 0 - 1
     end if
   end if
 end sub
@@ -221,15 +248,21 @@ if jevInit = 0 then
   useObjective = 1
   useRetreat = 0
   useDial = 0
+  ' Three narrow yes/no questions ride along with the objective ask, over the same state and in
+  ' the same request. They cost little and each is journaled so it can be scored against what
+  ' the game went on to do; none of them steers play yet.
+  useNouls = 1
+  ' Ask Jev to value each candidate on its own ordered scale instead of choosing between them.
+  useScore = 0
   useRelay = 1
   useLeader = 1
   useExamples = 1
-  ' Echo: squadmates repeat the callout they adopted. Off — a squad needs one voice. With it on
-  ' all four cogs shouted the same directive every two seconds (a listener never sets shoutTick,
-  ' so the repeat test below fired for every one of them from tick 0), and the echoes fed each
-  ' other: every adoption pushes jevObjectiveUntil and lastDirectiveTick out by kHold, so three
-  ' listeners in earshot can hold a dead asker's heart indefinitely and never promote a new
-  ' asker. useEcho = 1 restores the old behaviour exactly, as the control arm of an A/B.
+  ' Echo: squadmates repeat the callout they adopted. Off, because a squad needs one voice. With
+  ' it on, all four cogs shouted the same directive every two seconds (a listener never sets
+  ' shoutTick, so the repeat test below fired for every one of them from tick 0), and the echoes
+  ' fed each other: every adoption pushes jevObjectiveUntil and lastDirectiveTick out by kHold,
+  ' so three listeners in earshot can hold a dead asker's heart indefinitely and never promote a
+  ' new asker. useEcho = 1 restores the old behaviour exactly, as the control arm of an A/B.
   useEcho = 0
   ' Wider objective list (a guard option, the big heart, a strike on an enemy heart). Off: it looked
   ' fine at 1,200 ticks (+17.1) but loses full-length games (1/8 against 8/8 without it).
@@ -243,9 +276,12 @@ if jevInit = 0 then
   kConf = 300
   kMargin = 0
   kCand = 3
+  ' Hosted answers land a median of 28 ticks after the ask and sometimes much later. Past this
+  ' the state that was described has moved on and the pick is dropped rather than applied.
+  kStale = 96
   kRetreatHold = 72
-  kDialLow = 350
-  kDialHigh = 750
+  kDialLow = 250
+  kDialHigh = 650
   kLeaderWait = 120
   retreatDial = 1
   amSpeaker = 0
@@ -453,16 +489,27 @@ while h < heardCount() and h < 4
   end if
   h = h + 1
 wend
-' Score the survival prediction ten seconds after it was made, and each applied objective
-' fifteen seconds after it was applied (for off-policy scoring of prompt variants).
+' Score each prediction once the game has settled it: the two ten-second forecasts after ten
+' seconds, and each applied objective fifteen seconds after it was applied. Journaled for
+' off-policy scoring of prompt variants and for a Brier score against the base rate.
 if survId > 0 then
   if worldTick - survTick >= 240 then
-    survived = 1
+    lost = 0
     if livesLeft < survLives then
-      survived = 0
+      lost = 1
     end if
-    print "out t="; worldTick; " id="; survId; " psurv="; survP; " survived="; survived
+    print "out t="; worldTick; " id="; survId; " plose="; survP; " lost="; lost
     survId = 0
+  end if
+end if
+if fallId > 0 then
+  if worldTick - fallTick >= 240 then
+    fell = 0
+    if ownedCount < fallOwned then
+      fell = 1
+    end if
+    print "fout t="; worldTick; " id="; fallId; " pfall="; fallP; " fell="; fell
+    fallId = 0
   end if
 end if
 if objOutId > 0 then
@@ -487,6 +534,44 @@ if jevReq > 0 then
     ansObj = oracleAnswer(jevReq, strNew("objective"))
     ansConf = oracleConfidence(jevReq, strNew("objective"))
     rawObj = ansObj
+    ' The whole distribution, not just its peak: with it a journaled run can be re-scored for
+    ' a different rule offline instead of costing another battery of games.
+    pc0 = oracleProbability(jevReq, strNew("objective"), strNew("C0"))
+    pc1 = oracleProbability(jevReq, strNew("objective"), strNew("C1"))
+    pc2 = oracleProbability(jevReq, strNew("objective"), strNew("C2"))
+    pCur = oracleProbability(jevReq, strNew("objective"), strNew("current"))
+    print "probs t="; worldTick; " id="; jevReq; " n="; candN; " p0="; pc0; " p1="; pc1; " p2="; pc2; " pcur="; pCur
+    ' Score arm: each candidate valued on its own ordered scale, and code takes the best.
+    if useScore then
+      sv0 = oracleAnswer(jevReq, strNew("value_C0"))
+      sv1 = oracleAnswer(jevReq, strNew("value_C1"))
+      sv2 = oracleAnswer(jevReq, strNew("value_C2"))
+      svBest = 0 - 1
+      svTop = 0 - 1
+      if candN > 0 then
+        if sv0 > svTop then
+          svTop = sv0
+          svBest = 0
+        end if
+      end if
+      if candN > 1 then
+        if sv1 > svTop then
+          svTop = sv1
+          svBest = 1
+        end if
+      end if
+      if candN > 2 then
+        if sv2 > svTop then
+          svTop = sv2
+          svBest = 2
+        end if
+      end if
+      print "score t="; worldTick; " id="; jevReq; " v0="; sv0; " v1="; sv1; " v2="; sv2; " pick="; svBest
+      if svBest >= 0 then
+        ansObj = svBest
+        ansConf = 1000
+      end if
+    end if
     if ansObj >= 0 then
       lastDirectiveTick = worldTick
       shoutTick = worldTick
@@ -509,11 +594,20 @@ if jevReq > 0 then
         wend
         ansConf = 1000
       end if
-      if ansObj < candN and ansConf >= kConf then
+      fresh = 0
+      if worldTick - lastAskTick <= kStale then
+        fresh = 1
+      end if
+      if ansObj < candN and ansConf >= kConf and fresh then
         apply = 1
         if kMargin > 0 and useShuffle = 0 and useRule = 0 then
-          pTop = oracleProbability(jevReq, strNew("objective"), strCatInt(strNew("C"), ansObj))
-          pCur = oracleProbability(jevReq, strNew("objective"), strNew("current"))
+          pTop = pc0
+          if ansObj = 1 then
+            pTop = pc1
+          end if
+          if ansObj = 2 then
+            pTop = pc2
+          end if
           if pTop - pCur < kMargin then
             apply = 0
           end if
@@ -546,7 +640,7 @@ if jevReq > 0 then
     end if
     ansRet = oracleAnswer(jevReq, strNew("retreat"))
     ansConf = oracleConfidence(jevReq, strNew("retreat"))
-    if ansRet > 0 and ansRet < retCount and ansConf >= kConf and useRetreat then
+    if ansRet > 0 and ansRet < retSent and ansConf >= kConf and useRetreat then
       jevRetX = retX(ansRet)
       jevRetY = retY(ansRet)
       jevRetUntil = worldTick + kRetreatHold
@@ -554,14 +648,27 @@ if jevReq > 0 then
     if ansRet = 0 then
       jevRetUntil = 0
     end if
-    v = oracleAnswer(jevReq, strNew("survive"))
+    nOut = oracleAnswer(jevReq, strNew("outnumbered"))
+    nFall = oracleAnswer(jevReq, strNew("heart_falling"))
+    nTog = oracleAnswer(jevReq, strNew("squad_together"))
+    v = oracleAnswer(jevReq, strNew("lose_life"))
+    print "nouls t="; worldTick; " id="; jevReq; " outnum="; nOut; " falling="; nFall; " together="; nTog; " lose="; v
+    if nFall >= 0 then
+      if fallId = 0 then
+        fallId = jevReq
+        fallP = nFall
+        fallTick = worldTick
+        fallOwned = ownedCount
+      end if
+    end if
     if v >= 0 then
+      ' v is P(this cog loses a life in the next ten seconds): high means break off sooner.
       if useDial then
         retreatDial = 1
-        if v < kDialLow then
+        if v > kDialHigh then
           retreatDial = 0
         end if
-        if v > kDialHigh then
+        if v < kDialLow then
           retreatDial = 2
         end if
         dialUntil = worldTick + 96
@@ -573,7 +680,7 @@ if jevReq > 0 then
         survLives = livesLeft
       end if
     end if
-    print "ans t="; worldTick; " id="; jevReq; " obj="; jevObjective; " guard="; jevGuard; " ansobj="; ansObj; " rawobj="; rawObj; " n="; candN + 1; " ret="; ansRet; " psurv="; v; " dial="; retreatDial
+    print "ans t="; worldTick; " id="; jevReq; " obj="; jevObjective; " guard="; jevGuard; " ansobj="; ansObj; " rawobj="; rawObj; " n="; candN + 1; " ret="; ansRet; " plose="; v; " dial="; retreatDial; " fresh="; fresh
     jevReq = 0
   end if
 end if
@@ -657,7 +764,89 @@ RETREAT_RULE = """' Refuse a fight we are visibly losing: head for the heart tha
 if foesSeen > 0 and foesNear - friendsNear >= retreatDial and not carrying then
 """
 
-OVERRIDES_AND_ASK = """' ---- Jev overrides on the goal. ----
+KCAND = 3   # candidate slots the generator unrolls; must match kCand in the init block
+
+# Every string operation costs the same flat charge whatever its length, so the per-candidate
+# facts go out as fields under a path key rather than as one spliced sentence, and the criterion
+# is a short line that points at them. Fixed indices let the keys be literals.
+CANDIDATE_FIELDS = [
+    ("heart", "candHeart({k})"),
+    ("distance_m", "fDist"),
+    ("reach_seconds", "fReach"),
+    ("enemy_seen_near", "fThreat"),
+    ("enemy_closer_than_me", "fCloser"),
+    ("points_per_second", "fPoints"),
+    ("other_squad_heading_there", "fOther"),
+    ("is_current_objective", "fCurrent"),
+]
+CANDIDATE_TEXT_FIELDS = [("action", "fAction"), ("owner", "fOwner"), ("being_captured_by", "fCapture")]
+
+SCORE_LEVELS = [
+    "A bad use of the next five seconds: we cannot take or hold it, or going there walks the "
+    "squad into a bigger enemy group.",
+    "A weak use: reachable, but contested or far enough that we probably arrive second.",
+    "A fair use: we can most likely take or hold it, and it is worth doing when nothing better "
+    "is free.",
+    "A strong use: this squad can take or hold it together and it moves the score.",
+]
+
+
+def candidate_block(k: int) -> str:
+    lines = [f"if candCount > {k} then",
+             f"  heartFacts(candHeart({k}), candKind({k}))"]
+    for name, value in CANDIDATE_FIELDS:
+        lines.append(f'  oracleState(strNew("candidates[{k}].{name}"), {value.format(k=k)})')
+    for name, value in CANDIDATE_TEXT_FIELDS:
+        lines.append(f'  oracleStateText(strNew("candidates[{k}].{name}"), {value})')
+    lines.append(f'  oracleCriterion(strNew("objective"), strNew("C{k}"), '
+                 f'strNew("Work on the objective described in `candidates[{k}]`."))')
+    lines.append("end if")
+    return "\n".join(lines) + "\n"
+
+
+def score_block(k: int) -> str:
+    lines = [f"  if candCount > {k} then",
+             f'    oracleQuestion(strNew("value_C{k}"), 1, strNew("How good a use of this squad\'s '
+             f'next five seconds is the objective described in `candidates[{k}]`?"))']
+    for level in SCORE_LEVELS:
+        lines.append(f'    oracleCriterion(strNew("value_C{k}"), strNew(""), strNew("{level}"))')
+    lines.append("  end if")
+    return "\n".join(lines) + "\n"
+
+
+def enemy_block(k: int) -> str:
+    return (f"if viewCount > {k} then\n"
+            f'  oracleState(strNew("enemies_in_view[{k}].distance_m"), viewD({k}))\n'
+            f'  oracleState(strNew("enemies_in_view[{k}].hp_of_3"), viewHp({k}))\n'
+            f'  oracleState(strNew("enemies_in_view[{k}].carrying_our_heart"), viewCarry({k}))\n'
+            f'  oracleState(strNew("enemies_in_view[{k}].closing_on_me"), viewClose({k}))\n'
+            "end if\n")
+
+
+OBJECTIVE_INSTRUCTIONS = (
+    "Choose what this squad works on for the next five seconds. Judge only this decision. "
+    "This state was captured about a second before you see it and the answer is applied when it "
+    "arrives, so prefer a choice that is still sensible a few seconds from now. Measured over "
+    "hundreds of matches in this game: a team that refuses fights when outnumbered and moves in "
+    "groups of four beat every fight-everything style about 85% of the time, and squads that "
+    "split up lose. Prefer what this squad can take or hold together without walking into a "
+    "bigger enemy group, and do not send both squads to the same heart."
+)
+
+RULES = (
+    "Owned hearts keep scoring with nobody standing on them. The first team to 900 points wins. "
+    "A team with no lives left loses on the spot. Hearts are named by index: a heart's distance "
+    "and reach time are measured from the cog being asked."
+)
+
+LIMITS = (
+    "I see only my forward cone; enemies not listed may exist. Teammates share nothing except "
+    "shouts within 12 m. Hearts and scores are public."
+)
+
+
+def overrides_and_ask() -> str:
+    return """\' ---- Jev overrides on the goal. ----
 ' Guard: stand on one of our hearts that is under threat until the hold runs out.
 if jevGuard >= 0 and useObjective and worldTick < jevGuardUntil and not carrying then
   if jevGuard < heartCount() then
@@ -681,9 +870,11 @@ if useRetreat and worldTick < jevRetUntil and not carrying then
 end if
 
 ' ---- Ask Jev. The squad question goes to one asker per squad; a cog in danger asks for itself. ----
+' oracleReady() is 0 only when a fresh ask would be accepted, so nothing below is built to be
+' thrown away: drafting costs string operations whether or not the request ships.
 wantSquad = 0
 wantSelf = 0
-if jevReq = 0 and oracleAvailable() and worldTick - lastAskTick >= 24 and askCount < 220 then
+if jevReq = 0 and oracleReady() = 0 and askCount < 220 then
   canSquadAsk = 1
   if useLeader then
     canSquadAsk = 0
@@ -718,36 +909,37 @@ if jevReq = 0 and oracleAvailable() and worldTick - lastAskTick >= 24 and askCou
   end if
 end if
 if wantSquad or wantSelf then
-  ' Shared facts, scale in the name.
-  oracleState(strNew("seconds_elapsed"), worldTick / 24)
-  oracleState(strNew("our_score"), ourScore24 / 24)
-  oracleState(strNew("enemy_score"), theirScore24 / 24)
-  oracleState(strNew("score_to_win"), 900)
-  oracleState(strNew("hearts_ours"), ownedCount)
-  oracleState(strNew("hearts_enemy"), enemyCount)
-  oracleState(strNew("hearts_neutral"), neutralCount)
-  oracleState(strNew("my_hp_of_3"), selfHp)
-  oracleState(strNew("my_lives_left"), livesLeft)
-  oracleState(strNew("squadmates_within_12m"), friendsNear - 1)
-  oracleState(strNew("enemies_within_26m"), foesNear)
-  oracleState(strNew("fights_won"), fightsWon)
-  oracleState(strNew("fights_total"), fightCount)
+  ' Shared facts as fields. State carries what is true; the questions carry the judgment.
+  oracleState(strNew("match.seconds_elapsed"), worldTick / 24)
+  oracleState(strNew("match.our_score"), ourScore24 / 24)
+  oracleState(strNew("match.enemy_score"), theirScore24 / 24)
+  oracleState(strNew("match.score_to_win"), 900)
+  oracleState(strNew("board.hearts_ours"), ownedCount)
+  oracleState(strNew("board.hearts_enemy"), enemyCount)
+  oracleState(strNew("board.hearts_neutral"), neutralCount)
+  oracleState(strNew("me.hp_of_3"), selfHp)
+  oracleState(strNew("me.lives_left"), livesLeft)
+  oracleState(strNew("me.squadmates_within_12m"), friendsNear - 1)
+  oracleState(strNew("me.enemies_within_26m"), foesNear)
+  oracleState(strNew("me.fights_won"), fightsWon)
+  oracleState(strNew("me.fights_total"), fightCount)
   if firstContact = 0 then
-    oracleStateText(strNew("phase"), strNew("opening: no enemy contact yet"))
+    oracleStateText(strNew("match.phase"), strNew("opening: no enemy contact yet"))
   else
     if worldTick - firstContact < 360 then
-      oracleStateText(strNew("phase"), strNew("first contact"))
+      oracleStateText(strNew("match.phase"), strNew("first contact"))
     else
-      oracleStateText(strNew("phase"), strNew("midgame"))
+      oracleStateText(strNew("match.phase"), strNew("midgame"))
     end if
   end if
-  oracleStateText(strNew("limits"), strNew("I see only my forward cone; enemies not listed may exist. Teammates share nothing except shouts within 12 m. Hearts and scores are public."))
+  oracleStateText(strNew("rules"), strNew("%RULES%"))
+  oracleStateText(strNew("me.limits"), strNew("%LIMITS%"))
 end if
 if wantSquad then
   candCount = 0
   lastFp = fp
   lastSquadAsk = worldTick
-  ' Candidates: the cheapest capture targets, a guard option, the big heart, a strike, keep current.
+  ' Candidates: the cheapest capture targets, a guard option, the big heart, a strike.
   if candCost0 < 2147483647 then
     candHeart(0) = cheap0
     candKind(0) = 0
@@ -817,7 +1009,7 @@ if wantSquad then
         end if
         k = k + 1
       wend
-      if dup = 0 and candCount < 5 then
+      if dup = 0 and candCount < %KCAND% then
         candHeart(candCount) = extra
         candKind(candCount) = 0
         candCount = candCount + 1
@@ -826,82 +1018,64 @@ if wantSquad then
     extra = strikeHeart
     pass2 = pass2 + 1
   wend
-  hearts = strNew("")
-  k = 0
-  while k < candCount
-    heartLine(candHeart(k))
-    candLabel(k) = strCatInt(strNew("C"), k)
-    if candKind(k) = 1 then
-      candText(k) = strCat(strCat(strCat(strNew("defend "), label), strNew(": ")), line)
-    else
-      candText(k) = strCat(strCat(strCat(strNew("capture "), label), strNew(": ")), line)
-    end if
-    if k > 0 then
-      hearts = strCat(hearts, strNew("; "))
-    end if
-    hearts = strCat(hearts, candText(k))
-    k = k + 1
-  wend
-  oracleStateText(strNew("options"), hearts)
-  if objective >= 0 then
-    oracleStateText(strNew("current_objective"), strCatInt(strNew("H"), objective))
+  oracleState(strNew("me.current_objective_heart"), objective)
+  oracleQuestion(strNew("objective"), 2, strNew("%OBJECTIVE%"))
+%CANDIDATES%  oracleCriterion(strNew("objective"), strNew("current"), strNew("Keep the objective this squad already has, named by `me.current_objective_heart`."))
+  oracleCriterionField(strNew("objective"), strNew("current"), strNew("not_for"), strNew("An objective that is already ours, one no listed candidate describes, or -1, which means the squad has none yet."))
+  oracleCriterionField(strNew("objective"), strNew("current"), strNew("examples"), strNew("The squad is most of the way there and nothing about it has changed."))
+  oracleCriterionField(strNew("objective"), strNew("current"), strNew("examples"), strNew("Every listed candidate is worse than what this squad is already doing."))
+  if useScore then
+%SCORES%  end if
+  if useNouls then
+    oracleQuestion(strNew("outnumbered"), 0, strNew("This squad is outnumbered where it is heading."))
+    oracleCriterion(strNew("outnumbered"), strNew("true"), strNew("More enemies than squadmates will be in the fight there."))
+    oracleCriterion(strNew("outnumbered"), strNew("false"), strNew("We match or outnumber them there, or there is no fight there."))
+    oracleQuestion(strNew("heart_falling"), 0, strNew("The enemy takes one of the hearts we own within the next ten seconds."))
+    oracleCriterion(strNew("heart_falling"), strNew("true"), strNew("One of our hearts is being captured, or enemies are on it and we are not."))
+    oracleCriterion(strNew("heart_falling"), strNew("false"), strNew("Our hearts are quiet, or we can get back to the threatened one in time."))
+    oracleQuestion(strNew("squad_together"), 0, strNew("This squad can reach the objective named by `me.current_objective_heart` together, before the enemy contests it."))
+    oracleCriterion(strNew("squad_together"), strNew("true"), strNew("The squad is close to one another and nearer to it than the enemies we have seen."))
+    oracleCriterion(strNew("squad_together"), strNew("false"), strNew("The squad is scattered, or an enemy is closer to it than we are."))
   end if
-  oracleNote(strNew("Owned hearts keep scoring with nobody on them; first team to 900 points wins; a team with no lives left loses on the spot."))
-  oracleNote(strNew("Measured over hundreds of matches here: a team that refuses fights when outnumbered and moves in groups of four won about 85% against every fight-everything style."))
-  oracleNote(strNew("Measured here too: squads that split up lose. Prefer the objective my squadmates can reach with me, and do not send both squads to the same heart."))
-  if useExamples then
-    oracleNote(strNew("Example: two neutral hearts, one 10 m away with an enemy seen near it and one 25 m away and quiet. A squad of four at full hp takes the near one; a cog alone or at 1 hp takes the quiet one."))
-    oracleNote(strNew("Example: we hold most hearts and the enemy is capturing one of ours 15 m away: defend it. Example: every nearby heart is ours and quiet: strike the nearest enemy-held heart."))
-  end if
-  oracleQuestion(strNew("objective"), 2, strNew("Which option should this squad work on for the next five seconds? Judge only this decision. Prefer what we can take or hold without walking into a bigger enemy group."))
-  k = 0
-  while k < candCount
-    oracleCriterion(strNew("objective"), candLabel(k), candText(k))
-    k = k + 1
-  wend
-  oracleCriterion(strNew("objective"), strNew("current"), strNew("keep the current objective (see `current_objective`)"))
   candN = candCount
 end if
 retCount = 0
 if wantSelf then
   lastSelfAsk = worldTick
-  line = strNew("gun ready")
+  oracleState(strNew("me.gun_ready"), 1)
   if gunWait > 0 then
-    line = strNew("gun reloading")
+    oracleState(strNew("me.gun_ready"), 0)
   end if
+  oracleState(strNew("me.armored"), 0)
   if armorHp > 0 then
-    line = strCat(line, strNew(", armored"))
+    oracleState(strNew("me.armored"), 1)
   end if
+  oracleState(strNew("me.has_grenade"), 0)
   if hasGrenade then
-    line = strCat(line, strNew(", grenade"))
+    oracleState(strNew("me.has_grenade"), 1)
   end if
+  oracleState(strNew("me.damage_seconds_ago"), 0 - 1)
   if dmgTick > 0 then
-    line = strCatInt(strCat(line, strNew(", took damage ")), (worldTick + 1 - dmgTick) / 24)
-    line = strCat(line, strNew(" s ago"))
+    oracleState(strNew("me.damage_seconds_ago"), (worldTick + 1 - dmgTick) / 24)
   end if
-  oracleStateText(strNew("me"), line)
-  enemies = strNew("none in view")
-  shown = 0
+  viewCount = 0
   i = 1 - selfTeam
-  while i < 16 and shown < 3
+  while i < 16
     if visible(i) then
-      enemyLine(i)
-      if shown = 0 then
-        enemies = strCat(strCat(label, strNew(": ")), line)
-      else
-        enemies = strCat(strCat(strCat(enemies, strNew("; ")), label), strCat(strNew(": "), line))
+      if viewCount < 3 then
+        enemyFacts(i, viewCount)
+        viewCount = viewCount + 1
       end if
-      shown = shown + 1
     end if
     i = i + 2
   wend
-  oracleStateText(strNew("enemies_in_view_now"), enemies)
-  ' Where could I go? Code finds the places; Jev picks.
+  oracleState(strNew("me.enemies_in_view"), viewCount)
+%ENEMIES%  ' Where could I go? Code finds the places; Jev picks.
   retX(0) = goalX
   retY(0) = goalY
   retCount = 1
   oracleQuestion(strNew("retreat"), 2, strNew("This cog is hurt or outnumbered. Where should it go for the next three seconds? Judge only this decision."))
-  oracleCriterion(strNew("retreat"), strNew("R0"), strNew("keep going toward the objective and keep fighting: I can win this or the objective matters more"))
+  oracleCriterion(strNew("retreat"), strNew("R0"), strNew("Keep going toward the objective and keep fighting: this fight is winnable, or the objective matters more."))
   medkit = -1
   medD2 = 2147483647
   j = 0
@@ -919,10 +1093,10 @@ if wantSelf then
     j = j + 1
   wend
   if medkit >= 0 and selfHp < 3 then
-    whereLine(pickupMemoryX(medkit) - selfX, pickupMemoryY(medkit) - selfY)
     retX(retCount) = pickupMemoryX(medkit)
     retY(retCount) = pickupMemoryY(medkit)
-    oracleCriterion(strNew("retreat"), strCatInt(strNew("R"), retCount), strCat(strNew("go to the medkit I remember, restores my hp: "), line))
+    retOption(retCount, pickupMemoryX(medkit) - selfX, pickupMemoryY(medkit) - selfY)
+    oracleCriterion(strNew("retreat"), retLabel, strNew("Go to the medkit I remember, which restores my hp."))
     retCount = retCount + 1
   end if
   mate = -1
@@ -940,10 +1114,10 @@ if wantSelf then
     i = i + 2
   wend
   if mate >= 0 then
-    whereLine(playerX(mate) - selfX, playerY(mate) - selfY)
     retX(retCount) = playerX(mate)
     retY(retCount) = playerY(mate)
-    oracleCriterion(strNew("retreat"), strCatInt(strNew("R"), retCount), strCat(strNew("fall back to my nearest squadmate so we fight together: "), line))
+    retOption(retCount, playerX(mate) - selfX, playerY(mate) - selfY)
+    oracleCriterion(strNew("retreat"), retLabel, strNew("Fall back to my nearest squadmate so we fight together."))
     retCount = retCount + 1
   end if
   ownHeart = -1
@@ -961,32 +1135,38 @@ if wantSelf then
     j = j + 1
   wend
   if ownHeart >= 0 then
-    whereLine(controlX(ownHeart) - selfX, controlY(ownHeart) - selfY)
     retX(retCount) = controlX(ownHeart)
     retY(retCount) = controlY(ownHeart)
-    if heartThreat(ownHeart) then
-      line = strCat(line, strNew(", but an enemy was seen near it"))
-    end if
-    oracleCriterion(strNew("retreat"), strCatInt(strNew("R"), retCount), strCat(strNew("fall back to the nearest heart we own, where teammates respawn: "), line))
+    retOption(retCount, controlX(ownHeart) - selfX, controlY(ownHeart) - selfY)
+    oracleCriterion(strNew("retreat"), retLabel, strNew("Fall back to the nearest heart we own, where teammates respawn."))
+    oracleState(strNew("retreat_threatened"), heartThreat(ownHeart))
     retCount = retCount + 1
   end if
 end if
 if wantSquad or wantSelf then
-  oracleQuestion(strNew("survive"), 0, strNew("Will this cog still have all of its current lives ten seconds from now?"))
-  oracleCriterion(strNew("survive"), strNew("true"), strNew("It is healthy or out of contact and is unlikely to be killed in the next ten seconds."))
-  oracleCriterion(strNew("survive"), strNew("false"), strNew("It is hurt, outnumbered or walking into enemies and will probably lose a life within ten seconds."))
+  oracleQuestion(strNew("lose_life"), 0, strNew("This cog loses one of its lives within the next ten seconds."))
+  oracleCriterion(strNew("lose_life"), strNew("true"), strNew("It is in, or walking into, a fight it is likely to lose, and cannot break off in time."))
+  oracleCriterion(strNew("lose_life"), strNew("false"), strNew("It is out of contact, or in a fight it is likely to win, or it can disengage if the fight turns."))
   jevReq = oracleAsk()
   if jevReq > 0 then
     lastAskTick = worldTick
     askCount = askCount + 1
+    retSent = retCount
     print "ask t="; worldTick; " id="; jevReq; " squad="; wantSquad; " self="; wantSelf; " cand="; candCount; " ret="; retCount; " seat="; mySeat
   else
-    lastAskTick = worldTick - 12
     print "refused t="; worldTick
   end if
 end if
 
-"""
+""" \
+        .replace("%OBJECTIVE%", OBJECTIVE_INSTRUCTIONS) \
+        .replace("%RULES%", RULES) \
+        .replace("%LIMITS%", LIMITS) \
+        .replace("%KCAND%", str(KCAND + 2)) \
+        .replace("%CANDIDATES%", "".join(candidate_block(k) for k in range(KCAND))) \
+        .replace("%SCORES%", "".join(score_block(k) for k in range(KCAND))) \
+        .replace("%ENEMIES%", "".join(enemy_block(k) for k in range(3)))
+
 
 
 def build(base: str) -> str:
@@ -1001,7 +1181,7 @@ def build(base: str) -> str:
     s = swap(s, "  if objective < 0 and otherTarget >= 0 then\n    objective = otherTarget\n  end if\n", TERRITORY_OVERRIDE)
     s = swap(s, "' Refuse a fight we are visibly losing: head for the heart that is far from them and near us.\n"
                 "if foesNear - friendsNear >= 1 and not carrying then\n", RETREAT_RULE)
-    s = splice(s, "' Facing with nothing to shoot: sweep, then turn to speech and sound.\n", OVERRIDES_AND_ASK)
+    s = splice(s, "' Facing with nothing to shoot: sweep, then turn to speech and sound.\n", overrides_and_ask())
     return s
 
 
@@ -1010,6 +1190,11 @@ def main() -> None:
     out = build(BASE.read_text())
     size = len(out.encode())
     assert size <= 65_536, f"jev.bas is {size} bytes; the source limit is 65,536"
+    # Keep the spliced text ASCII. `read_text`/`write_text` use the locale encoding, so a stray
+    # em dash or smart quote round-trips fine here and makes `--check` report the shipped file as
+    # stale on the Windows runner, where the locale is cp1252.
+    wide = sorted({c for c in out if ord(c) > 127})
+    assert not wide, f"jev.bas must be ASCII; found {wide}"
     stale = [p for p in OUTPUTS if not p.exists() or p.read_text() != out]
     if check:
         if stale:
