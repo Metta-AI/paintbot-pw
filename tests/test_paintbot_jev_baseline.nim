@@ -3,7 +3,7 @@
 ## pods, this suite) every ask is refused, and the file must then play exactly like `base.bas`:
 ## the same state hash tick for tick, no seat disabled, and a per-decision cost that stays well
 ## inside the BASIC budget even though it drafts oracle requests.
-import std/[unittest, os, strutils, tables]
+import std/[unittest, os, strutils, tables, json]
 import polyworld/[cli, basic]
 import ../examples/paintbot/[sim, bots, oracle]
 
@@ -45,7 +45,8 @@ suite "Jev-advised BASIC baseline":
   test "drafting the oracle request stays inside the BASIC budget":
     # With the oracle on and no replies the askers draft and ship requests every ask interval.
     # Limits are 20,000 instructions, 50,000 work units and 1,024 string handles per decision;
-    # measured peaks are about 12,600 / 26,700 / 131. Guard three quarters of each limit.
+    # measured peaks are about 10,100 / 22,200 / 91, and about 10,900 / 25,500 / 101 with every
+    # switch on. Guard three quarters of each limit.
     let (_, players) = play(Jev, 4, advised = true)
     check drainOracleAsks().len > 0
     for slot in 0..<Seats:
@@ -122,3 +123,50 @@ suite "Jev-advised BASIC baseline":
               (words[1] == "hold") == (r.kind == 1):
             announced = true
       check announced
+
+  test "the drafted request is structured state, not sentences":
+    # Facts go out as fields under path keys and the criteria point at them, so Jev reads
+    # structure rather than prose and the options are not restated in the state.
+    resetOracle()
+    oracleEnabled = true
+    var w = newWorld(4)
+    let players = loadBots(@[BotGroup(path: Jev, count: Seats)])
+    discard players.decide(w)
+    let asks = drainOracleAsks()
+    check asks.len > 0
+    let body = parseJson(asks[0].body)
+    let state = body["state"]
+    let questions = body["questions"]
+
+    check state["candidates"].kind == JArray
+    check state["candidates"].len > 0
+    for candidate in state["candidates"]:
+      check candidate["heart"].kind == JInt
+      check candidate["reach_seconds"].getInt > 0
+      check candidate["owner"].getStr in ["ours", "enemy", "neutral"]
+      check candidate["action"].getStr in ["capture", "defend"]
+      check candidate["being_captured_by"].getStr in ["nobody", "us", "the enemy"]
+    check state["me"]["hp_of_3"].kind == JInt
+    check state["match"]["score_to_win"].getInt == 900
+    check state["board"]["hearts_ours"].kind == JInt
+    # The options live in the question. Restating them in the state is redundancy that the
+    # earlier build paid for in string operations, and guidance does not belong in state.
+    check not state.hasKey("options")
+    check not state.hasKey("notes")
+
+    # One criterion per candidate, each naming its row, plus "current" as an object.
+    let criteria = questions["objective"]["criteria"]
+    for i in 0 ..< state["candidates"].len:
+      check criteria["C" & $i].getStr.contains("`candidates[" & $i & "]`")
+    check criteria.len == state["candidates"].len + 1
+    check criteria["current"].kind == JObject
+    check criteria["current"]["examples"].kind == JArray
+
+    # The narrow yes/no questions ride along in the same request, over the same state.
+    for key in ["outnumbered", "heart_falling", "squad_together", "lose_life"]:
+      check questions[key]["type"].getStr == "noul"
+      check questions[key]["criteria"]["true"].kind == JString
+      check questions[key]["criteria"]["false"].kind == JString
+    # The survival question asks about losing a life, so a high probability means danger.
+    check not questions.hasKey("survive")
+    check questions["lose_life"]["instructions"].getStr.contains("loses one of its lives")
