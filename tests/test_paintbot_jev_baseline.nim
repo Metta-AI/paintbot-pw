@@ -58,6 +58,9 @@ suite "Jev-advised BASIC baseline":
     # An answered ask makes the asker shout "<Squad>, push <Heart>." (or hold / carry on) every
     # two seconds; the heart's name starts with A + its index. Squadmates within earshot adopt
     # it and log "relay ... obj=<heart> kind=<kind>". Nothing shouts the old "jev 0 5 0" form.
+    # With useEcho = 0 the adopters stay quiet: a squad's directive has one voice, so the wire
+    # carries one callout per answer instead of four, and an adoption cannot refresh another
+    # adopter's hold or keep a dead asker's seat from being taken over.
     const Names = ["Anvil", "Bridge", "Chapel", "Dock", "Elm", "Forge", "Gate", "Hollow", "Inn",
         "Jetty", "Kiln", "Lookout", "Mill", "Nook", "Orchard", "Pier"]
     resetOracle()
@@ -66,6 +69,7 @@ suite "Jev-advised BASIC baseline":
     var players = loadBots(@[BotGroup(path: Jev, count: Seats)])
     var lines: array[Seats, string]
     var relays: seq[tuple[tick, slot, heart, kind: int]]
+    var answered: set[int16]
     proc printer(s: int): PrintProc =
       # A proc per slot: a closure made in a loop body would share one captured `slot`.
       result = proc(e: PrintEvent) =
@@ -73,6 +77,8 @@ suite "Jev-advised BASIC baseline":
         of TextPrint: lines[s].add e.text
         of ValuePrint: lines[s].add $e.value
         of NewlinePrint:
+          if lines[s].startsWith("ans "):
+            answered.incl s.int16
           if lines[s].startsWith("relay "):
             var f = initTable[string, int]()
             for part in lines[s].split(' '):
@@ -122,3 +128,14 @@ suite "Jev-advised BASIC baseline":
               (words[1] == "hold") == (r.kind == 1):
             announced = true
       check announced
+    # One voice: every callout comes from a cog whose own ask was answered, and at least one cog
+    # adopted a callout without ever repeating it.
+    var speakers: set[int16]
+    for c in callouts:
+      check c.slot.int16 in answered
+      speakers.incl c.slot.int16
+    var quietAdopter = false
+    for r in relays:
+      if r.slot.int16 notin speakers:
+        quietAdopter = true
+    check quietAdopter
