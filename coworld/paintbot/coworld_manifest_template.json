@@ -167,6 +167,13 @@
       "description": "BASIC translation of the Paintbot objective and combat strategy."
     },
     {
+      "id": "basic-jev",
+      "name": "BASIC Jev Baseline",
+      "type": "player",
+      "file": "players/jev.bas",
+      "description": "The BASIC baseline steered by the host advisor oracle (Jev): squad objectives and retreats chosen from code-ranked options; plays exactly like the baseline where no oracle is configured."
+    },
+    {
       "id": "wasm-baseline",
       "name": "WASM Baseline",
       "type": "player",
