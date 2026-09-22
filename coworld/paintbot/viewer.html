@@ -1158,6 +1158,25 @@
   .team-scoreline strong { max-width:none; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; letter-spacing:.12em; }
   .team-scoreline small { font-size:7px; letter-spacing:.08em; opacity:.7; }
   .agent-lives { display:flex; gap:3px; }
+  #heart-strip { display:flex; align-items:center; gap:4px; flex:0 0 auto; align-self:center; }
+  #heart-strip[hidden] { display:none; }
+  #heart-strip .heart { position:relative; width:22px; height:22px; flex:0 0 auto; color:#ffe8a3; }
+  #heart-strip .heart svg { display:block; width:100%; height:100%; overflow:visible; }
+  #heart-strip .heart .outline { fill:#ffffff14; stroke:currentColor; stroke-width:1.5; stroke-linejoin:round; opacity:.55; }
+  #heart-strip .heart .fill { fill:currentColor; opacity:var(--fill,0); }
+  #heart-strip .heart.red { color:#ed6955; }
+  #heart-strip .heart.blue { color:#59bdeb; }
+  #heart-strip .heart.owned .outline { opacity:1; }
+  #heart-strip .heart .capture { fill:none; stroke:var(--capture,transparent); stroke-width:2; stroke-linejoin:round; stroke-dasharray:var(--dash,0) 200; }
+  #heart-strip .heart.big { width:28px; height:28px; }
+  #heart-strip .heart.big::after { content:"5"; position:absolute; right:-3px; top:-5px; font:700 9px sans-serif; color:#ffd755; }
+  #heart-strip .heart.big .ring { fill:none; stroke:#ffd755; stroke-width:1.5; }
+  #heart-strip .heart .ring { display:none; }
+  #heart-strip .heart.big .ring { display:block; }
+  #heart-strip .heart.contested { animation:heart-contest .6s ease-in-out infinite alternate; }
+  @keyframes heart-contest { from { transform:scale(1); } to { transform:scale(1.18); } }
+  @media(max-width:700px) { #heart-strip { gap:2px; } #heart-strip .heart { width:16px; height:16px; } #heart-strip .heart.big { width:20px; height:20px; } }
+  @media(max-width:520px) { #heart-strip { display:none; } }
   header .agent-life { width:17px; min-width:17px; height:17px; padding:0; display:block; border:0; border-radius:0; background:conic-gradient(currentColor calc(var(--fill,1)*1turn),transparent 0); box-shadow:inset 0 0 0 1px currentColor; opacity:.9; cursor:pointer; }
   header .agent-life:hover { opacity:1; transform:translateY(-1px); }
   header .agent-life[aria-pressed="true"] { outline:2px solid #fff3ce; outline-offset:2px; }
@@ -1196,6 +1215,7 @@
       <progress class="heart-meter" id="meter0" max="900" value="0" aria-label="Team heart meter" hidden></progress>
       <div id="lives0" class="agent-lives" aria-label="Ember agent lives"></div>
     </section>
+    <div id="heart-strip" role="img" aria-label="Territory hearts" hidden></div>
     <section class="team-summary blue" aria-label="Azure team">
       <div class="team-scoreline"><strong id="policy1">Policies</strong><span title="Hearts owned">♥ <b id="score1">1</b><small> HEARTS</small></span></div>
       <progress class="heart-meter" id="meter1" max="900" value="0" aria-label="Team heart meter" hidden></progress>

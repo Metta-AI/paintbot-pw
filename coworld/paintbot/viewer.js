@@ -863,6 +863,57 @@
       wave(x - z + 1100, 3700, 22)
     );
   }
+  // Top-bar heart strip: one glyph per territory heart, ordered from Ember's
+  // side to Azure's, filled by the owning team; a capture in progress traces
+  // the outline in the capturing team's color.
+  const heartStripOrder = [];
+  function updateHeartStrip(w, control) {
+    const strip = $("heart-strip");
+    if (!strip) return;
+    strip.hidden = !control;
+    if (!control) return;
+    const hearts = w.controlHearts;
+    if (strip.childElementCount !== hearts.length) {
+      strip.innerHTML = "";
+      heartStripOrder.length = 0;
+      hearts.forEach((h, i) => heartStripOrder.push(i));
+      // Hearts 1 and 2 sit nearest Ember's and Azure's camps and mirror each
+      // other through the map center, so their axis runs camp to camp.
+      const near0 = hearts[0].pos, near1 = hearts[1]?.pos ?? {x: near0.x + 1, z: near0.z};
+      const axis = {x: near1.x - near0.x, z: near1.z - near0.z};
+      heartStripOrder.sort((a, b) =>
+        (hearts[a].pos.x * axis.x + hearts[a].pos.z * axis.z) - (hearts[b].pos.x * axis.x + hearts[b].pos.z * axis.z) || a - b);
+      for (const i of heartStripOrder) {
+        const el = document.createElement("span");
+        el.className = "heart";
+        el.dataset.heart = i;
+        el.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">` +
+          `<circle class="ring" cx="12" cy="12" r="13"/>` +
+          `<path class="outline" d="M12 21s-7.5-4.6-9.6-9.3C.8 8.1 3 4 7 4c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 4 0 6.2 4.1 4.6 7.7C19.5 16.4 12 21 12 21z"/>` +
+          `<path class="fill" d="M12 21s-7.5-4.6-9.6-9.3C.8 8.1 3 4 7 4c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 4 0 6.2 4.1 4.6 7.7C19.5 16.4 12 21 12 21z"/>` +
+          `<path class="capture" pathLength="100" d="M12 21s-7.5-4.6-9.6-9.3C.8 8.1 3 4 7 4c2 0 3.6 1.1 5 3 1.4-1.9 3-3 5-3 4 0 6.2 4.1 4.6 7.7C19.5 16.4 12 21 12 21z"/></svg>`;
+        strip.appendChild(el);
+      }
+    }
+    const teamName = ["Ember", "Azure"], teamClass = ["red", "blue"];
+    for (const el of strip.children) {
+      const i = +el.dataset.heart, h = hearts[i];
+      const capture = w.heartCaptures?.[i];
+      const big = state.rulesVersion >= 25 && w.bigHeart === i;
+      const capturing = capture && capture.ticks > 0 && capture.team >= 0 && capture.team !== h.owner;
+      const contested = !!capture?.contested;
+      const owner = h.owner;
+      el.className = `heart ${owner >= 0 ? teamClass[owner] + " owned" : ""}${big ? " big" : ""}${contested ? " contested" : ""}`;
+      el.style.setProperty("--fill", owner >= 0 ? 1 : 0);
+      el.style.setProperty("--capture", capturing ? (capture.team ? "#59bdeb" : "#ed6955") : "transparent");
+      el.style.setProperty("--dash", capturing ? Math.round(100 * capture.ticks / 72) : 0);
+      const status = owner >= 0 ? `${teamName[owner]}` : "Unclaimed";
+      const progress = capturing ? ` · ${teamName[capture.team]} capturing ${Math.round(100 * capture.ticks / 72)}%` : "";
+      el.title = `Heart ${i + 1}: ${status}${big ? " · Big heart: 5 points/s" : ""}${progress}${contested ? " · Contested" : ""}`;
+    }
+    strip.setAttribute("aria-label", `Territory hearts: Ember ${hearts.filter(h => h.owner === 0).length}, Azure ${hearts.filter(h => h.owner === 1).length}, unclaimed ${hearts.filter(h => h.owner < 0).length}`);
+  }
+
   function minimap() {
     const canvas = $("minimap"),
       ctx = canvas.getContext("2d"),
@@ -1353,6 +1404,7 @@
     }
     const control = (w.controlHearts || []).length > 0;
     $("territorytoggle").hidden = !control;
+    updateHeartStrip(w, control);
     $("modehint").textContent = control
       ? (data.rulesVersion >= 34 ? "Fill the heart meter or eliminate the enemy to win · 900 points · 10-minute limit" : data.rulesVersion >= 28 ? "Fill the heart meter to win · 900 points · 10-minute limit" : data.rulesVersion >= 25 ? (w.bigHeart >= 0 ? `Big heart ${w.bigHeart + 1}: 5 points/s · ${30 - Math.floor(t / 24) % 30}s left` : w.bigHeartRound > 0 ? "All big hearts used · Normal hearts: 1 point/s" : "First big heart at 0:30 · Normal hearts: 1 point/s") : data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
       : "Capture the heart · Three lives";
