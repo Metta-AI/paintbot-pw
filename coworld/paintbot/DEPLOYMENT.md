@@ -359,3 +359,22 @@ Merged to main as `491ae56`. Version 0.3.31 is certified and canonical as
 Coworld workflow (run 35682382373) after build.yml passed on the merge commit; hosted
 certification and all five hosted smoke episodes passed (`ereq_2ff98632`, `ereq_70212521`,
 `ereq_8f243930`, `ereq_a6e4c3ba`, `ereq_ba8b8574`).
+
+## Glory scoring — 0.3.32 (rules 36)
+
+The match score is now per-team glory: it starts at the match length in seconds (600),
+loses one per second, and grows on events — a heart capture +5, an enemy tag +2, thirty
+seconds without collecting a supply +10 (per team, repeating), friendly fire taken in the
+opening thirty seconds +30 per hit. At the end the loser's glory is zeroed and a draw pays
+nobody, so `scores()` and the ladder rank by a winner's glory; the heart meter still decides
+who wins. BASIC `glory(team)`, a WASM `glory team <t> value <g>` sprite, a viewer toast at the
+very top for each award, glory in the header and the rule in the scoreboard dialog (#49).
+Glory joins the rules 36 hash; older recordings are unchanged.
+
+Merged to main as `a2b1afd`. Version 0.3.32 is certified and canonical as
+`cow_092d93c2-c367-4c9c-8640-62e96d78960d` (manifest
+`sha256:445e5edce429a422130fad7a88669630e118ef73f46e252a6e8d38e2081effd1`), deployed by the
+Deploy Coworld workflow (run 35698209569) after build.yml passed on the merge commit; hosted
+certification and all five hosted smoke episodes passed (`ereq_071b7be8`, `ereq_20bd9df9`,
+`ereq_72fc45d5`, `ereq_a8dcc08e`, `ereq_ea9a54bf`). The paintbot-pw league follows the canonical
+version (not locked), so round 1293, created four seconds after promotion, is the first glory round.
