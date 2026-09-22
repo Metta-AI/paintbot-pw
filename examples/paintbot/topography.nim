@@ -1,17 +1,31 @@
 ## Centimetre terrain heights, shared by simulation and the Polyworld layers.
 import std/math
 const TerraceHeight* = 250
-var wideRamps* = false
-var wilderness* = false
-var deepWilderness* = false
-var organicTerrain* = false
-var islandTerrain* = false
-var expandedIsland* = false
-var riverTerrain* = false
-var curvedRiver* = false
-var fractalRiver* = false
-var lakeTerrain* = false
-var symmetricTerrain* = false ## rules 35: every wave is mirrored under the half turn
+when defined(pwTraining):
+  var wideRamps* {.threadvar.}: bool
+  var wilderness* {.threadvar.}: bool
+  var deepWilderness* {.threadvar.}: bool
+  var organicTerrain* {.threadvar.}: bool
+  var islandTerrain* {.threadvar.}: bool
+  var expandedIsland* {.threadvar.}: bool
+  var riverTerrain* {.threadvar.}: bool
+  var curvedRiver* {.threadvar.}: bool
+  var fractalRiver* {.threadvar.}: bool
+  var lakeTerrain* {.threadvar.}: bool
+  var symmetricTerrain* {.threadvar.}: bool
+else:
+  var wideRamps* = false
+  var wilderness* = false
+  var deepWilderness* = false
+  var organicTerrain* = false
+  var islandTerrain* = false
+  var expandedIsland* = false
+  var riverTerrain* = false
+  var curvedRiver* = false
+  var fractalRiver* = false
+  var lakeTerrain* = false
+  var symmetricTerrain* = false ## rules 35: every wave is mirrored under the half turn
+
 const
   RiverBedHeight* = -200
   RiverWaterHeight* = -162 # GOTA-style shallow water: 38 cm above the bed.

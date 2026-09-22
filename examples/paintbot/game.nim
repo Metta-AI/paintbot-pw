@@ -126,6 +126,8 @@ proc setup*() =
     if recording.frames.len > 28800: raise newException(ValueError, "Replay tick limit exceeded")
     world = newWorld(recording.seed, recording.endTick)
   else:
+    # The recording header and live simulation must use the same rules.
+    configureRules(replayRulesVersion)
     world = newWorld(options.seed, options.maximumTicks); recording.seed = options.seed
     recording.endTick = world.endTick
     players = loadBots(options.botGroups, options.playerSlot)
@@ -184,6 +186,7 @@ proc runHeadless*() =
     echo "peak_instructions=", peakInstructions
     echo "peak_work=", peakWork
     echo "peak_strings=", peakStrings
+    echo "peak_neural_operations=", peakNativeWork
   when defined(coworld):
     finishCoworld(NumericCoworldResults[float](scores: world.scores(), ticks: world.tick,
         seed: world.seed, outcome: if world.winner <

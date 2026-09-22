@@ -1,6 +1,6 @@
 """One pod: the Polyworld native engine running sixteen BASIC seats, bridged to the advisor oracle.
 
-Every seat is a UTF-8 BASIC source file. The host fetches and verifies each seat's file, stages
+Every seat is a UTF-8 BASIC source file or a validated neural BASIC bundle. The host fetches and verifies each seat's file, stages
 it for the engine, launches the engine as a child, and then answers one JSON line per tick over
 the `PW_POLICY_FD` socket: the engine sends `{"rulesVersion", "tick", "oracle": [asks...]}` and
 the host always replies `{"oracle": [replies...]}` (an empty list when no oracle is configured).
@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 from oracle import MAX_ANSWER, Oracle, flatten
 from seats import load_seats, verified_policy, write_json
+from neural_package import stage_package
 
 MAX_SOURCE = 65536  # BASIC source limit per seat (64 KiB)
 WASM_MAGIC = b"\x00asm"
@@ -97,9 +98,14 @@ def run(engine):
                 slot = seat["slot"]
                 try:
                     data = verified_policy(seat)
-                    check_source(data)
                     source = tmp / f"player-{slot}.bas"
-                    source.write_bytes(data)
+                    if data.startswith(b"PK\x03\x04"):
+                        data = stage_package(data, source)
+                        check_source(data)
+                        seat.update(size_bytes=len(data), content_hash="sha256:" + hashlib.sha256(data).hexdigest())
+                    else:
+                        check_source(data)
+                        source.write_bytes(data)
                     seat["file_uri"] = source.as_uri()
                 except Exception as e:
                     # A seat that fails to load forfeits itself and falls back to the idle stub,
