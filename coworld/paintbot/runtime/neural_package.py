@@ -7,7 +7,12 @@ import zipfile
 MAX_MODEL_BYTES = 16 * 1024 * 1024
 MAX_SOURCE_BYTES = 64 * 1024
 MAX_MANIFEST_BYTES = 8192
+# Schema 1: bundles built against action contract v1. Schema 2: the same three files;
+# the manifest may name action contract v2 (lead-compensated identity aim), which only
+# hosts that know schema 2 can decode. Both stay accepted; the actor's own embedded
+# contract hashes are what the host binds and decodes by.
 SCHEMA = "paintbot-neural-basic/1"
+SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
 
 
 def unpack_package(data):
@@ -30,7 +35,7 @@ def unpack_package(data):
                 raise ValueError("oversized package entry")
             files[entry.filename] = payload
     manifest = json.loads(files["manifest.json"])
-    if not isinstance(manifest, dict) or manifest.get("schema") != SCHEMA:
+    if not isinstance(manifest, dict) or manifest.get("schema") not in SCHEMAS:
         raise ValueError("unsupported neural package schema")
     if not isinstance(manifest.get("sha256"), dict):
         raise ValueError("neural package sha256 must be an object")

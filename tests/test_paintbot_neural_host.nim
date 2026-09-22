@@ -4,13 +4,13 @@ import ../examples/paintbot/[bots, sim, neural_contract, neural_host]
 
 proc u32(s: var string, value: uint32) =
   for i in 0..3: s.add char((value shr (8*i)) and 255)
-proc zeroModel(): string =
+proc zeroModel(actionContract = ActionContractHash): string =
   const h = 64
   const n = ObservationSize*h + 3*h*h + LogitSize*h
   result = "PWNET001"
   for x in [1,ObservationSize,h,LogitSize,ActionSizes.len,n]: result.u32(x.uint32)
   result.add ObservationContractHash
-  result.add ActionContractHash
+  result.add actionContract
   for x in ActionSizes: result.u32(x.uint32)
   result.add repeat('\0', n*4)
 
@@ -19,10 +19,10 @@ paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
 paintbot_act(neuralLogits())
 """
-proc fixture(source: string, model = true): array[Seats,Bot] =
+proc fixture(source: string, model = true, actionContract = ActionContractHash): array[Seats,Bot] =
   let path = getTempDir()/"paintbot-neural-host-test.bas"
   writeFile(path,source)
-  if model: writeFile(path & ".model.bin", zeroModel())
+  if model: writeFile(path & ".model.bin", zeroModel(actionContract))
   defer:
     removeFile(path)
     if fileExists(path & ".model.bin"): removeFile(path & ".model.bin")
@@ -105,3 +105,19 @@ suite "native BASIC neural host":
     let before = w.stateHash()
     players.logNeuralTelemetry(2, proc(slot: int, text: string) = discard)
     check w.stateHash() == before
+
+  test "the bundle's action contract hash selects the decoder; unknown hashes are rejected":
+    let v1 = fixture(NeuralSource)
+    check v1[0].neural.contract == acV1
+    let v2 = fixture(NeuralSource, true, ActionContractV2Hash)
+    check v2[0].neural.contract == acV2
+    var w = newWorld(2026)
+    discard v2.decide(w)
+    check not v2[0].failed
+    check v2[0].neural.memory.tick == w.tick # v2 records its aim memory after acting
+    discard v1.decide(w)
+    check not v1[0].failed
+    check v1[0].neural.memory.tick == -1 # v1 never touches it
+    let unknown = fixture(NeuralSource, true, "0" & ActionContractV2Hash[1..^1])
+    discard unknown.decide(w)
+    check unknown[0].failed

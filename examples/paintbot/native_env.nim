@@ -31,6 +31,22 @@ type
     firePeriod: array[Seats,int32]
     lastHonouredShot: array[Seats,int32]
     damagePermille: array[Seats,int32]
+    # Action contract the caller's actions are decoded under (pw_set_action_contract;
+    # v1 unless asked, kept across resets) and, for contract v2, each seat's one-tick
+    # memory the lead-compensated identity aim reads (recorded after every decode,
+    # cleared by create/reset; never part of the world or its hash).
+    contract: ActionContractVersion
+    aimMemory: array[Seats,AimMemory]
+    # Mapping-ceiling diagnostics (pw-bc): a scripted seat with a non-zero override mask
+    # still runs its script every step (its orders are reported by pw_seat_orders) but
+    # executes the caller's decoded action for the masked heads: 1 walk/goal/direct,
+    # 2 aim, 4 shoot, 8 grenade, 16 sneak. pw_script_decide runs the scripts' decision
+    # for the current tick ahead of pw_step so the caller can read the orders, map them
+    # and hand the mapped action to the same step.
+    overrideMask: array[Seats,int32]
+    decided: array[Seats,Command]
+    decidedTick: int32
+    decidedValid: bool
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -42,6 +58,8 @@ proc ready() =
 
 proc invalidateBodies(env: ptr NativeEnv) =
   for slot in 0..<Seats: env.bodiesReady[slot] = false
+proc resetAimMemories(env: ptr NativeEnv) =
+  for slot in 0..<Seats: env.aimMemory[slot].resetAimMemory()
 proc resetStats(env: ptr NativeEnv) =
   for slot in 0..<Seats: env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
 proc resetCurriculum(env: ptr NativeEnv) =
@@ -84,16 +102,50 @@ proc installScript(env: ptr NativeEnv, slot: int) =
     env.scriptErrors[slot] = e.msg
 proc resetScripts(env: ptr NativeEnv) =
   env.scriptCount = 0
+  env.decidedValid = false
   for slot in 0..<Seats:
     env.scriptHeard[slot] = @[]
     env.installScript(slot)
     if env.scripts[slot].len > 0: inc env.scriptCount
+proc scriptDecide(env: ptr NativeEnv) =
+  ## The production tick's decision half: every BASIC seat decides on the pre-step world
+  ## (hearing what was shouted last tick), shouts are delivered for next tick. Runs once
+  ## per world tick, inline from pw_step or ahead of it from pw_script_decide.
+  heard = env.scriptHeard
+  let decided = decide(env.scriptBots, env.world)
+  deliverSpeech(env.world)
+  env.scriptHeard = heard
+  for slot in 0..<Seats:
+    if env.scripts[slot].len == 0: continue
+    let b = env.scriptBots[slot]
+    if b != nil and b.failed and env.scriptStatus[slot] == 1:
+      env.scriptStatus[slot] = 3
+      env.scriptErrors[slot] = b.error
+    env.scriptOrders[slot] = decided[slot]
+  env.decided = decided
+  env.decidedTick = env.world.tick
+  env.decidedValid = true
 proc bodiesFor(env: ptr NativeEnv, slot: int): array[Seats,int] =
   if not env.bodiesReady[slot]:
     env.bodies[slot] = env.world.observedBodies(slot)
     env.bodiesReady[slot] = true
   env.bodies[slot]
 
+proc decodeSeat(env: ptr NativeEnv, slot: int, actions: ActionBuffer): Command =
+  ## The caller's five head indices for one seat through the selected contract. Under
+  ## v1 the bodies are resolved only for an identity aim, as before; v2 always resolves
+  ## them because the seat's memory must be recorded on every decided tick.
+  let offset = slot*ActionSizes.len
+  if env.contract == acV1:
+    if actions[offset+1] in 1'i32..16'i32:
+      result = decodeActions(env.world,slot,actions.toOpenArray(offset,offset+ActionSizes.len-1),env.bodiesFor(slot))
+    else:
+      result = decodeActions(env.world,slot,actions.toOpenArray(offset,offset+ActionSizes.len-1))
+  else:
+    let bodies = env.bodiesFor(slot)
+    result = decodeActions(env.world,slot,actions.toOpenArray(offset,offset+ActionSizes.len-1),
+      bodies,env.contract,env.aimMemory[slot])
+    env.aimMemory[slot].recordAimMemory(env.world,slot,bodies)
 proc pw_env_version*(): cint {.exportc, cdecl, dynlib.} = 1
 proc pw_observation_size*(): cint {.exportc, cdecl, dynlib.} = ObservationSize
 proc pw_action_count*(): cint {.exportc, cdecl, dynlib.} = ActionSizes.len
@@ -108,6 +160,8 @@ proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
     env.invalidateBodies()
     env.resetStats()
     env.initCurriculum()
+    env.contract = acV1
+    env.resetAimMemories()
     result = env
   except CatchableError:
     `=destroy`(env[])
@@ -131,6 +185,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     env.resetStats()
     env.resetScripts()
     env.resetCurriculum()
+    env.resetAimMemories()
     return 0
   except CatchableError: return -1
 
@@ -165,27 +220,30 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
     var wasDead: array[Seats,bool]
     for slot in 0..<Seats:
       wasDead[slot] = env.world.cogs[slot].hp <= 0
-      if env.scripts[slot].len > 0: continue
-      let offset = slot*ActionSizes.len
-      commands[slot] = if actions[offset+1] in 1'i32..16'i32:
-          decodeActions(env.world,slot,actions.toOpenArray(offset,offset+ActionSizes.len-1),env.bodiesFor(slot))
-        else: decodeActions(env.world,slot,actions.toOpenArray(offset,offset+ActionSizes.len-1))
+      if env.scripts[slot].len > 0 and env.overrideMask[slot] == 0: continue
+      commands[slot] = env.decodeSeat(slot, actions)
     if env.scriptCount > 0:
       # The production tick: every BASIC seat decides on the pre-step world (hearing
       # what was shouted last tick), shouts are delivered for next tick, then the world
-      # steps. Unscripted seats hold no bot and shout nothing.
-      heard = env.scriptHeard
-      let decided = decide(env.scriptBots, env.world)
-      deliverSpeech(env.world)
-      env.scriptHeard = heard
+      # steps. Unscripted seats hold no bot and shout nothing. A decision already taken
+      # for this tick by pw_script_decide is used as it is.
+      if not (env.decidedValid and env.decidedTick == env.world.tick): env.scriptDecide()
+      env.decidedValid = false
       for slot in 0..<Seats:
         if env.scripts[slot].len == 0: continue
-        let b = env.scriptBots[slot]
-        if b != nil and b.failed and env.scriptStatus[slot] == 1:
-          env.scriptStatus[slot] = 3
-          env.scriptErrors[slot] = b.error
-        commands[slot] = decided[slot]
-        env.scriptOrders[slot] = decided[slot]
+        let mask = env.overrideMask[slot]
+        if mask == 0:
+          commands[slot] = env.decided[slot]
+        else:
+          var cmd = env.decided[slot]
+          let caller = commands[slot]
+          if (mask and 1) != 0:
+            cmd.walk = caller.walk; cmd.goal = caller.goal; cmd.direct = caller.direct
+          if (mask and 2) != 0: cmd.aim = caller.aim
+          if (mask and 4) != 0: cmd.shoot = caller.shoot
+          if (mask and 8) != 0: cmd.chargeGrenade = caller.chargeGrenade
+          if (mask and 16) != 0: cmd.sneak = caller.sneak
+          commands[slot] = cmd
     for slot in 0..<Seats: env.gateFire(slot, commands[slot])
     combatTelemetry = addr env.stats
     damageScale = addr env.damagePermille
@@ -305,6 +363,97 @@ proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int
   output[3] = c.shoot.int32; output[4] = c.aim.x; output[5] = c.aim.z
   output[6] = c.chargeGrenade.int32; output[7] = c.sneak.int32; output[8] = c.direct.int32
   output[9] = int32(env.scripts[seat].len > 0)
+  0
+
+proc pw_set_action_contract*(handle: pointer, version: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Select the action contract the caller's actions (and the Nim bot's, and any
+  ## override-mapped scripted seat's) are decoded under: 1 = v1 (identity aim is the
+  ## body's position; the default and byte-identical to a library without this call),
+  ## 2 = v2 (identity aim is the body's lead-compensated aim point, see
+  ## neural_contract.nim). Kept across pw_reset; every seat's aim memory is cleared here
+  ## and on every reset. Returns 0, -1 for a bad handle or version.
+  if handle == nil or version notin 1..2: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.contract = ActionContractVersion(version)
+  env.resetAimMemories()
+  0
+
+proc pw_action_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
+  ## The selected action contract version, 1 or 2; -1 for a bad handle.
+  if handle == nil: return -1
+  ready()
+  cint(cast[ptr NativeEnv](handle).contract)
+
+proc pw_action_contract_hash*(version: int32, output: ptr UncheckedArray[char],
+    capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The 64-hex SHA-256 contract hash an actor and its manifest must carry to be decoded
+  ## under `version` (1 or 2), NUL-terminated into output (capacity >= 65). Returns 0,
+  ## -1 for a bad version or buffer.
+  if version notin 1..2 or output == nil or capacity < 65: return -1
+  let hash = actionContractHash(ActionContractVersion(version))
+  copyMem(output, unsafeAddr hash[0], hash.len)
+  output[hash.len] = '\0'
+  0
+
+proc pw_action_candidates*(handle: pointer, seat: cint, movement, sneak: int32,
+    goals, aims: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Diagnostic for demonstration mapping: the point every head index of the movement
+  ## head (51 x {x, z}) and the aim head (25 x {x, z}) resolves to for this seat on the
+  ## current pre-step world under the selected contract, from the seat's own fog and,
+  ## under v2, its aim memory and the planned move of the given movement and sneak
+  ## heads (a v2 identity aim depends on them), exactly as the coming pw_step would
+  ## decode them. Index 0 is the seat's position / current aim (the "keep" candidates).
+  ## A candidate that does not exist now (missing heart, unavailable or unseen pickup,
+  ## identity nobody visible carries) and every entry of a dead seat is INT32_MIN in both
+  ## coordinates. Reading changes no state. Returns 0, -1 on bad arguments.
+  if handle == nil or seat notin 0..<Seats or goals == nil or aims == nil or
+      movement notin 0..<ActionSizes[0].int32 or sneak notin 0..1: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  let slot = seat.int
+  for i in 0..<ActionSizes[0]*2: goals[i] = low(int32)
+  for i in 0..<ActionSizes[1]*2: aims[i] = low(int32)
+  if env.world.cogs[slot].hp <= 0: return 0
+  let bodies = env.bodiesFor(slot)
+  var chosenGoal = env.world.cogs[slot].pos
+  for index in 0..<ActionSizes[0]:
+    let (found, p) = if index == 0: (true, env.world.cogs[slot].pos)
+                     else: env.world.goalCandidate(slot, index)
+    if found:
+      goals[index*2] = p.x; goals[index*2+1] = p.z
+      if index == movement.int: chosenGoal = p
+  let ownStep = if env.contract == acV2: env.world.plannedStep(slot, chosenGoal, sneak != 0)
+                else: Point()
+  for aim in 0..<ActionSizes[1]:
+    let (found, p) = if aim == 0: (true, env.world.cogs[slot].aim)
+                     else: env.world.aimCandidate(slot, aim, bodies, env.contract, env.aimMemory[slot], ownStep)
+    if found:
+      aims[aim*2] = p.x; aims[aim*2+1] = p.z
+  0
+
+proc pw_script_decide*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
+  ## Diagnostic: run the scripted seats' decision for the current tick now (once;
+  ## repeated calls before the next pw_step are no-ops) so pw_seat_orders reports the
+  ## orders the coming pw_step will execute. With every override mask 0 the world is
+  ## byte-identical whether or not this is called. Returns 1 when a decision was taken,
+  ## 0 when nothing was needed, -1 on a bad handle.
+  if handle == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  if env.scriptCount == 0 or env.world.winner != -1 or env.world.tick >= env.world.endTick: return 0
+  if env.decidedValid and env.decidedTick == env.world.tick: return 0
+  env.scriptDecide()
+  1
+
+proc pw_set_seat_override*(handle: pointer, seat: cint, mask: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Diagnostic: heads of a scripted seat taken from the caller's decoded action instead
+  ## of the script's order (bits: 1 walk/goal/direct, 2 aim, 4 shoot, 8 grenade, 16
+  ## sneak; 0 = exact script play). Kept across pw_reset like the curriculum knobs.
+  if handle == nil or seat notin 0..<Seats or mask < 0 or mask > 31: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.overrideMask[seat] = mask
   0
 
 proc pw_set_seat_fire_period*(handle: pointer, seat: cint, period: int32): cint {.exportc, cdecl, dynlib.} =

@@ -300,7 +300,7 @@ proc sprayTouches*(w: World, slot, victim: int): bool =
   along > 0 and along <= SprayReach+Radius and across <= halfWidth+Radius and
     w.lineClear(c.pos, w.cogs[victim].pos)
 
-proc waypointFor(w: World, slot: int, start, goal: Point): Point =
+proc waypointFor*(w: World, slot: int, start, goal: Point): Point =
   ## The path search breaks ties by scan order (north-west first, first edge first), so on
   ## its own blue's routes are not mirror images of red's. Rules 35 route blue on the
   ## mirrored map and mirror the answer back; the nav grid is its own mirror.
