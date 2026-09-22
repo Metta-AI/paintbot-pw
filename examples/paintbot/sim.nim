@@ -207,34 +207,46 @@ proc traversable*(w: World, a, b: Point): bool =
     if abs(h-last) > 25: return false
     last = h
   true
-proc blocked*(w: World, p: Point, radius = Radius): bool =
+proc coverBlocks(c: Cover, p: Point, radius: int): bool {.inline.} =
+  if c.h == 0:
+    let r = c.w div 2
+    return distance2(p, point(c.x.int+r.int, c.z.int+r.int)) < (r+radius).int64*(r+radius)
+  p.x > c.x-radius and p.x < c.x+c.w+radius and p.z > c.z-radius and p.z < c.z+c.h+radius
+proc boundsBlocked(p: Point, radius: int): bool {.inline.} =
   if p.x < minX()+radius or p.z < minZ()+radius or p.x > maxX()-radius or p.z >
       maxZ()-radius: return true
-  if islandTerrain and islandMargin(p.x.int,p.z.int)<radius div 3+40: return true
+  islandTerrain and islandMargin(p.x.int,p.z.int)<radius div 3+40
+proc blocked*(w: World, p: Point, radius = Radius): bool =
+  if boundsBlocked(p, radius): return true
   for c in w.cover:
-    if c.h == 0:
-      let r = c.w div 2
-      if distance2(p, point(c.x.int+r.int, c.z.int+r.int)) < (r+radius).int64*(
-          r+radius): return true
-      continue
-    if p.x > c.x-radius and p.x < c.x+c.w+radius and p.z > c.z-radius and p.z <
-        c.z+c.h+radius: return true
+    if c.coverBlocks(p, radius): return true
+const RayCoverLimit = 512
 proc lineClear*(w: World, a, b: Point): bool =
-  # Only obstacles overlapping the ray bounds can block its sampled points.
-  # Keep the exact sample positions and collision predicates for replay parity.
-  var rayWorld = w
-  rayWorld.cover = @[]
-  for c in w.cover:
+  # Only obstacles overlapping the ray bounds can block its sampled points, so the
+  # sampled predicate is evaluated against that subset; if there are too many to index
+  # on the stack the full set gives the same answer. Keep the exact sample positions
+  # and collision predicates for replay parity. No world copy, no allocation.
+  var rayCover: array[RayCoverLimit, int32]
+  var rayCount = 0
+  for index, c in w.cover:
     let depth = if c.h == 0: c.w else: c.h
     if c.x <= max(a.x,b.x) and c.x+c.w >= min(a.x,b.x) and
         c.z <= max(a.z,b.z) and c.z+depth >= min(a.z,b.z):
-      rayWorld.cover.add c
+      if rayCount < RayCoverLimit: rayCover[rayCount] = index.int32
+      inc rayCount
+  let filtered = rayCount <= RayCoverLimit
   let startHeight = if visionRulesVersion >= 9: w.elevation(a) else: 0
   let endHeight = if visionRulesVersion >= 9: w.elevation(b) else: 0
   let steps = max(abs(b.x-a.x), abs(b.z-a.z)) div 25 + 1
   for i in 1..steps:
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
-    if rayWorld.blocked(p, 0): return false
+    if boundsBlocked(p, 0): return false
+    if filtered:
+      for k in 0..<rayCount:
+        if w.cover[rayCover[k]].coverBlocks(p, 0): return false
+    else:
+      for c in w.cover:
+        if c.coverBlocks(p, 0): return false
     if visionRulesVersion >= 9:
       let eye = startHeight+120+(endHeight-startHeight)*i.int div steps.int
       if w.elevation(p) > eye: return false
