@@ -232,3 +232,131 @@ suite "Neural policy contract v2 (lead-compensated identity aim)":
     let compass = [45'i32, 19, 1, 1, 1]
     check w.decodeActions(0, compass, bodies, acV1, memory) ==
       w.decodeActions(0, compass, bodies, acV2, memory)
+
+suite "Decoder fire hold (bundle option, not a contract change)":
+  setup:
+    visionRulesVersion = 37
+  proc lane(w: var World, shooter, mate, target: int): (Point, Point, Point) =
+    ## Shooter, teammate and target on one open east-west line: the teammate 600 units
+    ## ahead of the shooter, the target 1200. Everyone else stands far away.
+    var s, m, t: Point
+    var found = false
+    # Everyone else stands in a row along the far edge, off every lane searched below.
+    for slot in 0..<Seats:
+      if slot notin [shooter, mate, target]:
+        w.cogs[slot].pos = point(200 + slot*80, maxZ() - 60)
+    for gz in countup(600, 3200, 200):
+      for gx in countup(0, 5000, 200):
+        s = point(gx, gz); m = point(gx + 600, gz); t = point(gx + 1200, gz)
+        if not w.openGround(s, t) or w.blocked(m) or w.trenchAt(m) >= 0: continue
+        w.cogs[shooter].pos = s; w.cogs[shooter].goal = s; w.cogs[shooter].aim = t
+        w.cogs[mate].pos = m; w.cogs[mate].goal = m; w.cogs[mate].aim = t
+        w.cogs[target].pos = t; w.cogs[target].goal = t
+        if w.visible(shooter, target) and w.visible(shooter, mate): found = true
+        if found: break
+      if found: break
+    require found
+    for slot in 0..<Seats:
+      w.cogs[slot].goal = w.cogs[slot].pos
+      w.cogs[slot].shield = 0
+      w.equipment[slot].armor = 0
+    (s, m, t)
+  test "a teammate in the line of fire holds the order; off the line or beyond the target it fires":
+    var w = newWorld(2026, 2400)
+    let shooter = 0
+    let mate = 2 # Same team as seat 0 (slot mod 2).
+    let target = 1
+    let (s, m, t) = w.lane(shooter, mate, target)
+    require team(mate) == team(shooter) and team(target) != team(shooter)
+    require w.cogs[shooter].cooldown == 0 and w.equipment[shooter].windup == 0
+    require not w.equipment[shooter].sprayCan
+    let bodies = w.observedBodies(shooter)
+    let identity = identityOf(bodies, target)
+    require identity >= 0
+    let actions = [0'i32, int32(identity+1), 1, 0, 0]
+    var memory: AimMemory
+    memory.resetAimMemory()
+    # Off (the default): the order fires, byte-identical to before the option existed.
+    let plain = w.decodeActions(shooter, actions, bodies, acV1, memory)
+    check plain.shoot and plain.aim == t
+    check w.decodeActions(shooter, actions, bodies, acV1, memory, false) == plain
+    # On: the teammate 600 units ahead sits on the ray, so the shoot order is held and
+    # nothing else changes.
+    let held = w.decodeActions(shooter, actions, bodies, acV1, memory, true)
+    check not held.shoot
+    var expected = plain
+    expected.shoot = false
+    check held == expected
+    check w.teammateInLine(shooter, t)
+    # The same under contract v2 and through the logits path.
+    check not w.decodeActions(shooter, actions, bodies, acV2, memory, true).shoot
+    var logits = newSeq[float32](LogitSize)
+    logits[51 + identity + 1] = 1; logits[51 + 25 + 1] = 1 # aim = target, fire = 1
+    check not w.decodeLogits(shooter, logits, bodies, acV1, memory, true).shoot
+    check w.decodeLogits(shooter, logits, bodies, acV1, memory).shoot
+    # Off the line: perpendicular offsets just past the tolerance fire, within it hold.
+    w.cogs[mate].pos = point(m.x.int, m.z.int + FireHoldRadius + 1)
+    check w.decodeActions(shooter, actions, bodies, acV1, memory, true).shoot
+    w.cogs[mate].pos = point(m.x.int, m.z.int + FireHoldRadius)
+    check not w.decodeActions(shooter, actions, bodies, acV1, memory, true).shoot
+    w.cogs[mate].pos = point(m.x.int, m.z.int - 200)
+    check w.decodeActions(shooter, actions, bodies, acV1, memory, true).shoot
+    # Beyond the target, or behind the shooter, the teammate is not in the way.
+    w.cogs[mate].pos = point(t.x.int + 300, t.z.int)
+    check w.decodeActions(shooter, actions, bodies, acV1, memory, true).shoot
+    w.cogs[mate].pos = point(s.x.int - 300, s.z.int)
+    check w.decodeActions(shooter, actions, bodies, acV1, memory, true).shoot
+    # A dead teammate on the line is not a body the gun can hit.
+    w.cogs[mate].pos = m
+    w.cogs[mate].hp = 0
+    check w.decodeActions(shooter, actions, bodies, acV1, memory, true).shoot
+    w.cogs[mate].hp = 3
+    # An enemy on the line is the point of shooting.
+    check w.decodeActions(shooter, [0'i32, int32(identityOf(bodies, target)+1), 1, 0, 0],
+      bodies, acV1, memory, true).shoot == false # the mate is back on the line
+    w.cogs[mate].pos = point(m.x.int, m.z.int + 400)
+    w.cogs[3].pos = m; w.cogs[3].goal = m; w.cogs[3].hp = 3; w.cogs[3].shield = 0
+    let bodies2 = w.observedBodies(shooter)
+    check w.decodeActions(shooter, [0'i32, int32(identityOf(bodies2, target)+1), 1, 0, 0],
+      bodies2, acV1, memory, true).shoot
+    # A directional aim past the teammate is held too; one the other way is not.
+    w.cogs[3].pos = point(s.x.int - 3000, s.z.int - 3000)
+    w.cogs[mate].pos = m
+    let bodies3 = w.observedBodies(shooter)
+    check not w.decodeActions(shooter, [0'i32, 17, 1, 0, 0], bodies3, acV1, memory, true).shoot # east
+    check w.decodeActions(shooter, [0'i32, 21, 1, 0, 0], bodies3, acV1, memory, true).shoot # west
+    # A walk order with no aim order aims at its goal, as the world applies it.
+    var walkOnly = Command(walk: true, goal: t, shoot: true)
+    check w.orderedAim(shooter, walkOnly) == t
+    check w.holdFire(shooter, walkOnly) and not walkOnly.shoot
+    var aimed = Command(walk: true, goal: t, aim: point(s.x.int, s.z.int - 2000), shoot: true)
+    check not w.holdFire(shooter, aimed) and aimed.shoot
+    # Not shooting: nothing to hold.
+    var quiet = Command(walk: true, goal: t)
+    check not w.holdFire(shooter, quiet)
+  test "the held order is the one the gun would have landed on the teammate":
+    var w = newWorld(2026, 2400)
+    let shooter = 0
+    let mate = 2
+    let target = 1
+    let (s, m, t) = w.lane(shooter, mate, target)
+    discard s; discard m
+    require w.cogs[mate].hp == 3 and w.cogs[target].hp == 3
+    let bodies = w.observedBodies(shooter)
+    let identity = identityOf(bodies, target)
+    require identity >= 0
+    let actions = [0'i32, int32(identity+1), 1, 0, 0]
+    var memory: AimMemory
+    memory.resetAimMemory()
+    let fired = w.decodeActions(shooter, actions, bodies, acV1, memory, false)
+    let held = w.decodeActions(shooter, actions, bodies, acV1, memory, true)
+    require fired.shoot and not held.shoot and fired.aim == t
+    for (name, command, mateHp) in [("fired", fired, 2'i32), ("held", held, 3'i32)]:
+      var trial = w
+      for tick in 0..GunWindupTicks:
+        var commands: array[Seats, Command]
+        commands[shooter] = if tick == 0: command else: Command(aim: command.aim)
+        trial.step(commands)
+      checkpoint name
+      check trial.cogs[mate].hp == mateHp
+      check trial.cogs[target].hp == 3

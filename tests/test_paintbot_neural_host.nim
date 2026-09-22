@@ -19,14 +19,23 @@ paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
 paintbot_act(neuralLogits())
 """
-proc fixture(source: string, model = true, actionContract = ActionContractHash): array[Seats,Bot] =
+proc fixture(source: string, model = true, actionContract = ActionContractHash,
+    manifest = ""): array[Seats,Bot] =
   let path = getTempDir()/"paintbot-neural-host-test.bas"
   writeFile(path,source)
   if model: writeFile(path & ".model.bin", zeroModel(actionContract))
+  if manifest.len > 0: writeFile(path & ".neural.json", manifest)
   defer:
     removeFile(path)
     if fileExists(path & ".model.bin"): removeFile(path & ".model.bin")
+    if fileExists(path & ".neural.json"): removeFile(path & ".neural.json")
   loadBots(@[BotGroup(path:path,count:Seats)])
+proc manifestJson(schema: string, actionContract: string, decoder = ""): string =
+  ## A staged manifest as neural_package.py writes it; `decoder` is the raw JSON value.
+  result = "{\"schema\": \"" & schema & "\", \"observation_contract\": \"" & ObservationContractHash &
+    "\", \"action_contract\": \"" & actionContract & "\", \"sha256\": {}"
+  if decoder.len > 0: result.add ", \"decoder\": " & decoder
+  result.add "}"
 proc mixedFixture(): array[Seats,Bot] =
   ## Slot 0 runs the neural package; every other seat is plain BASIC.
   let neuralPath = getTempDir()/"paintbot-neural-host-test-neural.bas"
@@ -121,3 +130,41 @@ suite "native BASIC neural host":
     let unknown = fixture(NeuralSource, true, "0" & ActionContractV2Hash[1..^1])
     discard unknown.decide(w)
     check unknown[0].failed
+
+  test "the fire-hold decoder option is read from a schema-2 manifest; older bundles are unaffected":
+    const Schema1 = "paintbot-neural-basic/1"
+    const Schema2 = "paintbot-neural-basic/2"
+    # A v2 bundle with the option: loads, holds, and reports the hold count in its log line.
+    let held = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"fire_hold_teammates\": true}"))
+    check not held[0].failed
+    check held[0].neural.contract == acV2
+    check held[0].neural.fireHoldTeammates
+    check held[0].neural.telemetry(10, 3) == "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 fire_holds=0"
+    var w = newWorld(2026)
+    discard held.decide(w)
+    check not held[0].failed
+    # Explicitly off, and a v1 bundle repackaged under schema 2 with the option on.
+    let off = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"fire_hold_teammates\": false}"))
+    check not off[0].failed and not off[0].neural.fireHoldTeammates
+    let v1Held = fixture(NeuralSource, true, ActionContractHash,
+      manifestJson(Schema2, ActionContractHash, "{\"fire_hold_teammates\": true}"))
+    check not v1Held[0].failed and v1Held[0].neural.contract == acV1 and v1Held[0].neural.fireHoldTeammates
+    # Schema 1 and schema 2 without the field: unchanged behaviour and log line.
+    for (schema, contract) in [(Schema1, ActionContractHash), (Schema2, ActionContractHash), (Schema2, ActionContractV2Hash)]:
+      let plain = fixture(NeuralSource, true, contract, manifestJson(schema, contract))
+      check not plain[0].failed
+      check not plain[0].neural.fireHoldTeammates
+      check plain[0].neural.telemetry(10, 3) == "neural: peak_ops=10 budget=4000000 model=w64 ticks=3"
+    let noManifest = fixture(NeuralSource, true, ActionContractV2Hash)
+    check not noManifest[0].failed and not noManifest[0].neural.fireHoldTeammates
+    # Rejected: the field under schema 1, an unknown option, a non-boolean, a non-object.
+    for (schema, decoder) in [(Schema1, "{\"fire_hold_teammates\": true}"),
+                              (Schema2, "{\"fire_hold_teammates\": true, \"other\": 1}"),
+                              (Schema2, "{\"fire_hold_teammates\": 1}"),
+                              (Schema2, "{\"fire_hold_teammates\": \"true\"}"),
+                              (Schema2, "[true]")]:
+      let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
+      checkpoint schema & " " & decoder
+      check bad[0].failed

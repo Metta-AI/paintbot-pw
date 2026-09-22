@@ -24,21 +24,30 @@ type
     # recurrent state: cleared at initial use, match reset, death and respawn.
     contract*: ActionContractVersion
     memory*: AimMemory
+    # The bundle's decoder options (manifest "decoder", schema 2): fireHoldTeammates
+    # applies holdFire to every decoded command; fireHolds counts the orders it held.
+    fireHoldTeammates*: bool
+    fireHolds*: int
     # The seat's apparent identities for this tick, resolved once for the observation
     # and the action decode (both read the same pre-action world).
     bodies: array[Seats, int]
     bodiesReady: bool
 
-proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int): string =
+proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
+    fireHolds = -1): string =
   ## One private seat-log line: peak native operations in a tick against the budget, the
-  ## model width and the ticks played. Diagnostics only; it reads no simulation state.
-  "neural: peak_ops=" & $peakOperations & " budget=" & $MaxNeuralOperations &
+  ## model width and the ticks played; with the fire-hold decoder option on, also the
+  ## number of shoot orders it held (omitted, and the line unchanged, when it is off).
+  ## Diagnostics only; it reads no simulation state.
+  result = "neural: peak_ops=" & $peakOperations & " budget=" & $MaxNeuralOperations &
     " model=w" & $hiddenSize & " ticks=" & $ticks
+  if fireHolds >= 0: result.add " fire_holds=" & $fireHolds
 
 proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
   ## Empty for a seat without a loaded neural model, so plain BASIC seats log nothing.
   if seat.isNil or seat.actor.isNil: ""
-  else: neuralTelemetry(peakOperations, seat.actor.hiddenSize, ticks)
+  else: neuralTelemetry(peakOperations, seat.actor.hiddenSize, ticks,
+    if seat.fireHoldTeammates: seat.fireHolds else: -1)
 
 proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
@@ -62,14 +71,29 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
     e.hiddenSize = actor.hiddenSize
     raise e
   let manifestPath = sourcePath & ".neural.json"
+  var fireHold = false
   if fileExists(manifestPath):
     if getFileSize(manifestPath) > 8192: raise newException(ValueError, "oversized neural manifest")
     let manifest = parseJson(readFile(manifestPath))
-    if manifest["observation_contract"].getStr != actor.observationContract or
-        manifest["action_contract"].getStr != actor.actionContract:
+    if manifest{"observation_contract"}.getStr != actor.observationContract or
+        manifest{"action_contract"}.getStr != actor.actionContract:
       raise newException(ValueError, "package and actor contract mismatch")
+    # Decoder options are a schema-2 field. Every key must be one this host knows, so a
+    # bundle asking for an option the host lacks fails here instead of playing without it.
+    if manifest.hasKey("decoder"):
+      if manifest{"schema"}.getStr != "paintbot-neural-basic/2":
+        raise newException(ValueError, "decoder options need package schema 2")
+      let decoder = manifest["decoder"]
+      if decoder.kind != JObject: raise newException(ValueError, "decoder options must be an object")
+      for key, value in decoder:
+        case key
+        of "fire_hold_teammates":
+          if value.kind != JBool: raise newException(ValueError, "decoder.fire_hold_teammates must be a boolean")
+          fireHold = value.getBool
+        else: raise newException(ValueError, "unknown decoder option: " & key)
   result.actor = actor
   result.contract = contract
+  result.fireHoldTeammates = fireHold
   result.memory.resetAimMemory()
   result.observation = newSeq[float32](ObservationSize)
   result.logits = newSeq[float32](LogitSize)
@@ -129,7 +153,9 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
     seat.require(a[0] == 3 and seat.inferred and not seat.acted, "neural action requires fresh logits")
     try:
       let bodies = seat.bodiesFor()
-      apply(decodeLogits(seat.world[], seat.slot, seat.logits, bodies, seat.contract, seat.memory))
+      var command = decodeLogits(seat.world[], seat.slot, seat.logits, bodies, seat.contract, seat.memory)
+      if seat.fireHoldTeammates and seat.world[].holdFire(seat.slot, command): inc seat.fireHolds
+      apply(command)
       if seat.contract == acV2:
         seat.memory.recordAimMemory(seat.world[], seat.slot, bodies)
     except ValueError as e:
