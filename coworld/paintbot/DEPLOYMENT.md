@@ -426,4 +426,4 @@ League follow-up after the deploy: the filler list drops `paintbot-pw-territory-
 `daveey-cogamer-paintbot-cdx`, the territory-wasm filler) are retired rather than left to
 forfeit three rounds into disqualification.
 
-PR: TBD. Deploy: TBD.
+PR #51. Deploy: TBD (filled in after the Deploy Coworld run).
