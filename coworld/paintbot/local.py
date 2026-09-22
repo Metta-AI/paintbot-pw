@@ -11,6 +11,7 @@ from pathlib import Path
 p = argparse.ArgumentParser()
 p.add_argument("--policy", action="append", default=[])
 p.add_argument("--ticks", type=int, default=14400)
+p.add_argument("--seed", type=int, default=2026)
 p.add_argument("--output", type=Path, required=True)
 p.add_argument("--port", type=int, default=8088)
 a = p.parse_args()
@@ -50,7 +51,7 @@ for i, file in enumerate(policies):
         dict(
             players=[dict(name=f"Player {i}") for i in range(16)],
             tokens=[str(i) for i in range(16)],
-            seed=2026,
+            seed=a.seed,
             max_ticks=a.ticks,
         )
     )

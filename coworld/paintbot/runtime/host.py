@@ -15,6 +15,7 @@ import wasmtime
 from oracle import MAX_ANSWER, Oracle, flatten
 from wasm_policy import Policy, load_seats, verified_policy, write_json
 from sprite import SpriteView
+from neural_package import stage_package
 
 
 def forfeit_seat(slot, reason, policies, views):
@@ -107,6 +108,11 @@ def run(engine):
                             content_hash="sha256:"
                             + hashlib.sha256(dummy.read_bytes()).hexdigest(),
                         )
+                    elif data.startswith(b"PK\x03\x04"):
+                        source = tmp / f"player-{slot}.bas"
+                        source_data = stage_package(data, source)
+                        seat.update(file_uri=source.as_uri(), size_bytes=len(source_data),
+                                    content_hash="sha256:" + hashlib.sha256(source_data).hexdigest())
                     else:
                         if len(data) > 65536:
                             raise ValueError("BASIC source exceeds 64 KiB")

@@ -155,7 +155,10 @@ type
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
-var visionRulesVersion* = 35
+when defined(pwTraining):
+  var visionRulesVersion* {.threadvar.}: int
+else:
+  var visionRulesVersion* = 36
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
@@ -333,7 +336,9 @@ proc spawn(w: var World, slot: int, solid = true) =
 proc resetHeart*(w: var World, side: int) =
   w.hearts[side] = Heart(pos: home(side), carrier: -1)
 proc initializeEquipment(w: var World)
-proc newWorld*(seed: int32, endTick: int32 = 0): World =
+proc configureRules*(version: int) =
+  ## Native rollout workers call this on their own thread before accessing a world.
+  visionRulesVersion = version
   wideRamps = visionRulesVersion >= 11
   wilderness = visionRulesVersion >= 12
   deepWilderness = visionRulesVersion >= 14
@@ -345,6 +350,9 @@ proc newWorld*(seed: int32, endTick: int32 = 0): World =
   fractalRiver = visionRulesVersion >= 32
   lakeTerrain = visionRulesVersion >= 33
   symmetricTerrain = visionRulesVersion >= 35
+
+proc newWorld*(seed: int32, endTick: int32 = 0): World =
+  configureRules(visionRulesVersion)
   result.endTick = if visionRulesVersion >= 28:
     (if endTick <= 0: HeartMeterMatchTicks.int32 else: min(endTick, HeartMeterMatchTicks.int32))
   else: (if endTick <= 0: MatchTicks.int32 else: endTick)
@@ -513,10 +521,16 @@ proc legacyWaypoint(w: World, start, goal: Point): Point =
   point(minX()+n mod nx*200+100, minZ()+n div nx*200+100)
 # Navigation uses body clearance, never the visibility ray. Cached flow fields
 # share static terrain work across cogs headed for the same objective.
-var navCover: seq[Cover]
-var navBounds: array[4,int]
-var navEdges: seq[seq[int]]
-var navFields: Table[int,seq[int]]
+when defined(pwTraining):
+  var navCover {.threadvar.}: seq[Cover]
+  var navBounds {.threadvar.}: array[4,int]
+  var navEdges {.threadvar.}: seq[seq[int]]
+  var navFields {.threadvar.}: Table[int,seq[int]]
+else:
+  var navCover: seq[Cover]
+  var navBounds: array[4,int]
+  var navEdges: seq[seq[int]]
+  var navFields: Table[int,seq[int]]
 const NavCell = 100
 proc walkClear*(w: World, a,b: Point):bool =
   if w.blocked(b) or not w.traversable(a,b):return false

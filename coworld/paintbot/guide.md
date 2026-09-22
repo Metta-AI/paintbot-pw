@@ -404,3 +404,42 @@ peak instructions, work units and string handles at the end of the match.
 and guarding on the answer. Host calls cost work units like any other (`oracleAsk` 68); the
 20,000-instruction budget is unchanged, and without an oracle the same script plays as if the calls
 were not there.
+
+## Neural BASIC policies
+
+A neural BASIC policy is a ZIP containing exactly `manifest.json`, `policy.bas`,
+and `model.bin`. Submit it through the same file-policy upload route as a plain
+BASIC source. The BASIC script calls native floating-point inference; it does not
+interpret the network's matrix arithmetic or quantize observations to integers.
+
+```basic
+paintbot_observe(neuralObservation())
+run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
+paintbot_act(neuralLogits())
+```
+
+The four handle functions identify this seat's model, observation, output, and
+recurrent state. Handles cannot access another seat. Each living seat can observe,
+infer, and decode one action per tick, in that order. Recurrent state resets on
+match start, death, and respawn. The decoder deterministically selects the largest
+logit in each action head. Other BASIC actuators remain available for orchestration.
+
+The restricted FP32 actor uses 448 policy-visible inputs, one MinGRU layer of
+width 64, 128, or 256, and categorical action heads `[51,25,2,2,2]`. It receives
+public objectives, own state, visible apparent identities/pickups, sound cues,
+and local terrain; it receives no hidden enemy identities or positions. The
+shared training/deployment contract includes public cooldown and heart-meter
+information beyond the older BASIC scalar getters.
+
+The bundle manifest uses schema `paintbot-neural-basic/1`, hashes both payloads,
+and binds the versioned observation/action contracts. Expanded files are bounded
+to 64 KiB BASIC, 16 MiB model, and 8 KiB manifest. Native inference is separately
+limited to 4,000,000 counted operations per seat/tick; BASIC's bytecode limits
+still apply. Invalid models, buffers, or inference results disable the offending
+seat with an explicit policy error and a safe action.
+
+See [package and host API](../../examples/paintbot/neural_basic.md) and
+[FP32 actor format](../../examples/paintbot/neural_actor.md) for the exact manifest,
+weight layout, reset semantics, and local validation commands. These interfaces
+require a game version containing the neural runtime; older game versions accept
+only their previously supported policy formats.

@@ -57,8 +57,13 @@ jobs:
       - run: nim r tests/test_paintbot_uniform.nim
       - run: nim r tests/test_paintbot_human.nim
       - run: nim r tests/test_paintbot_replay.nim
+      - run: nim r -d:headless tests/test_paintbot_live_rules.nim --bot:examples/paintbot/players/base.bas:16
       - run: nim r tests/test_paintbot_oracle.nim
       - run: nim r tests/test_paintbot_glory.nim
+      - run: nim r -d:headless tests/test_paintbot_neural_contract.nim
+      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim
+      - run: nim r -d:headless tests/test_paintbot_neural_host.nim
+      - run: python -m unittest discover -s coworld/paintbot -p test_neural_package.py
       - run: node tests/test_paintbot_inspector.js
       - run: node tests/test_paintbot_webinputs.js
       - run: python -m pip install wasmtime==48.0.0

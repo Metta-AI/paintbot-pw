@@ -1,6 +1,6 @@
 ## Bounded, persistent BASIC players, with the same observations as WASM seats.
 import polyworld/[basic, cli, controllers]
-import sim, oracle
+import sim, oracle, neural_host
 export oracle
 when defined(coworld): import polyworld/coworld
 
@@ -13,6 +13,7 @@ type Bot* = ref object
   failed*: bool
   output*: PrintProc
   strings*: StringPool
+  neural*: NeuralSeat
 var
   shouts*: array[Seats,seq[string]]
   heard*: array[Seats,seq[HeardMessage]]
@@ -40,8 +41,9 @@ proc limits*(): Limits =
   result.maxMemoryBytes=2*1024*1024; result.maxWorkUnits=50000
   result.maxArrayElements=4096;result.maxGlobals=256;result.maxCallDepth=16
   result.maxPrintBytes=1024;result.maxPrintEvents=128
-proc host(slot:int, strings:StringPool): Host =
+proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
   result=initHost()
+  result.addNeuralFunctions(neural, proc(command: Command) = commands[slot] = command)
   result.addStringFunctions(strings)
   result.addOracleFunctions(slot,strings)
   discard result.addFunction("shout",1,proc(a:openArray[int32]):int32 =
@@ -144,19 +146,35 @@ proc host(slot:int, strings:StringPool): Host =
     commands[slot].shoot=true;commands[slot].aim=Point(x:clamp(a[0],minX().int32,maxX().int32),z:clamp(a[1],minZ().int32,maxZ().int32));1,4)
 proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
   let sources=groups.expandBotSources(controllerKinds(Seats,playerSlot))
+  var paths: array[Seats, string]
+  var nextSlot = 0
+  for group in groups:
+    for unused in 0..<group.count:
+      while nextSlot < Seats and isPlayerIndex(playerSlot, nextSlot): inc nextSlot
+      if nextSlot < Seats: paths[nextSlot] = group.path
+      inc nextSlot
   for slot in 0..<Seats:
     if isPlayerIndex(playerSlot, slot): continue
     # Oracle drafts are text-heavy: four times the default handle count, same 64 KiB arena.
     var stringLimits=defaultStringLimits()
     stringLimits.maxStrings=1024
     let strings=initStringPool(stringLimits)
-    let h=host(slot,strings)
+    var neural: NeuralSeat
+    var neuralFailed = false
+    try:
+      neural = loadNeuralSeat(paths[slot], slot)
+    except CatchableError as e:
+      neural = NeuralSeat(slot: slot)
+      neuralFailed = true
+      when defined(coworld): playerError(slot, "Neural package failed: " & e.msg)
+      else: echo "seat ", slot, " neural package failed: ", e.msg
+    let h=host(slot,strings,neural)
     let p=when defined(coworld):compilePlayer(sources[slot],h,limits(),slot)
       else:compile(sources[slot],h,limits())
     strings.bindProgram(p)
-    result[slot]=Bot(runtime:initRuntime(p,h,limits()),strings:strings)
+    result[slot]=Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural,failed:neuralFailed)
     when defined(coworld):result[slot].output=playerPrinter(slot)
-var peakInstructions*, peakWork*, peakStrings*: array[Seats, int64] ## per-seat BASIC peaks, for PW_BASIC_PEAKS
+var peakInstructions*, peakWork*, peakStrings*, peakNativeWork*: array[Seats, int64] ## per-seat BASIC peaks, for PW_BASIC_PEAKS
 proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
   shouts=default(array[Seats,seq[string]])
   active=w;commands=default(array[Seats,Command])
@@ -166,13 +184,16 @@ proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
     let b=bots[slot];let cog=w.cogs[slot];let home=home(team(slot));let enemyHeart=w.hearts[1-team(slot)];let own=w.hearts[team(slot)]
     let heart=if enemyHeart.carrier<0 or w.visible(slot,enemyHeart.carrier.int):enemyHeart.pos else:home(1-team(slot))
     let ownPos=if own.carrier<0 or w.visible(slot,own.carrier.int):own.pos else:home
-    if b.isNil or b.failed or cog.hp<=0:continue
+    if b.isNil: continue
+    b.neural.beginTick(active)
+    if b.failed or cog.hp<=0:continue
     let values=[slot.int32,team(slot).int32,cog.pos.x,cog.pos.z,cog.hp,cog.carrying.int32,home.x,home.z,heart.x,heart.z,w.tick,ownPos.x,ownPos.z,int32(own.carrier>=0),w.equipment[slot].grenade.int32,w.equipment[slot].sprayCan.int32,w.equipment[slot].armor,w.equipment[slot].lives,w.equipment[slot].charge,w.trenchAt(cog.pos).int32]
     b.runtime.restart()
     b.strings.reset()
     try:
       for j,name in DataNames:b.runtime.setData(name,values[j])
       let stats = b.runtime.run(b.output)
+      peakNativeWork[slot] = max(peakNativeWork[slot], b.neural.nativeWork)
       peakInstructions[slot] = max(peakInstructions[slot], stats.instructions)
       peakWork[slot] = max(peakWork[slot], stats.workUnits)
       peakStrings[slot] = max(peakStrings[slot], b.strings.stringCount.int64)
