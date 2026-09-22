@@ -8,7 +8,7 @@ Reference: `coworld-ctf/client/replay_broadcast.html`, with the newer communicat
 
 | CTF spectator capability | Paintbot PW |
 | --- | --- |
-| Team score, flags/hearts, living squad pips | Team plates, heart-time points, heart state, 16 selectable portraits and health/respawn status |
+| Team score, flags/hearts, living squad pips | Team plates, heart-time points, a ten-heart territory strip between the plates (ordered from Ember's side to Azure's, filled by the owner, outline traced by a capture in progress), 16 selectable portraits and health/respawn status |
 | Player inspection and K/D roster | Live health, tags/outs, captures, respawn, shield, carrying, coordinates; full scoreboard at the playhead |
 | Kill feed and flag/capture announcements | Exact attacker/victim tag events, pickups/drops/returns/captures; capture banner and paint bursts |
 | Territory timeline | Team heart ownership above the scrubber, spoilers hidden by default |
