@@ -434,3 +434,25 @@ build.yml on the merge commit; hosted certification and all five hosted smoke ep
 (`ereq_0138d206`, `ereq_04c1d71a`, `ereq_3cfb62f8`, `ereq_da0f9794`, `ereq_de5c1ffd`). The league
 follow-ups above were applied the same hour: the filler list is `paintbot-pw-basic-v22:1` alone, and
 the `paintbot-pw-territory-wasm:v1` and `daveey-cogamer-paintbot-cdx:1` memberships are retired.
+
+## Glory actually plays: rules 37 — 0.3.34
+
+0.3.32 and 0.3.33 stamped recordings rules 36 while the live engine still played rules 35
+(`replayRulesVersion` was bumped, `visionRulesVersion` was not), so hosted matches scored
+heart-meter points, no glory was earned, and every replay of those versions failed
+"Replay hash mismatch at 1". #52 moves glory and its hash fields to rules 37, sets both
+defaults to 37, and reads a 36 header as rules 35, so the 0.3.32/0.3.33 recordings play back
+(verified on hosted episode `1406ea7e`, 986 ticks). Glory is a self-imposed handicap: the
+capture and tag awards from #49 are gone, and only thirty seconds without supplies (+10) and
+friendly fire taken in the opening thirty seconds (+30 per hit) pay. The header shows glory as
+the headline score in its own column, with the meter's count beside the bar.
+
+Deployed from main `2bc6809` (which also carries #53 and #54) after a pinned-branch attempt
+was refused (real uploads must run from main). Version 0.3.34 is certified and canonical as
+`cow_d21b3259-63c6-47aa-995f-51a7b979318e` (manifest
+`sha256:69382d28962c11afb887c9a9066cf63fc85b845912ab902a4b44ee08fcdac132`), Deploy Coworld run
+35704966436; hosted smoke passed (`ereq_123e2fc0`, `ereq_658db8bd`, `ereq_6f961a9d`,
+`ereq_d0bf299d`, `ereq_dae658eb`); the `ereq_123e2fc0` replay carries a rules 37 header and plays
+natively for all 240 ticks (a 240-tick smoke match draws, so glory is zero for both teams). The
+paintbot-pw league, paused at 07:35Z to stop recording unplayable 0.3.32 episodes, was unpaused
+once 0.3.34 was canonical.
