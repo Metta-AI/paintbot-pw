@@ -1206,7 +1206,14 @@
   #viewbar.collapsed > :not(#viewbar-toggle) { display:none !important; }
   #viewbar:not(.collapsed) #viewbar-toggle svg { transform:rotate(180deg); }
   #victory-banner { position:fixed; bottom:100px; left:50%; transform:translateX(-50%); z-index:20; padding:10px 18px; border-radius:12px; background:#142920e8; color:#f1dfac; font-size:18px; pointer-events:none; }
+  #glory-toast { position:fixed; top:0; left:50%; transform:translateX(-50%); z-index:30; display:flex; flex-direction:column; align-items:center; gap:2px; padding:5px 16px 7px; border-radius:0 0 12px 12px; background:#0b1a14e6; font-size:16px; font-weight:600; letter-spacing:.2px; text-shadow:0 1px 2px #0008; pointer-events:none; }
+  #glory-toast[hidden] { display:none; }
+  #glory-toast .red { color:#ed6955; }
+  #glory-toast .blue { color:#59bdeb; }
+  #glory-toast b { font-variant-numeric:tabular-nums; }
+  @media(max-width:700px) { #glory-toast { font-size:13px; padding:3px 10px 5px; } }
 </style>
+<div id="glory-toast" role="status" aria-live="polite" aria-label="Glory earned" hidden></div>
 <header>
   <small id="modehint" hidden></small>
   <div id="match-score">
