@@ -131,9 +131,11 @@ suite "BASIC advisor oracle":
       deliverOracleReply(OracleReply(slot: 2, id: id, status: 0))
     let poll = bots("shout(strFromInt(oraclePoll(1)))\nshout(strFromInt(oraclePoll(2)))\nshout(strFromInt(oraclePoll(6)))\n")
     discard poll.decide(w)
-    check shouts[2] == @["-1", "-1", "0"]
+    # 1 and 2 were dropped as the oldest; 6 is stored, and an answered request that carried
+    # nothing usable settles as failed rather than as 0, which oraclePoll reports as pending.
+    check shouts[2] == @["-1", "-1", "-1"]
 
-  test "a text-heavy decision fits the 1,024-handle string pool":
+  test "a text-heavy decision fits the string pool":
     var w = arena()
     let players = bots("i = 0\nwhile i < 600\n  s = strFromInt(i)\n  i = i + 1\nwend\nshout(strFromInt(i))\n")
     discard players.decide(w)
@@ -141,3 +143,77 @@ suite "BASIC advisor oracle":
     check shouts[2] == @["600"]
     check peakStrings[2] > 600
 
+
+  test "state keys are paths: rows of fields become arrays of objects":
+    # Building one prose sentence per candidate costs a string operation per fragment. A path
+    # key writes the same facts as fields at int prices, and Jev sees structure, not prose.
+    var w = arena()
+    let players = bots("""
+oracleState(strNew("candidates[0].heart"), 7)
+oracleStateText(strNew("candidates[0].owner"), strNew("enemy"))
+oracleState(strNew("candidates[1].heart"), 4)
+oracleState(strNew("me.hp_of_3"), selfHp)
+oracleStateText(strNew("me.phase"), strNew("midgame"))
+oracleState(strNew("plain_key"), 1)
+oracleState(strNew("not[a path"), 2)
+oracleQuestion(strNew("q"), 0, strNew("?"))
+oracleCriterion(strNew("q"), strNew("true"), strNew("yes"))
+oracleCriterion(strNew("q"), strNew("false"), strNew("no"))
+req = oracleAsk()
+""")
+    discard players.decide(w)
+    let state = parseJson(drainOracleAsks()[0].body)["state"]
+    check state["candidates"].kind == JArray
+    check state["candidates"].len == 2
+    check state["candidates"][0]["heart"].getInt == 7
+    check state["candidates"][0]["owner"].getStr == "enemy"
+    check state["candidates"][1]["heart"].getInt == 4
+    check state["me"]["hp_of_3"].getInt == 3
+    check state["me"]["phase"].getStr == "midgame"
+    check state["plain_key"].getInt == 1
+    # A key that is not a well-formed path stays a flat field instead of being dropped.
+    check state["not[a path"].getInt == 2
+
+  test "a criterion carries extra fields as an object, repeats as an array":
+    var w = arena()
+    let players = bots("""
+oracleQuestion(strNew("pick"), 2, strNew("Which?"))
+oracleCriterion(strNew("pick"), strNew("keep"), strNew("keep the current objective"))
+oracleCriterionField(strNew("pick"), strNew("keep"), strNew("not_for"), strNew("a stale objective"))
+oracleCriterionField(strNew("pick"), strNew("keep"), strNew("examples"), strNew("still closing on it"))
+oracleCriterionField(strNew("pick"), strNew("keep"), strNew("examples"), strNew("nothing nearer is free"))
+oracleCriterion(strNew("pick"), strNew("C0"), strNew("take the near heart"))
+shout(strFromInt(oracleCriterionField(strNew("pick"), strNew("absent"), strNew("x"), strNew("y"))))
+req = oracleAsk()
+""")
+    discard players.decide(w)
+    let criteria = parseJson(drainOracleAsks()[0].body)["questions"]["pick"]["criteria"]
+    check criteria["keep"]["what"].getStr == "keep the current objective"
+    check criteria["keep"]["not_for"].getStr == "a stale objective"
+    check criteria["keep"]["examples"].kind == JArray
+    check criteria["keep"]["examples"].len == 2
+    check criteria["keep"]["examples"][1].getStr == "nothing nearer is free"
+    # A criterion with no extra fields stays a plain string, and an unknown label is refused.
+    check criteria["C0"].getStr == "take the near heart"
+    check shouts[2] == @["0"]
+
+  test "oracleReady says when an ask would be accepted, so no draft is wasted":
+    var w = arena()
+    const Probe = "shout(strFromInt(oracleReady()))\n"
+    discard bots(Probe).decide(w)
+    check shouts[2] == @["0"]
+    let asker = bots("oracleQuestion(strNew(\"q\"), 0, strNew(\"?\"))\nr = oracleAsk()\nshout(strFromInt(oracleReady()))\n")
+    discard asker.decide(w)
+    # One request in flight: -1 until it settles, then the ticks still to wait.
+    check shouts[2] == @["-1"]
+    discard drainOracleAsks()
+    deliverOracleReply(OracleReply(slot: 2, id: 1, status: -1))
+    w.step(default(array[Seats,Command]))
+    discard bots(Probe).decide(w)
+    check shouts[2] == @["23"]
+    while w.tick < 24: w.step(default(array[Seats,Command]))
+    discard bots(Probe).decide(w)
+    check shouts[2] == @["0"]
+    oracleEnabled = false
+    discard bots(Probe).decide(w)
+    check shouts[2] == @["-1"]
