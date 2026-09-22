@@ -216,37 +216,152 @@ proc boundsBlocked(p: Point, radius: int): bool {.inline.} =
   if p.x < minX()+radius or p.z < minZ()+radius or p.x > maxX()-radius or p.z >
       maxZ()-radius: return true
   islandTerrain and islandMargin(p.x.int,p.z.int)<radius div 3+40
+# Training builds index cover on a coarse grid so point and segment tests visit only
+# nearby obstacles instead of all of them (224 under rules 37). The index belongs to the
+# thread and is keyed by the cover it was built from: a world whose cover payload address
+# or length differs is compared by content and the index rebuilt if it differs. Every
+# candidate set is a superset of the obstacles that can satisfy the predicate, so the
+# answers are identical to the full scans below. Other builds keep the full scans.
+when defined(pwTraining):
+  const
+    CoverCell = 200
+    CoverReach = 90 # Largest radius any caller passes to blocked; larger falls back.
+  type CoverIndex = object
+    payload: pointer
+    length: int
+    bounds: array[4, int]
+    cover: seq[Cover]
+    originX, originZ, nx, nz: int
+    cellStart, items: seq[int32]
+    seen: seq[int32]
+    stamp: int32
+  var coverIndex {.threadvar.}: CoverIndex
+  proc coverSpan(c: Cover): tuple[x0, x1, z0, z1: int] =
+    let depth = if c.h == 0: c.w else: c.h
+    (c.x.int-CoverReach-1, c.x.int+c.w.int+CoverReach+1, c.z.int-CoverReach-1, c.z.int+depth.int+CoverReach+1)
+  proc buildCoverIndex(w: World) =
+    let g = addr coverIndex
+    g.cover = w.cover
+    g.bounds = [minX(), minZ(), maxX(), maxZ()]
+    g.originX = minX()-2*CoverCell
+    g.originZ = minZ()-2*CoverCell
+    g.nx = (maxX()-minX()) div CoverCell+5
+    g.nz = (maxZ()-minZ()) div CoverCell+5
+    g.cellStart = newSeq[int32](g.nx*g.nz+1)
+    g.seen = newSeq[int32](w.cover.len)
+    g.stamp = 0
+    template cells(c: Cover, body: untyped) =
+      let span = coverSpan(c)
+      let cx0 = clamp((span.x0-g.originX) div CoverCell, 0, g.nx-1)
+      let cx1 = clamp((span.x1-g.originX) div CoverCell, 0, g.nx-1)
+      let cz0 = clamp((span.z0-g.originZ) div CoverCell, 0, g.nz-1)
+      let cz1 = clamp((span.z1-g.originZ) div CoverCell, 0, g.nz-1)
+      if span.x1 >= g.originX and span.z1 >= g.originZ:
+        for cz in cz0..cz1:
+          for cx in cx0..cx1:
+            let cell {.inject.} = cz*g.nx+cx
+            body
+    for c in w.cover:
+      cells(c): inc g.cellStart[cell+1]
+    for i in 1..g.nx*g.nz: g.cellStart[i] += g.cellStart[i-1]
+    g.items = newSeq[int32](g.cellStart[^1])
+    var fill = g.cellStart
+    for index, c in w.cover:
+      cells(c):
+        g.items[fill[cell]] = index.int32
+        inc fill[cell]
+  proc coverIndexFor(w: World): ptr CoverIndex =
+    result = addr coverIndex
+    let payload = if w.cover.len > 0: cast[pointer](unsafeAddr w.cover[0]) else: nil
+    if result.payload == payload and result.length == w.cover.len and
+        result.bounds == [minX(), minZ(), maxX(), maxZ()]: return
+    if result.length != w.cover.len or result.bounds != [minX(), minZ(), maxX(), maxZ()] or
+        result.cover != w.cover:
+      buildCoverIndex(w)
+    result.payload = payload
+    result.length = w.cover.len
+  template cellAt(g: ptr CoverIndex, x, z: int): int =
+    ## -1 when the point lies outside the indexed span.
+    let cx = x-g.originX
+    let cz = z-g.originZ
+    if cx < 0 or cz < 0 or cx >= g.nx*CoverCell or cz >= g.nz*CoverCell: -1
+    else: (cz div CoverCell)*g.nx+cx div CoverCell
+  proc coverBlockedIndexed(g: ptr CoverIndex, w: World, p: Point, radius: int): bool =
+    if radius > CoverReach:
+      for c in w.cover:
+        if c.coverBlocks(p, radius): return true
+      return false
+    let cell = cellAt(g, p.x.int, p.z.int)
+    if cell < 0:
+      for c in w.cover:
+        if c.coverBlocks(p, radius): return true
+      return false
+    for k in g.cellStart[cell]..<g.cellStart[cell+1]:
+      if w.cover[g.items[k]].coverBlocks(p, radius): return true
+    false
+  iterator segmentCover(w: World, a, b: Point): int =
+    ## Indices of cover that may lie within CoverReach of segment ab, each once, or every
+    ## index when the segment leaves the indexed span. Rebuilding is impossible mid-loop.
+    let g = coverIndexFor(w)
+    let c0 = cellAt(g, min(a.x, b.x).int, min(a.z, b.z).int)
+    let c1 = cellAt(g, max(a.x, b.x).int, max(a.z, b.z).int)
+    if c0 < 0 or c1 < 0:
+      for index in 0..<w.cover.len: yield index
+    else:
+      inc g.stamp
+      if g.stamp == high(int32):
+        for s in g.seen.mitems: s = 0
+        g.stamp = 1
+      let stamp = g.stamp
+      for cz in c0 div g.nx..c1 div g.nx:
+        for cx in c0 mod g.nx..c1 mod g.nx:
+          let cell = cz*g.nx+cx
+          for k in g.cellStart[cell]..<g.cellStart[cell+1]:
+            let index = g.items[k]
+            if g.seen[index] == stamp: continue
+            g.seen[index] = stamp
+            yield index.int
 proc blocked*(w: World, p: Point, radius = Radius): bool =
   if boundsBlocked(p, radius): return true
-  for c in w.cover:
-    if c.coverBlocks(p, radius): return true
+  when defined(pwTraining):
+    coverBlockedIndexed(coverIndexFor(w), w, p, radius)
+  else:
+    for c in w.cover:
+      if c.coverBlocks(p, radius): return true
 const RayCoverLimit = 512
 proc lineClear*(w: World, a, b: Point): bool =
   # Only obstacles overlapping the ray bounds can block its sampled points, so the
-  # sampled predicate is evaluated against that subset; if there are too many to index
-  # on the stack the full set gives the same answer. Keep the exact sample positions
-  # and collision predicates for replay parity. No world copy, no allocation.
-  var rayCover: array[RayCoverLimit, int32]
-  var rayCount = 0
-  for index, c in w.cover:
-    let depth = if c.h == 0: c.w else: c.h
-    if c.x <= max(a.x,b.x) and c.x+c.w >= min(a.x,b.x) and
-        c.z <= max(a.z,b.z) and c.z+depth >= min(a.z,b.z):
-      if rayCount < RayCoverLimit: rayCover[rayCount] = index.int32
-      inc rayCount
-  let filtered = rayCount <= RayCoverLimit
+  # sampled predicate is evaluated against that subset (from the cover index in training
+  # builds, otherwise indexed on the stack; too many for the stack means the full set,
+  # which gives the same answer). Keep the exact sample positions and collision
+  # predicates for replay parity. No world copy, no allocation.
+  when not defined(pwTraining):
+    var rayCover: array[RayCoverLimit, int32]
+    var rayCount = 0
+    for index, c in w.cover:
+      let depth = if c.h == 0: c.w else: c.h
+      if c.x <= max(a.x,b.x) and c.x+c.w >= min(a.x,b.x) and
+          c.z <= max(a.z,b.z) and c.z+depth >= min(a.z,b.z):
+        if rayCount < RayCoverLimit: rayCover[rayCount] = index.int32
+        inc rayCount
+    let filtered = rayCount <= RayCoverLimit
+  else:
+    let g = coverIndexFor(w)
   let startHeight = if visionRulesVersion >= 9: w.elevation(a) else: 0
   let endHeight = if visionRulesVersion >= 9: w.elevation(b) else: 0
   let steps = max(abs(b.x-a.x), abs(b.z-a.z)) div 25 + 1
   for i in 1..steps:
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
     if boundsBlocked(p, 0): return false
-    if filtered:
-      for k in 0..<rayCount:
-        if w.cover[rayCover[k]].coverBlocks(p, 0): return false
+    when defined(pwTraining):
+      if coverBlockedIndexed(g, w, p, 0): return false
     else:
-      for c in w.cover:
-        if c.coverBlocks(p, 0): return false
+      if filtered:
+        for k in 0..<rayCount:
+          if w.cover[rayCover[k]].coverBlocks(p, 0): return false
+      else:
+        for c in w.cover:
+          if c.coverBlocks(p, 0): return false
     if visionRulesVersion >= 9:
       let eye = startHeight+120+(endHeight-startHeight)*i.int div steps.int
       if w.elevation(p) > eye: return false
@@ -546,23 +661,29 @@ else:
   var navEdges: seq[seq[int]]
   var navFields: Table[int,seq[int]]
 const NavCell = 100
+proc walkCoverBlocks(c: Cover, a,b: Point, dx,dz,length: float64): bool {.inline.} =
+  if c.h==0:
+    let r=c.w.float64/2
+    let cx=c.x.float64+r;let cz=c.z.float64+r
+    let t=if length==0:0.0 else:clamp(((cx-a.x.float64)*dx+(cz-a.z.float64)*dz)/length,0.0,1.0)
+    let ex=a.x.float64+t*dx-cx;let ez=a.z.float64+t*dz-cz
+    if ex*ex+ez*ez<(r+Radius.float64)*(r+Radius.float64):return true
+  else:
+    let steps=max(abs(b.x-a.x),abs(b.z-a.z)).int div 15+1
+    for i in 1..steps:
+      let x=a.x.int+(b.x-a.x).int*i div steps
+      let z=a.z.int+(b.z-a.z).int*i div steps
+      if x>c.x-Radius and x<c.x+c.w+Radius and z>c.z-Radius and z<c.z+c.h+Radius:return true
 proc walkClear*(w: World, a,b: Point):bool =
   if w.blocked(b) or not w.traversable(a,b):return false
   let dx=(b.x-a.x).float64;let dz=(b.z-a.z).float64
   let length=dx*dx+dz*dz
-  for c in w.cover:
-    if c.h==0:
-      let r=c.w.float64/2
-      let cx=c.x.float64+r;let cz=c.z.float64+r
-      let t=if length==0:0.0 else:clamp(((cx-a.x.float64)*dx+(cz-a.z.float64)*dz)/length,0.0,1.0)
-      let ex=a.x.float64+t*dx-cx;let ez=a.z.float64+t*dz-cz
-      if ex*ex+ez*ez<(r+Radius.float64)*(r+Radius.float64):return false
-    else:
-      let steps=max(abs(b.x-a.x),abs(b.z-a.z)).int div 15+1
-      for i in 1..steps:
-        let x=a.x.int+(b.x-a.x).int*i div steps
-        let z=a.z.int+(b.z-a.z).int*i div steps
-        if x>c.x-Radius and x<c.x+c.w+Radius and z>c.z-Radius and z<c.z+c.h+Radius:return false
+  when defined(pwTraining):
+    for index in segmentCover(w,a,b):
+      if w.cover[index].walkCoverBlocks(a,b,dx,dz,length):return false
+  else:
+    for c in w.cover:
+      if c.walkCoverBlocks(a,b,dx,dz,length):return false
   let steps=max(abs(b.x-a.x),abs(b.z-a.z)).int div 50+1
   for i in 1..steps:
     let x=a.x.int+(b.x-a.x).int*i div steps
