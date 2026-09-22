@@ -103,24 +103,29 @@ aim = P + (GunWindupTicks+1)*u - GunWindupTicks*v = P + 6u - 5v
 ```
 
 which is base.bas's own rule ("the ray leaves six moves after the order ... aim where
-they will be, minus our own drift": target velocity x 6, own drift x 5). The velocities
-are last tick's displacements as the seat itself could observe them, kept by the host in
-an `AimMemory` outside the world (never hashed or serialized, recorded with
-`recordAimMemory` after every decode): `u` only when the same body was seen under the
-same identity one tick ago, `v` only when the seat decided one tick ago; a first tick,
-a gap, a respawn or a teleport (a per-axis displacement above `TeleportStep` = 60, more
-than any one-tick move) counts as zero. With both zero the v2 aim is the v1 aim. The
-memory follows the recurrent state in the hosted seat (cleared at initial use, match
-reset, death and respawn) and is cleared by `pw_create`, `pw_reset` and
-`pw_set_action_contract` in the native ABI.
+they will be, minus our own drift": target velocity x 6, own drift x 5; base.bas uses
+its planned leg as the drift while in contact and its last measured move otherwise).
+`u` is the body's last-tick displacement as the seat itself could observe it, kept by
+the host in an `AimMemory` outside the world (never hashed or serialized, recorded with
+`recordAimMemory` after every decode): only when the same body was seen under the same
+identity one tick ago; a first tick, a gap, a respawn or a teleport (a per-axis
+displacement above `TeleportStep` = 60, more than any one-tick move) counts as zero.
+`v` is not remembered but known: the move the world will make for the seat on this
+tick from the goal and sneak flag decoded from the same action (`plannedStep`: the
+same waypoint, speed and trench damping as `mechanics.nim`, before blocking and
+yielding; zero when the seat holds still). With a still target and a still seat the v2
+aim is the v1 aim. The memory follows the recurrent state in the hosted seat (cleared
+at initial use, match reset, death and respawn) and is cleared by `pw_create`,
+`pw_reset` and `pw_set_action_contract` in the native ABI.
 
 Native ABI: `pw_set_action_contract(handle, 1|2)` selects the decoder for the caller's
 actions (default 1, kept across resets), `pw_action_contract(handle)` reads it,
 `pw_action_contract_hash(version, out, 65)` returns the hash; the Nim bot
 (`pw_bot_actions`) expresses identity aims and is therefore lead-compensated under v2.
-`pw_action_candidates(handle, seat, int32[51*2], int32[25*2])` reports the point each
-head index resolves to on the current pre-step world (INT32_MIN for a candidate that
-does not exist), for exact demonstration mapping. `pw_script_decide(handle)` runs the
+`pw_action_candidates(handle, seat, movement, sneak, int32[51*2], int32[25*2])` reports
+the point each head index resolves to on the current pre-step world (INT32_MIN for a
+candidate that does not exist; a v2 identity aim depends on the movement and sneak
+indices given), for exact demonstration mapping. `pw_script_decide(handle)` runs the
 scripted seats' decision ahead of `pw_step` and `pw_set_seat_override(handle, seat,
 mask)` (bits 1 walk, 2 aim, 4 shoot, 8 grenade, 16 sneak) makes a scripted seat execute
 the caller's decoded action for the masked heads: the mapping-ceiling diagnostics, exact
