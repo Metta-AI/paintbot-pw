@@ -21,6 +21,16 @@ int pw_step(void *handle, const int32_t *actions, float *rewards, float *termina
 uint32_t pw_state_hash(void *handle);
 int pw_results(void *handle, float *eight_results);
 int pw_bot_actions(void *handle, int side, int level, int32_t *actions);
+/* Per-seat combat telemetry, cumulative since the last create/reset; additive to v1.
+ * Pure telemetry: reading or ignoring it changes no simulation state or hash.
+ * Damage is health removed (armor absorbs first); a hit is a damage event past the
+ * shield and life checks; captures are the world's own credit for flipping a heart;
+ * first_friendly_fire_tick is -1 until this seat first damages a teammate. */
+typedef struct {
+    int32_t damage_dealt_enemy, damage_dealt_team, hits_enemy, hits_taken;
+    int32_t kills, deaths, captures, first_friendly_fire_tick;
+} pw_seat_stats_t;
+int pw_seat_stats(void *handle, int32_t *sixteen_seats_times_eight); /* pw_seat_stats_t[16] */
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
 #ifdef __cplusplus

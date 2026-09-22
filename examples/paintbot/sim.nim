@@ -158,6 +158,16 @@ proc team*(slot: int): int = slot mod 2
 # still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
 when defined(pwTraining):
   var visionRulesVersion* {.threadvar.}: int
+  type
+    SeatStats* = object
+      ## Per-seat combat telemetry for training hosts. Cumulative per match; never
+      ## part of World, its hash or any decision. Layout is the native ABI's.
+      damageDealtEnemy*, damageDealtTeam*, hitsEnemy*, hitsTaken*: int32
+      kills*, deaths*, captures*, firstFriendlyFireTick*: int32
+    CombatTelemetry* = array[Seats, SeatStats]
+  # The host points this at its telemetry for the duration of one step; nil means
+  # nobody is listening and damage pays only for the nil test.
+  var combatTelemetry* {.threadvar.}: ptr CombatTelemetry
 else:
   var visionRulesVersion* = 37
 proc apparentTeam*(w: World, slot: int): int =
