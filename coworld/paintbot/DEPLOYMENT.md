@@ -390,10 +390,13 @@ baseline. No engine, rules, observation or API change.
 
 Where no oracle is configured the layer's asks are refused and the file plays exactly like
 `base.bas`: `tests/test_paintbot_jev_baseline.nim` runs both files on all sixteen seats and
-requires the same state hash tick for tick, no seat disabled and the request drafting inside
-three quarters of the BASIC budget. Porting found one difference: the asker's "keep current" shout
+requires the same state hash tick for tick and no seat disabled; with the engine's oracle
+switched on and no replies, it requires the drafted requests to stay inside three quarters of
+the BASIC budget. Certification seats 1 and 2 play `basic-jev`, so the hosted engine compiles
+and runs it on every release. Porting found one difference: the asker's "keep current" shout
 fired at tick 0 for every cog (its timer starts at 0), and the baseline's turn-to-speech habit
 then played a different match; the generator now shouts it only after an answer. In the native
 engine, same file on both sides, seeds 1-8 at 4,800 ticks: identical hashes to `base.bas` on
-every seed. Peak per decision about 10,300 instructions, 14,500 work units and 22 string handles
-(limits 20,000 / 50,000 / 1,024). Not yet deployed; it ships with the next version.
+every seed. Peak per decision without an oracle about 10,300 instructions, 14,500 work units and 22
+string handles; drafting requests with the oracle on, about 12,600 / 26,700 / 131 (limits
+20,000 / 50,000 / 1,024). Not yet deployed; it ships with the next version.

@@ -171,7 +171,7 @@
       "name": "BASIC Jev Baseline",
       "type": "player",
       "file": "players/jev.bas",
-      "description": "The BASIC baseline steered by the host advisor oracle (Jev): squad objectives and retreats chosen from code-ranked options; plays exactly like the baseline where no oracle is configured."
+      "description": "The BASIC baseline steered by the host advisor oracle (Jev): one cog per squad has Jev pick the squad objective from code-ranked capture candidates and relays it by shout; plays exactly like the baseline where no oracle is configured."
     },
     {
       "id": "wasm-baseline",
@@ -620,10 +620,10 @@
         "player_id": "wasm-baseline"
       },
       {
-        "player_id": "baseline"
+        "player_id": "basic-jev"
       },
       {
-        "player_id": "baseline"
+        "player_id": "basic-jev"
       },
       {
         "player_id": "baseline"

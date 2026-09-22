@@ -12,9 +12,12 @@ const Root = currentSourcePath().parentDir.parentDir
 const Base = Root / "coworld/paintbot/players/base.bas"
 const Jev = Root / "coworld/paintbot/players/jev.bas"
 
-proc play(path: string, seed: int32): (seq[uint32], array[Seats, Bot]) =
+proc play(path: string, seed: int32, advised = false): (seq[uint32], array[Seats, Bot]) =
   resetOracle()
-  oracleEnabled = false
+  oracleEnabled = advised
+  peakInstructions = default(array[Seats, int64])
+  peakWork = default(array[Seats, int64])
+  peakStrings = default(array[Seats, int64])
   var w = newWorld(seed)
   let players = loadBots(@[BotGroup(path: path, count: Seats)])
   var hashes: seq[uint32]
@@ -40,10 +43,13 @@ suite "Jev-advised BASIC baseline":
       check drainOracleAsks().len == 0
 
   test "drafting the oracle request stays inside the BASIC budget":
+    # With the oracle on and no replies the askers draft and ship requests every ask interval.
     # Limits are 20,000 instructions, 50,000 work units and 1,024 string handles per decision;
-    # measured peaks are about 10,300 / 14,500 / 22. Guard three quarters of each limit.
-    discard play(Jev, 4)
+    # measured peaks are about 12,600 / 26,700 / 131. Guard three quarters of each limit.
+    let (_, players) = play(Jev, 4, advised = true)
+    check drainOracleAsks().len > 0
     for slot in 0..<Seats:
+      check not players[slot].failed
       check peakInstructions[slot] < 15_000
       check peakWork[slot] < 37_500
       check peakStrings[slot] < 768
