@@ -192,6 +192,12 @@ proc updateTerritory*(w:var World) =
 
 proc damage*(w: var World, victim, attacker, amount: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
+  when defined(pwTraining):
+    # Curriculum: scale what this attacker deals (floor; 1000 is exact). The hit still
+    # happens, so shields, cooldown relief, telemetry and friendly-fire glory are as before.
+    var amount = amount
+    if damageScale != nil and attacker >= 0 and damageScale[attacker] != 1000:
+      amount = int(int64(amount)*damageScale[attacker] div 1000)
   if observeHit != nil: observeHit(w.tick, victim, attacker, w.cogs[victim].pos)
   if attacker >= 0 and attacker != victim and team(attacker) == team(victim) and
       w.tick < GloryFriendlyFireTicks:
