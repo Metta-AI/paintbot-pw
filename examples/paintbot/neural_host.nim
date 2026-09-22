@@ -5,15 +5,31 @@ import sim, neural_actor, neural_contract
 
 const MaxNeuralOperations* = 4_000_000'i64
 
-type NeuralSeat* = ref object
-  actor*: Actor
-  observation*, logits*, state*: seq[float32]
-  slot*: int
-  world: ptr World
-  observed, inferred, acted: bool
-  previousTick: int32
-  previouslyAlive: bool
-  nativeWork*: int64
+type
+  NeuralBudgetError* = object of ValueError
+    ## The package's model needs more native operations per tick than the budget allows.
+    operations*: int64
+    hiddenSize*: int
+  NeuralSeat* = ref object
+    actor*: Actor
+    observation*, logits*, state*: seq[float32]
+    slot*: int
+    world: ptr World
+    observed, inferred, acted: bool
+    previousTick: int32
+    previouslyAlive: bool
+    nativeWork*: int64
+
+proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int): string =
+  ## One private seat-log line: peak native operations in a tick against the budget, the
+  ## model width and the ticks played. Diagnostics only; it reads no simulation state.
+  "neural: peak_ops=" & $peakOperations & " budget=" & $MaxNeuralOperations &
+    " model=w" & $hiddenSize & " ticks=" & $ticks
+
+proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
+  ## Empty for a seat without a loaded neural model, so plain BASIC seats log nothing.
+  if seat.isNil or seat.actor.isNil: ""
+  else: neuralTelemetry(peakOperations, seat.actor.hiddenSize, ticks)
 
 proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
@@ -27,7 +43,10 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   if actor.observationContract != ObservationContractHash or actor.actionContract != ActionContractHash:
     raise newException(ValueError, "neural actor contract mismatch")
   if actor.operationCount > MaxNeuralOperations:
-    raise newException(ValueError, "neural actor exceeds native operation budget")
+    let e = newException(NeuralBudgetError, "neural actor exceeds native operation budget")
+    e.operations = actor.operationCount
+    e.hiddenSize = actor.hiddenSize
+    raise e
   let manifestPath = sourcePath & ".neural.json"
   if fileExists(manifestPath):
     if getFileSize(manifestPath) > 8192: raise newException(ValueError, "oversized neural manifest")

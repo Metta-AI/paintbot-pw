@@ -179,7 +179,12 @@ proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
     except CatchableError as e:
       neural = NeuralSeat(slot: slot)
       neuralFailed = true
-      when defined(coworld): playerError(slot, "Neural package failed: " & e.msg)
+      when defined(coworld):
+        if e of NeuralBudgetError:
+          # The rejected model's cost, so the seat log says how far over budget it was.
+          let budget = (ref NeuralBudgetError)(e)
+          playerLog(slot, neuralTelemetry(budget.operations, budget.hiddenSize, 0) & "\n")
+        playerError(slot, "Neural package failed: " & e.msg)
       else: echo "seat ", slot, " neural package failed: ", e.msg
     let h=host(slot,strings,neural)
     let p=when defined(coworld):compilePlayer(sources[slot],h,limits(),slot)
@@ -206,6 +211,15 @@ when defined(pwTraining):
     Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural)
 else:
   var peakInstructions*, peakWork*, peakStrings*, peakNativeWork*: array[Seats, int64] ## per-seat BASIC peaks, for PW_BASIC_PEAKS
+proc logNeuralTelemetry*(bots: array[Seats,Bot], ticks: int,
+    log: proc(slot: int, text: string)) =
+  ## Writes each neural seat's telemetry line (peak operations against the budget) through
+  ## `log`, one line per seat that loaded a neural model. Plain BASIC seats are skipped, and
+  ## nothing here touches the world or the seats' runtimes.
+  for slot in 0..<Seats:
+    if bots[slot].isNil: continue
+    let line = bots[slot].neural.telemetry(peakNativeWork[slot], ticks)
+    if line.len > 0: log(slot, line & "\n")
 proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
   shouts=default(array[Seats,seq[string]])
   active=w;commands=default(array[Seats,Command])

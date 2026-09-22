@@ -27,6 +27,18 @@ proc fixture(source: string, model = true): array[Seats,Bot] =
     removeFile(path)
     if fileExists(path & ".model.bin"): removeFile(path & ".model.bin")
   loadBots(@[BotGroup(path:path,count:Seats)])
+proc mixedFixture(): array[Seats,Bot] =
+  ## Slot 0 runs the neural package; every other seat is plain BASIC.
+  let neuralPath = getTempDir()/"paintbot-neural-host-test-neural.bas"
+  let plainPath = getTempDir()/"paintbot-neural-host-test-plain.bas"
+  writeFile(neuralPath, NeuralSource)
+  writeFile(neuralPath & ".model.bin", zeroModel())
+  writeFile(plainPath, "walkTo(selfX,selfY)\n")
+  defer:
+    removeFile(neuralPath)
+    removeFile(neuralPath & ".model.bin")
+    removeFile(plainPath)
+  loadBots(@[BotGroup(path:neuralPath,count:1), BotGroup(path:plainPath,count:Seats-1)])
 
 suite "native BASIC neural host":
   test "seat buffers are independent and recurrence resets on death and match reset":
@@ -70,3 +82,26 @@ suite "native BASIC neural host":
     let missing = fixture(NeuralSource,false)
     discard missing.decide(newWorld(2026))
     check missing[0].failed
+
+  test "seat telemetry line names peak operations, budget, width and ticks":
+    check neuralTelemetry(238080, 128, 1200) ==
+      "neural: peak_ops=238080 budget=4000000 model=w128 ticks=1200"
+
+  test "seat telemetry is logged for neural seats and not for plain seats":
+    let players = mixedFixture()
+    var w = newWorld(2026)
+    discard players.decide(w)
+    w.tick = 1
+    discard players.decide(w)
+    check not players[0].failed and not players[1].failed
+    let expected = int64(2*(ObservationSize*64 + 3*64*64 + LogitSize*64) + 32*64)
+    check players[0].neural.nativeWork == expected
+    var lines: seq[(int, string)]
+    players.logNeuralTelemetry(2, proc(slot: int, text: string) = lines.add((slot, text)))
+    check lines.len == 1
+    check lines[0][0] == 0
+    check lines[0][1] == "neural: peak_ops=" & $expected & " budget=4000000 model=w64 ticks=2\n"
+    # A plain seat logs nothing, and the world is untouched by telemetry.
+    let before = w.stateHash()
+    players.logNeuralTelemetry(2, proc(slot: int, text: string) = discard)
+    check w.stateHash() == before
