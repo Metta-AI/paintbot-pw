@@ -11,15 +11,28 @@ type HeardMessage* = object
 type Bot* = ref object
   runtime*: Runtime
   failed*: bool
+  error*: string ## The BasicError that disabled the seat, if any.
   output*: PrintProc
   strings*: StringPool
   neural*: NeuralSeat
-var
-  shouts*: array[Seats,seq[string]]
-  heard*: array[Seats,seq[HeardMessage]]
-  active*: World
-  commands*: array[Seats, Command]
-var visionCache: array[Seats, array[Seats, int8]]
+# One decision's scratch (active world, commands, vision cache, shouts) and the hearing
+# carried to the next decision. Training builds run many worlds on many threads: there
+# the same variables are thread-local and the native host copies `heard` in and out
+# around each step, so a handle may migrate between threads.
+when defined(pwTraining):
+  var
+    shouts* {.threadvar.}: array[Seats,seq[string]]
+    heard* {.threadvar.}: array[Seats,seq[HeardMessage]]
+    active* {.threadvar.}: World
+    commands* {.threadvar.}: array[Seats, Command]
+  var visionCache {.threadvar.}: array[Seats, array[Seats, int8]]
+else:
+  var
+    shouts*: array[Seats,seq[string]]
+    heard*: array[Seats,seq[HeardMessage]]
+    active*: World
+    commands*: array[Seats, Command]
+  var visionCache: array[Seats, array[Seats, int8]]
 proc bodyForSeat(observer, identity: int): int =
   if identity notin 0..<Seats: return -1
   if identity == observer: return observer
@@ -174,7 +187,25 @@ proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
     strings.bindProgram(p)
     result[slot]=Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural,failed:neuralFailed)
     when defined(coworld):result[slot].output=playerPrinter(slot)
-var peakInstructions*, peakWork*, peakStrings*, peakNativeWork*: array[Seats, int64] ## per-seat BASIC peaks, for PW_BASIC_PEAKS
+when defined(pwTraining):
+  var peakInstructions* {.threadvar.}: array[Seats, int64]
+  var peakWork* {.threadvar.}: array[Seats, int64]
+  var peakStrings* {.threadvar.}: array[Seats, int64]
+  var peakNativeWork* {.threadvar.}: array[Seats, int64]
+  proc loadScriptBot*(source: string, slot: int): Bot =
+    ## One seat from BASIC source text, exactly as loadBots builds a file seat without a
+    ## neural package: same string limits, host functions, compile limits and runtime
+    ## budget. Raises BasicError when the source does not compile.
+    var stringLimits=defaultStringLimits()
+    stringLimits.maxStrings=1024
+    let strings=initStringPool(stringLimits)
+    let neural = loadNeuralSeat("/nonexistent/paintbot-pw-script-seat", slot)
+    let h=host(slot,strings,neural)
+    let p=compile(source,h,limits())
+    strings.bindProgram(p)
+    Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural)
+else:
+  var peakInstructions*, peakWork*, peakStrings*, peakNativeWork*: array[Seats, int64] ## per-seat BASIC peaks, for PW_BASIC_PEAKS
 proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
   shouts=default(array[Seats,seq[string]])
   active=w;commands=default(array[Seats,Command])
@@ -198,9 +229,9 @@ proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
       peakWork[slot] = max(peakWork[slot], stats.workUnits)
       peakStrings[slot] = max(peakStrings[slot], b.strings.stringCount.int64)
     except BasicError as e:
-      b.failed=true;commands[slot]=Command()
+      b.failed=true;b.error=e.msg;commands[slot]=Command()
       when defined(coworld):playerError(slot,e.msg)
-      else:echo "seat ",slot," disabled: ",e.msg
+      elif not defined(pwTraining):echo "seat ",slot," disabled: ",e.msg
   commands
 
 proc deliverSpeech*(w: World) =

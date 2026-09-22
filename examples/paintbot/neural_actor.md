@@ -84,3 +84,21 @@ own credit for flipping a heart; `first_friendly_fire_tick` is -1 until the seat
 damages a teammate. The counters are pure telemetry held by the host handle, never
 by the world: they are outside the state hash, no decision reads them, and a build
 that never calls `pw_seat_stats` pays one pointer test per damage event.
+
+BASIC seats: `pw_set_seat_script(handle, seat, source, length)` installs BASIC source
+on one seat, compiled and run by the production interpreter with the hosted host
+functions (`bots.nim`), limits and 20,000-instruction per-decision budget, with the
+production tick order (every scripted seat decides on the pre-step world, hears what
+was shouted last tick, then the world steps). The caller's actions for that seat are
+ignored while the script is installed; the runtime is re-instantiated on every
+`pw_reset` with cleared persistent variables, as a new hosted match loads its bots.
+Compile or runtime errors disable the seat exactly as they disable a hosted seat;
+`pw_seat_script_status(handle, seat, message, capacity)` reports 0 unscripted, 1
+running, 2 compile failed, 3 disabled, with the error text. `pw_seat_orders(handle,
+seat, int32[10])` reports the command a scripted seat issued on the last step
+(`walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct, scripted`),
+for demonstration collection: it maps exactly onto the action contract only when the
+goal is a heart or visible pickup position or `pos+200*compass` (clamped) and the aim
+is a visible body's position or `pos+5000*compass` (clamped); other orders have no
+exact head candidate and any mapping is an approximation. Worlds without scripts are
+byte-identical to a build without this call.
