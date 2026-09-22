@@ -66,6 +66,40 @@ int pw_seat_orders(void *handle, int seat, int32_t *ten);
  * glory as before). 1000 is exact. Returns 0, -1 bad args. */
 int pw_set_seat_fire_period(void *handle, int seat, int32_t period);
 int pw_set_seat_damage_scale(void *handle, int seat, int32_t permille);
+/* Action contract selection (additive to v1). pw_set_action_contract chooses how the
+ * caller's actions (and the Nim bot's, and an override-mapped scripted seat's) are
+ * decoded: 1 = contract v1 "paintbot-pw.rules37.action.v1.51-25-2-2-2" (an identity aim
+ * is the body's current position; the default, byte-identical to a library without this
+ * call), 2 = contract v2 "paintbot-pw.rules37.action.v2.51-25-2-2-2" (an identity aim is
+ * the body's lead-compensated aim point: body + 6*u - 5*v with u the body's and v the
+ * seat's last-tick displacement as the seat itself could observe them, zero on a first
+ * tick, gap, respawn or teleport; see neural_contract.nim). Same head sizes; movement,
+ * directional aim, fire, grenade and sneak decode identically. Kept across pw_reset; the
+ * per-seat one-tick aim memory v2 reads is cleared here and by every reset. Returns 0, -1
+ * for a bad handle or version. pw_action_contract returns the selected version.
+ * pw_action_contract_hash writes the 64-hex SHA-256 an actor and manifest must carry to
+ * be decoded under that version (NUL-terminated, capacity >= 65). */
+int pw_set_action_contract(void *handle, int32_t version);
+int pw_action_contract(void *handle);
+int pw_action_contract_hash(int32_t version, char *sixty_five_bytes, int32_t capacity);
+/* Demonstration-mapping diagnostic: the point every movement head index (51 x {x, z})
+ * and aim head index (25 x {x, z}) resolves to for the seat on the current pre-step
+ * world under the selected contract, exactly as the coming pw_step would decode it.
+ * Index 0 is the seat's position / current aim. Candidates that do not exist now
+ * (missing heart, unavailable or unseen pickup, identity nobody visible carries) and
+ * every entry of a dead seat are INT32_MIN in both coordinates. Reads only. */
+int pw_action_candidates(void *handle, int seat, int32_t *goals_51x2, int32_t *aims_25x2);
+/* Mapping-ceiling diagnostics (pw-bc). pw_script_decide runs the scripted seats'
+ * decision for the current tick now (once; later calls before the next pw_step are
+ * no-ops) so pw_seat_orders reports the orders the coming pw_step will execute; with
+ * every override mask 0 the world is byte-identical whether or not it is called.
+ * Returns 1 decided, 0 nothing to do, -1 bad handle. pw_set_seat_override makes a
+ * scripted seat execute the caller's decoded action for the masked heads instead of its
+ * script's order (bits: 1 walk/goal/direct, 2 aim, 4 shoot, 8 grenade, 16 sneak; 0 =
+ * exact script play); the script still runs and reports its orders. Kept across
+ * pw_reset. Returns 0, -1 bad args. */
+int pw_script_decide(void *handle);
+int pw_set_seat_override(void *handle, int seat, int32_t mask);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
 #ifdef __cplusplus

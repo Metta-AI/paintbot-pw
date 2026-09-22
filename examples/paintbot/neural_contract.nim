@@ -11,7 +11,54 @@ const
   ActionContract* = "paintbot-pw.rules37.action.v1.51-25-2-2-2"
   ObservationContractHash* = "ed5d16768e3144a04a28420ce227ff2d6a831be9f64f3633326b133a5335b7e2"
   ActionContractHash* = "55922d42d4065a069b3193f31e056c3a53cd34175b10fed7ff0d8c22b50a473e"
+  ## Action contract v2: the same five heads and sizes; an identity aim resolves to the
+  ## body's lead-compensated aim point (leadAimPoint) instead of its current position.
+  ## Directional aim, movement, fire, grenade and sneak decode exactly as in v1.
+  ActionContractV2* = "paintbot-pw.rules37.action.v2.51-25-2-2-2"
+  ActionContractV2Hash* = "51f602ef167919ca825595f9d81777cb807afbb0938a20102457d0594e2b4317"
   Directions = [(1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1)]
+  # Lead compensation (contract v2), derived from the gun in mechanics.nim (rules >= 10):
+  # the tick a shoot order is applied the shooter first moves, then gunAim = aim - pos is
+  # locked; the ray leaves GunWindupTicks ticks later from wherever the shooter then
+  # stands, along the locked vector. With one move per tick the shooter has made 6 moves
+  # when the ray leaves and the direction was fixed after the first, so for velocities u
+  # (target) and v (shooter) the ray through the target's future position needs
+  # aim = body + (GunWindupTicks+1)*u - GunWindupTicks*v. base.bas ("the ray leaves six
+  # moves after the order... aim where they will be, minus our own drift") uses the same
+  # 6 and 5.
+  LeadTargetMoves* = GunWindupTicks + 1
+  LeadOwnMoves* = GunWindupTicks
+  # A larger per-axis displacement than any one-tick move (MoveSpeed 28, diagonal yield
+  # steps included) is a respawn or teleport, not a velocity; base.bas uses the same 60.
+  TeleportStep* = 60
+static: doAssert LeadTargetMoves == 6 and LeadOwnMoves == 5 and TeleportStep > 2*MoveSpeed
+
+type
+  ActionContractVersion* = enum
+    acV1 = 1, acV2 = 2
+  AimMemory* = object
+    ## What a seat saw one tick ago, kept by the host outside the World (never hashed,
+    ## never serialized): the pre-step tick it was recorded on, the seat's own position
+    ## and, per apparent identity, the body it resolved to and that body's position.
+    ## Contract v2 derives its lead velocities from it; contract v1 never reads it.
+    tick*: int32 # -1 when nothing is recorded
+    self*: Point
+    bodies*: array[Seats, int]
+    positions*: array[Seats, Point]
+
+proc actionContractHash*(version: ActionContractVersion): string =
+  case version
+  of acV1: ActionContractHash
+  of acV2: ActionContractV2Hash
+proc actionContractId*(version: ActionContractVersion): string =
+  case version
+  of acV1: ActionContract
+  of acV2: ActionContractV2
+proc actionContractVersion*(hash: string): ActionContractVersion =
+  ## The contract an actor or manifest hash names; ValueError for anything else.
+  if hash == ActionContractHash: acV1
+  elif hash == ActionContractV2Hash: acV2
+  else: raise newException(ValueError, "unknown neural action contract")
 
 proc observedBodies*(w: World, slot: int): array[Seats, int] =
   ## Match BASIC identity resolution, including uniforms and duplicate identities.
@@ -134,8 +181,88 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32]) =
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   w.encodeObservation(slot, output, w.observedBodies(slot))
 
+proc resetAimMemory*(m: var AimMemory) =
+  m.tick = -1
+  m.self = Point()
+  for i in 0..<Seats:
+    m.bodies[i] = -1
+    m.positions[i] = Point()
+
+proc recordAimMemory*(m: var AimMemory, w: World, slot: int, bodies: array[Seats, int]) =
+  ## Record once per decided tick, on the same pre-step world the actions were decoded
+  ## against, with the identities that decode resolved.
+  m.tick = w.tick
+  m.self = w.cogs[slot].pos
+  for identity in 0..<Seats:
+    let body = bodies[identity]
+    m.bodies[identity] = body
+    m.positions[identity] = if body >= 0: w.cogs[body].pos else: Point()
+
+proc oneTickStep(a, b: Point): Point =
+  ## b - a when it can be one tick's movement; zero across a respawn or teleport.
+  let dx = b.x - a.x
+  let dz = b.z - a.z
+  if abs(dx) > TeleportStep or abs(dz) > TeleportStep: Point() else: Point(x: dx, z: dz)
+
+proc leadAimPoint*(w: World, slot, identity, body: int, m: AimMemory): Point =
+  ## Contract v2 identity aim: the point a shoot order issued now must name so that the
+  ## gun's ray meets `body` if both keep last tick's velocity (see LeadTargetMoves). The
+  ## velocities are last tick's displacements as the seat itself could observe them:
+  ## the body's only when the same body was seen under the same identity one tick ago,
+  ## the seat's own only when it decided one tick ago; a first tick, a gap, a respawn or
+  ## a teleport counts as zero, and with both zero the point is the body's position,
+  ## exactly the contract v1 aim.
+  let now = w.cogs[body].pos
+  result = now
+  if m.tick != w.tick - 1: return
+  if m.bodies[identity] == body:
+    let u = oneTickStep(m.positions[identity], now)
+    result.x += u.x * LeadTargetMoves.int32
+    result.z += u.z * LeadTargetMoves.int32
+  let v = oneTickStep(m.self, w.cogs[slot].pos)
+  result.x -= v.x * LeadOwnMoves.int32
+  result.z -= v.z * LeadOwnMoves.int32
+
+proc goalCandidate*(w: World, slot, movement: int): (bool, Point) =
+  ## Where movement head index `movement` sends the seat, and whether that candidate
+  ## exists now (a missing heart or an unavailable/unseen pickup keeps the goal).
+  let me = w.cogs[slot]
+  let flip = if team(slot)==0: 1 else: -1
+  if movement in 1..10:
+    if movement-1 < w.controlHearts.len: return (true, w.controlHearts[movement-1].pos)
+  elif movement in 11..42:
+    let i = movement-11
+    if i < w.pickups.len and w.pickups[i].readyAt <= w.tick and
+        w.canSeePoint(slot,w.pickups[i].pos): return (true, w.pickups[i].pos)
+  elif movement >= 43 and movement <= 50:
+    let delta = Directions[movement-43]
+    return (true, point(clamp(me.pos.x.int+flip*delta[0]*200,minX(),maxX()),
+                        clamp(me.pos.z.int+flip*delta[1]*200,minZ(),maxZ())))
+  (false, me.pos)
+
+proc aimCandidate*(w: World, slot, aim: int, bodies: array[Seats, int],
+    version: ActionContractVersion, memory: AimMemory): (bool, Point) =
+  ## Where aim head index `aim` points under `version`, and whether that candidate
+  ## exists now (an identity nobody visible carries keeps the aim).
+  let me = w.cogs[slot]
+  let flip = if team(slot)==0: 1 else: -1
+  if aim in 1..16:
+    let body = bodies[aim-1]
+    if body >= 0:
+      return (true, if version == acV2: w.leadAimPoint(slot, aim-1, body, memory)
+                    else: w.cogs[body].pos)
+  elif aim >= 17 and aim <= 24:
+    let delta = Directions[aim-17]
+    return (true, point(clamp(me.pos.x.int+flip*delta[0]*5000,minX(),maxX()),
+                        clamp(me.pos.z.int+flip*delta[1]*5000,minZ(),maxZ())))
+  (false, me.aim)
+
 proc decodeActions*(w: World, slot: int, actions: openArray[int32],
-    bodies: array[Seats, int]): Command =
+    bodies: array[Seats, int], version: ActionContractVersion,
+    memory: AimMemory): Command =
+  ## The shared decoder of every host. `version` selects the identity-aim rule; the
+  ## memory is read only under contract v2 (the host records it with recordAimMemory
+  ## after decoding each tick).
   if slot notin 0..<Seats or actions.len != ActionSizes.len:
     raise newException(ValueError, "invalid neural action dimensions or seat")
   for i,size in ActionSizes:
@@ -146,41 +273,33 @@ proc decodeActions*(w: World, slot: int, actions: openArray[int32],
   result.aim = me.aim
   if me.hp <= 0: return
   result.walk = true
-  let movement = actions[0].int
-  let flip = if team(slot)==0: 1 else: -1
-  if movement in 1..10:
-    if movement-1 < w.controlHearts.len: result.goal = w.controlHearts[movement-1].pos
-  elif movement in 11..42:
-    let i = movement-11
-    if i < w.pickups.len and w.pickups[i].readyAt <= w.tick and
-        w.canSeePoint(slot,w.pickups[i].pos): result.goal = w.pickups[i].pos
-  elif movement >= 43:
-    let delta = Directions[movement-43]
-    result.goal = point(clamp(me.pos.x.int+flip*delta[0]*200,minX(),maxX()),
-                        clamp(me.pos.z.int+flip*delta[1]*200,minZ(),maxZ()))
-  let aim = actions[1].int
-  if aim in 1..16:
-    if bodies[aim-1] >= 0: result.aim = w.cogs[bodies[aim-1]].pos
-  elif aim >= 17:
-    let delta = Directions[aim-17]
-    result.aim = point(clamp(me.pos.x.int+flip*delta[0]*5000,minX(),maxX()),
-                       clamp(me.pos.z.int+flip*delta[1]*5000,minZ(),maxZ()))
+  let (goalFound, goal) = w.goalCandidate(slot, actions[0].int)
+  if goalFound: result.goal = goal
+  let (aimFound, aim) = w.aimCandidate(slot, actions[1].int, bodies, version, memory)
+  if aimFound: result.aim = aim
   result.shoot = actions[2] != 0
   result.chargeGrenade = actions[3] != 0
   result.sneak = actions[4] != 0
-proc decodeActions*(w: World, slot: int, actions: openArray[int32]): Command =
+proc decodeActions*(w: World, slot: int, actions: openArray[int32],
+    bodies: array[Seats, int]): Command =
+  ## Contract v1: an identity aim is the body's current position.
+  w.decodeActions(slot, actions, bodies, acV1, default(AimMemory))
+proc decodeActions*(w: World, slot: int, actions: openArray[int32],
+    version: ActionContractVersion, memory: AimMemory): Command =
   if slot notin 0..<Seats or actions.len != ActionSizes.len:
     raise newException(ValueError, "invalid neural action dimensions or seat")
   # Identity aim is the only head that resolves bodies; keep the cost to that case.
   if actions.len == ActionSizes.len and actions[1] in 1'i32..16'i32:
-    return w.decodeActions(slot, actions, w.observedBodies(slot))
+    return w.decodeActions(slot, actions, w.observedBodies(slot), version, memory)
   var none: array[Seats, int]
   for i in 0..<Seats: none[i] = -1
-  w.decodeActions(slot, actions, none)
+  w.decodeActions(slot, actions, none, version, memory)
+proc decodeActions*(w: World, slot: int, actions: openArray[int32]): Command =
+  w.decodeActions(slot, actions, acV1, default(AimMemory))
 
-proc decodeLogits*(w: World, slot: int, logits: openArray[float32]): Command =
+proc argmaxActions*(logits: openArray[float32]): array[ActionSizes.len, int32] =
+  ## Deterministic headwise argmax, the deployed selection rule (first maximum wins).
   if logits.len != LogitSize: raise newException(ValueError,"invalid neural logit size")
-  var actions: array[ActionSizes.len,int32]
   var offset = 0
   for head,size in ActionSizes:
     var best = 0
@@ -188,9 +307,14 @@ proc decodeLogits*(w: World, slot: int, logits: openArray[float32]): Command =
       if classify(logits[offset+i]) in {fcNan,fcInf,fcNegInf}:
         raise newException(ValueError,"non-finite neural logits")
       if logits[offset+i] > logits[offset+best]: best = i
-    actions[head] = best.int32
+    result[head] = best.int32
     offset += size
-  w.decodeActions(slot,actions)
+proc decodeLogits*(w: World, slot: int, logits: openArray[float32],
+    bodies: array[Seats, int], version: ActionContractVersion,
+    memory: AimMemory): Command =
+  w.decodeActions(slot, argmaxActions(logits), bodies, version, memory)
+proc decodeLogits*(w: World, slot: int, logits: openArray[float32]): Command =
+  w.decodeActions(slot, argmaxActions(logits))
 
 proc trainingBotActions*(w: World, slot, level: int,
     actions: var openArray[int32], bodies: array[Seats, int]) =

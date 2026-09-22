@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import re
 import sys
 import unittest
 import zipfile
@@ -50,6 +51,25 @@ class PackageTests(unittest.TestCase):
     def test_contract_required(self):
         with self.assertRaisesRegex(ValueError, "contract"):
             unpack_package(package({"action_contract": "invalid"}))
+
+    def test_schema_2_accepted_and_others_rejected(self):
+        _, _, manifest = unpack_package(package({"schema": "paintbot-neural-basic/2"}))
+        self.assertEqual(manifest["schema"], "paintbot-neural-basic/2")
+        for schema in ("paintbot-neural-basic/3", "paintbot-neural-basic", None):
+            with self.assertRaisesRegex(ValueError, "schema"):
+                unpack_package(package({"schema": schema}))
+
+    def test_contract_hashes_are_sha256_of_their_ids(self):
+        # neural_contract.nim exports each contract id next to its hash; the hash is the
+        # SHA-256 of the id string and is what actors and manifests carry.
+        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
+        consts = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        pairs = [("ObservationContract", "ObservationContractHash"), ("ActionContract", "ActionContractHash"),
+                 ("ActionContractV2", "ActionContractV2Hash")]
+        for name, hashed in pairs:
+            self.assertEqual(consts[hashed], hashlib.sha256(consts[name].encode()).hexdigest(), name)
+        self.assertEqual(consts["ActionContractV2"], "paintbot-pw.rules37.action.v2.51-25-2-2-2")
+        self.assertNotEqual(consts["ActionContractHash"], consts["ActionContractV2Hash"])
 
     def test_decompression_bound(self):
         out = io.BytesIO()
