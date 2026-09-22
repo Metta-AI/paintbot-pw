@@ -400,3 +400,30 @@ engine, same file on both sides, seeds 1-8 at 4,800 ticks: identical hashes to `
 every seed. Peak per decision without an oracle about 10,300 instructions, 14,500 work units and 22
 string handles; drafting requests with the oracle on, about 12,600 / 26,700 / 131 (limits
 20,000 / 50,000 / 1,024). Not yet deployed; it ships with the next version.
+
+## BASIC only: the WASM lane is removed — 0.3.33
+
+Every seat is now a BASIC script. The WASM policy lane (a Wasmtime instance per seat fed the
+CTF sprite protocol by a host-side renderer, answering with gamepad or direct-order packets)
+is gone: `runtime/wasm_policy.py`, `runtime/sprite.py`, the WASM baseline
+(`players/base_wasm.nim`, `baseline.wasm`, its provenance and build tool) and
+`test_baseline.py` are deleted, the pod image no longer installs `wasmtime`, and the engine's
+policy bridge carries advisor-oracle traffic only (`{"rulesVersion","tick","oracle"}` out,
+`{"oracle"}` back; no world snapshot, no external commands). A WASM upload now forfeits its
+seat at episode start with "WASM modules are no longer accepted; submit a BASIC source file",
+exactly as a malformed BASIC file does, and the other fifteen seats play on. Rules, recordings
+and hashes are unchanged; older episodes keep their viewers.
+
+Why: with the direct-order packet, a WASM seat already acted through BASIC's actuators, so the
+lane amounted to a second hand-maintained observation encoding (kept in parity by thousands of
+terrain samples), a compute budget about a million times BASIC's, and a build chain that needed
+a coworld-ctf checkout and wasi-sdk 33. Every runtime-specific incident in this log (the CTF
+flag destination, the gamepad cap) was on that side.
+
+League follow-up after the deploy: the filler list drops `paintbot-pw-territory-wasm:v1`
+(`adcd246b-8a85-47b6-b63e-7f0dfcb7c40a`) and keeps `paintbot-pw-basic-v22:1`
+(`c51834df-5ce1-4307-9134-b6e80211dece`); WASM memberships (`daveey-heartwick`,
+`daveey-cogamer-paintbot-cdx`, the territory-wasm filler) are retired rather than left to
+forfeit three rounds into disqualification.
+
+PR #51. Deploy: TBD (filled in after the Deploy Coworld run).

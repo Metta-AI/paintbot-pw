@@ -44,9 +44,8 @@ type
     names*: array[Seats, string]
     communications*: seq[Communication]
     endTick*: int32
-  ExternalCommand = tuple[slot: int, command: Command, chat: seq[string]]
-  ExternalReply = object
-    commands: seq[ExternalCommand]
+  BridgeReply = object
+    ## The host's answer to one bridge line: settled advisor-oracle requests, nothing else.
     oracle: seq[OracleReply]
 type LegacyMetadataRecording = object
   seed: int32
@@ -158,34 +157,16 @@ proc advance*() =
           recording.communications.add Communication(tick: world.tick+1,
               slot: slot, text: message)
     if bridge != nil:
-      let snapshot = world.toJson()
+      # The bridge carries advisor-oracle traffic only: this tick's BASIC asks go out, and
+      # the host's settled answers come back. Seats never act through the host.
       var asks = ""
       for ask in drainOracleAsks():
         asks.add (if asks.len > 0: "," else: "") & "{\"slot\":" & $ask.slot &
             ",\"id\":" & $ask.id & ",\"body\":" & ask.body & "}"
-      bridge.writeLine("{\"rulesVersion\":" & $replayRulesVersion & "," &
-          "\"heard\":" & heard.toJson() & ",\"oracle\":[" & asks & "]," &
-          snapshot[1..^1]); bridge.flushFile()
-      # The host answers with the legacy command list, or with {commands, oracle} once it
-      # has oracle replies to deliver alongside the commands.
-      let line = bridge.readLine()
-      var external: seq[ExternalCommand]
-      if line.strip().startsWith("{"):
-        let reply = line.fromJson(ExternalReply)
-        external = reply.commands
-        for item in reply.oracle: deliverOracleReply(item)
-      else:
-        external = line.fromJson(seq[ExternalCommand])
-      for item in external:
-        if item.slot < 0 or item.slot >= Seats: raise newException(ValueError, "Invalid WASM slot")
-        commands[item.slot] = item.command
-        shouts[item.slot] = @[]
-        for message in item.chat[0..<min(4,item.chat.len)]:
-          if message.len > 1024: raise newException(ValueError, "Communication too long")
-          shouts[item.slot].add message[0..<min(256,message.len)]
-          if recording.communications.len < 20000:
-            recording.communications.add Communication(tick: world.tick+1,
-                slot: item.slot, text: message)
+      bridge.writeLine("{\"rulesVersion\":" & $replayRulesVersion & ",\"tick\":" &
+          $world.tick & ",\"oracle\":[" & asks & "]}"); bridge.flushFile()
+      let reply = bridge.readLine().fromJson(BridgeReply)
+      for item in reply.oracle: deliverOracleReply(item)
     deliverSpeech(world)
     world.step(commands)
     recording.frames.add Frame(commands: commands, hash: world.stateHash())
@@ -199,7 +180,7 @@ proc runHeadless*() =
   echo "ticks=", world.tick, " captures=", world.captures, " hash=",
       world.stateHash()
   if getEnv("PW_BASIC_PEAKS") == "1":
-    # Budget headroom per seat: limits are 20,000 instructions, 50,000 work units, 1,024 strings.
+    # Budget headroom per seat against the limits in bots.nim (instructions, work units, strings).
     echo "peak_instructions=", peakInstructions
     echo "peak_work=", peakWork
     echo "peak_strings=", peakStrings

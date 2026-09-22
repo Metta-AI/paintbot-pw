@@ -1,9 +1,10 @@
-"""Host-side advisor oracle for WASM seats.
+"""Host-side advisor oracle for BASIC seats.
 
-Seats stay sandboxed: they cannot open sockets. A seat may instead hand the host a JSON
-question (`state` + `questions`) through the `paintbot.oracle_ask` import; the host posts it
-to one operator-configured endpoint outside the sandbox and the seat collects the answer on
-a later tick with `paintbot.oracle_poll`. Nothing here blocks a game tick.
+Seats stay sandboxed inside the engine: they cannot open sockets. A BASIC seat instead drafts a
+JSON question (`state` + `questions`) that the engine ships to the host in its per-tick bridge
+line; the host posts it to one operator-configured endpoint outside the sandbox and returns the
+answer over the bridge on a later tick (see `host.basic_oracle_round`). Nothing here blocks a
+game tick.
 
 Limits apply per seat: one request in flight, a minimum spacing in game ticks, bounded body
 and answer sizes, and a hard wall-clock deadline after which the request is reported failed.
@@ -127,7 +128,8 @@ class Oracle:
         """Queue a request. Returns a request id >= 1, or 0 when refused (rate limit, in flight, bad
         body, or a hosted sidecar already found to have no System One route).
 
-        The engine assigns ids for BASIC seats (`request_id`); WASM seats take the next one here.
+        The engine assigns ids for BASIC seats (`request_id`); a caller that passes none takes
+        the seat's next id here.
         """
         if len(body) > MAX_BODY:
             return 0
