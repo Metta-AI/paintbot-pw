@@ -55,9 +55,11 @@ int pw_seat_orders(void *handle, int seat, int32_t *ten);
  * every world byte-identical to a library without them.
  * pw_set_seat_fire_period: the seat's shoot order (script, Nim bot or caller) is honoured
  * only when the seat could fire now (gun: cooldown 0 and no windup; spray can: spray
- * cooldown 0) and at least `period` cooldown windows (period x 24 ticks) have passed
- * since its last honoured shot. Only the issued order is gated: the interpreter, the
- * script's state and its aim are untouched. Period 1 never gates. Returns 0, -1 bad args.
+ * cooldown 0) and at least `period` weapon cooldown windows have passed since its last
+ * honoured shot. UNIT: one cooldown window = FireCooldownTicks = 24 ticks (one second),
+ * so period 4 = at most one honoured shot per 96 ticks, the same unit as the adapter's
+ * fire-gated Nim bot. Only the issued order is gated: the interpreter, the script's
+ * state and its aim are untouched. Period 1 never gates. Returns 0, -1 bad args.
  * pw_set_seat_damage_scale: damage dealt BY the seat is scaled by permille/1000 with
  * floor rounding (a 1-point gun hit deals 0 below 1000; grenade 2/6 and spray 3 step
  * down), the hit itself still lands (shield, cooldown relief, telemetry and friendly-fire

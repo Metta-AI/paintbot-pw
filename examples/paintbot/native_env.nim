@@ -54,9 +54,11 @@ proc initCurriculum(env: ptr NativeEnv) =
     env.firePeriod[slot] = 1
     env.damagePermille[slot] = 1000
   env.resetCurriculum()
+static: doAssert FireCooldownTicks == 24, "the fire period unit is the 24-tick cooldown window"
 proc gateFire(env: ptr NativeEnv, slot: int, command: var Command) =
-  ## Honour a shoot order only when the seat could fire now and at least `period`
-  ## cooldown windows have passed since its last honoured shot. Period 1 never gates.
+  ## Honour a shoot order only when the seat could fire now and at least
+  ## period x FireCooldownTicks (period x 24 ticks) have passed since its last honoured
+  ## shot. Period 1 never gates.
   let period = env.firePeriod[slot]
   if period <= 1 or not command.shoot: return
   let c = env.world.cogs[slot]
@@ -307,10 +309,12 @@ proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int
 
 proc pw_set_seat_fire_period*(handle: pointer, seat: cint, period: int32): cint {.exportc, cdecl, dynlib.} =
   ## Curriculum: the seat's shoot order (from its script, the Nim bot, or the caller)
-  ## is honoured only when it could fire now and at least `period` cooldown windows
-  ## (period x 24 ticks) have passed since its last honoured shot; lookAt, movement and
-  ## everything the script believes are untouched. 1 restores exact behaviour. Kept
-  ## across pw_reset; the shot history is not.
+  ## is honoured only when it could fire now and at least `period` weapon cooldown
+  ## windows have passed since its last honoured shot. The unit is the gun cooldown
+  ## window, FireCooldownTicks = 24 ticks (one second): period 4 means at most one
+  ## honoured shot per 96 ticks, the same unit as the adapter's fire-gated Nim bot.
+  ## lookAt, movement and everything the script believes are untouched. 1 restores
+  ## exact behaviour. Kept across pw_reset; the shot history is not.
   if handle == nil or seat notin 0..<Seats or period < 1: return -1
   ready()
   let env = cast[ptr NativeEnv](handle)

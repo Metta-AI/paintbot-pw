@@ -61,8 +61,11 @@ suite "Native curriculum knobs":
         let fired = shots[0]
         check fired.len > 0
         check fired.len <= issued
-        check fired.len <= gatedHashes.len div (period.int*FireCooldownTicks) + 1
-        for i in 1..<fired.len: check fired[i]-fired[i-1] >= period*FireCooldownTicks.int32
+        # The unit is the 24-tick cooldown window: period 4 = at least 96 ticks apart.
+        check fired.len <= gatedHashes.len div (period.int*24) + 1
+        for i in 1..<fired.len: check fired[i]-fired[i-1] >= period*24
+        if period == 4:
+          for i in 1..<fired.len: check fired[i]-fired[i-1] >= 96
         check pw_seat_script_status(gated, 0, nil, 0) == 1 # The script ran untouched.
         check gatedHashes != plainHashes
         # Period 1 on the same handle after a reset is exact again.
