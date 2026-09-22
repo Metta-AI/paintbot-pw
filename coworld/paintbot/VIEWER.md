@@ -45,7 +45,7 @@ The bundle contains its fonts, portrait, textures and models; it needs no extern
 
 ## Verification
 
-`tests/test_paintbot_replay.nim` checks forward/backward/repeated checkpoint seeks against recorded hashes, v1 conversion, v2 public metadata, invalid metadata, and hash corruption. The existing seven rules tests and four Python runtime-boundary tests remain passing. A newly recorded 16-seat mixed BASIC/WASM episode retained the existing 3984-tick, 3–0 result and hash `1977552757`.
+`tests/test_paintbot_replay.nim` checks forward/backward/repeated checkpoint seeks against recorded hashes, v1 conversion, v2 public metadata, invalid metadata, and hash corruption. `tests/test_paintbot_projection.nim` checks that the HUD overlay projection in `examples/paintbot/projection.nim` stays finite for every drawable size, including the 0x0 window of a hidden or not-yet-laid-out iframe, so the wasm never hands `JSON.parse` a `nan` (which stopped the main loop before the first frame). The existing seven rules tests and four Python runtime-boundary tests remain passing. A newly recorded 16-seat mixed BASIC/WASM episode retained the existing 3984-tick, 3–0 result and hash `1977552757`.
 
 ## Live browser games and human control
 
