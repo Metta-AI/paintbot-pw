@@ -16,10 +16,14 @@ proc secondsBetween(a, b: int): int32 =
   ## Whole-second boundaries crossed going from tick a to tick b: the countdown paid.
   int32(b div TickRate - a div TickRate)
 
+# A live game must simulate the same rules it stamps on the recording; 0.3.32 shipped with these
+# two defaults apart (35 vs 36), which made every hosted replay of that version unplayable.
+doAssert visionRulesVersion == replayRulesVersion
+
 suite "Glory":
   setup:
-    visionRulesVersion = 36
-    replayRulesVersion = 36
+    visionRulesVersion = 37
+    replayRulesVersion = 37
   test "glory starts at the match length in seconds and counts down one per second":
     var w = newWorld(2026)
     check w.endTick == 600*TickRate
@@ -171,7 +175,18 @@ suite "Glory":
     w.idle(24)
     check w.winner == 0
     check w.glory == [0'i32, 0'i32]
-  test "glory is part of the rules 36 hash and absent from rules 35":
+  test "rules 36 recordings play as rules 35: no glory, heart-point scores":
+    visionRulesVersion = 36
+    replayRulesVersion = 36
+    var w = newWorld(2026)
+    w.idle(TickRate)
+    check w.glory == [0'i32, 0'i32]
+    check w.gloryEvents.len == 0
+    check w.scores()[0] == 1.0
+    var tampered = w
+    tampered.glory[0] = 99
+    check tampered.stateHash() == w.stateHash()
+  test "glory is part of the rules 37 hash and absent from rules 35":
     var w = newWorld(2026)
     w.idle(1)
     var tampered = w
@@ -190,7 +205,7 @@ suite "Glory":
     var oldTampered = old
     oldTampered.glory[0] = 99
     check oldTampered.stateHash() == old.stateHash()
-  test "rules 36 recording round trips to the same glory":
+  test "rules 37 recording round trips to the same glory":
     var w = newWorld(2026, 48)
     var r = Recording(seed: w.seed, endTick: w.endTick)
     var commands: array[Seats, Command]
@@ -200,9 +215,9 @@ suite "Glory":
     check w.winner == -2
     let path = getTempDir()/"paintbot-glory.replay"
     defer: removeFile(path)
-    saveReplayFile(path, "paintbot_pw", 36, r)
+    saveReplayFile(path, "paintbot_pw", 37, r)
     let loaded = loadRecording(path)
-    check replayRulesVersion == 36
+    check replayRulesVersion == 37
     var replay = newWorld(loaded.seed, loaded.endTick)
     check replay.glory == [2'i32, 2'i32]
     for frame in loaded.frames:

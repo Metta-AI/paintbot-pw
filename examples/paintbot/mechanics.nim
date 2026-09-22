@@ -509,7 +509,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         if heart.owner >= 0: w.scoreTicks[heart.owner] += w.heartPoints(index)
       if visionRulesVersion >= 28:
         inc w.tick
-        if visionRulesVersion >= 36: w.updateGlory()
+        if visionRulesVersion >= 37: w.updateGlory()
         let target = w.heartMeterTarget()
         var eliminated = false
         if visionRulesVersion >= 34:
