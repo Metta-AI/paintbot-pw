@@ -170,3 +170,57 @@ suite "Jev-advised BASIC baseline":
     # The survival question asks about losing a life, so a high probability means danger.
     check not questions.hasKey("survive")
     check questions["lose_life"]["instructions"].getStr.contains("loses one of its lives")
+
+  test "every experiment switch combination still plays and fits the budget":
+    # The shipped defaults leave several arms switched off, so nothing else here compiles the
+    # code behind them. `coworld/paintbot/tools/jev_experiment.py` ships exactly these flips as
+    # hosted experiment arms; a broken arm must fail here, not after a battery of paid episodes.
+    const Arms = {
+      "no nouls": @[("useNouls", 0)],
+      "score": @[("useScore", 1)],
+      "margin": @[("kMargin", 150)],
+      "wide": @[("useWide", 1)],
+      "retreat and dial": @[("useRetreat", 1), ("useDial", 1)],
+    }
+    let shipped = readFile(Jev)
+    for (name, flips) in Arms:
+      var source = shipped
+      for (switch, value) in flips:
+        let want = "\n  " & switch & " = " & $value & "\n"
+        for old in 0..1:
+          source = source.replace("\n  " & switch & " = " & $old & "\n", want)
+        # The switch must exist in the init block under exactly this name, or the arm is a
+        # no-op that would quietly measure the shipped defaults instead.
+        check source.contains(want)
+        check not source.contains("\n  " & switch & " = 0\n") or value == 0
+      let path = getTempDir() / ("paintbot-jev-arm-" & name.replace(" ", "-") & ".bas")
+      writeFile(path, source)
+      defer: removeFile(path)
+
+      resetOracle()
+      oracleEnabled = true
+      peakInstructions = default(array[Seats, int64])
+      peakWork = default(array[Seats, int64])
+      peakStrings = default(array[Seats, int64])
+      var w = newWorld(4)
+      let players = loadBots(@[BotGroup(path: path, count: Seats)])
+      var asked = 0
+      while w.tick < 360 and w.winner == -1:
+        let commands = players.decide(w)
+        for ask in drainOracleAsks():
+          inc asked
+          # Answer whatever this arm asked, so the consume path runs too.
+          var answers = initTable[string, OracleAnswer]()
+          for key, question in parseJson(ask.body)["questions"]:
+            answers[key] = OracleAnswer(value: 0, confidence: 900,
+                probabilities: {"C0": 800'i32, "current": 200'i32}.toTable)
+          deliverOracleReply(OracleReply(slot: ask.slot, id: ask.id, status: answers.len,
+              answers: answers))
+        deliverSpeech(w)
+        w.step(commands)
+      check asked > 0
+      for slot in 0..<Seats:
+        check not players[slot].failed
+        check peakInstructions[slot] < 15_000
+        check peakWork[slot] < 37_500
+        check peakStrings[slot] < 768
