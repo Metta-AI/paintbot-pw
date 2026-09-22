@@ -23,10 +23,9 @@ const
   HeartCaptureTicks* = 3 * TickRate
   BigHeartInterval* = 30 * TickRate
   BigHeartPoints* = 5
-  # Glory (rules 36) is the winner's score: it starts at the match length in seconds, loses
+  # Glory (rules 37) is the winner's score: it starts at the match length in seconds, loses
   # one per second, and grows on the events below. The loser's glory is zeroed at the end.
-  GloryCapture* = 5
-  GloryTag* = 2
+  # Glory is a self-imposed handicap: nothing that makes a team more likely to win pays it.
   GloryQuietSupplies* = 10
   GloryQuietSupplyTicks* = 30*TickRate
   GloryFriendlyFire* = 30
@@ -88,7 +87,7 @@ type
   SoundCue* = object
     listener*, kind*, direction*, distance*, tick*: int32
   GloryKind* = enum
-    gloryCapture, gloryTag, gloryQuietSupplies, gloryFriendlyFire
+    gloryQuietSupplies, gloryFriendlyFire
   GloryEvent* = object
     tick*, team*, amount*: int32
     kind*: GloryKind
@@ -115,7 +114,7 @@ type
     usedBigHearts*: seq[bool]
     sounds*: seq[SoundCue] # Listener-relative sectors; never exact source coordinates.
     uniforms*: array[Seats, bool]
-    glory*: array[2, int32] # Rules 36: the winner's score, in seconds; see GloryCapture and friends.
+    glory*: array[2, int32] # Rules 37: the winner's score, in seconds; see GloryQuietSupplies and friends.
     lastSupplyTick*: array[2, int32] # The last tick each team collected a supply.
     gloryEvents*: seq[GloryEvent] # Recent awards, kept GloryEventLifetime ticks for the viewer.
   TerritoryWorld = object
@@ -155,7 +154,9 @@ type
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
-var visionRulesVersion* = 35
+# Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
+# still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
+var visionRulesVersion* = 37
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
@@ -349,7 +350,7 @@ proc newWorld*(seed: int32, endTick: int32 = 0): World =
     (if endTick <= 0: HeartMeterMatchTicks.int32 else: min(endTick, HeartMeterMatchTicks.int32))
   else: (if endTick <= 0: MatchTicks.int32 else: endTick)
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
-  if visionRulesVersion >= 36:
+  if visionRulesVersion >= 37:
     let seconds = result.endTick div TickRate
     result.glory = [seconds, seconds]
   if visionRulesVersion >= 8:
@@ -398,13 +399,13 @@ proc heartMeterTarget*(w: World): int32 =
   w.controlHearts.len.int32 * HeartMeterFillTicks div 2
 
 proc earnGlory*(w: var World, side: int, kind: GloryKind, amount: int32) =
-  ## Rules 36: credit a team and remember why, so the viewer can say so.
-  if visionRulesVersion < 36: return
+  ## Rules 37: credit a team and remember why, so the viewer can say so.
+  if visionRulesVersion < 37: return
   w.glory[side] += amount
   w.gloryEvents.add GloryEvent(tick: w.tick, team: side.int32, amount: amount, kind: kind)
 
 proc updateGlory*(w: var World) =
-  ## Rules 36, once per tick after the tick counter advances: forget old awards, count
+  ## Rules 37, once per tick after the tick counter advances: forget old awards, count
   ## down one glory per second, and pay a team that went thirty seconds without supplies.
   var recent: seq[GloryEvent]
   for event in w.gloryEvents:
@@ -419,13 +420,13 @@ proc updateGlory*(w: var World) =
 
 proc settleGlory*(w: var World) =
   ## Only winners keep glory: the loser's drops to zero, and a draw pays nobody.
-  if visionRulesVersion < 36 or w.winner == -1: return
+  if visionRulesVersion < 37 or w.winner == -1: return
   for side in 0..1:
     if w.winner != side.int32: w.glory[side] = 0
 
 proc scores*(w: World): seq[float] =
   for i in 0..<Seats:
-    result.add (if visionRulesVersion >= 36: w.glory[team(i)].float elif visionRulesVersion >= 23: w.scoreTicks[team(i)].float / TickRate.float else: float(if visionRulesVersion >= 20 and w.winner >= 0: (if w.winner == team(i).int32: 10 else: 0) elif visionRulesVersion>=13:w.captures[team(i)].int else:int(w.winner == team(i).int32)))
+    result.add (if visionRulesVersion >= 37: w.glory[team(i)].float elif visionRulesVersion >= 23: w.scoreTicks[team(i)].float / TickRate.float else: float(if visionRulesVersion >= 20 and w.winner >= 0: (if w.winner == team(i).int32: 10 else: 0) elif visionRulesVersion>=13:w.captures[team(i)].int else:int(w.winner == team(i).int32)))
 type LegacyWorld = object
   seed, tick: int32
   rng: Rng
@@ -442,7 +443,7 @@ proc stateHash*(w: World): uint32 =
       when name == "uniforms":
         if visionRulesVersion >= 27: result.addHashy(value)
       elif name == "glory" or name == "lastSupplyTick" or name == "gloryEvents":
-        if visionRulesVersion >= 36: result.addHashy(value)
+        if visionRulesVersion >= 37: result.addHashy(value)
       else: result.addHashy(value)
     return
   if visionRulesVersion >= 13:
