@@ -650,17 +650,23 @@ proc legacyWaypoint(w: World, start, goal: Point): Point =
   point(minX()+n mod nx*200+100, minZ()+n div nx*200+100)
 # Navigation uses body clearance, never the visibility ray. Cached flow fields
 # share static terrain work across cogs headed for the same objective.
+type NavCache = object
+  cover: seq[Cover]
+  payload: pointer
+  length: int
+  bounds: array[4,int]
+  edges: seq[seq[int]]
+  fields: Table[int,seq[int32]] # target cell -> BFS distance per cell, -1 unreachable
+  recent: seq[int]              # targets, least recently used first
+  targets: Table[Point,int]     # goal -> nearest connected cell (or -1)
 when defined(pwTraining):
-  var navCover {.threadvar.}: seq[Cover]
-  var navBounds {.threadvar.}: array[4,int]
-  var navEdges {.threadvar.}: seq[seq[int]]
-  var navFields {.threadvar.}: Table[int,seq[int]]
+  var nav {.threadvar.}: NavCache
 else:
-  var navCover: seq[Cover]
-  var navBounds: array[4,int]
-  var navEdges: seq[seq[int]]
-  var navFields: Table[int,seq[int]]
-const NavCell = 100
+  var nav: NavCache
+const
+  NavCell = 100
+  NavFieldLimit = 64
+  NavTargetLimit = 4096
 proc walkCoverBlocks(c: Cover, a,b: Point, dx,dz,length: float64): bool {.inline.} =
   if c.h==0:
     let r=c.w.float64/2
@@ -693,15 +699,44 @@ proc walkClear*(w: World, a,b: Point):bool =
 proc navigationPoint(n,nx:int):Point =
   point(minX()+(n mod nx)*NavCell+NavCell div 2,
         minZ()+(n div nx)*NavCell+NavCell div 2)
+proc nearestConnectedCell(goal:Point,nx,nz:int):int =
+  ## The connected cell whose centre is nearest the goal, lowest index on ties: the
+  ## same answer as scanning every cell, found by rings of cells around the goal that
+  ## stop once a ring cannot hold a centre as near as the best so far.
+  result = -1
+  var best=high(int64)
+  let originX=minX(); let originZ=minZ()
+  let gx=floorDiv(goal.x.int-originX,NavCell)
+  let gz=floorDiv(goal.z.int-originZ,NavCell)
+  for ring in 0..max(nx,nz)+max(abs(gx),abs(gz))+1:
+    if ring>0:
+      let nearest=int64((ring-1)*NavCell+NavCell div 2)
+      if nearest*nearest>best:break
+    for z in max(0,gz-ring)..min(nz-1,gz+ring):
+      let edge=abs(z-gz)==ring
+      var x=max(0,gx-ring)
+      while x<=min(nx-1,gx+ring):
+        if edge or abs(x-gx)==ring:
+          let n=z*nx+x
+          if nav.edges[n].len>0:
+            let d=distance2(goal,point(originX+x*NavCell+NavCell div 2,originZ+z*NavCell+NavCell div 2))
+            if d<best or (d==best and n<result):best=d;result=n
+        if edge or x>=gx+ring:inc x
+        else:x=gx+ring
 proc waypoint*(w:World,start,goal:Point):Point =
   if visionRulesVersion<22:return w.legacyWaypoint(start,goal)
   if w.walkClear(start,goal):return goal
   let nx=(maxX()-minX()) div NavCell
   let nz=(maxZ()-minZ()) div NavCell
   let bounds=[minX(),minZ(),maxX(),maxZ()]
-  if navEdges.len!=nx*nz or navCover!=w.cover or navBounds!=bounds:
-    navCover=w.cover;navBounds=bounds;navFields.clear()
-    navEdges=newSeq[seq[int]](nx*nz)
+  let payload=if w.cover.len>0:cast[pointer](unsafeAddr w.cover[0]) else:nil
+  # The grid depends only on cover and bounds. A world whose cover payload address or
+  # length differs from the last is compared by content; the grid survives if it agrees.
+  let same=nav.edges.len==nx*nz and nav.bounds==bounds and nav.length==w.cover.len and
+    ((nav.payload==payload and defined(pwTraining)) or nav.cover==w.cover)
+  if not same:
+    nav.cover=w.cover;nav.bounds=bounds;nav.fields.clear();nav.recent.setLen(0);nav.targets.clear()
+    nav.edges=newSeq[seq[int]](nx*nz)
     for n in 0..<nx*nz:
       let a=navigationPoint(n,nx)
       if w.blocked(a):continue
@@ -710,29 +745,35 @@ proc waypoint*(w:World,start,goal:Point):Point =
         if x>=nx or z>=nz:continue
         let j=z*nx+x
         if w.walkClear(a,navigationPoint(j,nx)):
-          navEdges[n].add j;navEdges[j].add n
+          nav.edges[n].add j;nav.edges[j].add n
+  nav.payload=payload;nav.length=w.cover.len
   var target = -1
-  var best=high(int64)
-  for n in 0..<navEdges.len:
-    if navEdges[n].len==0:continue
-    let d=distance2(goal,navigationPoint(n,nx))
-    if d<best:best=d;target=n
+  if goal in nav.targets:target=nav.targets[goal]
+  else:
+    target=nearestConnectedCell(goal,nx,nz)
+    if nav.targets.len>=NavTargetLimit:nav.targets.clear()
+    nav.targets[goal]=target
   if target<0:return start
-  if target notin navFields:
-    var distances=newSeq[int](nx*nz)
+  if target notin nav.fields:
+    var distances=newSeq[int32](nx*nz)
     for d in distances.mitems:d = -1
     var queue = @[target];distances[target]=0
     var head=0
     while head<queue.len:
       let n=queue[head];inc head
-      for j in navEdges[n]:
+      for j in nav.edges[n]:
         if distances[j]<0:
           distances[j]=distances[n]+1;queue.add j
-    if navFields.len>=64:navFields.clear()
-    navFields[target]=distances
-  let distances=navFields[target]
+    if nav.fields.len>=NavFieldLimit:
+      # Bounded eviction of the least recently used field; results never depend on it.
+      nav.fields.del(nav.recent[0]);nav.recent.delete(0)
+    nav.fields[target]=distances
+    nav.recent.add target
+  elif nav.recent[^1]!=target:
+    nav.recent.delete(nav.recent.find(target));nav.recent.add target
+  let distances=addr nav.fields[target]
   result=start
-  best=high(int64)
+  var best=high(int64)
   var anchor = -1
   let sx=(start.x.int-minX()) div NavCell
   let sz=(start.z.int-minZ()) div NavCell
@@ -748,7 +789,7 @@ proc waypoint*(w:World,start,goal:Point):Point =
   result=navigationPoint(anchor,nx)
   for step in 0..<8:
     var next = -1
-    for j in navEdges[anchor]:
+    for j in nav.edges[anchor]:
       if distances[j]>=0 and distances[j]<distances[anchor]:next=j;break
     if next<0:break
     let p=navigationPoint(next,nx)
