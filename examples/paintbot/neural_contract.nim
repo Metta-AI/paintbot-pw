@@ -7,10 +7,10 @@ const
   ObservationSize* = 448
   ActionSizes* = [51, 25, 2, 2, 2]
   LogitSize* = 82
-  ObservationContract* = "paintbot-pw.obs.v1.float448"
-  ActionContract* = "paintbot-pw.action.v1.51-25-2-2-2"
-  ObservationContractHash* = "e01445fa09aecd45f7b63fad29d444146b662f9d5de7652433b91e5f425a8b1d"
-  ActionContractHash* = "74ee9ad44aa93d2e1d39a503e113eb924a66772b0f2882e5cc16ab0c895238f9"
+  ObservationContract* = "paintbot-pw.rules37.obs.v1.float448"
+  ActionContract* = "paintbot-pw.rules37.action.v1.51-25-2-2-2"
+  ObservationContractHash* = "ed5d16768e3144a04a28420ce227ff2d6a831be9f64f3633326b133a5335b7e2"
+  ActionContractHash* = "55922d42d4065a069b3193f31e056c3a53cd34175b10fed7ff0d8c22b50a473e"
   Directions = [(1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1)]
 
 proc observedBodies(w: World, slot: int): array[Seats, int] =

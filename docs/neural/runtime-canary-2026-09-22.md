@@ -1,5 +1,10 @@
 # Neural BASIC runtime canary — 2026-09-22
 
+Historical pre-integration evidence: this snapshot implemented glory under rules 36.
+PR #52 subsequently moved glory to rules 37, removed capture/tag glory rewards,
+and restored historical rules 36 replay compatibility. These canaries and
+contract hashes do not establish readiness of the later rules 37 target.
+
 This is local evidence from the native binary and production Python host path,
 not a hosted release, certification, trained policy, or promotion result.
 The working tree includes the neural API and live-rules initialization fix.
@@ -75,3 +80,21 @@ This directly checks that extracting terrain configuration into `configureRules`
 did not alter legacy simulator semantics. It does not claim cross-version
 replays are interchangeable; the normal-launch regression separately checks the
 intentional default-rules correction.
+
+## Rules 37 integration canary
+
+After integrating PR #51's BASIC-only host and PR #52's rules 37 semantics,
+regenerated the neutral actor with rules 37 contract hashes. The real host again
+completed the mixed eight-neural/eight-plain full match: 1,669 ticks, all 16 seats
+exit code 0, team scores `[0,681]`, and every replay frame verified with final
+hash **2621322303**. Launch plus replay verification took 12.27 seconds locally.
+This is the current local integration canary, not hosted certification.
+
+Model SHA-256: `677f0a8daf0dbab8d97c055f28558adc69b0099c661ed717a8d03de3239e2bc1`.
+BASIC SHA-256 remains `316e4cf91ac9c7f9a0de848c2b59f7575a07666569efad89d9dc521bd69ea99d`.
+Current contracts are `paintbot-pw.rules37.obs.v1.float448` and
+`paintbot-pw.rules37.action.v1.51-25-2-2-2`; hashes are in `neural_contract.nim`.
+
+After integration, the BASIC-only Python runtime's 28 tests, six package tests,
+rules 37 glory suite, legacy replay suite, neural-host/contract suites, native
+ABI reference suite, and normal-live-launch replay regression all passed.

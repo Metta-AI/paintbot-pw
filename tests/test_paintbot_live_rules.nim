@@ -7,7 +7,7 @@ if "--replay" in commandLineParams():
 else:
   setup() # Use the normal CLI setup path, without assigning any rules globals.
   doAssert visionRulesVersion == replayRulesVersion
-  doAssert replayRulesVersion == 36
+  doAssert replayRulesVersion == 37
   doAssert world.glory == [world.endTick div TickRate, world.endTick div TickRate]
   for i in 0..<48: advance()
   let path = getTempDir() / ("paintbot-live-rules-" & $getCurrentProcessId() & ".replay")

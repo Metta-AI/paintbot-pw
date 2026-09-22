@@ -3,7 +3,7 @@ import ../examples/paintbot/[sim, neural_contract]
 
 suite "Neural policy contract":
   setup:
-    visionRulesVersion = 36
+    visionRulesVersion = 37
   test "fixed finite observations for every seat and scratch buffers are cleared":
     let w = newWorld(2026)
     var obs: array[ObservationSize,float32]
