@@ -422,8 +422,8 @@ flag destination, the gamepad cap) was on that side.
 
 League follow-up after the deploy: the filler list drops `paintbot-pw-territory-wasm:v1`
 (`adcd246b-8a85-47b6-b63e-7f0dfcb7c40a`) and keeps `paintbot-pw-basic-v22:1`
-(`c51834df-5ce1-4307-9134-b6e80211dece`); WASM memberships (`daveey-heartwick`,
-`daveey-cogamer-paintbot-cdx`, the territory-wasm filler) are retired rather than left to
-forfeit three rounds into disqualification.
+(`c51834df-5ce1-4307-9134-b6e80211dece`); the WASM memberships (`daveey-cogamer-paintbot-cdx`
+and the territory-wasm filler) are retired rather than left to forfeit three rounds into
+disqualification. `daveey-heartwick` is a BASIC script (`heartwick.bas`) and stays.
 
 PR #51. Deploy: TBD (filled in after the Deploy Coworld run).
