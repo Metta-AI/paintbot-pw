@@ -2,11 +2,16 @@
 
 A neural policy is a ZIP file with exactly three root entries: `manifest.json`,
 `policy.bas`, and `model.bin`. It uses the ordinary opaque file policy upload.
-The manifest has schema `paintbot-neural-basic/1`, a `sha256` object mapping
-`policy.bas` and `model.bin` to lowercase SHA-256 digests, and
+The manifest has schema `paintbot-neural-basic/1` or `paintbot-neural-basic/2`, a
+`sha256` object mapping `policy.bas` and `model.bin` to lowercase SHA-256 digests, and
 `observation_contract`/`action_contract` containing the contract SHA-256 hashes
-exported in `neural_contract.nim`. Actor metadata must match both contracts,
-448 inputs, 82 outputs, and categorical head sizes `[51,25,2,2,2]`.
+exported in `neural_contract.nim`. The action contract may be v1
+(`55922d42…`, identity aim = body position) or v2 (`51f602ef…`, lead-compensated
+identity aim; see `neural_actor.md`); the actor's embedded hash must equal the manifest's
+and selects the decoder the seat runs, so existing v1 bundles keep byte-identical
+behaviour. Schema 2 is for bundles that may name contract v2: a host that only knows
+schema 1 rejects them at staging instead of at model load. Actor metadata must match
+both contracts, 448 inputs, 82 outputs, and categorical head sizes `[51,25,2,2,2]`.
 The actor's binary format is documented in `neural_actor.md`.
 
 The archive is bounded to 16 MiB model, 64 KiB BASIC, and 8 KiB manifest.

@@ -74,6 +74,58 @@ Version 1, declared in `native_env.h`: `pw_create/pw_reset/pw_destroy`,
 `pw_results`, `pw_bot_actions`, `pw_state_hash`, and the telemetry call below. Every
 entry is additive to v1; a host that ignores the newer ones sees the same bytes.
 
+## Action contracts
+
+Two action contracts share the five heads `[51,25,2,2,2]` and differ only in what an
+identity aim (aim head index 1..16) resolves to. The actor file and the package
+manifest carry the contract's SHA-256 (the hash of the id string), and the host decodes
+each seat by the contract its actor names; a v1 bundle keeps byte-identical behaviour on
+a host that also knows v2.
+
+| version | id | SHA-256 | identity aim |
+|---|---|---|---|
+| v1 | `paintbot-pw.rules37.action.v1.51-25-2-2-2` | `55922d42d4065a069b3193f31e056c3a53cd34175b10fed7ff0d8c22b50a473e` | the body's current position |
+| v2 | `paintbot-pw.rules37.action.v2.51-25-2-2-2` | `51f602ef167919ca825595f9d81777cb807afbb0938a20102457d0594e2b4317` | the body's lead-compensated aim point |
+
+Movement (heart, visible pickup or `pos+200*compass`), directional aim
+(`pos+5000*compass`), fire, grenade and sneak decode identically under both.
+
+**v2 lead (`leadAimPoint` in `neural_contract.nim`).** The gun (`mechanics.nim`, rules
+>= 10) processes a shoot order on tick T after that tick's movement: `gunAim = aim -
+pos_T` is locked as a vector and the ray leaves `GunWindupTicks` = 5 ticks later from
+`pos_(T+5)`, along the locked vector. Between the pre-step world the policy observed and
+the ray, the shooter makes 6 moves, and the direction was fixed after the first. For a
+shooter with per-tick velocity `v` and a target with per-tick velocity `u` observed at
+`P`, the ray `pos_(T+5) + s*(aim - pos_T)` passes through `P + 6u` when
+
+```
+aim = P + (GunWindupTicks+1)*u - GunWindupTicks*v = P + 6u - 5v
+```
+
+which is base.bas's own rule ("the ray leaves six moves after the order ... aim where
+they will be, minus our own drift": target velocity x 6, own drift x 5). The velocities
+are last tick's displacements as the seat itself could observe them, kept by the host in
+an `AimMemory` outside the world (never hashed or serialized, recorded with
+`recordAimMemory` after every decode): `u` only when the same body was seen under the
+same identity one tick ago, `v` only when the seat decided one tick ago; a first tick,
+a gap, a respawn or a teleport (a per-axis displacement above `TeleportStep` = 60, more
+than any one-tick move) counts as zero. With both zero the v2 aim is the v1 aim. The
+memory follows the recurrent state in the hosted seat (cleared at initial use, match
+reset, death and respawn) and is cleared by `pw_create`, `pw_reset` and
+`pw_set_action_contract` in the native ABI.
+
+Native ABI: `pw_set_action_contract(handle, 1|2)` selects the decoder for the caller's
+actions (default 1, kept across resets), `pw_action_contract(handle)` reads it,
+`pw_action_contract_hash(version, out, 65)` returns the hash; the Nim bot
+(`pw_bot_actions`) expresses identity aims and is therefore lead-compensated under v2.
+`pw_action_candidates(handle, seat, int32[51*2], int32[25*2])` reports the point each
+head index resolves to on the current pre-step world (INT32_MIN for a candidate that
+does not exist), for exact demonstration mapping. `pw_script_decide(handle)` runs the
+scripted seats' decision ahead of `pw_step` and `pw_set_seat_override(handle, seat,
+mask)` (bits 1 walk, 2 aim, 4 shoot, 8 grenade, 16 sneak) makes a scripted seat execute
+the caller's decoded action for the masked heads: the mapping-ceiling diagnostics, exact
+with mask 0.
+
 `pw_seat_stats(handle, int32 out[16*8])` fills, per seat in seat order,
 `{damage_dealt_enemy, damage_dealt_team, hits_enemy, hits_taken, kills, deaths,
 captures, first_friendly_fire_tick}` (`pw_seat_stats_t` in the header), cumulative
