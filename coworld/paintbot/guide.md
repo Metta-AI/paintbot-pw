@@ -97,6 +97,57 @@ seeking, individual cone visibility, first-person view, event filtering, invento
 armor/lives inspection, grenade arcs/blasts, spray effects and trench markers.
 Earlier replay versions retain their original rules and hashes.
 
+## Comparing two builds on hosted episodes
+
+A hosted experience request runs a batch of episodes you define, on a pinned Coworld, without
+touching a league seat. `uv run coworld xp-request create body.json`, then
+`uv run coworld xp-request get <xreq_...> --json` for the scores and
+`uv run coworld episode-logs <ereq_...> -d <dir>` for the seat logs. For the Jev baseline's own
+switches, `coworld/paintbot/tools/jev_experiment.py` writes the arm files and the bodies for
+you and prints the upload and create commands; the rest of this section is what to put in a
+body it does not cover, and how to read what comes back.
+
+```json
+{"target": {"coworld_id": "cow_...", "variant_id": "competition"},
+ "roster": [{"slot": 0, "player": {"policy_ref": "my-build:v3"}},
+            {"slot": 1, "player": {"policy_ref": "<pvid or name:vN>"}}],
+ "num_episodes": 30, "execution_backend": "k8s",
+ "episode_player_llm_spend_limit_usd": 0.5, "notes": "what this arm is"}
+```
+
+Give the roster one entry per seat, all sixteen (two are shown above) — even seats are Red, odd
+are Blue, so seat parity is the team. Two traps in the body itself: `variant_id` belongs in
+`target` **or** at the top level, never both, and `policy_ref` takes the bare `name:vN` or a
+policy-version UUID, not the player-prefixed `player/name:vN` form that the request echo prints
+back. An advised build also needs `episode_player_llm_spend_limit_usd`: a seat with no budget has
+no advisor, plays as the baseline and still scores normally, so the request looks healthy and
+measures nothing.
+
+Four things about reading the result:
+
+- **The gap between the two scores is one bit; the winner's glory is not.** The loser's glory
+  is zeroed at the final tick, so subtracting one side's score from the other only restates who
+  won. The winner's number is a real measurement — roughly the match length in seconds minus
+  the seconds it took, plus event awards — so it says how *fast* the win was. Which statistic
+  to use follows from the matchup. Against an opponent an arm nearly always beats, compare the
+  arms' **mean winning glory**: win rate is saturated and carries nothing (two arms both went
+  20/20 against the plain BASIC baseline, but their winning glory, 676.7 +/- 83.7 against
+  672.6 +/- 91.5 over 20 episodes each, is a comparison with real resolution). Between arms
+  that are close, use **win rate**: each arm only has a glory number for the games it won, so
+  the means are computed over selected and non-comparable subsets.
+- **Split each arm into equal halves with the sides swapped.** Rules 35 mirrored the map and
+  validated it at red 51.7% over 400 native seeds, so neither side is favoured — but 60
+  episodes of one build against another still came out 35/60 to Red by chance alone
+  (95% Wilson [0.457, 0.699]). A 58% split from noise is the same size as the effects these
+  batteries are trying to find.
+- **Budget the episodes.** 60 episodes give a Wilson interval of about ±0.12: enough to reject
+  a 70/30 effect, not enough to tell 0.62 from 0.50. Plan ~250 for that. Decide the stopping
+  point and the rule before the first result, and start a fresh battery rather than extending
+  one you have already read.
+- **Check the seats before trusting a score.** Each seat's BASIC `print` output comes back from
+  `coworld episode-logs`; count its asks against its failures and refusals. Locally,
+  `PW_BASIC_PEAKS=1` prints each seat's peak instructions, work units and string handles.
+
 ## Heartwick arena
 
 Cottages, garden walls, carts, supply stacks and the market well are solid cover: they block movement, sight and direct fire. Grenades still lob over them. The village is symmetric under a half turn, with a market square, cross streets and side lanes. Flower patches are walkable decoration. Trenches retain their existing movement and damage rules.
@@ -381,6 +432,20 @@ capture candidates or keep current, each with its consequence spelled out) and r
 by shout so the squad keeps agreeing. The draft also carries a retreat choice and a survival
 estimate, journaled but switched off (`useRetreat`, `useDial`, `useWide` in the init block) because
 they lost full-length games in the ablations. Asks are event-driven with a 24-tick debounce.
+
+The callout is three words — `Alpha, push Forge.`, `Bravo, hold Chapel.`, `Alpha, carry on.` — and
+a listener decodes only the squad word, the verb's first letter and the heart's first letter (A +
+index). **Only the asker repeats it**, every two seconds while its answer is fresh; a cog that
+adopts a callout falls silent until one of its own asks is answered (`amSpeaker`, gated by
+`useEcho = 0`). That is worth knowing for any policy that talks: shouts are heard by *both* teams
+within 12.8 m, and each adoption also pushes the listener's objective hold and its leader-takeover
+timer out by `kHold`. Before the switch existed every squadmate repeated the callout, which
+multiplied the traffic on a channel the enemy can read — one measured episode logged 450 directive
+adoptions on the echoing team against 76 on the quiet one — and let two listeners in earshot keep
+each other's directive alive indefinitely, so a squad could hold a dead asker's heart forever and
+never promote a new asker. `useEcho = 1` restores that behaviour for comparison; it won 23 of 60
+head-to-head hosted episodes against `useEcho = 0` (95% Wilson [0.271, 0.510]), which is not a
+separation, so the switch is set on the mechanism and not on the measurement.
 Where no oracle is configured, as in certification pods (two seats play it there), every ask is
 refused and the file plays exactly like `base.bas`: `tests/test_paintbot_jev_baseline.nim` holds
 it to the same state hash and checks the drafting cost with the oracle on. The layer was

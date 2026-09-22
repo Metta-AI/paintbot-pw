@@ -44,6 +44,9 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
                 {"useWide": 1}),
     "a6-retreat": ("the retreat choice and break-off dial, now that retSent and the question's "
                    "polarity are fixed", {"useRetreat": 1, "useDial": 1}),
+    "a7-echo": ("squadmates repeating the callout they adopted, which reaches past the 12.8 m "
+                "shout radius but pins the hold and the leader-takeover timer open",
+                {"useEcho": 1}),
 }
 
 
