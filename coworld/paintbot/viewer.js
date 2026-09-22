@@ -571,7 +571,7 @@
           ? "Match drawn"
           : `${w.winner ? "Azure" : "Ember"} wins`
         : "Match scoreboard",
-      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}${state.rulesVersion >= 37 ? `<br>Glory: Ember <b>${w.glory?.[0] ?? 0}</b> — <b>${w.glory?.[1] ?? 0}</b> Azure. Glory starts at the match length in seconds and loses one per second; a heart capture adds 5, an enemy tag 2, thirty seconds without supplies 10, friendly fire taken in the opening thirty seconds 30 per hit. The loser's glory drops to zero; the winner's is the match score.` : ""}<br>${state.rulesVersion >= 34 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; an eliminated team loses immediately and the survivor's meter fills. At 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 28 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; at 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
+      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}${state.rulesVersion >= 37 ? `<br>Glory: Ember <b>${w.glory?.[0] ?? 0}</b> — <b>${w.glory?.[1] ?? 0}</b> Azure. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10, friendly fire taken in the opening thirty seconds 30 per hit. Nothing that helps you win pays glory. The loser's glory drops to zero; the winner's is the match score.` : ""}<br>${state.rulesVersion >= 34 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; an eliminated team loses immediately and the survivor's meter fills. At 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 28 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; at 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
     $("dialogbody")
       .querySelectorAll("[data-seat]")
@@ -867,10 +867,8 @@
   // side to Azure's, filled by the owning team; a capture in progress traces
   // the outline in the capturing team's color.
   const heartStripOrder = [];
-  const GLORY_KINDS = ["gloryCapture", "gloryTag", "gloryQuietSupplies", "gloryFriendlyFire"];
+  const GLORY_KINDS = ["gloryQuietSupplies", "gloryFriendlyFire"];
   const GLORY_REASONS = {
-    gloryCapture: "heart captured",
-    gloryTag: "enemy tagged",
     gloryQuietSupplies: "thirty seconds without supplies",
     gloryFriendlyFire: "friendly fire taken in the opening thirty seconds",
   };
@@ -1465,7 +1463,7 @@
       const scoreLine = $(`score${s}`).parentElement;
       const bigOwned = data.rulesVersion >= 25 && w.bigHeart >= 0 && w.controlHearts[w.bigHeart].owner === s;
       scoreLine.title = glory !== null
-        ? `Glory ${glory} · ${owned} hearts held. Glory starts at the match length in seconds and loses one per second; a heart capture adds 5, an enemy tag 2, thirty seconds without supplies 10, friendly fire taken in the opening thirty seconds 30 per hit. Only the winner keeps it.`
+        ? `Glory ${glory} · ${owned} hearts held. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10, friendly fire taken in the opening thirty seconds 30 per hit. Only the winner keeps it.`
         : `${owned} hearts held${bigOwned ? " · Big heart: 5 points/s" : ""}`;
       scoreLine.querySelector('small').textContent = glory !== null ? ` GLORY · ${Math.floor(w.scoreTicks[s]/24)} / ${w.controlHearts.length * 90} · ${owned} ♥` : data.rulesVersion >= 28 ? ` / ${w.controlHearts.length * 90} · ${owned} ♥` : data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
       w.cogs.forEach((c, i) => {

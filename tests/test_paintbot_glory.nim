@@ -83,10 +83,10 @@ suite "Glory":
     check commands[0].goal == point(587, 300)
     check commands[0].aim == point(-1, -1)
     check commands[1].goal == point(587, 300)
-  test "captures and enemy tags earn glory; early friendly fire pays the team that took it":
+  test "captures and tags pay nothing; early friendly fire pays the team that took it":
     var w = newWorld(2026)
     w.pickups.setLen(0)
-    # Red cog 0 stands on neutral heart 2 until the claim completes.
+    # Red cog 0 stands on neutral heart 2 until the claim completes: no glory for winning play.
     w.cogs[0].pos = w.controlHearts[2].pos
     w.cogs[0].goal = w.cogs[0].pos
     var commands: array[Seats, Command]
@@ -95,18 +95,16 @@ suite "Glory":
       w.step(commands); inc ticks
     check w.controlHearts[2].owner == 0
     check w.tick == HeartCaptureTicks
-    check w.glory == [600'i32-HeartCaptureTicks div TickRate+GloryCapture, 600'i32-HeartCaptureTicks div TickRate]
-    check w.gloryEvents.len == 1
-    check w.gloryEvents[0].kind == gloryCapture
-    check w.gloryEvents[0].team == 0
+    check w.glory == [600'i32-HeartCaptureTicks div TickRate, 600'i32-HeartCaptureTicks div TickRate]
+    check w.gloryEvents.len == 0
     var glory = w.glory
-    # An enemy tag pays the attacker's team.
+    # An enemy tag counts as a tag and nothing more.
     w.cogs[1].hp = 1; w.cogs[1].shield = 0
     w.damage(1, 0, 1)
     check w.cogs[1].hp == 0
-    glory[0] += GloryTag
+    check w.cogs[0].tags == 1
     check w.glory == glory
-    check w.gloryEvents[^1].kind == gloryTag
+    check w.gloryEvents.len == 0
     # Friendly fire in the opening thirty seconds pays the victim's team, per hit.
     check w.tick < GloryFriendlyFireTicks
     w.cogs[2].hp = 3; w.cogs[2].shield = 0; w.equipment[2].armor = 0

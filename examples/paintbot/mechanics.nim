@@ -177,7 +177,6 @@ proc updateTerritory*(w:var World) =
             inc w.cogs[i].captures
             break
         heart.owner=owner
-        w.earnGlory(owner.int, gloryCapture, GloryCapture)
   w.captures=[0'i32,0'i32]
   for heart in w.controlHearts:
     if heart.owner>=0:inc w.captures[heart.owner]
@@ -214,7 +213,6 @@ proc damage*(w: var World, victim, attacker, amount: int) =
   w.cogs[victim].cooldown = 0
   if attacker >= 0 and attacker != victim:
     inc w.cogs[attacker].tags
-    if team(attacker) != team(victim): w.earnGlory(team(attacker), gloryTag, GloryTag)
     if observeTag != nil: observeTag(w.tick, victim, attacker, w.cogs[victim].pos)
 
 const

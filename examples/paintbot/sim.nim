@@ -25,8 +25,7 @@ const
   BigHeartPoints* = 5
   # Glory (rules 37) is the winner's score: it starts at the match length in seconds, loses
   # one per second, and grows on the events below. The loser's glory is zeroed at the end.
-  GloryCapture* = 5
-  GloryTag* = 2
+  # Glory is a self-imposed handicap: nothing that makes a team more likely to win pays it.
   GloryQuietSupplies* = 10
   GloryQuietSupplyTicks* = 30*TickRate
   GloryFriendlyFire* = 30
@@ -88,7 +87,7 @@ type
   SoundCue* = object
     listener*, kind*, direction*, distance*, tick*: int32
   GloryKind* = enum
-    gloryCapture, gloryTag, gloryQuietSupplies, gloryFriendlyFire
+    gloryQuietSupplies, gloryFriendlyFire
   GloryEvent* = object
     tick*, team*, amount*: int32
     kind*: GloryKind
@@ -115,7 +114,7 @@ type
     usedBigHearts*: seq[bool]
     sounds*: seq[SoundCue] # Listener-relative sectors; never exact source coordinates.
     uniforms*: array[Seats, bool]
-    glory*: array[2, int32] # Rules 37: the winner's score, in seconds; see GloryCapture and friends.
+    glory*: array[2, int32] # Rules 37: the winner's score, in seconds; see GloryQuietSupplies and friends.
     lastSupplyTick*: array[2, int32] # The last tick each team collected a supply.
     gloryEvents*: seq[GloryEvent] # Recent awards, kept GloryEventLifetime ticks for the viewer.
   TerritoryWorld = object
