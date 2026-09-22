@@ -112,6 +112,8 @@ proc host(slot:int, strings:StringPool): Host =
   for axis in 0..2:
     discard result.addFunction(["pickupX","pickupY","pickupKind"][axis],1,getPickup(axis),4)
   discard result.addFunction("heartCount",0,proc(a:openArray[int32]):int32 = active.controlHearts.len.int32,4)
+  discard result.addFunction("glory",1,proc(a:openArray[int32]):int32 =
+    (if a[0] >= 0 and a[0] <= 1: active.glory[a[0]] else: -1'i32),4)
   proc getControl(field:int):HostProc =
     result = proc(a:openArray[int32]):int32 =
       let i=a[0].int

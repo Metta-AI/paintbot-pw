@@ -16,7 +16,9 @@ and `controlOwner(i)` (-1 neutral, 0 red, 1 blue). Capture state is also public:
 `controlContested(i)` (0 or 1). Invalid indices return -1. WASM sprite observations include
 `control heart <index> owner <owner>` and a separate
 `control capture <index> team <team> ticks <ticks> contested <0|1>` sprite; the legacy enemy-flag target points to an
-unowned objective so existing Paintbot WASM policies can play territory control.
+unowned objective so existing Paintbot WASM policies can play territory control. Glory is
+public too: BASIC `glory(team)` (-1 for an invalid team), and for WASM a
+`glory team <team> value <glory>` sprite on each team's base heart (rules 36).
 
 Cogs have three base HP and three respawns (four lives total). Death loses equipment and respawns
 after 72 ticks; spawn protection lasts 36 ticks. Initial spawns and respawns are within 350 world units
@@ -33,6 +35,12 @@ with equal totals drawing. A team is eliminated when every cog is out with no
 respawns left; it loses immediately and the surviving team's meter fills (rules 34).
 If both teams are eliminated on the same tick, the match ends with no bonus and the
 higher meter wins; equal totals draw. There is no bombardment or overtime.
+The match score is **glory** (rules 36). Each team starts with the match length in
+seconds (600) and loses one glory per second. A heart capture adds 5, tagging an enemy 2,
+every thirty seconds without collecting a supply 10, and friendly fire taken in the
+opening thirty seconds 30 per hit. When the match ends the loser's glory drops to zero
+and a draw pays nobody; the winner's glory is its score and the ladder input. The heart
+meter still decides who wins. See "Glory" below.
 Older replays retain their original capture-the-heart rules.
 
 ## Combat and equipment
@@ -83,8 +91,8 @@ BASIC read-only data: `selfId`, `selfTeam`, `selfX`, `selfY`, `selfHp`, `carryin
 
 Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `playerCarrying(slot)`, `pickupCount()`, `pickupVisible(id)`, `pickupX(id)`,
-`pickupY(id)`, `pickupKind(id)` (0 grenade, 1 spray, 2 medkit, 3 armor).
-Hidden player and pickup coordinates are not disclosed.
+`pickupY(id)`, `pickupKind(id)` (0 grenade, 1 spray, 2 medkit, 3 armor),
+`glory(team)` (rules 36). Hidden player and pickup coordinates are not disclosed.
 
 Actions: `walkTo(x,y)`, `lookAt(x,y)`, `shootAt(x,y)`, `chargeGrenade(held)`.
 Release by calling `chargeGrenade(0)` or not calling it on the next tick.
@@ -222,6 +230,35 @@ wading. Cogs in the water move at one-quarter speed (7 cm/tick normally),
 stacking with sneaking and carrying penalties. Dry banks retain normal speed;
 the water causes no damage. Terrain height, line of sight, and navigation use
 the lake bed. Earlier replays preserve their original river geometry and rules.
+
+### Glory (rules 36)
+
+The heart meter decides who wins; glory decides how much the win is worth. Every score the
+ladder sees is a winner's glory, so a fast, eventful win outranks a slow one, and a team that
+loses scores nothing however it played. Each team's glory starts at the match length in
+seconds (600 for the ten-minute limit, `endTick div TickRate`) and loses one per second, so a
+five-minute win keeps about 300 before events. The events, all constants in `sim.nim`:
+
+| Event | Glory | Credited to |
+| --- | --- | --- |
+| A heart changes to your ownership (`GloryCapture`) | +5 | the capturing team |
+| An enemy cog is tagged out (`GloryTag`) | +2 | the attacker's team |
+| Thirty seconds with no supply collected (`GloryQuietSupplies`, per team, repeating) | +10 | the abstaining team |
+| Friendly fire taken in the opening thirty seconds (`GloryFriendlyFire`, per hit) | +30 | the team that took it |
+
+Friendly-fire kills are not tags; spawn protection and self-damage never count; the supply
+clock restarts whenever a teammate collects a grenade, spray can, medkit, armor or uniform,
+and the countdown floors at zero. At the final tick the loser's glory is set to zero (a draw
+zeroes both), then glory is frozen: `scores()` reports each seat's team glory, so the winner's
+seats all carry the same number and the loser's carry zero. Glory, the supply clocks and the
+recent awards are part of the rules 36 world hash; older recordings ignore them.
+
+The engine keeps each award for four seconds (`gloryEvents`). The viewer shows recent awards
+at the very top of the page in the earning team's color ("Ember +10 glory · thirty seconds
+without supplies"), the header's big number is each team's glory with the heart-meter points
+in small type beside it, and the scoreboard dialog repeats both. `tests/test_paintbot_glory.nim`
+covers the countdown, each event, the end-of-match settlement, the hash gate and a rules 36
+recording round trip.
 
 ### A fair map: mirrored ground (rules 35)
 

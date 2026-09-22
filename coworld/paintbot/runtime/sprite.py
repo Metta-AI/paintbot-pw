@@ -564,6 +564,10 @@ class SpriteView:
                     f"ticks {capture['ticks']} contested {int(capture['contested'])}",
                     heart["pos"], 20, 20,
                 )
+        if w.get("rulesVersion", 0) >= 36 and len(controls) >= 2:
+            # Each team's glory rides on its base heart; policies read both.
+            for side, value in enumerate(w.get("glory", [])[:2]):
+                item(f"glory team {side} value {value}", controls[side]["pos"], 20, 20)
         for side, color in enumerate(COLORS):
             h = w["hearts"][side]
             if controls and side != self.slot % 2:

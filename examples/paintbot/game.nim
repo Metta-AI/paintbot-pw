@@ -67,7 +67,7 @@ proc convertFrames(frames: seq[PreSoundFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
         goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
     result.add next
-var replayRulesVersion* = 35
+var replayRulesVersion* = 36
 proc loadRecording*(path: string): Recording =
   replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
   visionRulesVersion = replayRulesVersion
@@ -86,7 +86,7 @@ proc loadRecording*(path: string): Recording =
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreSoundRecording)
     result = Recording(seed:old.seed,frames:convertFrames(old.frames),names:old.names,
       communications:old.communications,endTick:old.endTick)
-  elif replayRulesVersion in [26, 27, 28, 29, 30, 31, 32, 33, 34, 35]:
+  elif replayRulesVersion in [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")

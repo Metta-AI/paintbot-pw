@@ -177,6 +177,7 @@ proc updateTerritory*(w:var World) =
             inc w.cogs[i].captures
             break
         heart.owner=owner
+        w.earnGlory(owner.int, gloryCapture, GloryCapture)
   w.captures=[0'i32,0'i32]
   for heart in w.controlHearts:
     if heart.owner>=0:inc w.captures[heart.owner]
@@ -193,6 +194,9 @@ proc updateTerritory*(w:var World) =
 proc damage*(w: var World, victim, attacker, amount: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
   if observeHit != nil: observeHit(w.tick, victim, attacker, w.cogs[victim].pos)
+  if attacker >= 0 and attacker != victim and team(attacker) == team(victim) and
+      w.tick < GloryFriendlyFireTicks:
+    w.earnGlory(team(victim), gloryFriendlyFire, GloryFriendlyFire)
   let absorbed = min(w.equipment[victim].armor, amount.int32)
   w.equipment[victim].armor-=absorbed
   w.cogs[victim].hp = max(0'i32, w.cogs[victim].hp-(amount.int32-absorbed))
@@ -210,6 +214,7 @@ proc damage*(w: var World, victim, attacker, amount: int) =
   w.cogs[victim].cooldown = 0
   if attacker >= 0 and attacker != victim:
     inc w.cogs[attacker].tags
+    if team(attacker) != team(victim): w.earnGlory(team(attacker), gloryTag, GloryTag)
     if observeTag != nil: observeTag(w.tick, victim, attacker, w.cogs[victim].pos)
 
 const
@@ -311,6 +316,7 @@ proc pickupEquipment(w: var World, attacked: array[Seats, bool]) =
       of armorPickup:
         if w.equipment[i].armor < 3: w.equipment[i].armor = 3; taken = true
       if taken:
+        w.lastSupplyTick[team(i)] = w.tick
         w.pickups[k].readyAt = w.tick+(if w.pickups[k].kind ==
             grenadePickup: 120 else: 720)
         break
@@ -503,6 +509,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         if heart.owner >= 0: w.scoreTicks[heart.owner] += w.heartPoints(index)
       if visionRulesVersion >= 28:
         inc w.tick
+        if visionRulesVersion >= 36: w.updateGlory()
         let target = w.heartMeterTarget()
         var eliminated = false
         if visionRulesVersion >= 34:
@@ -516,6 +523,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
             w.scoreTicks[survivor] = max(w.scoreTicks[survivor], target)
         if eliminated or w.scoreTicks[0] >= target or w.scoreTicks[1] >= target or w.tick >= w.endTick:
           w.winner = if w.scoreTicks[0] > w.scoreTicks[1]: 0 elif w.scoreTicks[1] > w.scoreTicks[0]: 1 else: -2
+          w.settleGlory()
         return
       var alive: array[2, bool]
       for i,c in w.cogs:

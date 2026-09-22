@@ -230,6 +230,13 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn(b"control value 0 points 1", view.frame(w))
         del w["heartCaptures"]
         self.assertNotIn(b"control capture", view.frame(w))
+        w["controlHearts"].append(dict(pos=dict(x=3400, z=2000), owner=-1))
+        w["glory"] = [587, 300]
+        self.assertNotIn(b"glory team", view.frame(w))
+        w["rulesVersion"] = 36
+        frame = view.frame(w)
+        self.assertIn(b"glory team 0 value 587", frame)
+        self.assertIn(b"glory team 1 value 300", frame)
 
     def test_sound_sprites_are_listener_relative_and_quiet_chord_is_opt_in(self):
         view = SpriteView(0)
