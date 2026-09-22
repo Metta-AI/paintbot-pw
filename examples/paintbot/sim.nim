@@ -168,6 +168,9 @@ when defined(pwTraining):
   # The host points this at its telemetry for the duration of one step; nil means
   # nobody is listening and damage pays only for the nil test.
   var combatTelemetry* {.threadvar.}: ptr CombatTelemetry
+  # Per-attacker damage scale in permille, pointed at by the host for one step; nil or
+  # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
+  var damageScale* {.threadvar.}: ptr array[Seats, int32]
 else:
   var visionRulesVersion* = 37
 proc apparentTeam*(w: World, slot: int): int =

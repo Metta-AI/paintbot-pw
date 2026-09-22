@@ -25,6 +25,12 @@ type
     scriptHeard: array[Seats,seq[HeardMessage]] # Speech carried from the previous decision.
     scriptOrders: array[Seats,Command] # What each scripted seat ordered on the last step.
     scriptCount: int
+    # Curriculum knobs, kept across resets like scripts. A fire period above 1 lets a
+    # seat's shoot order through only once per that many cooldown windows; a damage
+    # scale below or above 1000 permille changes what the seat deals.
+    firePeriod: array[Seats,int32]
+    lastHonouredShot: array[Seats,int32]
+    damagePermille: array[Seats,int32]
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -38,6 +44,30 @@ proc invalidateBodies(env: ptr NativeEnv) =
   for slot in 0..<Seats: env.bodiesReady[slot] = false
 proc resetStats(env: ptr NativeEnv) =
   for slot in 0..<Seats: env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
+proc resetCurriculum(env: ptr NativeEnv) =
+  ## Knob values persist; the shot history belongs to the match.
+  for slot in 0..<Seats:
+    env.lastHonouredShot[slot] = low(int32) div 2
+    if env.firePeriod[slot] < 1: env.firePeriod[slot] = 1
+proc initCurriculum(env: ptr NativeEnv) =
+  for slot in 0..<Seats:
+    env.firePeriod[slot] = 1
+    env.damagePermille[slot] = 1000
+  env.resetCurriculum()
+static: doAssert FireCooldownTicks == 24, "the fire period unit is the 24-tick cooldown window"
+proc gateFire(env: ptr NativeEnv, slot: int, command: var Command) =
+  ## Honour a shoot order only when the seat could fire now and at least
+  ## period x FireCooldownTicks (period x 24 ticks) have passed since its last honoured
+  ## shot. Period 1 never gates.
+  let period = env.firePeriod[slot]
+  if period <= 1 or not command.shoot: return
+  let c = env.world.cogs[slot]
+  let e = env.world.equipment[slot]
+  let ready = c.hp > 0 and (if e.sprayCan: e.sprayCooldown == 0 else: c.cooldown == 0 and e.windup == 0)
+  if ready and env.world.tick-env.lastHonouredShot[slot] >= period*FireCooldownTicks.int32:
+    env.lastHonouredShot[slot] = env.world.tick
+  else:
+    command.shoot = false
 proc installScript(env: ptr NativeEnv, slot: int) =
   ## A fresh runtime for the seat's source, as a new match loads its bots.
   env.scriptBots[slot] = nil
@@ -77,6 +107,7 @@ proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
     for i in 0..<Seats: env.resets[i] = 1
     env.invalidateBodies()
     env.resetStats()
+    env.initCurriculum()
     result = env
   except CatchableError:
     `=destroy`(env[])
@@ -99,6 +130,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     env.invalidateBodies()
     env.resetStats()
     env.resetScripts()
+    env.resetCurriculum()
     return 0
   except CatchableError: return -1
 
@@ -154,9 +186,13 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
           env.scriptErrors[slot] = b.error
         commands[slot] = decided[slot]
         env.scriptOrders[slot] = decided[slot]
+    for slot in 0..<Seats: env.gateFire(slot, commands[slot])
     combatTelemetry = addr env.stats
+    damageScale = addr env.damagePermille
     try: env.world.step(commands)
-    finally: combatTelemetry = nil
+    finally:
+      combatTelemetry = nil
+      damageScale = nil
     env.invalidateBodies()
     let done = env.world.winner != -1 or env.world.tick >= env.world.endTick
     for slot in 0..<Seats:
@@ -269,6 +305,31 @@ proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int
   output[3] = c.shoot.int32; output[4] = c.aim.x; output[5] = c.aim.z
   output[6] = c.chargeGrenade.int32; output[7] = c.sneak.int32; output[8] = c.direct.int32
   output[9] = int32(env.scripts[seat].len > 0)
+  0
+
+proc pw_set_seat_fire_period*(handle: pointer, seat: cint, period: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Curriculum: the seat's shoot order (from its script, the Nim bot, or the caller)
+  ## is honoured only when it could fire now and at least `period` weapon cooldown
+  ## windows have passed since its last honoured shot. The unit is the gun cooldown
+  ## window, FireCooldownTicks = 24 ticks (one second): period 4 means at most one
+  ## honoured shot per 96 ticks, the same unit as the adapter's fire-gated Nim bot.
+  ## lookAt, movement and everything the script believes are untouched. 1 restores
+  ## exact behaviour. Kept across pw_reset; the shot history is not.
+  if handle == nil or seat notin 0..<Seats or period < 1: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.firePeriod[seat] = period
+  0
+
+proc pw_set_seat_damage_scale*(handle: pointer, seat: cint, permille: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Curriculum: damage dealt BY this seat is scaled by permille/1000 (floor: with
+  ## 1-point gun hits, anything below 1000 means no damage; grenade 2/6 and spray 3
+  ## scale in steps). Hits still land (shield, cooldown relief, telemetry, glory as
+  ## before). 1000 restores exact behaviour. Kept across pw_reset.
+  if handle == nil or seat notin 0..<Seats or permille < 0: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.damagePermille[seat] = permille
   0
 
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
