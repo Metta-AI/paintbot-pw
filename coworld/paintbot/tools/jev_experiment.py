@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -104,6 +105,8 @@ def main() -> None:
     parser.add_argument("--out", default="dist/jev-xp", help="directory for arm files and bodies")
     parser.add_argument("--episodes", type=int, default=EPISODES,
                         help="episodes per arm, split evenly between the two side assignments")
+    parser.add_argument("--fire", action="store_true",
+                        help="create the requests and record them in requests.json")
     args = parser.parse_args()
 
     assert args.episodes % 2 == 0, "episodes must be even so the two side halves are equal"
@@ -115,7 +118,7 @@ def main() -> None:
     assert "oracleReady()" in base, f"{JEV} predates the readiness probe; regenerate it first"
 
     def policy(arm: str) -> str:
-        return f"daveey1-jev-{arm}:v1"
+        return f"jev-{arm}:v1"
 
     print(f"# {len(ARMS)} arms, {args.episodes} episodes each ({half} a side), "
           f"head-to-head against {REFERENCE}\n")
@@ -124,7 +127,7 @@ def main() -> None:
         bas.write_text(arm_source(base, overrides), encoding="utf-8")
         flips = ", ".join(f"{k}={v}" for k, v in overrides.items()) or "shipped defaults"
         print(f"# {arm}: {flips}")
-        print(f"coworld upload-policy --file {bas.relative_to(ROOT)} --name daveey1-jev-{arm}")
+        print(f"coworld upload-policy --file {bas.relative_to(ROOT)} --name jev-{arm}")
 
     print()
     for arm, (purpose, _) in ARMS.items():
@@ -141,6 +144,28 @@ def main() -> None:
                 body(coworld_id=args.coworld_id, candidate=policy(arm), opponent=opponent,
                      candidate_even=candidate_even, episodes=half, note=note), indent=2) + "\n")
             print(f"coworld xp-request create {path.relative_to(ROOT)}")
+
+    if args.fire:
+        # The manifest is the only record of which side each candidate took: the API returns
+        # `notes` as null, so a reader that infers the side from the request scores every win as
+        # a loss. Write it before reading anything back.
+        manifest = {}
+        for arm in ARMS:
+            for side in ("even", "odd"):
+                path = out / f"{arm}-{side}.json"
+                result = subprocess.run(["coworld", "xp-request", "create", str(path)],
+                                        capture_output=True, text=True)
+                found = re.search(r"xreq_[0-9a-f-]{36}", result.stdout)
+                if not found:
+                    print(f"{arm}-{side}: FAILED {result.stdout.strip()[:120]}")
+                    continue
+                manifest[found.group(0)] = {"arm": arm, "candidate_even": side == "even"}
+                print(f"{arm}-{side}: {found.group(0)}")
+        (out / "requests.json").write_text(json.dumps(manifest, indent=2) + "\n")
+        print(f"\nwrote {out / 'requests.json'} with {len(manifest)} requests")
+        print(f"score with: python3 coworld/paintbot/tools/jev_results.py "
+              f"{(out / 'requests.json').relative_to(ROOT)}")
+        return
 
     print("\n# then: coworld xp-request list --mine")
     print("# per request: coworld xp-request get <xreq_id> --json")

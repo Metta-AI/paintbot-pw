@@ -148,6 +148,44 @@ Four things about reading the result:
   `coworld episode-logs`; count its asks against its failures and refusals. Locally,
   `PW_BASIC_PEAKS=1` prints each seat's peak instructions, work units and string handles.
 
+### What the advisor switches are worth
+
+Measured on 0.3.36 over 420 hosted episodes, every arm 60 head-to-head against the shipped
+build with the sides swapped in equal halves (`coworld/paintbot/tools/jev_experiment.py`,
+scored by `jev_results.py`). Win rate with a 95% Wilson interval; the loser's glory is zeroed
+so the margin says nothing.
+
+| arm | switch | candidate even | candidate odd | pooled | 95% Wilson |
+| --- | --- | --- | --- | --- | --- |
+| a1-structured | shipped, vs the plain BASIC baseline | 30/30 | 30/30 | **1.000** | [0.940, 1.000] |
+| a2-no-nouls | `useNouls = 0` | 0.37 | 0.50 | 0.433 | [0.316, 0.559] |
+| a3-score | `useScore = 1` | 0.43 | 0.40 | 0.417 | [0.301, 0.543] |
+| a4-margin | `kMargin = 150` | 0.43 | 0.60 | 0.517 | [0.393, 0.638] |
+| a5-wide | `useWide = 1` | 0.30 | 0.47 | 0.383 | [0.271, 0.510] |
+| a6-retreat | `useRetreat = 1`, `useDial = 1` | 0.70 | 0.47 | 0.583 | [0.457, 0.699] |
+| a7-echo | `useEcho = 1` | 0.30 | 0.23 | **0.267** | [0.171, 0.390] |
+
+Only two separate from a coin flip. The advised build beats the plain baseline every time, which
+is a sanity check and not a result. And the old echoing relay **loses**: `useEcho = 1` took 16 of
+60, consistently on both sides, so the one-voice default is now supported by measurement and not
+only by its mechanism.
+
+Everything else is a draw at this power, and the defaults stay as they are. Two of them are worth
+reading carefully rather than as weak evidence:
+
+- **a6-retreat looks like the best arm and is not.** Its halves disagree: 0.70 with the candidate
+  on even seats against 0.47 on odd. Pooled it is 0.583, which is exactly the split that arose
+  from noise alone in the earlier 60-episode battery. An unbalanced battery would have reported
+  the retreat choice as promising. This is what the side swap is for.
+- **a2-no-nouls does not buy latency.** In a single episode with the two builds on opposite
+  sides, the two-question build answered at a median of 26 ticks and the five-question build at
+  25, with the five-question build steadier at the tail (p90 78 against 107) and dropping 3% of
+  answers as stale against 12%. Questions in one request are evaluated in parallel; asking three
+  more costs tokens, not time, so the narrow yes/no questions stay on and keep producing labels.
+
+Separating an effect near 0.60 needs about 250 episodes, not 60, so a draw here is "not measured"
+rather than "no difference".
+
 ## Heartwick arena
 
 Cottages, garden walls, carts, supply stacks and the market well are solid cover: they block movement, sight and direct fire. Grenades still lob over them. The village is symmetric under a half turn, with a market square, cross streets and side lanes. Flower patches are walkable decoration. Trenches retain their existing movement and damage rules.
