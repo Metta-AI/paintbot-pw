@@ -214,8 +214,10 @@ when defined(pwTraining):
     TerrainCacheBlocksX = 264 # 16896 units, covers rules 22+ span [-4800, 11200] with margin
     TerrainCacheBlocksZ = 160 # 10240 units, covers [-2800, 6800] with margin
   type
+    TerrainCell* = object
+      height*, margin*: int16 # Together: one cache line serves both lookups at a point.
     TerrainBlock = object
-      height, margin: array[TerrainCacheBlock*TerrainCacheBlock, int16]
+      cells: array[TerrainCacheBlock*TerrainCacheBlock, TerrainCell]
     TerrainTable = object
       key: int
       blocks: array[TerrainCacheBlocksX*TerrainCacheBlocksZ, Atomic[ptr TerrainBlock]]
@@ -256,29 +258,33 @@ when defined(pwTraining):
         let margin = islandMarginDirect(x0+dx, z0+dz)
         doAssert height >= low(int16) and height <= high(int16) and
           margin >= low(int16) and margin <= high(int16), "terrain outside int16"
-        entry.height[dz*TerrainCacheBlock+dx] = int16(height)
-        entry.margin[dz*TerrainCacheBlock+dx] = int16(margin)
+        entry.cells[dz*TerrainCacheBlock+dx] = TerrainCell(height: int16(height), margin: int16(margin))
     var expected: ptr TerrainBlock = nil
     if table.blocks[index].compareExchange(expected, entry, moAcquireRelease, moAcquire):
       return entry
     deallocShared(entry)
     expected
-  template terrainLookup(x, z: int, field: untyped, direct: untyped): int =
+  template terrainCellAt(x, z: int, found: untyped, missing: untyped): untyped =
     let cx = x-TerrainCacheMinX
     let cz = z-TerrainCacheMinZ
     if cx < 0 or cz < 0 or cx >= TerrainCacheBlocksX*TerrainCacheBlock or
         cz >= TerrainCacheBlocksZ*TerrainCacheBlock:
-      direct
+      missing
     else:
       let table = terrainTable()
       let index = (cz div TerrainCacheBlock)*TerrainCacheBlocksX+cx div TerrainCacheBlock
       var b = table.blocks[index].load(moAcquire)
       if b == nil: b = fillTerrainBlock(table, index)
-      int(b.field[(cz mod TerrainCacheBlock)*TerrainCacheBlock+cx mod TerrainCacheBlock])
+      let cell {.inject.} = b.cells[(cz mod TerrainCacheBlock)*TerrainCacheBlock+cx mod TerrainCacheBlock]
+      found
   proc terrainHeight*(x,z:int):int =
-    terrainLookup(x, z, height, terrainHeightDirect(x, z))
+    terrainCellAt(x, z, int(cell.height), terrainHeightDirect(x, z))
   proc islandMargin*(x,z:int):int =
-    terrainLookup(x, z, margin, islandMarginDirect(x, z))
+    terrainCellAt(x, z, int(cell.margin), islandMarginDirect(x, z))
+  proc terrainSample*(x,z:int):TerrainCell =
+    ## Both values from one cell fetch; identical to the two lookups above.
+    terrainCellAt(x, z, cell, TerrainCell(height: int16(terrainHeightDirect(x, z)),
+      margin: int16(islandMarginDirect(x, z))))
   proc terrainCacheResidentBlocks*(): int =
     ## Filled blocks across every table; each holds 16 KiB of exact results.
     for i in 0..<terrainTables.len:
