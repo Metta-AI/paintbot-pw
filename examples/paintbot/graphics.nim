@@ -3,7 +3,7 @@ import std/[math, times, algorithm]
 when defined(emscripten) and defined(workerReplayIndex): import flatty
 import windy, opengl, vmath, chroma, jsony
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam, selectionoutlines]
-import game, sim, analysis, villagegraphics, controls, celebration
+import game, sim, analysis, villagegraphics, controls, celebration, projection
 import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
 else: {.emit: "#define EMSCRIPTEN_KEEPALIVE".}
@@ -804,13 +804,8 @@ proc runGraphics*() =
       director.follow(target, distance, dt.float32, max(1, playbackRate.int32))
       camX = target.x; camY = target.y; camZ = target.z
 
-    let fittedDistance = distance*max(1'f32, 1.6'f32/(window.size.x.float32/max(
-        1, window.size.y).float32))
-    let eye = target+vec3(sin(yaw)*cos(tilt), sin(tilt), cos(yaw)*cos(
-        tilt))*fittedDistance
-    let view = lookAt(eye, target, vec3(0, 1, 0))
-    let projection = perspective(45'f32, window.size.x.float32/max(1,
-        window.size.y).float32, 0.1'f32, 600'f32)
+    let (eye, view, projection) = spectatorCamera(target, distance, yaw, tilt,
+        window.size.x, window.size.y)
     let vp = projection*view
     if orderKind != 0:
       # Unproject the click into the same world coordinates used by bot commands.
@@ -1129,20 +1124,10 @@ proc runGraphics*() =
       if lastHud != world.tick or paused or victory.active:
         var screens: array[Seats, array[2, float32]]
         var visibility: array[Seats, bool]
-        var footprint: array[4, array[2, float32]]
-        let inverse = vp.inverse
-        for i, corner in [vec2(-1, -1), vec2(1, -1), vec2(1, 1), vec2(-1, 1)]:
-          let a = inverse*vec4(corner.x, corner.y, -1, 1)
-          let b = inverse*vec4(corner.x, corner.y, 1, 1)
-          let origin = vec3(a.x, a.y, a.z)/a.w
-          let ray = vec3(b.x, b.y, b.z)/b.w-origin
-          let point = origin+ray*clamp(-origin.y/ray.y, 0'f32, 1'f32)
-          footprint[i] = [point.x, point.z]
+        let footprint = groundFootprint(vp)
         for i in 0..<Seats:
           visibility[i] = shown(i)
-          let clip = vp*vec4(poses[i]+vec3(0, 1, 0), 1)
-          screens[i] = [(clip.x/clip.w*0.5+0.5).float32, (
-              0.5-clip.y/clip.w*0.5).float32]
+          screens[i] = screenPoint(vp, poses[i]+vec3(0, 1, 0))
         var terrain: array[Seats, CogTerrain]
         for i, cog in world.cogs:
           let aim = if world.equipment[i].windup > 0:
@@ -1154,20 +1139,16 @@ proc runGraphics*() =
         var objects: seq[Inspectable]
         var heartHeld: seq[int]
         var heartValues: seq[int32]
-        proc projected(p: Vec3): array[2, float32] =
-          let clip = vp*vec4(p, 1)
-          if clip.w <= 0: return [-100'f32, -100'f32]
-          [(clip.x/clip.w*0.5+0.5).float32, (0.5-clip.y/clip.w*0.5).float32]
         for i, h in world.controlHearts:
           heartHeld.add index.heartHeldTicks(i, world.tick.int)
           heartValues.add world.heartPoints(i)
           objects.add Inspectable(kind: "heart", id: i,
-            bottom: projected(position(h.pos, 0.4)),
-            top: projected(position(h.pos, if world.heartPoints(i) == BigHeartPoints: 6.2 else: 4.5)))
+            bottom: projected(vp, position(h.pos, 0.4)),
+            top: projected(vp, position(h.pos, if world.heartPoints(i) == BigHeartPoints: 6.2 else: 4.5)))
         for i, item in world.pickups:
           if item.readyAt > world.tick or not pointSeen(item.pos): continue
           objects.add Inspectable(kind: "pickup", id: i,
-            bottom: projected(position(item.pos, 0.1)), top: projected(position(item.pos, 1.7)))
+            bottom: projected(vp, position(item.pos, 0.1)), top: projected(vp, position(item.pos, 1.7)))
         let payload = ViewerState(terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
             paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint).toJson()
