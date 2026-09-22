@@ -109,6 +109,29 @@ sub whereLine(bx, by)
   line = strCat(strCat(strCatInt(strNew(""), root / 100), strNew(" m ")), bear)
 end sub
 
+' Squad callout by shout, into line: "<Squad>, push <Heart>." (kind 0), "<Squad>, hold <Heart>."
+' (kind 1) or "<Squad>, carry on." (heart -1). Alpha is squad 0, Bravo squad 1; a heart's name
+' starts with the letter A + its index (Anvil = 0 ... Pier = 15), which is all a listener decodes.
+sub callout(kind, heart)
+  if mySquad = 0 then
+    line = strNew("Alpha, ")
+  else
+    line = strNew("Bravo, ")
+  end if
+  if heart < 0 then
+    line = strCat(line, strNew("carry on."))
+  else
+    if kind = 1 then
+      line = strCat(line, strNew("hold "))
+    else
+      line = strCat(line, strNew("push "))
+    end if
+    line = strCat(line, strWord(strNew("Anvil Bridge Chapel Dock Elm Forge Gate Hollow Inn Jetty Kiln Lookout Mill Nook Orchard Pier"), heart))
+    line = strCat(line, strNew("."))
+  end if
+  shout(line)
+end sub
+
 ' One heart as a candidate sentence with computed facts, into line; "H<j>" into label.
 sub heartLine(j)
   label = strCatInt(strNew("H"), j)
@@ -362,20 +385,42 @@ end if
 foesSeenPrev = foesSeen
 hpPrev = selfHp
 livesPrev = livesLeft
-' Squad directives: "jev <squad> <heart> <kind>". My own squad's is adopted; the other squad's
-' tells me where they are going.
+' Squad callouts (see callout above): "<Squad>, push <Heart>.", "<Squad>, hold <Heart>." or
+' "<Squad>, carry on.". Three words; the squad word, the verb's first letter (p, h, c) and the
+' heart's first letter (A + index) carry everything. My own squad's callout is adopted; the
+' other squad's tells me where they are going.
 h = 0
 while h < heardCount() and h < 4
   if heardSlot(h) mod 2 = selfTeam then
     t = heardText(h)
-    if strWordCount(t) = 4 then
-      if strEq(strWord(t, 0), strNew("jev")) then
-        hSquad = strVal(strWord(t, 1))
-        hObj = strVal(strWord(t, 2))
-        hKind = strVal(strWord(t, 3))
+    if strWordCount(t) = 3 then
+      hSquad = -1
+      if strEq(strWord(t, 0), strNew("Alpha,")) then
+        hSquad = 0
+      end if
+      if strEq(strWord(t, 0), strNew("Bravo,")) then
+        hSquad = 1
+      end if
+      hVerb = strAsc(strWord(t, 1))
+      hKind = -1
+      if hVerb = 112 then
+        hKind = 0
+      end if
+      if hVerb = 104 then
+        hKind = 1
+      end if
+      if hVerb = 99 then
+        hKind = 0
+      end if
+      if hSquad >= 0 and hKind >= 0 then
+        hObj = strAsc(strWord(t, 2)) - 65
+        if hVerb = 99 then
+          hObj = -1
+        end if
         if hSquad = mySquad then
           lastDirectiveTick = worldTick
           if useRelay and worldTick - lastAnswerTick > 24 and hObj >= 0 and hObj < 16 then
+            print "relay t="; worldTick; " from="; heardSlot(h); " obj="; hObj; " kind="; hKind
             if hKind = 1 then
               jevGuard = hObj
               jevGuardUntil = worldTick + kHold
@@ -520,19 +565,19 @@ end if
 if worldTick >= dialUntil then
   retreatDial = 1
 end if
-' Relay: the asker repeats its squad's directive every two seconds while it is fresh.
+' Relay: the asker repeats its squad's callout every two seconds while it is fresh.
 if useRelay and worldTick - shoutTick >= 0 and (worldTick - shoutTick) mod 48 = 0 then
   if jevObjective >= 0 and worldTick < jevObjectiveUntil then
-    shout(strCat(strCatInt(strCat(strCatInt(strNew("jev "), mySquad), strNew(" ")), jevObjective), strNew(" 0")))
+    callout(0, jevObjective)
   end if
   if jevGuard >= 0 and worldTick < jevGuardUntil then
-    shout(strCat(strCatInt(strCat(strCatInt(strNew("jev "), mySquad), strNew(" ")), jevGuard), strNew(" 1")))
+    callout(1, jevGuard)
   end if
   if worldTick = shoutTick and shoutTick > 0 and worldTick >= jevObjectiveUntil and worldTick >= jevGuardUntil then
-    ' "Keep current": nothing to adopt, but squadmates should know their asker is alive.
+    ' "Carry on": nothing to adopt, but squadmates should know their asker is alive.
     ' (shoutTick > 0: only after an answer; at tick 0 every cog would otherwise shout and the
     ' baseline's turn-to-speech habit would make the file play differently without an oracle.)
-    shout(strCat(strCatInt(strNew("jev "), mySquad), strNew(" -1 0")))
+    callout(0, -1)
   end if
 end if
 
