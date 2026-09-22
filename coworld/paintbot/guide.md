@@ -404,3 +404,17 @@ peak instructions, work units and string handles at the end of the match.
 and guarding on the answer. Host calls cost work units like any other (`oracleAsk` 68); the
 20,000-instruction budget is unchanged, and without an oracle the same script plays as if the calls
 were not there.
+
+`players/jev.bas` (manifest entry `basic-jev`, the second BASIC baseline) is `base.bas` with an
+advisor layer spliced in by `coworld/paintbot/tools/make_jev_baseline.py`; regenerate it whenever
+`base.bas` changes (`--check` in CI keeps the two copies honest). Reflexes stay in code. One cog
+per squad asks Jev to pick the squad's objective from a code-ranked list (the three cheapest
+capture candidates or keep current, each with its consequence spelled out) and relays the answer
+by shout so the squad keeps agreeing. The draft also carries a retreat choice and a survival
+estimate, journaled but switched off (`useRetreat`, `useDial`, `useWide` in the init block) because
+they lost full-length games in the ablations. Asks are event-driven with a 24-tick debounce.
+Where no oracle is configured, as in certification pods (two seats play it there), every ask is
+refused and the file plays exactly like `base.bas`: `tests/test_paintbot_jev_baseline.nim` holds
+it to the same state hash and checks the drafting cost with the oracle on. The layer was
+developed and measured in daveey/cogamer (`cogames/paintbot/jev`): 20 of 24 full-length matches
+against `base.bas` through the hosted route, about 100 asks per game.
