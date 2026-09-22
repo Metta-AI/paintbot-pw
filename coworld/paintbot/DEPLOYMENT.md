@@ -426,4 +426,11 @@ League follow-up after the deploy: the filler list drops `paintbot-pw-territory-
 and the territory-wasm filler) are retired rather than left to forfeit three rounds into
 disqualification. `daveey-heartwick` is a BASIC script (`heartwick.bas`) and stays.
 
-PR #51. Deploy: TBD (filled in after the Deploy Coworld run).
+Merged to main as `733d632` (PR #51). Version 0.3.33 is certified and canonical as
+`cow_1ecd4d02-7d0e-4d95-9649-7ebaf3efdd20` (manifest
+`sha256:7ed6bdf3901c498e279e8b85dcdb0382d42da0e4db02f4a854070ffe2ca0d882`), deployed from `b2f2977` by
+the Deploy Coworld workflow (run 35702798901) after a dry run on the branch (run 35699963916) and
+build.yml on the merge commit; hosted certification and all five hosted smoke episodes passed
+(`ereq_0138d206`, `ereq_04c1d71a`, `ereq_3cfb62f8`, `ereq_da0f9794`, `ereq_de5c1ffd`). The league
+follow-ups above were applied the same hour: the filler list is `paintbot-pw-basic-v22:1` alone, and
+the `paintbot-pw-territory-wasm:v1` and `daveey-cogamer-paintbot-cdx:1` memberships are retired.
