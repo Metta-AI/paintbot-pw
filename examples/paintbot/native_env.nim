@@ -116,3 +116,7 @@ proc pw_bot_actions*(handle: pointer, side, level: cint,
       trainingBotActions(env.world,slot,level.int,
         actions.toOpenArray(slot*ActionSizes.len,(slot+1)*ActionSizes.len-1))
   return 0
+
+proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
+  ## Diagnostic: resident 64x64 terrain blocks (16 KiB each) across all tables.
+  cint(terrainCacheResidentBlocks())

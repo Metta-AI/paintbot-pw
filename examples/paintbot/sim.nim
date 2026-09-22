@@ -363,6 +363,7 @@ proc configureRules*(version: int) =
   fractalRiver = visionRulesVersion >= 32
   lakeTerrain = visionRulesVersion >= 33
   symmetricTerrain = visionRulesVersion >= 35
+  refreshTerrainTable()
 
 proc newWorld*(seed: int32, endTick: int32 = 0): World =
   configureRules(visionRulesVersion)

@@ -85,7 +85,7 @@ proc riverBlend*(x, z: int): int =
   1000 - int(distance.int64*distance.int64*distance.int64*1000 div
     (RiverBankWidth.int64*RiverBankWidth.int64*RiverBankWidth.int64))
 
-proc islandMargin*(x,z:int):int =
+proc islandMarginDirect*(x,z:int):int =
   # Rounded headlands with asymmetric coves, in normalized coast units.
   let nx=abs(x-3200).int64*1000 div (if expandedIsland:7733 else:5800)
   let nz=abs(z-2000).int64*1000 div (if expandedIsland:4575 else:3050)
@@ -148,6 +148,7 @@ proc forestHeight*(x,z:int):int =
   height=height*(300+min(baseForestRouteDistance(x,z),500)) div 800
   let edge=max(max(0,max(-x,x-6400)),max(0,max(-z,z-4000)))
   height*min(edge,500) div 500
+proc islandMargin*(x,z:int):int
 proc forestLots*():seq[tuple[x,z,radius:int]] =
   # Jittered groves, not a wall: trails and objective clearings stay open.
   for z in countup((if expandedIsland: -2700 else: -1000),(if expandedIsland:6700 else:4800),400):
@@ -189,12 +190,103 @@ proc baseTerrainHeight(x, z: int): int =
 proc raisedHeight*(x,z:int):int =
   let p=landCoordinates(x,z)
   baseRaisedHeight(p.x,p.z)
-proc terrainHeight*(x,z:int):int =
+proc terrainHeightDirect*(x,z:int):int =
   let p=landCoordinates(x,z)
   result=baseTerrainHeight(p.x,p.z)
   if riverTerrain:
     let amount = riverBlend(x,z)
     result -= (result-RiverBedHeight)*amount div 1000
   if islandTerrain:
-    let coast=islandMargin(x,z)
+    let coast=islandMarginDirect(x,z)
     result=min(result,(coast-35)*5)
+
+# Rules-static terrain lookups. terrainHeight and islandMargin are pure functions of a
+# point and the flags above, and the sampled visibility, walk and navigation rays call
+# them millions of times per match. Training builds keep lazily filled blocks of exact
+# results, computed by the direct functions above, shared by every world and thread
+# whose flags agree; a point outside the tabled span falls through to the direct code.
+when defined(pwTraining):
+  import std/[atomics, locks]
+  const
+    TerrainCacheMinX = -5120
+    TerrainCacheMinZ = -3072
+    TerrainCacheBlock = 64
+    TerrainCacheBlocksX = 264 # 16896 units, covers rules 22+ span [-4800, 11200] with margin
+    TerrainCacheBlocksZ = 160 # 10240 units, covers [-2800, 6800] with margin
+  type
+    TerrainBlock = object
+      height, margin: array[TerrainCacheBlock*TerrainCacheBlock, int16]
+    TerrainTable = object
+      key: int
+      blocks: array[TerrainCacheBlocksX*TerrainCacheBlocksZ, Atomic[ptr TerrainBlock]]
+  var terrainTables: array[2048, Atomic[ptr TerrainTable]] # one per flag combination
+  var terrainLock: Lock
+  initLock(terrainLock)
+  var terrainCurrent {.threadvar.}: ptr TerrainTable
+  proc terrainFlagsKey(): int =
+    for i, flag in [wideRamps, wilderness, deepWilderness, organicTerrain, islandTerrain,
+        expandedIsland, riverTerrain, curvedRiver, fractalRiver, lakeTerrain, symmetricTerrain]:
+      if flag: result = result or (1 shl i)
+  proc refreshTerrainTable*() =
+    ## Binds this thread's lookups to the table for its current flags. configureRules
+    ## calls it; a training build that sets terrain flags by hand must call it too,
+    ## because the lookup itself reads one thread variable, never the eleven flags.
+    let key = terrainFlagsKey()
+    if terrainCurrent != nil and terrainCurrent.key == key: return
+    var table = terrainTables[key].load(moAcquire)
+    if table == nil:
+      withLock terrainLock:
+        table = terrainTables[key].load(moAcquire)
+        if table == nil:
+          table = cast[ptr TerrainTable](allocShared0(sizeof(TerrainTable)))
+          table.key = key
+          terrainTables[key].store(table, moRelease)
+    terrainCurrent = table
+  proc terrainTable(): ptr TerrainTable {.inline.} =
+    if terrainCurrent == nil: refreshTerrainTable()
+    terrainCurrent
+  proc fillTerrainBlock(table: ptr TerrainTable, index: int): ptr TerrainBlock =
+    ## Computed outside any lock; the first publisher wins and a loser frees its copy.
+    let entry = cast[ptr TerrainBlock](allocShared0(sizeof(TerrainBlock)))
+    let x0 = TerrainCacheMinX+(index mod TerrainCacheBlocksX)*TerrainCacheBlock
+    let z0 = TerrainCacheMinZ+(index div TerrainCacheBlocksX)*TerrainCacheBlock
+    for dz in 0..<TerrainCacheBlock:
+      for dx in 0..<TerrainCacheBlock:
+        let height = terrainHeightDirect(x0+dx, z0+dz)
+        let margin = islandMarginDirect(x0+dx, z0+dz)
+        doAssert height >= low(int16) and height <= high(int16) and
+          margin >= low(int16) and margin <= high(int16), "terrain outside int16"
+        entry.height[dz*TerrainCacheBlock+dx] = int16(height)
+        entry.margin[dz*TerrainCacheBlock+dx] = int16(margin)
+    var expected: ptr TerrainBlock = nil
+    if table.blocks[index].compareExchange(expected, entry, moAcquireRelease, moAcquire):
+      return entry
+    deallocShared(entry)
+    expected
+  template terrainLookup(x, z: int, field: untyped, direct: untyped): int =
+    let cx = x-TerrainCacheMinX
+    let cz = z-TerrainCacheMinZ
+    if cx < 0 or cz < 0 or cx >= TerrainCacheBlocksX*TerrainCacheBlock or
+        cz >= TerrainCacheBlocksZ*TerrainCacheBlock:
+      direct
+    else:
+      let table = terrainTable()
+      let index = (cz div TerrainCacheBlock)*TerrainCacheBlocksX+cx div TerrainCacheBlock
+      var b = table.blocks[index].load(moAcquire)
+      if b == nil: b = fillTerrainBlock(table, index)
+      int(b.field[(cz mod TerrainCacheBlock)*TerrainCacheBlock+cx mod TerrainCacheBlock])
+  proc terrainHeight*(x,z:int):int =
+    terrainLookup(x, z, height, terrainHeightDirect(x, z))
+  proc islandMargin*(x,z:int):int =
+    terrainLookup(x, z, margin, islandMarginDirect(x, z))
+  proc terrainCacheResidentBlocks*(): int =
+    ## Filled blocks across every table; each holds 16 KiB of exact results.
+    for i in 0..<terrainTables.len:
+      let table = terrainTables[i].load(moAcquire)
+      if table == nil: continue
+      for j in 0..<table.blocks.len:
+        if table.blocks[j].load(moAcquire) != nil: inc result
+else:
+  proc refreshTerrainTable*() = discard
+  proc terrainHeight*(x,z:int):int = terrainHeightDirect(x,z)
+  proc islandMargin*(x,z:int):int = islandMarginDirect(x,z)
