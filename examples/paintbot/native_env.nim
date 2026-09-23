@@ -84,7 +84,7 @@ type
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
-const NativeRules* = 38
+const NativeRules* = 39
 
 proc ready() =
   setupForeignThreadGc()
