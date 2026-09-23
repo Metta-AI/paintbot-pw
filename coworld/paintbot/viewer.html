@@ -1238,8 +1238,22 @@
   #glory-toast .blue { color:#59bdeb; }
   #glory-toast b { font-variant-numeric:tabular-nums; }
   @media(max-width:700px) { #glory-toast { font-size:13px; padding:3px 10px 5px; } }
+  #glory-pops { position:fixed; inset:0; z-index:25; pointer-events:none; overflow:hidden; }
+  .glory-pop { position:absolute; transform:translate(-50%,-150%); font:800 26px/1 system-ui,sans-serif; color:#ffd24a; -webkit-text-stroke:1px #5a3a00; text-shadow:0 2px 6px #000a; animation:glory-pop 1.5s ease-out forwards; }
+  .glory-pop.red { -webkit-text-stroke:1.5px #b8322a; }
+  .glory-pop.blue { -webkit-text-stroke:1.5px #1d74a8; }
+  @keyframes glory-pop {
+    0% { opacity:0; transform:translate(-50%,-120%) scale(.6); }
+    12% { opacity:1; transform:translate(-50%,-170%) scale(1.25); }
+    30% { transform:translate(-50%,-190%) scale(1); }
+    75% { opacity:1; }
+    100% { opacity:0; transform:translate(-50%,-320%) scale(1); }
+  }
+  @media(prefers-reduced-motion:reduce) { .glory-pop { animation:glory-pop-fade 1.5s linear forwards; } }
+  @keyframes glory-pop-fade { 0%,70% { opacity:1; } 100% { opacity:0; } }
 </style>
 <div id="glory-toast" role="status" aria-live="polite" aria-label="Glory earned" hidden></div>
+<div id="glory-pops" aria-hidden="true"></div>
 <header>
   <small id="modehint" hidden></small>
   <div id="match-score">

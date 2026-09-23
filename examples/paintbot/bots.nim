@@ -134,6 +134,17 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
   discard result.addFunction("heartCount",0,proc(a:openArray[int32]):int32 = active.controlHearts.len.int32,4)
   discard result.addFunction("glory",1,proc(a:openArray[int32]):int32 =
     (if a[0] >= 0 and a[0] <= 1: active.glory[a[0]] else: -1'i32),4)
+  # Rules 38: glory hearts are fog-gated like pickups; hidden or invalid ones read -1.
+  discard result.addFunction("gloryHeartCount",0,proc(a:openArray[int32]):int32 = active.gloryHearts.len.int32,4)
+  proc getGloryHeart(field:int):HostProc =
+    result = proc(a:openArray[int32]):int32 =
+      let i=a[0].int
+      if i<0 or i>=active.gloryHearts.len or not active.canSeePoint(slot,active.gloryHearts[i].pos):return -1
+      if field==0:active.gloryHearts[i].pos.x
+      elif field==1:active.gloryHearts[i].pos.z
+      else:active.gloryHearts[i].expiresAt-active.tick
+  for axis in 0..2:
+    discard result.addFunction(["gloryHeartX","gloryHeartY","gloryHeartTicksLeft"][axis],1,getGloryHeart(axis),4)
   proc getControl(field:int):HostProc =
     result = proc(a:openArray[int32]):int32 =
       let i=a[0].int

@@ -60,6 +60,7 @@ jobs:
       - run: nim r -d:headless tests/test_paintbot_live_rules.nim --bot:examples/paintbot/players/base.bas:16
       - run: nim r tests/test_paintbot_oracle.nim
       - run: nim r tests/test_paintbot_glory.nim
+      - run: nim r tests/test_paintbot_glory_hearts.nim
       - run: nim r tests/test_paintbot_projection.nim
       - run: nim r -d:headless tests/test_paintbot_neural_contract.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim

@@ -33,8 +33,8 @@ If both teams are eliminated on the same tick, the match ends with no bonus and 
 higher meter wins; equal totals draw. There is no bombardment or overtime.
 The match score is **glory** (rules 37), a self-imposed handicap. Each team starts with the
 match length in seconds (600) and loses one glory per second. Every thirty seconds without
-collecting a supply adds 10, and friendly fire taken in the opening thirty seconds 30 per
-hit; nothing that makes a team more likely to win pays glory. When the match ends the loser's glory drops to zero
+collecting a supply adds 10, friendly fire taken in the opening thirty seconds 30 per
+hit, and each glory heart picked up 20 (rules 38); nothing that makes a team more likely to win pays glory. When the match ends the loser's glory drops to zero
 and a draw pays nobody; the winner's glory is its score and the ladder input. The heart
 meter still decides who wins. See "Glory" below.
 Older replays retain their original capture-the-heart rules.
@@ -81,7 +81,9 @@ BASIC read-only data: `selfId`, `selfTeam`, `selfX`, `selfY`, `selfHp`, `carryin
 Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `playerCarrying(slot)`, `pickupCount()`, `pickupVisible(id)`, `pickupX(id)`,
 `pickupY(id)`, `pickupKind(id)` (0 grenade, 1 spray, 2 medkit, 3 armor),
-`glory(team)` (rules 37). Hidden player and pickup coordinates are not disclosed.
+`glory(team)` (rules 37), `gloryHeartCount()`, `gloryHeartX(id)`, `gloryHeartY(id)`,
+`gloryHeartTicksLeft(id)` (rules 38). Hidden player, pickup and glory-heart coordinates are
+not disclosed (-1).
 
 Actions: `walkTo(x,y)`, `lookAt(x,y)`, `shootAt(x,y)`, `chargeGrenade(held)`.
 Release by calling `chargeGrenade(0)` or not calling it on the next tick.
@@ -347,6 +349,7 @@ keeps about 300 before events. The events, all constants in `sim.nim`:
 | --- | --- | --- |
 | Thirty seconds with no supply collected (`GloryQuietSupplies`, per team, repeating) | +10 | the abstaining team |
 | Friendly fire taken in the opening thirty seconds (`GloryFriendlyFire`, per hit) | +30 | the team that took it |
+| Picking up a glory heart (`GloryHeartAward`, rules 38) | +20 | the team of the cog that touched it |
 
 Spawn protection and self-damage never count; the supply
 clock restarts whenever a teammate collects a grenade, spray can, medkit, armor or uniform,
@@ -361,6 +364,23 @@ without supplies"), the header's big number is each team's glory with the heart-
 in small type beside it, and the scoreboard dialog repeats both. `tests/test_paintbot_glory.nim`
 covers the countdown, each event, the end-of-match settlement, the hash gate and a rules 37
 recording round trip.
+
+### Glory hearts (rules 38)
+
+Small spinning gold hearts appear on the field in mirrored pairs: the first pair at 0:20, then a
+new pair every 10-20 seconds (`GloryHeartMinGap`..`GloryHeartMaxGap`, drawn from the match RNG).
+Each heart sits on a random open, dry spot and its mirror under the map's half turn, lasts thirty
+seconds (`GloryHeartTicks`; it blinks in its last five), then vanishes. The first living cog
+within 120 units (`GloryHeartReach`, seat order alternating each tick like other pickups) takes it
+and its team earns +20 glory. A glory heart is not a supply: it does not restart the
+thirty-seconds-without-supplies clock. It gives nothing that helps win; the detour to fetch one is
+the price. The viewer draws a "+20" rising over the cog that took it, and the top toast names
+the award. Hearts are fog-gated for policies like any pickup (`gloryHeartX/Y/TicksLeft(id)` read
+-1 when out of view; `gloryHeartCount()` is public). The hearts, the next spawn tick and the
+recent pickups (`gloryPickups`, kept four seconds for the viewer) are part of the rules 38 world
+hash; older recordings ignore them. `tests/test_paintbot_glory_hearts.nim` covers spawning,
+expiry, pickup, the hash gate and the BASIC queries. Training builds (`NativeRules`) stay on
+rules 37.
 
 ### A fair map: mirrored ground (rules 35)
 
