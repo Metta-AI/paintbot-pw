@@ -202,6 +202,13 @@ suite "Jev-advised BASIC baseline":
       "weapons": @[("useSmartGrenade", 1), ("useSpray", 1)],
       "everything": @[("useTerrain", 1), ("useSmartGrenade", 1), ("useSpray", 1)],
       "explore": @[("useExplore", 1)],
+      "ball": @[("useBall", 1)],
+      "regroup": @[("useRegroup", 1)],
+      "ball and regroup": @[("useBall", 1), ("useRegroup", 1)],
+      "focus": @[("useFocus", 1)],
+      "ball and focus": @[("useBall", 1), ("useFocus", 1)],
+      "kite": @[("useKite", 1)],
+      "kite and focus": @[("useKite", 1), ("useFocus", 1)],
     }
     # Git may check the file out with CRLF, so normalise before matching on line boundaries.
     let shipped = readFile(Jev).replace("\r\n", "\n")
