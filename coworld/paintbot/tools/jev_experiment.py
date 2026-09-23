@@ -88,6 +88,9 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
     "a13-weapons": ("smart grenades and spray together", {"useSmartGrenade": 1, "useSpray": 1}),
     "a14-rule-weapons": ("the code rule's objective with smart grenades and spray",
                          {"useRule": 1, "useSmartGrenade": 1, "useSpray": 1}),
+    "a15-dry": ("walk around the lake: a detour when the straight way to a far target crosses "
+                "water, where 73% of our deaths against the league leader happened",
+                {"useDryRoute": 1}),
 }
 
 
