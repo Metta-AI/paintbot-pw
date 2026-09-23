@@ -19,6 +19,7 @@ dim pickupMemoryX(32)
 dim pickupMemoryY(32)
 dim pickupMemoryKind(32)
 dim pickupMemoryTick(32)
+dim drF(6)
 dim oldX(16)
 dim oldY(16)
 dim lastSeen(16)
@@ -31,7 +32,6 @@ dim candHeart(6)
 dim candKind(6)
 dim viewD(4)
 dim spLen(16)
-dim drF(6)
 dim viewHp(4)
 dim viewCarry(4)
 dim viewClose(4)
@@ -52,6 +52,25 @@ sub isqrt(n)
     guess = (root + n / root) / 2
     iterations = iterations + 1
   wend
+end sub
+
+' How much of the straight line between two points is under water, in ten samples: into wet.
+sub wetLine(ax, ay, bx, by)
+  wet = 0
+  s3 = 1
+  while s3 <= 10
+    if waterAt(ax + (bx - ax) * s3 / 10, ay + (by - ay) * s3 / 10) then
+      wet = wet + 1
+    end if
+    s3 = s3 + 1
+  wend
+end sub
+
+' Time to walk a leg, in metres of dry walking: a wet metre costs kWetCost dry ones. Into legCost.
+sub legTime(ax, ay, bx, by)
+  wetLine(ax, ay, bx, by)
+  isqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
+  legCost = root / 100 + root / 100 * wet * (kWetCost - 1) / 10
 end sub
 
 ' Small linear congruential generator; every product stays far inside int32.
@@ -333,25 +352,6 @@ sub terrainFacts(j)
   end if
 end sub
 
-' How much of the straight line between two points is under water, in ten samples: into wet.
-sub wetLine(ax, ay, bx, by)
-  wet = 0
-  s3 = 1
-  while s3 <= 10
-    if waterAt(ax + (bx - ax) * s3 / 10, ay + (by - ay) * s3 / 10) then
-      wet = wet + 1
-    end if
-    s3 = s3 + 1
-  wend
-end sub
-
-' Time to walk a leg, in metres of dry walking: a wet metre costs kWetCost dry ones. Into legCost.
-sub legTime(ax, ay, bx, by)
-  wetLine(ax, ay, bx, by)
-  isqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
-  legCost = root / 100 + root / 100 * wet * (kWetCost - 1) / 10
-end sub
-
 ' One retreat option: its distance out as a field, and "R<k>" into retLabel for the criterion.
 sub retOption(k, bx, by)
   isqrt(bx * bx + by * by)
@@ -384,6 +384,14 @@ end sub
 
 if started = 0 then
   started = 1
+  ' Detour offsets beside a wet route, as tenths of the route's length (see Dry route below).
+  drF(0) = -10
+  drF(1) = -6
+  drF(2) = -3
+  drF(3) = 3
+  drF(4) = 6
+  drF(5) = 10
+  kWetCost = 6
   rngState = selfId * 4099 + 977
   zig = 1
   if selfId mod 4 >= 2 then
@@ -506,19 +514,6 @@ if jevInit = 0 then
   ' ignores the cover) or bunch up (a burst hits every cog in its cone for three), and aim each
   ' burst where the cone holds most. A can replaces the gun until death, so only then.
   useSpray = 0
-  ' Dry routes. The navigator walks straight at any goal no wall blocks, and water blocks nothing,
-  ' so an objective across the lake is reached by wading at a quarter speed. Re-simulating 60
-  ' games against the league leader, 73% of our deaths happened in that water (his: 21%). When
-  ' the straight way to a far target crosses water, walk first to the point beside the route
-  ' that is quickest to go through, counting a wet metre as kWetCost dry ones.
-  useDryRoute = 0
-  kWetCost = 6
-  drF(0) = -10
-  drF(1) = -6
-  drF(2) = -3
-  drF(3) = 3
-  drF(4) = 6
-  drF(5) = 10
   ' Once a second one seat per team logs hearts held and the running score: the dense signal a
   ' decision can be scored against when only the winner keeps a final score.
   useTrace = 1
@@ -1821,72 +1816,70 @@ else
   legTicks = 0
   stalled = 0
 end if
-' ---- Dry route. ----
-' Only for travel: a target more than 8 m away. Footwork stays where the dodge put it. A detour
-' is kept until its point is reached, the target moves more than 10 m, or ten seconds pass, so
-' a cog does not dither between two sides of the lake.
+' Dry route. The navigator walks straight at any goal no wall blocks, and water blocks nothing,
+' so an objective across the lake is reached by wading at a quarter speed. Against the league
+' leader that is where 73% of our deaths happened. When the straight way to a target more than
+' 8 m off crosses water, walk first to whichever of six points beside the route is quickest to
+' go through, a wet metre costing kWetCost dry ones, and keep that point until it is reached,
+' the target moves 10 m, or ten seconds pass. Footwork is left where the dodge put it.
 drWalk = 0
-if useDryRoute then
-  drTx = moveX
-  drTy = moveY
-  drDx = drTx - selfX
-  drDy = drTy - selfY
-  if drDx * drDx + drDy * drDy > 640000 then
-    if drActive then
-      drEx = drTx - drGx
-      drEy = drTy - drGy
-      if drEx * drEx + drEy * drEy > 1000000 then
-        drActive = 0
-      end if
-      drEx = drWx - selfX
-      drEy = drWy - selfY
-      if drEx * drEx + drEy * drEy < 90000 then
-        drActive = 0
-      end if
-      if worldTick - drTick > 240 then
-        drActive = 0
-      end if
+drTx = moveX
+drTy = moveY
+drDx = drTx - selfX
+drDy = drTy - selfY
+if drDx * drDx + drDy * drDy > 640000 then
+  if drActive then
+    drEx = drTx - drGx
+    drEy = drTy - drGy
+    if drEx * drEx + drEy * drEy > 1000000 then
+      drActive = 0
     end if
-    if drActive = 0 and worldTick - drTick >= 12 then
-      drTick = worldTick
-      legTime(selfX, selfY, drTx, drTy)
-      drStraightWet = wet
-      if wet > 0 then
-        drBest = legCost
-        drBestK = -1
-        drMx = selfX + drDx / 2
-        drMy = selfY + drDy / 2
-        drK = 0
-        while drK < 6
-          drCx = drMx - drDy * drF(drK) / 10
-          drCy = drMy + drDx * drF(drK) / 10
-          if drCx > mapMinX() + 200 and drCx < mapMaxX() - 200 and drCy > mapMinY() + 200 and drCy < mapMaxY() - 200 then
-            if waterAt(drCx, drCy) = 0 then
-              legTime(selfX, selfY, drCx, drCy)
-              drSc = legCost
-              legTime(drCx, drCy, drTx, drTy)
-              drSc = drSc + legCost
-              if drSc < drBest then
-                drBest = drSc
-                drBestK = drK
-                drWx = drCx
-                drWy = drCy
-              end if
+    drEx = drWx - selfX
+    drEy = drWy - selfY
+    if drEx * drEx + drEy * drEy < 90000 then
+      drActive = 0
+    end if
+    if worldTick - drTick > 240 then
+      drActive = 0
+    end if
+  end if
+  if drActive = 0 and worldTick - drTick >= 12 then
+    drTick = worldTick
+    legTime(selfX, selfY, drTx, drTy)
+    if wet > 0 then
+      drBest = legCost
+      drBestK = -1
+      drMx = selfX + drDx / 2
+      drMy = selfY + drDy / 2
+      drK = 0
+      while drK < 6
+        drCx = drMx - drDy * drF(drK) / 10
+        drCy = drMy + drDx * drF(drK) / 10
+        if drCx > mapMinX() + 200 and drCx < mapMaxX() - 200 and drCy > mapMinY() + 200 and drCy < mapMaxY() - 200 then
+          if waterAt(drCx, drCy) = 0 then
+            legTime(selfX, selfY, drCx, drCy)
+            drSc = legCost
+            legTime(drCx, drCy, drTx, drTy)
+            drSc = drSc + legCost
+            if drSc < drBest then
+              drBest = drSc
+              drBestK = drK
+              drWx = drCx
+              drWy = drCy
             end if
           end if
-          drK = drK + 1
-        wend
-        if drBestK >= 0 then
-          drActive = 1
-          drGx = drTx
-          drGy = drTy
-          print "dry t="; worldTick; " wet="; drStraightWet; " via="; drBestK
         end if
+        drK = drK + 1
+      wend
+      if drBestK >= 0 then
+        drActive = 1
+        drGx = drTx
+        drGy = drTy
       end if
     end if
-    if drActive then
-      drWalk = 1
-    end if
+  end if
+  if drActive then
+    drWalk = 1
   end if
 end if
 if drWalk then
