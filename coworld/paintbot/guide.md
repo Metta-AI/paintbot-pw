@@ -407,8 +407,8 @@ the award. Hearts are fog-gated for policies like any pickup (`gloryHeartX/Y/Tic
 -1 when out of view; `gloryHeartCount()` is public). The hearts, the next spawn tick and the
 recent pickups (`gloryPickups`, kept four seconds for the viewer) are part of the rules 38 world
 hash; older recordings ignore them. `tests/test_paintbot_glory_hearts.nim` covers spawning,
-expiry, pickup, the hash gate and the BASIC queries. Training builds (`NativeRules`) stay on
-rules 37.
+expiry, pickup, the hash gate and the BASIC queries. Training builds (`NativeRules`) play
+the current rules, so glory hearts are on the field there too. First live in 0.3.40.
 
 ### A fair map: mirrored ground (rules 35)
 
