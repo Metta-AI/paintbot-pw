@@ -1187,15 +1187,20 @@ def build(base: str) -> str:
 
 def main() -> None:
     check = "--check" in sys.argv[1:]
-    out = build(BASE.read_text())
+    out = build(BASE.read_text(encoding="utf-8"))
     size = len(out.encode())
     assert size <= 65_536, f"jev.bas is {size} bytes; the source limit is 65,536"
+    # Keep the generated BASIC to plain ASCII. A stray em dash in a comment is invisible here and
+    # costs a Windows CI round trip: the file is written UTF-8 and compared after a locale-codepage
+    # read, so --check calls a file it just generated stale.
+    stray = [(i + 1, line) for i, line in enumerate(out.splitlines()) if not line.isascii()]
+    assert not stray, f"jev.bas line {stray[0][0]} is not ASCII: {stray[0][1].strip()!r}"
     # Keep the spliced text ASCII. `read_text`/`write_text` use the locale encoding, so a stray
     # em dash or smart quote round-trips fine here and makes `--check` report the shipped file as
     # stale on the Windows runner, where the locale is cp1252.
     wide = sorted({c for c in out if ord(c) > 127})
     assert not wide, f"jev.bas must be ASCII; found {wide}"
-    stale = [p for p in OUTPUTS if not p.exists() or p.read_text() != out]
+    stale = [p for p in OUTPUTS if not p.exists() or p.read_text(encoding="utf-8") != out]
     if check:
         if stale:
             sys.exit("stale: " + ", ".join(str(p.relative_to(ROOT)) for p in stale)
@@ -1203,7 +1208,7 @@ def main() -> None:
         print(f"jev.bas matches the generator ({len(out.splitlines())} lines, {size} bytes)")
         return
     for p in OUTPUTS:
-        p.write_text(out)
+        p.write_text(out, encoding="utf-8")
     print(f"jev.bas: {len(out.splitlines())} lines, {size} bytes (limit 65,536); wrote "
           + ", ".join(str(p.relative_to(ROOT)) for p in OUTPUTS))
 
