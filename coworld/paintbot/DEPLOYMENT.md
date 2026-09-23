@@ -510,3 +510,38 @@ Neural canaries on the new version, all 16 seats exit 0 with hash-verified repla
   replay's per-seat telemetry shows the neural team's damage to its own side falling from 21 to 4
   against the same opponent and seed.
 - schema-2 fixture without the option: `ereq_54ee9b00` (1287 ticks, hash 1085495096).
+
+## Decoder option `sampling` — 0.3.37
+
+#69 adds a second per-bundle decoder option under manifest schema `paintbot-neural-basic/2`:
+`"decoder": {"sampling": {"mode": "categorical", "temperature": t, "heads": [...]}}` draws the
+categorical action heads from a stream seeded by the match seed and the seat, so a sampled seat is
+still replay-deterministic. Bundles without the key decode exactly as before (headwise argmax).
+Decoder-only: no `sim.nim` change, no rules bump, replays and hashes of earlier versions are
+unaffected, and the league was not paused.
+
+Deployed from main `488a066` (build.yml run 35822523754 green on all three OSes) by one Deploy
+Coworld run, 35823868854 (`Deploy Coworld 0.3.37 (upload)`). Before dispatch, the pre-dispatch
+check found no other deploy run in flight or in the previous 30 minutes, and `next-version`
+returned 0.3.37 in the same minute. Version 0.3.37 is certified and canonical as
+`cow_6e2f8488-b9cb-4afd-a38a-6e76b62936b7`
+(manifest `sha256:122874aa30f77e65a9752da4bfa36a4d4c76b3c8073c8b58befecb05c66ab690`). Hosted smoke
+passed (`ereq_000223a1`, `ereq_0f7c78fd`, `ereq_1af8accf`, `ereq_91047a71`, `ereq_aab32d0b`). The
+paintbot-pw league picked the row up with round #1422.
+
+Neural canaries on the new version, all 16 seats exit 0 with hash-verified replays:
+
+- v1 preserved: the contract-v1 bundle re-ran as `ereq_fd819894` and produced the same replay file
+  as `ereq_0594ef14` on 0.3.36 (993 ticks, hash 301441621).
+- fire hold preserved (argmax): the schema-2 fixture with `fire_hold_teammates` re-ran as
+  `ereq_979d468e` and produced the same replay file as `ereq_e532f165` on 0.3.36 (1404 ticks, hash
+  2920536881).
+- sampling on: one bundle with `{"fire_hold_teammates": true, "sampling": {"mode": "categorical",
+  "temperature": 1.0}}` ran twice with the same body (seed 2026, same fillers), as `ereq_4ec66116`
+  and `ereq_405cae9b`. The two hosted replay files are identical (1347 ticks, hash 3896881393), and
+  they match a local reproduction on a `488a066` engine in every frame. Each neural seat log
+  carries `sampling=categorical t=1.000 heads=01234 seed=0x… draws=N` next to the peak-ops and
+  `fire_holds` telemetry, with a different stream seed for each seat.
+
+From this release on, the league has a schema-2 neural ZIP competing, so a future decoder or
+contract change must canary a copy of the live bundle before it ships.
