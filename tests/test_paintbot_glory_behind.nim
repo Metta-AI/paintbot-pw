@@ -16,8 +16,8 @@ proc firstSeat(side: int): int =
 
 suite "Glory for being behind in lives":
   setup:
-    visionRulesVersion = 38
-    replayRulesVersion = 38
+    visionRulesVersion = 39
+    replayRulesVersion = 39
   test "level teams earn nothing":
     var w = newWorld(2026)
     w.pickups.setLen(0)
@@ -55,16 +55,16 @@ suite "Glory for being behind in lives":
     check awards[0].team == 1
     check awards[0].amount == 1
     check w.glory == [595'i32, 596'i32]
-  test "rules 37 does not pay for lives":
-    visionRulesVersion = 37
-    replayRulesVersion = 37
+  test "rules 38, live in 0.3.39, does not pay for lives":
+    visionRulesVersion = 38
+    replayRulesVersion = 38
     var w = newWorld(2026)
     w.pickups.setLen(0)
     w.equipment[firstSeat(0)].lives -= 3
     w.idle(2*GloryBehindLivesTicks)
     check w.behindAwards.len == 0
     check w.glory == [590'i32, 590'i32]
-  test "rules 38 pays nothing for friendly fire":
+  test "rules 39 pays nothing for friendly fire; rules 38 still pays thirty per hit":
     var w = newWorld(2026)
     w.pickups.setLen(0)
     var a = -1
@@ -76,3 +76,12 @@ suite "Glory for being behind in lives":
     w.damage(b, a, 1)
     check w.gloryEvents.len == 0
     check w.glory == [600'i32, 600'i32]
+    visionRulesVersion = 38
+    replayRulesVersion = 38
+    var old = newWorld(2026)
+    old.pickups.setLen(0)
+    old.cogs[b].shield = 0
+    old.damage(b, a, 1)
+    check old.gloryEvents.len == 1
+    check old.gloryEvents[0].kind == gloryFriendlyFire
+    check old.glory == [600'i32+GloryFriendlyFire, 600'i32]
