@@ -28,7 +28,7 @@ const
   # Glory is a self-imposed handicap: nothing that makes a team more likely to win pays it.
   GloryQuietSupplies* = 10
   GloryQuietSupplyTicks* = 30*TickRate
-  GloryFriendlyFire* = 30
+  GloryFriendlyFire* = 30 # Rules 37 only; rules 38 pays nothing for friendly fire.
   GloryFriendlyFireTicks* = 30*TickRate
   GloryEventLifetime* = 4*TickRate
   # Glory hearts (rules 38): small hearts appear in mirrored pairs at random open spots,
@@ -39,6 +39,10 @@ const
   GloryHeartMinGap* = 10*TickRate
   GloryHeartMaxGap* = 20*TickRate
   GloryHeartReach* = 120
+  # Rules 38: every GloryBehindLivesTicks a team earns GloryBehindLives per life it has fewer
+  # than the enemy (lives left summed over its cogs); the team ahead in lives earns nothing.
+  GloryBehindLives* = 1
+  GloryBehindLivesTicks* = 5*TickRate
   SpawnTemperature* = 1000
   HeartSpawnRadius* = 350
   # Compile-time exponential table keeps native/WASM sampling integer-only.
@@ -95,7 +99,7 @@ type
   SoundCue* = object
     listener*, kind*, direction*, distance*, tick*: int32
   GloryKind* = enum
-    gloryQuietSupplies, gloryFriendlyFire, gloryHeart
+    gloryQuietSupplies, gloryFriendlyFire, gloryHeart, gloryBehindLives
   GloryEvent* = object
     tick*, team*, amount*: int32
     kind*: GloryKind
@@ -614,7 +618,8 @@ proc earnGlory*(w: var World, side: int, kind: GloryKind, amount: int32) =
 
 proc updateGlory*(w: var World) =
   ## Rules 37, once per tick after the tick counter advances: forget old awards, count
-  ## down one glory per second, and pay a team that went thirty seconds without supplies.
+  ## down one glory per second, pay a team that went thirty seconds without supplies, and
+  ## (rules 38) pay a team behind in lives every five seconds.
   var recent: seq[GloryEvent]
   for event in w.gloryEvents:
     if w.tick-event.tick < GloryEventLifetime: recent.add event
@@ -625,6 +630,12 @@ proc updateGlory*(w: var World) =
     if w.tick-w.lastSupplyTick[side] >= GloryQuietSupplyTicks:
       w.lastSupplyTick[side] = w.tick
       w.earnGlory(side, gloryQuietSupplies, GloryQuietSupplies)
+  if visionRulesVersion >= 38 and w.tick mod GloryBehindLivesTicks == 0:
+    var lives: array[2, int32]
+    for i in 0..<Seats: lives[team(i)] += w.equipment[i].lives
+    for side in 0..1:
+      let behind = lives[1-side]-lives[side]
+      if behind > 0: w.earnGlory(side, gloryBehindLives, behind*GloryBehindLives)
 
 proc gloryHeartSpot(w: var World): (bool, Point) =
   ## A random open spot on dry land whose mirror is open too; false after 32 misses.

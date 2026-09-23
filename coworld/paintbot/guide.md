@@ -33,8 +33,9 @@ If both teams are eliminated on the same tick, the match ends with no bonus and 
 higher meter wins; equal totals draw. There is no bombardment or overtime.
 The match score is **glory** (rules 37), a self-imposed handicap. Each team starts with the
 match length in seconds (600) and loses one glory per second. Every thirty seconds without
-collecting a supply adds 10, friendly fire taken in the opening thirty seconds 30 per
-hit, and each glory heart picked up 20 (rules 38); nothing that makes a team more likely to win pays glory. When the match ends the loser's glory drops to zero
+collecting a supply adds 10, each glory heart picked up 20 (rules 38), and every five seconds
+a team behind in lives earns 1 per life it trails by (rules 38). Friendly fire taken in the
+opening thirty seconds paid 30 per hit in rules 37 only; nothing that makes a team more likely to win pays glory. When the match ends the loser's glory drops to zero
 and a draw pays nobody; the winner's glory is its score and the ladder input. The heart
 meter still decides who wins. See "Glory" below.
 Older replays retain their original capture-the-heart rules.
@@ -364,8 +365,9 @@ keeps about 300 before events. The events, all constants in `sim.nim`:
 | Event | Glory | Credited to |
 | --- | --- | --- |
 | Thirty seconds with no supply collected (`GloryQuietSupplies`, per team, repeating) | +10 | the abstaining team |
-| Friendly fire taken in the opening thirty seconds (`GloryFriendlyFire`, per hit) | +30 | the team that took it |
+| Friendly fire taken in the opening thirty seconds (`GloryFriendlyFire`, per hit; rules 37 only, removed in rules 38) | +30 | the team that took it |
 | Picking up a glory heart (`GloryHeartAward`, rules 38) | +20 | the team of the cog that touched it |
+| Every five seconds, per life fewer than the enemy (`GloryBehindLives`, rules 38; lives left summed over the team's cogs) | +1 | the team behind in lives |
 
 Spawn protection and self-damage never count; the supply
 clock restarts whenever a teammate collects a grenade, spray can, medkit, armor or uniform,
