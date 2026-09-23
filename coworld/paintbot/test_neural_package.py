@@ -102,3 +102,22 @@ class PackageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_sampling_option(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        for sampling in ({"mode": "categorical"},
+                         {"mode": "categorical", "temperature": 0.5, "heads": [0, 2]},
+                         {"mode": "categorical", "temperature": 10},
+                         {"mode": "categorical", "temperature": 0.01, "heads": [4, 3, 2, 1, 0]}):
+            _, _, manifest = unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": True, "sampling": sampling}}))
+            self.assertEqual(manifest["decoder"]["sampling"], sampling)
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {"sampling": {"mode": "categorical"}}}))
+        for sampling, message in (({}, "mode"), ({"mode": "argmax"}, "mode"), ({"mode": "categorical", "temperature": 0}, "within"),
+                                  ({"mode": "categorical", "temperature": 11}, "within"), ({"mode": "categorical", "temperature": "1"}, "number"),
+                                  ({"mode": "categorical", "temperature": True}, "number"), ({"mode": "categorical", "heads": []}, "non-empty"),
+                                  ({"mode": "categorical", "heads": [5]}, "indices"), ({"mode": "categorical", "heads": [1, 1]}, "repeats"),
+                                  ({"mode": "categorical", "heads": "all"}, "non-empty"), ({"mode": "categorical", "heads": [True]}, "indices"),
+                                  ({"mode": "categorical", "seed": 1}, "unknown decoder.sampling field"), (True, "must be a dict"), ([], "must be a dict")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(sampling)):
+                unpack_package(package({**schema2, "decoder": {"sampling": sampling}}))

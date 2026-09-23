@@ -168,3 +168,67 @@ suite "native BASIC neural host":
       let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
       checkpoint schema & " " & decoder
       check bad[0].failed
+  test "the sampling decoder option is read from a schema-2 manifest, seeds per seat and replays exactly":
+    const Schema1 = "paintbot-neural-basic/1"
+    const Schema2 = "paintbot-neural-basic/2"
+    let sampled = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"fire_hold_teammates\": true, \"sampling\": {\"mode\": \"categorical\"}}"))
+    check not sampled[0].failed
+    check sampled[0].neural.sampling.enabled
+    check sampled[0].neural.sampling.temperature == 1'f32
+    check sampled[0].neural.sampling.heads == [true, true, true, true, true]
+    check sampled[0].neural.telemetry(10, 3) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 fire_holds=0 sampling=categorical t=1.000 heads=01234 seed=0x0000000000000000 draws=0"
+    var w = newWorld(2026)
+    discard sampled.decide(w)
+    check not sampled[0].failed
+    check sampled[0].neural.sampleDraws == 1
+    check sampled[0].neural.telemetry(10, 1) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=1 fire_holds=0 sampling=categorical t=1.000 heads=01234 seed=0x" &
+      toHex(samplingSeed(2026, 0), 16).toLowerAscii & " draws=1"
+    # Temperature and a head subset.
+    let partial = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"sampling\": {\"mode\": \"categorical\", \"temperature\": 0.5, \"heads\": [2, 0]}}"))
+    check not partial[0].failed
+    check partial[0].neural.sampling.temperature == 0.5'f32
+    check partial[0].neural.sampling.heads == [true, false, true, false, false]
+    check partial[0].neural.telemetry(10, 3) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 sampling=categorical t=0.500 heads=02 seed=0x0000000000000000 draws=0"
+    # Replay determinism: the same match seed twice gives the same world hash every tick
+    # with every seat sampling (the zero model's logits are all equal, so every draw is a
+    # uniform choice); the argmax bundle on the same seed diverges from it.
+    proc play(manifest: string, seed: int32, ticks: int): seq[uint32] =
+      let players = fixture(NeuralSource, true, ActionContractV2Hash, manifest)
+      var world = newWorld(seed)
+      for tick in 0..<ticks:
+        let commands = players.decide(world)
+        for slot in 0..<Seats: check not players[slot].failed
+        world.step(commands)
+        result.add world.stateHash()
+    let sampling = manifestJson(Schema2, ActionContractV2Hash, "{\"sampling\": {\"mode\": \"categorical\"}}")
+    let once = play(sampling, 2026, 120)
+    check once == play(sampling, 2026, 120)
+    check once != play(manifestJson(Schema2, ActionContractV2Hash), 2026, 120)
+    check once != play(sampling, 2027, 120)
+    # Schema 1 and schema 2 without the field: unchanged behaviour and log line.
+    for (schema, contract) in [(Schema1, ActionContractHash), (Schema2, ActionContractHash), (Schema2, ActionContractV2Hash)]:
+      let plain = fixture(NeuralSource, true, contract, manifestJson(schema, contract))
+      check not plain[0].failed
+      check not plain[0].neural.sampling.enabled
+      check plain[0].neural.telemetry(10, 3) == "neural: peak_ops=10 budget=4000000 model=w64 ticks=3"
+    # Rejected: under schema 1; no mode; another mode; bad temperatures; bad heads; unknown field; not an object.
+    for (schema, decoder) in [(Schema1, "{\"sampling\": {\"mode\": \"categorical\"}}"),
+                              (Schema2, "{\"sampling\": {}}"),
+                              (Schema2, "{\"sampling\": {\"mode\": \"argmax\"}}"),
+                              (Schema2, "{\"sampling\": {\"mode\": \"categorical\", \"temperature\": 0}}"),
+                              (Schema2, "{\"sampling\": {\"mode\": \"categorical\", \"temperature\": 11}}"),
+                              (Schema2, "{\"sampling\": {\"mode\": \"categorical\", \"temperature\": \"1\"}}"),
+                              (Schema2, "{\"sampling\": {\"mode\": \"categorical\", \"heads\": []}}"),
+                              (Schema2, "{\"sampling\": {\"mode\": \"categorical\", \"heads\": [5]}}"),
+                              (Schema2, "{\"sampling\": {\"mode\": \"categorical\", \"heads\": [1, 1]}}"),
+                              (Schema2, "{\"sampling\": {\"mode\": \"categorical\", \"heads\": \"all\"}}"),
+                              (Schema2, "{\"sampling\": {\"mode\": \"categorical\", \"seed\": 1}}"),
+                              (Schema2, "{\"sampling\": true}")]:
+      let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
+      checkpoint schema & " " & decoder
+      check bad[0].failed

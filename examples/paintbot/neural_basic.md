@@ -29,6 +29,25 @@ candidates and the contract hashes are the same with or without them.
   decoder gates it. The same rule is the native training ABI's `pw_set_seat_fire_hold`,
   so a policy trained under it is deployed under it. With the option on, the seat's
   telemetry line ends in ` fire_holds=<n>`, the orders held in the match.
+- `"decoder": {"sampling": {"mode": "categorical", "temperature": 1.0, "heads": [0, 1, 2, 3, 4]}}`
+  (default absent = argmax, byte-identical to before): the listed heads are drawn from
+  `softmax(logits / temperature)` instead of taken by argmax, the others keep argmax.
+  `mode` is required and only `"categorical"` exists; `temperature` is optional (1.0)
+  within [0.01, 10]; `heads` is optional (every head) and lists distinct head indices.
+  The draws come from a stream the seat owns (`neural_contract.sampleActions`: SplitMix64
+  from `polyworld/rngs`, the engine's replay-portable generator), seeded from the match
+  seed and the seat's slot the first time the seat sees the world, one draw per sampled
+  head per decision, in head order. The world's own random stream is never touched, so
+  the world hash and every other seat are unaffected by the option, and the same match
+  seed replays the same draws on the same engine build. Replays themselves record the
+  commands the seat gave and never re-run the network. The same generator and seeding
+  are the native training ABI's `pw_set_seat_sampling` / `pw_sample_actions`, so a probe
+  that feeds it the hosted actor's logits takes the hosted seat's draws. With the option
+  on, the seat's telemetry line ends in
+  ` sampling=categorical t=<temperature> heads=<indices> seed=0x<stream seed> draws=<n>`.
+  Caveat: the actor's float32 logits are argmax-stable across CPU architectures but not
+  bit-stable, so a sampled match reproduces exactly on one engine build and architecture
+  (the hosted platform's), not necessarily between an arm64 laptop and an x86 host.
 
 The archive is bounded to 16 MiB model, 64 KiB BASIC, and 8 KiB manifest.
 Duplicates, unexpected paths/files, encryption, incorrect hashes, and oversized
@@ -63,8 +82,9 @@ operations in any tick, the budget, the hidden width, ticks played); a package r
 for exceeding the budget gets the same line with the rejected model's cost and `ticks=0`
 before its `BASIC error`. Plain BASIC seats log nothing. Recurrent
 state resets at initial use, match reset, death, and respawn. Training must use
-the same reset convention. Output selection is deterministic headwise argmax;
-training samples categorical heads and evaluates the deployed argmax artifact.
+the same reset convention. Output selection is deterministic headwise argmax unless
+the bundle asks for `decoder.sampling` (above); training samples categorical heads and
+evaluates the deployed artifact under the selection rule it will be deployed with.
 
 The versioned neural observation includes public self cooldown and heart-meter
 state as well as the documented feature layout. These are deliberate additions

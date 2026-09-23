@@ -1,4 +1,5 @@
 import std/[unittest, math]
+import polyworld/rngs
 import ../examples/paintbot/[sim, neural_contract]
 
 suite "Neural policy contract":
@@ -360,3 +361,109 @@ suite "Decoder fire hold (bundle option, not a contract change)":
       checkpoint name
       check trial.cogs[mate].hp == mateHp
       check trial.cogs[target].hp == 3
+
+suite "Decoder sampling (bundle option, not a contract change)":
+  proc logitsFor(seed: int): seq[float32] =
+    ## Deterministic pseudo-random logits in about [-3, 3] (a small LCG, no std/random).
+    var x = uint32(seed)*2654435761'u32 + 12345
+    result = newSeq[float32](LogitSize)
+    for i in 0..<LogitSize:
+      x = x*1664525'u32 + 1013904223'u32
+      result[i] = float32(int((x shr 8) mod 6000) - 3000) / 1000'f32
+  proc allHeads(temperature = 1'f32): SamplingOptions =
+    result.enabled = true
+    result.temperature = temperature
+    for head in 0..<ActionSizes.len: result.heads[head] = true
+  proc separated(seed: int): seq[float32] =
+    ## logitsFor with every head's argmax lifted by 3, so no near-tie survives a cold draw.
+    result = logitsFor(seed)
+    let best = argmaxActions(result)
+    var offset = 0
+    for head, size in ActionSizes:
+      result[offset+best[head]] += 3
+      offset += size
+  test "disabled options are exactly argmax and draw nothing":
+    var options: SamplingOptions
+    var rng = samplingRng(2026, 0)
+    let before = rng.state
+    for s in 0..<20:
+      let logits = logitsFor(s)
+      check sampleActions(logits, options, rng) == argmaxActions(logits)
+    check rng.state == before
+  test "the stream is a function of the match seed and the slot":
+    check samplingSeed(2026, 0) == samplingRng(2026, 0).state
+    var seeds: seq[uint64]
+    for slot in 0..<Seats: seeds.add samplingSeed(2026, slot)
+    for a in 0..<Seats:
+      for b in a+1..<Seats: check seeds[a] != seeds[b]
+    check samplingSeed(2026, 0) != samplingSeed(2027, 0)
+    check samplingSeed(-1, 0) == samplingSeed(-1, 0)
+    var first = samplingRng(2026, 3)
+    var again = samplingRng(2026, 3)
+    var other = samplingRng(2026, 4)
+    var otherSeed = samplingRng(2027, 3)
+    var differsBySlot, differsBySeed = false
+    for s in 0..<500:
+      let logits = logitsFor(s)
+      let a = sampleActions(logits, allHeads(), first)
+      check a == sampleActions(logits, allHeads(), again)
+      if a != sampleActions(logits, allHeads(), other): differsBySlot = true
+      if a != sampleActions(logits, allHeads(), otherSeed): differsBySeed = true
+    check differsBySlot and differsBySeed
+  test "one draw per sampled head per call; unsampled heads take argmax":
+    var options = allHeads()
+    options.heads = [false, true, false, true, false]
+    var rng = samplingRng(11, 2)
+    for s in 0..<50:
+      var expected = rng
+      discard expected.next(); discard expected.next()
+      let logits = logitsFor(s)
+      let picked = sampleActions(logits, options, rng)
+      let best = argmaxActions(logits)
+      check rng.state == expected.state
+      check picked[0] == best[0] and picked[2] == best[2] and picked[4] == best[4]
+    var every = allHeads()
+    var full = samplingRng(11, 2)
+    var expected = full
+    for head in 0..<ActionSizes.len: discard expected.next()
+    discard sampleActions(logitsFor(0), every, full)
+    check full.state == expected.state
+  test "draw frequencies follow softmax(logits / temperature); a cold temperature is argmax":
+    var logits = newSeq[float32](LogitSize)
+    # head 2 (offset 76): [0, ln 3] -> p(1) = 0.75; head 3 (78): [0, 0] -> 0.5;
+    # head 4 (80): [2, 0] -> p(0) = e^2/(e^2+1) = 0.881; head 0 (51 entries) all 0 -> uniform.
+    logits[77] = ln(3.0).float32
+    logits[80] = 2
+    var rng = samplingRng(5, 0)
+    var count2, count3, count4 = 0
+    var head0 = newSeq[int](51)
+    const N = 20000
+    for i in 0..<N:
+      let a = sampleActions(logits, allHeads(), rng)
+      if a[2] == 1: inc count2
+      if a[3] == 1: inc count3
+      if a[4] == 0: inc count4
+      inc head0[a[0]]
+    check abs(count2/N - 0.75) < 0.02
+    check abs(count3/N - 0.5) < 0.02
+    check abs(count4/N - 0.881) < 0.02
+    for c in head0: check c > 250 and c < 550
+    # Temperature 2 halves the log-odds of head 2: p(1) = sqrt(3)/(1+sqrt(3)) = 0.634.
+    var warm = samplingRng(5, 0)
+    var count2warm = 0
+    for i in 0..<N:
+      if sampleActions(logits, allHeads(2), warm)[2] == 1: inc count2warm
+    check abs(count2warm/N - 0.634) < 0.02
+    # Temperature 0.01 on separated logits: every draw is the argmax.
+    var cold = samplingRng(5, 0)
+    for i in 0..<2000:
+      let apart = separated(i)
+      check sampleActions(apart, allHeads(0.01), cold) == argmaxActions(apart)
+  test "invalid logits and temperatures are rejected":
+    var rng = samplingRng(1, 0)
+    var bad = logitsFor(1)
+    bad[10] = NaN
+    expect ValueError: discard sampleActions(bad, allHeads(), rng)
+    expect ValueError: discard sampleActions(logitsFor(1), allHeads(0), rng)
+    expect ValueError: discard sampleActions(logitsFor(1), allHeads(11), rng)
+    expect ValueError: discard sampleActions(newSeq[float32](10), allHeads(), rng)
