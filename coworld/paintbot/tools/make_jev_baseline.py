@@ -397,6 +397,12 @@ if jevInit = 0 then
   kKiteMargin = 1
   kKiteFoeR2 = 27562500
   kKiteMateR2 = 4000000
+  ' useRush: we carry a grenade half our alive time and throw almost none - the leader's clusters
+  ' sit at 30-50 m and a grenade lands at most 12.8 m out. A carrier that sees two or more enemies
+  ' bunched within 3.3 m, no farther than kRushR2 away, walks in to throw range (overriding kite);
+  ' pair it with useSmartGrenade so the throw goes to the densest cluster.
+  useRush = 0
+  kRushR2 = 6250000
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -1278,6 +1284,46 @@ if useKite and not carrying and foesSeen > 0 then
       goalY = controlY(away)
       holding = 0
     end if
+  end if
+end if
+
+' ---- Rush a cluster with a grenade. ----
+if useRush and hasGrenade and not carrying and foesSeen > 1 then
+  ruBest = 0
+  ruD2 = 2147483647
+  i = 1 - selfTeam
+  while i < 16
+    if visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      d2 = dx * dx + dy * dy
+      if d2 <= kRushR2 then
+        ruN = 0
+        e = 1 - selfTeam
+        while e < 16
+          if visible(e) then
+            cfx = playerX(e) - playerX(i)
+            cfy = playerY(e) - playerY(i)
+            if cfx * cfx + cfy * cfy < 108900 then
+              ruN = ruN + 1
+            end if
+          end if
+          e = e + 2
+        wend
+        if ruN > ruBest or (ruN = ruBest and d2 < ruD2) then
+          ruBest = ruN
+          ruD2 = d2
+          ruX = playerX(i)
+          ruY = playerY(i)
+        end if
+      end if
+    end if
+    i = i + 2
+  wend
+  if ruBest >= 2 then
+    goalX = ruX
+    goalY = ruY
+    holding = 0
   end if
 end if
 

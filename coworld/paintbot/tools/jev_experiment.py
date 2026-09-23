@@ -97,6 +97,8 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
     "a20-ball-focus": ("one group of eight that shoots one target", {"useBall": 1, "useFocus": 1}),
     "a21-kite": ("fall back when outgunned within gun range, not just within 26 m", {"useKite": 1}),
     "a22-kite-focus": ("kite and focus fire", {"useKite": 1, "useFocus": 1}),
+    "a23-kite-rush": ("kite; grenade carriers walk in on a visible cluster and grenade it",
+                      {"useKite": 1, "useRush": 1, "useSmartGrenade": 1}),
 }
 
 
