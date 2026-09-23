@@ -67,8 +67,9 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
                   "a margin in probability", {"kMargin": 150}),
     "a5-wide": ("the wider objective list at full length, now that the options are structured",
                 {"useWide": 1}),
-    "a6-retreat": ("the retreat choice and break-off dial, now that retSent and the question's "
-                   "polarity are fixed", {"useRetreat": 1, "useDial": 1}),
+    "a6-no-retreat": ("dropping the retreat choice and break-off dial, which went live on the "
+                      "thinnest margin the rules allow (0.553 over 360, [0.501, 0.603]) and is "
+                      "the first switch to re-examine", {"useRetreat": 0, "useDial": 0}),
     "a7-echo": ("the old echoing relay, where every adopter repeats the callout, as the control "
                 "arm for the one-voice change", {"useEcho": 1}),
 }

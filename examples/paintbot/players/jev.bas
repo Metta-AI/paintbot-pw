@@ -337,8 +337,14 @@ if jevInit = 0 then
   ' 1,200 ticks): leader asks + wide list +17.1 +/- 6.1; every cog asking -2.1; retreat as a
   ' choice -3.6 and the survival dial -5.2 relative to the core, so both stay off.
   useObjective = 1
-  useRetreat = 0
-  useDial = 0
+  ' Retreat choice and break-off dial. On since 2026-09-23, and only just: 199 of 360
+  ' head-to-head episodes over three batteries (0.553, Wilson [0.501, 0.603], exact two-sided
+  ' p = 0.051). The lower bound clears 0.5 by 0.001, and the effect shrank as the sample grew
+  ' (0.583 at n=120, 0.537 at n=240), so treat this as the weakest live switch, not a win.
+  ' Every earlier A/B of it measured nothing: retCount was rebuilt each tick before a late reply
+  ' was read, which made useRetreat a no-op until #62.
+  useRetreat = 1
+  useDial = 1
   ' Three narrow yes/no questions ride along with the objective ask, over the same state and in
   ' the same request. They cost little and each is journaled so it can be scored against what
   ' the game went on to do; none of them steers play yet.
