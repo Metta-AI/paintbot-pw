@@ -150,6 +150,16 @@ Four things about reading the result:
 - **Check the seats before trusting a score.** Each seat's BASIC `print` output comes back from
   `coworld episode-logs`; count its asks against its failures and refusals. Locally,
   `PW_BASIC_PEAKS=1` prints each seat's peak instructions, work units and string handles.
+- **Read the replay, not just the score.** `examples/paintbot/replay_stats.nim` re-simulates a
+  replay and reports, per side, lives left, cogs standing, captures, heart-ticks held, ticks
+  spent ahead on heart count and every glory award by kind. Win rate alone hid the most
+  important fact about this league: matches end by elimination at roughly a quarter of the
+  clock, so the heart meter usually never decides anything. Hosted replays are gzipped —
+  `curl -sS <replay_url> | gunzip -c > match.raw` first.
+
+**A league round swaps which side a policy takes between episodes.** Derive the side from that
+episode's `policy_version_ids` zipped with slots; never assume your policy is on the even seats.
+Assuming it turns a win into a loss in your table, silently.
 
 ### What the advisor switches are worth
 
