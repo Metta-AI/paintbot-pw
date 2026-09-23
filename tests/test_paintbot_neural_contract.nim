@@ -467,3 +467,264 @@ suite "Decoder sampling (bundle option, not a contract change)":
     expect ValueError: discard sampleActions(logitsFor(1), allHeads(0), rng)
     expect ValueError: discard sampleActions(logitsFor(1), allHeads(11), rng)
     expect ValueError: discard sampleActions(newSeq[float32](10), allHeads(), rng)
+
+suite "Decoder objective forbid (bundle option, not a contract change)":
+  proc logitsFor(seed: int): seq[float32] =
+    var x = uint32(seed)*2654435761'u32 + 12345
+    result = newSeq[float32](LogitSize)
+    for i in 0..<LogitSize:
+      x = x*1664525'u32 + 1013904223'u32
+      result[i] = float32(int((x shr 8) mod 6000) - 3000) / 1000'f32
+  proc allHeads(): SamplingOptions =
+    result.enabled = true
+    result.temperature = 1
+    for head in 0..<ActionSizes.len: result.heads[head] = true
+  proc river(): ObjectiveMask =
+    result[9] = true
+    result[10] = true
+  test "nothing forbidden is exactly argmax and exactly the sampler, draw for draw":
+    var none: ObjectiveMask
+    check not none.forbidsAny and river().forbidsAny
+    var a = samplingRng(3, 1)
+    var b = samplingRng(3, 1)
+    for s in 0..<200:
+      let logits = logitsFor(s)
+      check argmaxActions(logits, none) == argmaxActions(logits)
+      check sampleActions(logits, allHeads(), a, none) == sampleActions(logits, allHeads(), b)
+      check a.state == b.state
+  test "a forbidden objective is never the argmax; the next best is, every other head unchanged":
+    for s in 0..<200:
+      var logits = logitsFor(s)
+      logits[9] = 50  # the river heart would win by far
+      logits[10] = 49
+      let masked = argmaxActions(logits, river())
+      let plain = argmaxActions(logits)
+      check plain[0] == 9
+      var best = 0
+      for i in 0..<ActionSizes[0]:
+        if i notin [9, 10] and logits[i] > logits[best]: best = i
+      check masked[0] == best.int32
+      check masked[1..4] == plain[1..4]
+    # A NaN is still rejected, even at a forbidden index; forbidding everything is an error.
+    var bad = logitsFor(1)
+    bad[9] = NaN
+    expect ValueError: discard argmaxActions(bad, river())
+    var every: ObjectiveMask
+    for i in 0..<ActionSizes[0]: every[i] = true
+    expect ValueError: discard argmaxActions(logitsFor(1), every)
+  test "sampled with a forbid: never drawn, the rest renormalised, one draw per head":
+    var logits = newSeq[float32](LogitSize)  # every head uniform
+    logits[9] = 5; logits[10] = 5           # most of the mass sits on the river hearts
+    var rng = samplingRng(5, 0)
+    var counts = newSeq[int](ActionSizes[0])
+    const N = 49000
+    for i in 0..<N:
+      var expected = rng
+      for head in 0..<ActionSizes.len: discard expected.next()
+      let a = sampleActions(logits, allHeads(), rng, river())
+      check rng.state == expected.state
+      inc counts[a[0]]
+    check counts[9] == 0 and counts[10] == 0
+    for i, c in counts:
+      if i notin [9, 10]: check c > 800 and c < 1200   # 1000 expected
+    # Sampling off with a forbid: the masked argmax, no draw.
+    var off: SamplingOptions
+    var quiet = samplingRng(5, 0)
+    let before = quiet.state
+    check sampleActions(logits, off, quiet, river()) == argmaxActions(logits, river())
+    check quiet.state == before
+
+suite "Decoder strafe legs (bundle option, not a contract change)":
+  setup:
+    visionRulesVersion = 37
+  proc contact(w: var World, seat, enemy: int, gap = 1200): (Point, Point) =
+    ## `seat` and `enemy` 1200 units apart on an open east-west line, both seeing each
+    ## other; every other seat stands far away along the edge.
+    for slot in 0..<Seats:
+      if slot notin [seat, enemy]: w.cogs[slot].pos = point(200 + slot*80, maxZ() - 60)
+    for gz in countup(600, 3200, 200):
+      for gx in countup(0, 5000, 200):
+        let s = point(gx, gz)
+        let e = point(gx + gap, gz)
+        if not w.openGround(s, e): continue
+        w.cogs[seat].pos = s; w.cogs[enemy].pos = e
+        w.cogs[seat].goal = s; w.cogs[enemy].goal = e
+        w.cogs[seat].aim = e; w.cogs[enemy].aim = s
+        if w.visible(seat, enemy) and w.visible(enemy, seat): return (s, e)
+    raise newException(AssertionDefect, "no open contact line")
+  proc options(reverse = 800'i32, range = DefaultStrafeRange): StrafeOptions =
+    result = defaultStrafeOptions()
+    result.reversePermille = reverse
+    result.range = range
+  test "defaults are the pw-diag values; the parameters are validated":
+    let d = defaultStrafeOptions()
+    check d.enabled and d.range == 5250 and d.legTicks == [3'i32, 6] and d.shotLegTicks == [6'i32, 9] and d.reversePermille == 800
+    check strafeOptionsError(d) == ""
+    for bad in [StrafeOptions(enabled: true, range: 0, legTicks: [3'i32, 6], shotLegTicks: [6'i32, 9]),
+                StrafeOptions(enabled: true, range: 20001, legTicks: [3'i32, 6], shotLegTicks: [6'i32, 9]),
+                StrafeOptions(enabled: true, range: 5250, legTicks: [0'i32, 6], shotLegTicks: [6'i32, 9]),
+                StrafeOptions(enabled: true, range: 5250, legTicks: [7'i32, 6], shotLegTicks: [6'i32, 9]),
+                StrafeOptions(enabled: true, range: 5250, legTicks: [3'i32, 73], shotLegTicks: [6'i32, 9]),
+                StrafeOptions(enabled: true, range: 5250, legTicks: [3'i32, 6], shotLegTicks: [5'i32, 9]),
+                StrafeOptions(enabled: true, range: 5250, legTicks: [3'i32, 6], shotLegTicks: [9'i32, 8]),
+                StrafeOptions(enabled: true, range: 5250, legTicks: [3'i32, 6], shotLegTicks: [6'i32, 9], reversePermille: 1001),
+                StrafeOptions(enabled: true, range: 5250, legTicks: [3'i32, 6], shotLegTicks: [6'i32, 9], reversePermille: -1)]:
+      check strafeOptionsError(bad) != ""
+    check initStrafeState(0).zig == 1 and initStrafeState(3).zig == 1 and initStrafeState(4).zig == -1 and initStrafeState(15).zig == -1
+    check strafeSeed(2026, 0) != samplingSeed(2026, 0) and strafeSeed(2026, 0) != strafeSeed(2026, 1)
+  test "in contact the movement head becomes a compass leg perpendicular to the enemy, held for its length":
+    var w = newWorld(2026, 2400)
+    let (s, e) = w.contact(0, 1)
+    discard s; discard e
+    let bodies = w.observedBodies(0)
+    var state = initStrafeState(0)
+    var rng = strafeRng(2026, 0)
+    var o = options(reverse = 0)   # never reverse: zig stays +1
+    var actions = [5'i32, 0, 0, 0, 0]
+    check w.strafeActions(0, actions, bodies, o, state, rng)
+    # Enemy due east of a team-0 seat, zig +1: perpendicular (0, +1) -> compass 2 -> index 45.
+    # The objective (heart 5) is blended in, so allow the neighbouring headings too.
+    check actions[0] in 43'i32..50'i32
+    check actions[1..4] == [0'i32, 0, 0, 0]
+    check state.legs == 1 and state.leg in 2'i32..5'i32 and state.ticks == 1
+    # Without an objective to blend (index 0 = keep) the leg is exactly perpendicular.
+    state = initStrafeState(0)
+    actions = [0'i32, 0, 0, 0, 0]
+    check w.strafeActions(0, actions, bodies, o, state, rng)
+    check actions[0] == 45
+    let length = state.leg + 1
+    check length in 3'i32..6'i32
+    # The leg holds its heading until it runs out, then a new one starts.
+    for k in 1..<length:
+      var again = [0'i32, 0, 0, 0, 0]
+      check w.strafeActions(0, again, bodies, o, state, rng)
+      check again[0] == 45 and state.legs == 1
+    var next = [0'i32, 0, 0, 0, 0]
+    check w.strafeActions(0, next, bodies, o, state, rng)
+    check state.legs == 2 and next[0] == 45   # no reversal at permille 0
+    # Always reverse: consecutive legs alternate sides of the line (45 <-> 49).
+    var flipper = initStrafeState(0)
+    var headings: seq[int32]
+    while flipper.legs < 4:
+      var a = [0'i32, 0, 0, 0, 0]
+      let before = flipper.legs
+      check w.strafeActions(0, a, bodies, options(reverse = 1000), flipper, rng)
+      if flipper.legs != before: headings.add a[0]
+    check headings == @[49'i32, 45, 49, 45]
+  test "a ready shot with too little leg left starts a shot leg; the shot itself stands":
+    var w = newWorld(2026, 2400)
+    discard w.contact(0, 1)
+    let bodies = w.observedBodies(0)
+    require w.cogs[0].cooldown == 0 and w.equipment[0].windup == 0 and not w.equipment[0].sprayCan
+    var rng = strafeRng(7, 0)
+    for trial in 0..<50:
+      var state = initStrafeState(0)
+      var a = [0'i32, 0, 0, 0, 0]
+      check w.strafeActions(0, a, bodies, options(), state, rng)   # a plain leg
+      check state.leg + 1 in 3'i32..6'i32
+      var shot = [0'i32, 0, 1, 0, 0]
+      let legsBefore = state.legs
+      check w.strafeActions(0, shot, bodies, options(), state, rng)
+      check shot[2] == 1
+      # A plain leg has at most 5 ticks left after its first, fewer than the 6 a shot
+      # needs, so the ready shot starts a new shot leg of 6..9 ticks.
+      check state.legs == legsBefore + 1
+      check state.leg + 1 in 6'i32..9'i32
+      # A shot while a long enough leg runs does not restart it.
+      let legsNow = state.legs
+      var shot2 = [0'i32, 0, 1, 0, 0]
+      if state.leg >= 6:
+        check w.strafeActions(0, shot2, bodies, options(), state, rng)
+        check state.legs == legsNow
+    # A shoot order the gun cannot take (cooling down) does not ask for a shot leg.
+    var cooling = w
+    cooling.cogs[0].cooldown = 10
+    var state = initStrafeState(0)
+    var a = [0'i32, 0, 0, 0, 0]
+    check cooling.strafeActions(0, a, bodies, options(), state, rng)
+    var shot = [0'i32, 0, 1, 0, 0]
+    let legs = state.legs
+    if state.leg > 0:
+      check cooling.strafeActions(0, shot, bodies, options(), state, rng)
+      check state.legs == legs
+  test "out of contact, out of range, dead, in a trench or disabled: untouched and the leg ends":
+    var w = newWorld(2026, 2400)
+    discard w.contact(0, 1, 1200)
+    var rng = strafeRng(1, 0)
+    var state = initStrafeState(0)
+    var a = [7'i32, 3, 1, 0, 1]
+    check w.strafeActions(0, a, w.observedBodies(0), options(), state, rng)
+    require state.leg > 0
+    # Range shorter than the gap.
+    var b = [7'i32, 3, 1, 0, 1]
+    check not w.strafeActions(0, b, w.observedBodies(0), options(range = 1000), state, rng)
+    check b == [7'i32, 3, 1, 0, 1] and state.leg == 0
+    # No visible enemy (the only one is dead).
+    var gone = w
+    gone.cogs[1].hp = 0
+    var c = [7'i32, 3, 1, 0, 1]
+    check not gone.strafeActions(0, c, gone.observedBodies(0), options(), state, rng)
+    check c == [7'i32, 3, 1, 0, 1]
+    # The seat itself dead.
+    var dead = w
+    dead.cogs[0].hp = 0
+    check not dead.strafeActions(0, c, w.observedBodies(0), options(), state, rng)
+    # Disabled options: untouched, no draw.
+    let before = rng.state
+    var off: StrafeOptions
+    check not w.strafeActions(0, c, w.observedBodies(0), off, state, rng)
+    check rng.state == before and c == [7'i32, 3, 1, 0, 1]
+    # A teammate is never a threat.
+    var mates = newWorld(2026, 2400)
+    discard mates.contact(0, 2)
+    var d = [7'i32, 3, 1, 0, 1]
+    check not mates.strafeActions(0, d, mates.observedBodies(0), options(), state, rng)
+    # In a trench (base.bas holds its trench in contact).
+    if w.trenches.len > 0:
+      var dug = w
+      let t = w.trenches[0]
+      dug.cogs[0].pos = point(t.x.int + t.w.int div 2, t.z.int + t.h.int div 2)
+      require dug.trenchAt(dug.cogs[0].pos) >= 0
+      var e = [7'i32, 3, 1, 0, 1]
+      check not dug.strafeActions(0, e, w.observedBodies(0), options(), state, rng)
+  test "team 1 legs are perpendicular in world space too, and forbidden headings are skipped":
+    var w = newWorld(2026, 2400)
+    let (s, e) = w.contact(1, 0)   # seat 1 (team 1) at s, enemy seat 0 due east at e
+    let bodies = w.observedBodies(1)
+    var state = initStrafeState(1)
+    var rng = strafeRng(2026, 1)
+    var a = [0'i32, 0, 0, 0, 0]
+    check w.strafeActions(1, a, bodies, options(reverse = 0), state, rng)
+    let (found, goal) = w.goalCandidate(1, a[0].int)
+    require found
+    check goal.x == s.x          # moves along z only: perpendicular to the east-west line
+    check goal.z != s.z
+    discard e
+    # Forbid both perpendicular compass headings: the next nearest allowed heading.
+    var mask: ObjectiveMask
+    mask[45] = true; mask[49] = true
+    var zero = initStrafeState(0)
+    var w2 = newWorld(2026, 2400)
+    discard w2.contact(0, 1)
+    var b = [0'i32, 0, 0, 0, 0]
+    check w2.strafeActions(0, b, w2.observedBodies(0), options(reverse = 0), zero, rng, mask)
+    check b[0] notin [45'i32, 49] and b[0] in [44'i32, 46]
+    var all: ObjectiveMask
+    for i in 43..50: all[i] = true
+    var none = initStrafeState(0)
+    var c = [0'i32, 0, 0, 0, 0]
+    check not w2.strafeActions(0, c, w2.observedBodies(0), options(), none, rng, all)
+    check c[0] == 0
+  test "the same stream and world replay the same legs; another stream differs":
+    var w = newWorld(2026, 2400)
+    discard w.contact(0, 1)
+    let bodies = w.observedBodies(0)
+    proc run(w: World, seed: int32): seq[int32] =
+      var state = initStrafeState(0)
+      var rng = strafeRng(seed, 0)
+      for tick in 0..<400:
+        var a = [0'i32, 0, int32(tick mod 3 == 0), 0, 0]
+        discard w.strafeActions(0, a, bodies, defaultStrafeOptions(), state, rng)
+        result.add a[0]
+    check run(w, 2026) == run(w, 2026)
+    check run(w, 2026) != run(w, 2027)

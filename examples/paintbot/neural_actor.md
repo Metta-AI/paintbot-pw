@@ -96,6 +96,10 @@ the listed heads are drawn from `softmax(logits / temperature)` on a seat-owned 
 stream seeded from the match seed and the slot (`neural_contract.sampleActions`,
 `samplingRng`), the rest keep argmax; the candidates and hashes are again unchanged, and
 the training ABI's `pw_set_seat_sampling` / `pw_sample_actions` draw from the same stream.
+`decoder.forbid_objectives` removes movement-head candidates from selection and
+`decoder.strafe_legs` replaces the movement head with base.bas's contact legs
+(`neural_basic.md`); candidates and hashes are unchanged, and the training ABI's
+`pw_set_seat_forbid_objectives` / `pw_set_seat_strafe` are the same rules.
 
 Movement (heart, visible pickup or `pos+200*compass`), directional aim
 (`pos+5000*compass`), fire, grenade and sneak decode identically under both.
@@ -143,7 +147,15 @@ with mask 0. `pw_set_seat_sampling(handle, seat, temperature_permille, head_mask
 `pw_sample_actions(handle, seat, float[82], int32[5])` select a seat's head actions from
 logits the way a sampling bundle would (the seat's stream is seeded from the match seed
 and the seat on every create/reset; `pw_seat_sample_draws` counts); with sampling off
-(the default) it is plain argmax, and `pw_step` is untouched either way.
+(the default) it is plain argmax, and `pw_step` is untouched either way (a hosted seat
+decides only while alive, so a probe matching its draws calls it for live seats only).
+`pw_set_seat_forbid_objectives(handle, seat, int32 indices[], count)` masks movement-head
+candidates out of `pw_sample_actions` and makes `pw_step` return -3 (nothing stepped) when
+the caller hands a live seat a forbidden one; `pw_seat_forbidden_objectives(handle, seat,
+int32 out[51])` returns the mask for a trainer's logits. `pw_set_seat_strafe(handle, seat,
+range, leg_min, leg_max, shot_min, shot_max, reverse_permille)` (range 0 = off) applies
+the strafe to the caller's heads inside `pw_step`; `pw_seat_strafe_stats(handle, seat,
+int32 out[3])` = {legs, replaced decisions, movement index executed last step or -1}.
 
 `pw_seat_stats(handle, int32 out[16*8])` fills, per seat in seat order,
 `{damage_dealt_enemy, damage_dealt_team, hits_enemy, hits_taken, kills, deaths,

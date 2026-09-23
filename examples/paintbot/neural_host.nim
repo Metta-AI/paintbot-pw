@@ -36,6 +36,18 @@ type
     sampleRng: Rng
     sampleSeeded: bool
     sampleDraws*: int
+    # decoder.forbid_objectives: movement-head indices never selected (argmax or draw);
+    # forbidHits counts decisions whose unmasked argmax objective was one of them.
+    forbidden*: ObjectiveMask
+    forbidAny*: bool
+    forbidHits*: int
+    # decoder.strafe_legs: the options, the seat's leg state and its own draw stream
+    # (seeded like the sampling stream, with its own salt, the first time the seat sees
+    # the world; never part of the world or its hash).
+    strafe*: StrafeOptions
+    strafeState*: StrafeState
+    strafeRng: Rng
+    strafeSeeded: bool
     # The seat's apparent identities for this tick, resolved once for the observation
     # and the action decode (both read the same pre-action world).
     bodies: array[Seats, int]
@@ -56,8 +68,27 @@ proc samplingTelemetry*(options: SamplingOptions, seed: uint64, draws: int): str
     if on: result.add $head
   result.add " seed=0x" & toHex(seed, 16).toLowerAscii & " draws=" & $draws
 
+proc forbidTelemetry*(forbidden: ObjectiveMask, hits: int): string =
+  ## The forbid part of the seat log line: the forbidden indices and how many decisions
+  ## the mask changed the argmax objective of.
+  result = " forbid_objectives="
+  var first = true
+  for index, on in forbidden:
+    if not on: continue
+    if not first: result.add ","
+    result.add $index
+    first = false
+  result.add " forbid_hits=" & $hits
+
+proc strafeTelemetry*(options: StrafeOptions, state: StrafeState): string =
+  ## The strafe part of the seat log line: the parameters, legs started and decisions
+  ## whose movement head the strafe replaced.
+  " strafe=r" & $options.range & ",legs" & $options.legTicks[0] & "-" & $options.legTicks[1] &
+    ",shot" & $options.shotLegTicks[0] & "-" & $options.shotLegTicks[1] & ",rev" & $options.reversePermille &
+    " strafe_legs=" & $state.legs & " strafe_ticks=" & $state.ticks
+
 proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
-    fireHolds = -1, sampling = ""): string =
+    fireHolds = -1, sampling = "", options = ""): string =
   ## One private seat-log line: peak native operations in a tick against the budget, the
   ## model width and the ticks played; with the fire-hold decoder option on, also the
   ## number of shoot orders it held (omitted, and the line unchanged, when it is off).
@@ -66,13 +97,16 @@ proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
     " model=w" & $hiddenSize & " ticks=" & $ticks
   if fireHolds >= 0: result.add " fire_holds=" & $fireHolds
   result.add sampling
+  result.add options
 
 proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
   ## Empty for a seat without a loaded neural model, so plain BASIC seats log nothing.
   if seat.isNil or seat.actor.isNil: ""
   else: neuralTelemetry(peakOperations, seat.actor.hiddenSize, ticks,
     if seat.fireHoldTeammates: seat.fireHolds else: -1,
-    if seat.sampling.enabled: samplingTelemetry(seat.sampling, seat.samplingLogSeed, seat.sampleDraws) else: "")
+    if seat.sampling.enabled: samplingTelemetry(seat.sampling, seat.samplingLogSeed, seat.sampleDraws) else: "",
+    (if seat.forbidAny: forbidTelemetry(seat.forbidden, seat.forbidHits) else: "") &
+    (if seat.strafe.enabled: strafeTelemetry(seat.strafe, seat.strafeState) else: ""))
 
 proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
   ## decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}. mode is
@@ -107,6 +141,42 @@ proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
     else: raise newException(ValueError, "unknown decoder.sampling field: " & key)
   if not sawMode: raise newException(ValueError, "decoder.sampling.mode is required")
 
+proc parseForbidObjectives*(value: JsonNode): ObjectiveMask =
+  ## decoder.forbid_objectives: a non-empty array of distinct movement-head candidate
+  ## indices 0 ..< ActionSizes[0] that leaves at least one index allowed.
+  if value.kind != JArray or value.len == 0:
+    raise newException(ValueError, "decoder.forbid_objectives must be a non-empty array")
+  for item in value:
+    if item.kind != JInt or item.getInt notin 0..<ActionSizes[0]:
+      raise newException(ValueError, "decoder.forbid_objectives entries must be objective indices 0 .. " & $(ActionSizes[0]-1))
+    if result[item.getInt]: raise newException(ValueError, "decoder.forbid_objectives repeats an index")
+    result[item.getInt] = true
+  if value.len >= ActionSizes[0]: raise newException(ValueError, "decoder.forbid_objectives must leave an objective allowed")
+
+proc parseStrafeOptions*(value: JsonNode): StrafeOptions =
+  ## decoder.strafe_legs: {"range": r, "legs": [min, max], "shot_legs": [min, max],
+  ## "reverse_permille": p}; every field optional (the pw-diag / base.bas values
+  ## 5250, [3, 6], [6, 9], 800); anything else rejects the bundle.
+  if value.kind != JObject: raise newException(ValueError, "decoder.strafe_legs must be an object")
+  result = defaultStrafeOptions()
+  proc integer(field: JsonNode, name: string): int32 =
+    if field.kind != JInt or field.getBiggestInt < int32.low or field.getBiggestInt > int32.high:
+      raise newException(ValueError, "decoder.strafe_legs." & name & " must be an integer")
+    int32(field.getBiggestInt)
+  proc pair(field: JsonNode, name: string): array[2, int32] =
+    if field.kind != JArray or field.len != 2:
+      raise newException(ValueError, "decoder.strafe_legs." & name & " must be [min, max]")
+    [integer(field[0], name), integer(field[1], name)]
+  for key, field in value:
+    case key
+    of "range": result.range = integer(field, key)
+    of "legs": result.legTicks = pair(field, key)
+    of "shot_legs": result.shotLegTicks = pair(field, key)
+    of "reverse_permille": result.reversePermille = integer(field, key)
+    else: raise newException(ValueError, "unknown decoder.strafe_legs field: " & key)
+  let problem = strafeOptionsError(result)
+  if problem.len > 0: raise newException(ValueError, "decoder.strafe_legs." & problem)
+
 proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
   let modelPath = sourcePath & ".model.bin"
@@ -131,6 +201,8 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   let manifestPath = sourcePath & ".neural.json"
   var fireHold = false
   var sampling: SamplingOptions
+  var forbidden: ObjectiveMask
+  var strafe: StrafeOptions
   if fileExists(manifestPath):
     if getFileSize(manifestPath) > 8192: raise newException(ValueError, "oversized neural manifest")
     let manifest = parseJson(readFile(manifestPath))
@@ -151,11 +223,19 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
           fireHold = value.getBool
         of "sampling":
           sampling = parseSamplingOptions(value)
+        of "forbid_objectives":
+          forbidden = parseForbidObjectives(value)
+        of "strafe_legs":
+          strafe = parseStrafeOptions(value)
         else: raise newException(ValueError, "unknown decoder option: " & key)
   result.actor = actor
   result.contract = contract
   result.fireHoldTeammates = fireHold
   result.sampling = sampling
+  result.forbidden = forbidden
+  result.forbidAny = forbidden.forbidsAny
+  result.strafe = strafe
+  result.strafeState = initStrafeState(slot)
   result.memory.resetAimMemory()
   result.observation = newSeq[float32](ObservationSize)
   result.logits = newSeq[float32](LogitSize)
@@ -176,6 +256,12 @@ proc beginTick*(seat: NeuralSeat, w: var World) =
     # the network reads; resetting it would only correlate draws after every respawn).
     seat.sampleRng = samplingRng(w.seed, seat.slot)
     seat.sampleSeeded = true
+  if seat.strafe.enabled:
+    if not seat.strafeSeeded:
+      # Seeded like the sampling stream: one per seat per match, from the match seed.
+      seat.strafeRng = strafeRng(w.seed, seat.slot)
+      seat.strafeSeeded = true
+    if not alive: seat.strafeState.leg = 0
   seat.observed = false
   seat.inferred = false
   seat.acted = false
@@ -222,7 +308,17 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
     try:
       let bodies = seat.bodiesFor()
       var command: Command
-      if seat.sampling.enabled:
+      if seat.forbidAny or seat.strafe.enabled:
+        # Order: forbid (selection), sampling or argmax, strafe (movement), decode, hold.
+        var actions = if seat.sampling.enabled: sampleActions(seat.logits, seat.sampling, seat.sampleRng, seat.forbidden)
+                      else: argmaxActions(seat.logits, seat.forbidden)
+        if seat.sampling.enabled: inc seat.sampleDraws
+        if seat.forbidAny and seat.forbidden[argmaxActions(seat.logits)[0]]: inc seat.forbidHits
+        if seat.strafe.enabled:
+          discard seat.world[].strafeActions(seat.slot, actions, bodies, seat.strafe, seat.strafeState,
+            seat.strafeRng, seat.forbidden)
+        command = decodeActions(seat.world[], seat.slot, actions, bodies, seat.contract, seat.memory)
+      elif seat.sampling.enabled:
         let actions = sampleActions(seat.logits, seat.sampling, seat.sampleRng)
         inc seat.sampleDraws
         command = decodeActions(seat.world[], seat.slot, actions, bodies, seat.contract, seat.memory)

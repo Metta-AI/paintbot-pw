@@ -13,13 +13,64 @@ MAX_MANIFEST_BYTES = 8192
 # contract hashes are what the host binds and decodes by.
 SCHEMA = "paintbot-neural-basic/1"
 SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
-# Schema-2 decoder options: "decoder": {"fire_hold_teammates": true, "sampling": {...}}.
+# Schema-2 decoder options: "decoder": {"fire_hold_teammates": true, "sampling": {...},
+# "forbid_objectives": [9, 10], "strafe_legs": {...}}.
 # Every key must be one the host knows and every value the declared type, so a bundle
 # asking for an option this release lacks is rejected at staging rather than played
 # without it. The rules here mirror neural_host.nim's exactly.
-DECODER_OPTIONS = {"fire_hold_teammates": bool, "sampling": dict}
+DECODER_OPTIONS = {"fire_hold_teammates": bool, "sampling": dict, "forbid_objectives": list, "strafe_legs": dict}
 SAMPLING_HEADS = 5
 MIN_SAMPLING_TEMPERATURE, MAX_SAMPLING_TEMPERATURE = 0.01, 10.0
+OBJECTIVE_CANDIDATES = 51  # movement-head size in both action contracts
+MAX_STRAFE_RANGE, MAX_STRAFE_LEG_TICKS, MIN_STRAFE_SHOT_LEG_TICKS = 20000, 72, 6
+
+
+def _is_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def validate_forbid_objectives(value):
+    """decoder.forbid_objectives: distinct movement-head indices 0 .. 50, at least one left allowed."""
+    if not isinstance(value, list) or not value:
+        raise ValueError("decoder.forbid_objectives must be a non-empty array")
+    for item in value:
+        if not _is_int(item) or not 0 <= item < OBJECTIVE_CANDIDATES:
+            raise ValueError("decoder.forbid_objectives entries must be objective indices 0 .. %d" % (OBJECTIVE_CANDIDATES - 1))
+    if len(set(value)) != len(value):
+        raise ValueError("decoder.forbid_objectives repeats an index")
+    if len(value) >= OBJECTIVE_CANDIDATES:
+        raise ValueError("decoder.forbid_objectives must leave an objective allowed")
+
+
+def validate_strafe_legs(value):
+    """decoder.strafe_legs: {"range": r, "legs": [min, max], "shot_legs": [min, max], "reverse_permille": p},
+    every field optional (5250, [3, 6], [6, 9], 800)."""
+    if not isinstance(value, dict):
+        raise ValueError("decoder.strafe_legs must be an object")
+    options = {"range": 5250, "legs": [3, 6], "shot_legs": [6, 9], "reverse_permille": 800}
+    for key, field in value.items():
+        if key in ("range", "reverse_permille"):
+            if not _is_int(field):
+                raise ValueError("decoder.strafe_legs.%s must be an integer" % key)
+        elif key in ("legs", "shot_legs"):
+            if not isinstance(field, list) or len(field) != 2:
+                raise ValueError("decoder.strafe_legs.%s must be [min, max]" % key)
+            if not all(_is_int(item) for item in field):
+                raise ValueError("decoder.strafe_legs.%s must be an integer" % key)
+        else:
+            raise ValueError("unknown decoder.strafe_legs field: " + str(key))
+        options[key] = field
+    if not 1 <= options["range"] <= MAX_STRAFE_RANGE:
+        raise ValueError("decoder.strafe_legs.range must be within 1 .. %d" % MAX_STRAFE_RANGE)
+    low, high = options["legs"]
+    if not 1 <= low <= high <= MAX_STRAFE_LEG_TICKS:
+        raise ValueError("decoder.strafe_legs.legs must be [min, max] with 1 <= min <= max <= %d" % MAX_STRAFE_LEG_TICKS)
+    low, high = options["shot_legs"]
+    if not MIN_STRAFE_SHOT_LEG_TICKS <= low <= high <= MAX_STRAFE_LEG_TICKS:
+        raise ValueError("decoder.strafe_legs.shot_legs must be [min, max] with %d <= min <= max <= %d"
+                         % (MIN_STRAFE_SHOT_LEG_TICKS, MAX_STRAFE_LEG_TICKS))
+    if not 0 <= options["reverse_permille"] <= 1000:
+        raise ValueError("decoder.strafe_legs.reverse_permille must be within 0 .. 1000")
 
 
 def validate_sampling(value):
@@ -93,6 +144,10 @@ def unpack_package(data):
                 raise ValueError("decoder." + key + " must be a " + DECODER_OPTIONS[key].__name__)
             if key == "sampling":
                 validate_sampling(value)
+            elif key == "forbid_objectives":
+                validate_forbid_objectives(value)
+            elif key == "strafe_legs":
+                validate_strafe_legs(value)
     files["policy.bas"].decode("utf-8")
     if not files["model.bin"]:
         raise ValueError("empty neural model")
