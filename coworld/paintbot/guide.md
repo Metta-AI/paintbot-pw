@@ -186,6 +186,35 @@ reading carefully rather than as weak evidence:
 Separating an effect near 0.60 needs about 250 episodes, not 60, so a draw here is "not measured"
 rather than "no difference".
 
+### Against the league leader: the lake decides it
+
+Re-simulating 60 hosted games of the shipped Jev build against `a-aron:v7` (league #1), with the
+state hash checked every tick, showed where the games are lost. **73% of our deaths happened in the
+lake** (his: 21%), and we spent 20.6% of our alive time wading (his: 9.5%). Almost none of those
+deaths came while outnumbered nearby: a wading cog moves at a quarter of its speed and is shot from
+range. The match is an elimination race - in games we lost we burned 31.9 of 32 lives, he burned
+25.5 - while we captured 2.8 times as many hearts as he did. That is why changing how the objective
+is chosen made no difference against him: we already win the territory and lose the lives.
+
+The cause is the navigator. `waypoint()` returns the goal whenever `walkClear(start, goal)` - no
+wall in the way - and water is not a wall, so any objective across the lake is reached by a
+straight wade; the grid search behind it has no water term either.
+
+`useDryRoute` routes around it from the policy: when the straight way to a target more than 8 m off
+crosses water (`waterAt`, ten samples), the cog first walks to whichever of six points beside the
+route is quickest to go through, counting a wet metre as `kWetCost` (6) dry ones, and keeps that
+point until it is reached, the target moves 10 m, or ten seconds pass.
+
+| against `a-aron:v7`, 0.3.38, sides swapped | even | odd | wins | 95% Wilson |
+| --- | --- | --- | --- | --- |
+| shipped build + `useDryRoute = 1` | 47/60 | 42/60 | **89/120 = 0.742** | [0.657, 0.812] |
+| shipped build, run alongside it | 3/30 | 9/30 | 12/60 = 0.200 | [0.118, 0.318] |
+
+The replays of the dry-route games confirm the mechanism rather than just the score: time wading
+fell from 20.6% to 12.1%, deaths in the water from 73% to 49%, and the elimination race turned -
+he now burns 30.9 of his 32 lives a game. Half our deaths still come in the water, so there is more
+to take here.
+
 ## Heartwick arena
 
 Cottages, garden walls, carts, supply stacks and the market well are solid cover: they block movement, sight and direct fire. Grenades still lob over them. The village is symmetric under a half turn, with a market square, cross streets and side lanes. Flower patches are walkable decoration. Trenches retain their existing movement and damage rules.
