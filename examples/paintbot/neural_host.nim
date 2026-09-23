@@ -25,6 +25,9 @@ type
     # recurrent state: cleared at initial use, match reset, death and respawn.
     contract*: ActionContractVersion
     memory*: AimMemory
+    # The observation contract the actor was trained against (named by its embedded
+    # hash): v1 (448 floats) or v2 (v1 + terrain block); selects the encoder.
+    observationContract*: ObservationContractVersion
     # The bundle's decoder options (manifest "decoder", schema 2): fireHoldTeammates
     # applies holdFire to every decoded command; fireHolds counts the orders it held.
     fireHoldTeammates*: bool
@@ -182,13 +185,21 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   let modelPath = sourcePath & ".model.bin"
   if not fileExists(modelPath): return
   let actor = loadActorFile(modelPath)
-  if actor.inputSize != ObservationSize or actor.outputSize != LogitSize or
+  # Model metadata is authoritative even when running a local unpacked package. The
+  # observation contract hash selects the encoder (v1, or v2 = v1 + terrain block) and
+  # fixes the input width; the action contract hash selects the decoder: v1 (identity
+  # aim = body position) or v2 (lead-compensated identity aim); anything else is rejected.
+  # Checks run in the order they always have (dimensions, then contracts), so a bundle
+  # rejected before v2 existed is rejected with the same message; an unknown observation
+  # hash is held to v1's width for the dimension check.
+  var observationContract = ocV1
+  var observationKnown = true
+  try: observationContract = observationContractVersion(actor.observationContract)
+  except ValueError: observationKnown = false
+  if actor.inputSize != observationSize(observationContract) or actor.outputSize != LogitSize or
       actor.headSizes != @ActionSizes:
     raise newException(ValueError, "neural actor dimensions do not match Paintbot contract")
-  # Model metadata is authoritative even when running a local unpacked package. The
-  # action contract hash selects the decoder: v1 (identity aim = body position) or v2
-  # (lead-compensated identity aim); anything else is rejected.
-  if actor.observationContract != ObservationContractHash:
+  if not observationKnown:
     raise newException(ValueError, "neural actor contract mismatch")
   var contract: ActionContractVersion
   try: contract = actionContractVersion(actor.actionContract)
@@ -230,6 +241,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
         else: raise newException(ValueError, "unknown decoder option: " & key)
   result.actor = actor
   result.contract = contract
+  result.observationContract = observationContract
   result.fireHoldTeammates = fireHold
   result.sampling = sampling
   result.forbidden = forbidden
@@ -237,7 +249,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result.strafe = strafe
   result.strafeState = initStrafeState(slot)
   result.memory.resetAimMemory()
-  result.observation = newSeq[float32](ObservationSize)
+  result.observation = newSeq[float32](observationSize(observationContract))
   result.logits = newSeq[float32](LogitSize)
   result.state = newSeq[float32](actor.hiddenSize)
 
@@ -287,7 +299,10 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
   discard h.addFunction("paintbot_observe", 1, proc(a: openArray[int32]): int32 =
     seat.require(a[0] == 2 and not seat.observed, "invalid or repeated neural observation")
     try:
-      encodeObservation(seat.world[], seat.slot, seat.observation, seat.bodiesFor())
+      if seat.observationContract == ocV1:
+        encodeObservation(seat.world[], seat.slot, seat.observation, seat.bodiesFor())
+      else:
+        encodeObservation(seat.world[], seat.slot, seat.observation, seat.bodiesFor(), seat.observationContract)
     except ValueError as e:
       raise newException(BasicError, "neural observation failed: " & e.msg)
     seat.observed = true

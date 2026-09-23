@@ -602,7 +602,8 @@ infer, and decode one action per tick, in that order. Recurrent state resets on
 match start, death, and respawn. The decoder deterministically selects the largest
 logit in each action head. Other BASIC actuators remain available for orchestration.
 
-The restricted FP32 actor uses 448 policy-visible inputs, one MinGRU layer of
+The restricted FP32 actor uses 448 policy-visible inputs (observation contract v1; v2
+adds a 58-float public terrain block, water and height, for 506), one MinGRU layer of
 width 64, 128, or 256, and categorical action heads `[51,25,2,2,2]`. It receives
 public objectives, own state, visible apparent identities/pickups, sound cues,
 and local terrain; it receives no hidden enemy identities or positions. The

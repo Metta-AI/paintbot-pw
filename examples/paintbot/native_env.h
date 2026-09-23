@@ -4,7 +4,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Fixed v1 buffers: 16 seats, 448 floats/seat, 5 int32 actions/seat.
+/* v1 buffers: 16 seats, 448 floats/seat (observation contract v1; a handle from
+ * pw_create_observation(..., 2) writes 506), 5 int32 actions/seat.
  * Output reset masks are independent of match terminals. Handles are exclusive
  * to one call at a time. Caller provides correctly sized non-null buffers. */
 int pw_env_version(void);
@@ -160,6 +161,25 @@ int pw_seat_forbidden_objectives(void *handle, int seat, int32_t *mask);
 int pw_set_seat_strafe(void *handle, int seat, int32_t range, int32_t leg_min, int32_t leg_max,
                        int32_t shot_min, int32_t shot_max, int32_t reverse_permille);
 int pw_seat_strafe_stats(void *handle, int seat, int32_t *stats);
+/* Observation contract selection (additive). pw_create_observation is pw_create with the
+ * observation contract chosen, kept across pw_reset: 1 = v1
+ * "paintbot-pw.rules37.obs.v1.float448" (identical to pw_create), 2 = v2
+ * "paintbot-pw.rules37.obs.v2.float506" = v1's 448 floats unchanged in columns 0..447,
+ * then a 58-float public terrain block (self wet, self height; per heart 0..9 wet and
+ * height delta; per apparent identity 0..15 wet and height delta, zero when v1's slot is
+ * empty; visible apparent enemies wet/dry and teammates wet/dry, each /8; heights are
+ * elevation/800; see neural_actor.md). NULL for any other version or a bad max_ticks.
+ * pw_observe / pw_observe_seats rows are then that many floats apart. The contract never
+ * touches the world or its hash. pw_observation_size() stays 448;
+ * pw_observation_size_for(version) = 448 / 506 (-1 unknown); pw_handle_observation_size
+ * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
+ * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
+ * 0, or -1 bad args). */
+void *pw_create_observation(int32_t seed, int32_t max_ticks, int32_t obs_version);
+int pw_observation_size_for(int32_t obs_version);
+int pw_handle_observation_size(void *handle);
+int pw_observation_contract(void *handle);
+int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, int32_t capacity);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
 #ifdef __cplusplus

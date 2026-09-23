@@ -76,6 +76,11 @@ type
     decided: array[Seats,Command]
     decidedTick: int32
     decidedValid: bool
+    # Observation contract the handle encodes (chosen at create, kept across resets):
+    # v1 (pw_create, 448 floats per seat) or v2 (pw_create_observation, v1's 448 floats
+    # followed by the terrain block). pw_observe/pw_observe_seats rows are
+    # observationSize(obsVersion) floats apart. The world never reads it.
+    obsVersion: ObservationContractVersion
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -208,11 +213,12 @@ proc pw_env_version*(): cint {.exportc, cdecl, dynlib.} = 1
 proc pw_observation_size*(): cint {.exportc, cdecl, dynlib.} = ObservationSize
 proc pw_action_count*(): cint {.exportc, cdecl, dynlib.} = ActionSizes.len
 
-proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
+proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): pointer =
   ready()
   if maxTicks < 0 or maxTicks > HeartMeterMatchTicks: return nil
   let env = cast[ptr NativeEnv](allocShared0(sizeof(NativeEnv)))
   try:
+    env.obsVersion = obsVersion
     env.world = newWorld(seed,maxTicks)
     for i in 0..<Seats: env.resets[i] = 1
     env.invalidateBodies()
@@ -226,6 +232,41 @@ proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
   except CatchableError:
     `=destroy`(env[])
     deallocShared(env)
+
+proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
+  ## Observation contract v1 (448 floats per seat), as before.
+  createEnv(seed, maxTicks, ocV1)
+
+proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.exportc, cdecl, dynlib.} =
+  ## pw_create with the observation contract chosen: 1 = v1 (identical to pw_create),
+  ## 2 = v2 (v1 + terrain block). nil for any other version or a bad max_ticks.
+  if obsVersion notin [ocV1.int32, ocV2.int32]: return nil
+  createEnv(seed, maxTicks, ObservationContractVersion(obsVersion))
+
+proc pw_observation_size_for*(obsVersion: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Floats per seat under observation contract `obsVersion`; -1 if unknown.
+  if obsVersion notin [ocV1.int32, ocV2.int32]: return -1
+  observationSize(ObservationContractVersion(obsVersion)).cint
+
+proc pw_observation_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
+  ## The handle's observation contract version (1 or 2); -1 for a nil handle.
+  if handle == nil: return -1
+  cast[ptr NativeEnv](handle).obsVersion.cint
+
+proc pw_handle_observation_size*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
+  ## Floats per seat this handle's pw_observe writes (the row stride); -1 for nil.
+  if handle == nil: return -1
+  observationSize(cast[ptr NativeEnv](handle).obsVersion).cint
+
+proc pw_observation_contract_hash*(obsVersion: int32, output: ptr UncheckedArray[char],
+    capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The 64-hex SHA-256 an actor and manifest carry for observation contract
+  ## `obsVersion`, NUL-terminated; capacity must be >= 65. 0, or -1 bad args.
+  if output == nil or capacity < 65 or obsVersion notin [ocV1.int32, ocV2.int32]: return -1
+  let hash = observationContractHash(ObservationContractVersion(obsVersion))
+  for i, c in hash: output[i] = c
+  output[hash.len] = '\0'
+  0
 
 proc pw_destroy*(handle: pointer) {.exportc, cdecl, dynlib.} =
   if handle == nil: return
@@ -259,11 +300,19 @@ proc pw_observe_seats*(handle: pointer, seats: uint32, observations, resets: Flo
   ready()
   let env = cast[ptr NativeEnv](handle)
   try:
-    for slot in 0..<Seats:
-      if (seats and (1'u32 shl slot)) == 0: continue
-      encodeObservation(env.world,slot,observations.toOpenArray(slot*ObservationSize,(slot+1)*ObservationSize-1),
-        env.bodiesFor(slot))
-      resets[slot] = env.resets[slot]
+    if env.obsVersion == ocV1:
+      for slot in 0..<Seats:
+        if (seats and (1'u32 shl slot)) == 0: continue
+        encodeObservation(env.world,slot,observations.toOpenArray(slot*ObservationSize,(slot+1)*ObservationSize-1),
+          env.bodiesFor(slot))
+        resets[slot] = env.resets[slot]
+    else:
+      let n = observationSize(env.obsVersion)
+      for slot in 0..<Seats:
+        if (seats and (1'u32 shl slot)) == 0: continue
+        encodeObservation(env.world,slot,observations.toOpenArray(slot*n,(slot+1)*n-1),
+          env.bodiesFor(slot),env.obsVersion)
+        resets[slot] = env.resets[slot]
     return 0
   except CatchableError: return -1
 

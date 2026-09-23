@@ -5,13 +5,19 @@ A neural policy is a ZIP file with exactly three root entries: `manifest.json`,
 The manifest has schema `paintbot-neural-basic/1` or `paintbot-neural-basic/2`, a
 `sha256` object mapping `policy.bas` and `model.bin` to lowercase SHA-256 digests, and
 `observation_contract`/`action_contract` containing the contract SHA-256 hashes
-exported in `neural_contract.nim`. The action contract may be v1
+exported in `neural_contract.nim`. The observation contract may be v1 (`ed5d1676…`, 448
+inputs) or v2 (`e0d7b0b9…`, 506 inputs: v1's 448 unchanged followed by a 58-float terrain
+block, water and height for the seat, the hearts and the visible identities; see
+`neural_actor.md`); the actor's embedded hash must equal the manifest's, selects the
+encoder the seat runs and fixes the actor's input count. The action contract may be v1
 (`55922d42…`, identity aim = body position) or v2 (`51f602ef…`, lead-compensated
 identity aim; see `neural_actor.md`); the actor's embedded hash must equal the manifest's
 and selects the decoder the seat runs, so existing v1 bundles keep byte-identical
 behaviour. Schema 2 is for bundles that may name contract v2: a host that only knows
 schema 1 rejects them at staging instead of at model load. Actor metadata must match
-both contracts, 448 inputs, 82 outputs, and categorical head sizes `[51,25,2,2,2]`.
+both contracts, the observation contract's input count (448 for v1, 506 for v2), 82
+outputs, and categorical head sizes `[51,25,2,2,2]`. Any combination of observation and
+action contract versions is allowed, under either schema.
 The actor's binary format is documented in `neural_actor.md`.
 
 A schema-2 manifest may carry a `decoder` object of per-bundle decoder options. Every
@@ -129,6 +135,8 @@ Validation:
 python3 -m unittest coworld/paintbot/test_neural_package.py
 nim c -r -d:headless tests/test_paintbot_neural_host.nim
 nim c -r -d:headless tests/test_paintbot_neural_contract.nim
+nim c -r -d:headless tests/test_paintbot_neural_obs_v2.nim
+nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
 nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold.nim
 ```
 

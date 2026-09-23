@@ -74,6 +74,61 @@ Version 1, declared in `native_env.h`: `pw_create/pw_reset/pw_destroy`,
 `pw_results`, `pw_bot_actions`, `pw_state_hash`, and the telemetry call below. Every
 entry is additive to v1; a host that ignores the newer ones sees the same bytes.
 
+## Observation contracts
+
+Two observation contracts exist. The actor file and the package manifest carry the
+contract's SHA-256 (the hash of the id string); the host encodes each seat with the
+contract its actor names and requires the actor's input count to be that contract's
+width, so a v1 bundle keeps byte-identical behaviour on a host that also knows v2. An
+unknown hash fails the seat, as before.
+
+| version | id | SHA-256 | floats |
+|---|---|---|---|
+| v1 | `paintbot-pw.rules37.obs.v1.float448` | `ed5d16768e3144a04a28420ce227ff2d6a831be9f64f3633326b133a5335b7e2` | 448 |
+| v2 | `paintbot-pw.rules37.obs.v2.float506` | `e0d7b0b97975725c470ef6119ca2a6caf4aaa6f34cd15bee02bd306489c029e5` | 506 |
+
+v2 is v1 followed by a terrain block: columns 0..447 are the v1 observation, same order,
+same values (`encodeObservation` v1 is called unchanged on that slice), and columns
+448..505 are `encodeTerrainBlock` (`neural_contract.nim`). Why: the river decides
+fights (a wading seat moves at a quarter speed and stands about 200 below the bank,
+where it is hit two to four times as often), and v1 shows neither water nor absolute
+height, only nine height samples around the seat.
+
+"Wet" is `inWater(p)`, exactly the predicate `mechanics.nim` uses to quarter a seat's
+speed (rules >= 30: inside the river and below `RiverWaterHeight` = -162). "Height" is
+`w.elevation(p)` (terrain plus the trench's -60, the height the gun's spread reads)
+divided by `TerrainHeightScale` = 800; the rules-37 playable span measures -260..551, so
+every height and delta lies within about [-1, 1] (river bed under a level bank: -0.25).
+
+| column | field |
+|---|---|
+| 448 | self wet (0/1) |
+| 449 | self height |
+| 450 + 2i, i = 0..9 | heart i wet (0 when the heart is absent) |
+| 451 + 2i | heart i height minus self height (0 when absent; negative = below the seat) |
+| 470 + 2j, j = 0..15 | apparent identity j wet (0 when v1's identity slot j is empty) |
+| 471 + 2j | apparent identity j height minus self height (0 when empty; the seat's own slot is 0) |
+| 502 | visible apparent enemies wet / 8 |
+| 503 | visible apparent enemies dry / 8 |
+| 504 | visible apparent teammates wet / 8 (the seat itself excluded) |
+| 505 | visible apparent teammates dry / 8 (the seat itself excluded) |
+
+No hidden information: the block reads terrain only at points v1 already reveals (the
+seat's own position, the ten public hearts, the bodies v1 resolves under apparent
+identities). Identity slots follow v1's fog and uniform resolution (`observedBodies`),
+so a slot can be non-zero only when v1's visibility flag for that slot (column
+104 + 8j) is 1 (a visible seat on dry ground level with the observer reads 0, 0; the
+flag tells the two apart), and the counts use the apparent team v1 shows (a disguised enemy counts
+as a teammate, at the identity it wears).
+
+Native ABI: `pw_create_observation(seed, max_ticks, version)` creates a handle encoding
+contract 1 or 2 (NULL otherwise; `pw_create` is contract 1); the version is kept across
+`pw_reset`, and `pw_observe` / `pw_observe_seats` rows are that contract's width apart.
+`pw_observation_size_for(version)` (448 / 506, -1 unknown), `pw_handle_observation_size
+(handle)`, `pw_observation_contract(handle)` and `pw_observation_contract_hash(version,
+out, 65)` report it; `pw_observation_size()` stays 448. The observation contract never
+touches the world or its hash.
+
 ## Action contracts
 
 Two action contracts share the five heads `[51,25,2,2,2]` and differ only in what an
