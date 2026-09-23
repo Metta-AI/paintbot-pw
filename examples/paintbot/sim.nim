@@ -28,7 +28,7 @@ const
   # Glory is a self-imposed handicap: nothing that makes a team more likely to win pays it.
   GloryQuietSupplies* = 10
   GloryQuietSupplyTicks* = 30*TickRate
-  GloryFriendlyFire* = 30
+  GloryFriendlyFire* = 30 # Rules 37 only; rules 38 pays nothing for friendly fire.
   GloryFriendlyFireTicks* = 30*TickRate
   GloryEventLifetime* = 4*TickRate
   # Glory hearts (rules 38): small hearts appear in mirrored pairs at random open spots,

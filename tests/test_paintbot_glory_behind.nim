@@ -64,3 +64,15 @@ suite "Glory for being behind in lives":
     w.idle(2*GloryBehindLivesTicks)
     check w.behindAwards.len == 0
     check w.glory == [590'i32, 590'i32]
+  test "rules 38 pays nothing for friendly fire":
+    var w = newWorld(2026)
+    w.pickups.setLen(0)
+    var a = -1
+    var b = -1
+    for i in 0..<Seats:
+      if team(i) == 0:
+        if a < 0: a = i elif b < 0: b = i
+    w.cogs[b].shield = 0
+    w.damage(b, a, 1)
+    check w.gloryEvents.len == 0
+    check w.glory == [600'i32, 600'i32]

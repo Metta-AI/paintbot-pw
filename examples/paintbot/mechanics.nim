@@ -200,7 +200,7 @@ proc damage*(w: var World, victim, attacker, amount: int) =
       amount = int(int64(amount)*damageScale[attacker] div 1000)
   if observeHit != nil: observeHit(w.tick, victim, attacker, w.cogs[victim].pos)
   if attacker >= 0 and attacker != victim and team(attacker) == team(victim) and
-      w.tick < GloryFriendlyFireTicks:
+      w.tick < GloryFriendlyFireTicks and visionRulesVersion < 38:
     w.earnGlory(team(victim), gloryFriendlyFire, GloryFriendlyFire)
   let absorbed = min(w.equipment[victim].armor, amount.int32)
   w.equipment[victim].armor-=absorbed
