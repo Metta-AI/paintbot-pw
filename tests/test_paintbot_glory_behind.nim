@@ -15,9 +15,11 @@ proc firstSeat(side: int): int =
     if team(i) == side: return i
 
 suite "Glory for being behind in lives":
+  # Rules 39. Rules 38 shipped (0.3.39) without these changes, so they cannot live there: its
+  # recorded games must replay tick for tick, and glory is part of the state hash.
   setup:
-    visionRulesVersion = 38
-    replayRulesVersion = 38
+    visionRulesVersion = 39
+    replayRulesVersion = 39
   test "level teams earn nothing":
     var w = newWorld(2026)
     w.pickups.setLen(0)
@@ -64,7 +66,28 @@ suite "Glory for being behind in lives":
     w.idle(2*GloryBehindLivesTicks)
     check w.behindAwards.len == 0
     check w.glory == [590'i32, 590'i32]
-  test "rules 38 pays nothing for friendly fire":
+  test "rules 38, as shipped, does not pay for lives either":
+    visionRulesVersion = 38
+    replayRulesVersion = 38
+    var w = newWorld(2026)
+    w.pickups.setLen(0)
+    w.equipment[firstSeat(0)].lives -= 3
+    w.idle(2*GloryBehindLivesTicks)
+    check w.behindAwards.len == 0
+  test "rules 38, as shipped, still pays for friendly fire":
+    visionRulesVersion = 38
+    replayRulesVersion = 38
+    var w = newWorld(2026)
+    w.pickups.setLen(0)
+    var a = -1
+    var b = -1
+    for i in 0..<Seats:
+      if team(i) == 0:
+        if a < 0: a = i elif b < 0: b = i
+    w.cogs[b].shield = 0
+    w.damage(b, a, 1)
+    check w.gloryEvents.len > 0
+  test "rules 39 pays nothing for friendly fire":
     var w = newWorld(2026)
     w.pickups.setLen(0)
     var a = -1

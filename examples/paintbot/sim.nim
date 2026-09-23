@@ -28,7 +28,7 @@ const
   # Glory is a self-imposed handicap: nothing that makes a team more likely to win pays it.
   GloryQuietSupplies* = 10
   GloryQuietSupplyTicks* = 30*TickRate
-  GloryFriendlyFire* = 30 # Rules 37 only; rules 38 pays nothing for friendly fire.
+  GloryFriendlyFire* = 30 # Rules 37 and 38; rules 39 pays nothing for friendly fire.
   GloryFriendlyFireTicks* = 30*TickRate
   GloryEventLifetime* = 4*TickRate
   # Glory hearts (rules 38): small hearts appear in mirrored pairs at random open spots,
@@ -39,7 +39,7 @@ const
   GloryHeartMinGap* = 10*TickRate
   GloryHeartMaxGap* = 20*TickRate
   GloryHeartReach* = 120
-  # Rules 38: every GloryBehindLivesTicks a team earns GloryBehindLives per life it has fewer
+  # Rules 39: every GloryBehindLivesTicks a team earns GloryBehindLives per life it has fewer
   # than the enemy (lives left summed over its cogs); the team ahead in lives earns nothing.
   GloryBehindLives* = 1
   GloryBehindLivesTicks* = 5*TickRate
@@ -194,7 +194,7 @@ when defined(pwTraining):
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
   var damageScale* {.threadvar.}: ptr array[Seats, int32]
 else:
-  var visionRulesVersion* = 38
+  var visionRulesVersion* = 39
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
@@ -619,7 +619,7 @@ proc earnGlory*(w: var World, side: int, kind: GloryKind, amount: int32) =
 proc updateGlory*(w: var World) =
   ## Rules 37, once per tick after the tick counter advances: forget old awards, count
   ## down one glory per second, pay a team that went thirty seconds without supplies, and
-  ## (rules 38) pay a team behind in lives every five seconds.
+  ## (rules 39) pay a team behind in lives every five seconds.
   var recent: seq[GloryEvent]
   for event in w.gloryEvents:
     if w.tick-event.tick < GloryEventLifetime: recent.add event
@@ -630,7 +630,7 @@ proc updateGlory*(w: var World) =
     if w.tick-w.lastSupplyTick[side] >= GloryQuietSupplyTicks:
       w.lastSupplyTick[side] = w.tick
       w.earnGlory(side, gloryQuietSupplies, GloryQuietSupplies)
-  if visionRulesVersion >= 38 and w.tick mod GloryBehindLivesTicks == 0:
+  if visionRulesVersion >= 39 and w.tick mod GloryBehindLivesTicks == 0:
     var lives: array[2, int32]
     for i in 0..<Seats: lives[team(i)] += w.equipment[i].lives
     for side in 0..1:
