@@ -59,6 +59,20 @@ type
     sampling: array[Seats,SamplingOptions]
     sampleRng: array[Seats,Rng]
     sampleDraws: array[Seats,int32]
+    # Decoder objective forbid (pw_set_seat_forbid_objectives, kept across resets): the
+    # movement-head indices pw_sample_actions never selects for the seat and pw_step
+    # refuses from the caller for it (the hosted bundle option decoder.forbid_objectives).
+    forbidden: array[Seats,ObjectiveMask]
+    forbidAny: array[Seats,bool]
+    # Decoder strafe legs (pw_set_seat_strafe, kept across resets): applied to the
+    # caller's selected heads in pw_step before they are decoded, with the seat's own
+    # stream seeded from the match seed and the slot exactly as the hosted seat seeds its
+    # own (neural_contract.strafeRng) on every create/reset. strafeLast is the movement
+    # index the strafe executed on the last pw_step (-1 = the caller's stood).
+    strafe: array[Seats,StrafeOptions]
+    strafeState: array[Seats,StrafeState]
+    strafeRng: array[Seats,Rng]
+    strafeLast: array[Seats,int32]
     decided: array[Seats,Command]
     decidedTick: int32
     decidedValid: bool
@@ -84,6 +98,12 @@ proc resetSampling(env: ptr NativeEnv) =
   for slot in 0..<Seats:
     env.sampleRng[slot] = samplingRng(env.world.seed, slot)
     env.sampleDraws[slot] = 0
+proc resetStrafe(env: ptr NativeEnv) =
+  ## Fresh leg state and streams for the new match (options persist).
+  for slot in 0..<Seats:
+    env.strafeState[slot] = initStrafeState(slot)
+    env.strafeRng[slot] = strafeRng(env.world.seed, slot)
+    env.strafeLast[slot] = -1
 proc resetCurriculum(env: ptr NativeEnv) =
   ## Knob values persist; the shot history belongs to the match.
   for slot in 0..<Seats:
@@ -156,8 +176,24 @@ proc bodiesFor(env: ptr NativeEnv, slot: int): array[Seats,int] =
 proc decodeSeat(env: ptr NativeEnv, slot: int, actions: ActionBuffer): Command =
   ## The caller's five head indices for one seat through the selected contract. Under
   ## v1 the bodies are resolved only for an identity aim, as before; v2 always resolves
-  ## them because the seat's memory must be recorded on every decided tick.
+  ## them because the seat's memory must be recorded on every decided tick. A seat with
+  ## the strafe on decodes its heads after neural_contract.strafeActions, as the hosted
+  ## seat does.
   let offset = slot*ActionSizes.len
+  if env.strafe[slot].enabled:
+    var heads: array[ActionSizes.len, int32]
+    for head in 0..<ActionSizes.len: heads[head] = actions[offset+head]
+    let bodies = env.bodiesFor(slot)
+    env.strafeLast[slot] = -1
+    if env.world.strafeActions(slot, heads, bodies, env.strafe[slot], env.strafeState[slot],
+        env.strafeRng[slot], env.forbidden[slot]):
+      env.strafeLast[slot] = heads[0]
+    if env.contract == acV1:
+      result = decodeActions(env.world,slot,heads,bodies)
+    else:
+      result = decodeActions(env.world,slot,heads,bodies,env.contract,env.aimMemory[slot])
+      env.aimMemory[slot].recordAimMemory(env.world,slot,bodies)
+    return
   if env.contract == acV1:
     if actions[offset+1] in 1'i32..16'i32:
       result = decodeActions(env.world,slot,actions.toOpenArray(offset,offset+ActionSizes.len-1),env.bodiesFor(slot))
@@ -185,6 +221,7 @@ proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
     env.contract = acV1
     env.resetAimMemories()
     env.resetSampling()
+    env.resetStrafe()
     result = env
   except CatchableError:
     `=destroy`(env[])
@@ -210,6 +247,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     env.resetCurriculum()
     env.resetAimMemories()
     env.resetSampling()
+    env.resetStrafe()
     return 0
   except CatchableError: return -1
 
@@ -235,10 +273,17 @@ proc pw_observe*(handle: pointer, observations, resets: FloatBuffer): cint {.exp
 proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
   ## Settled score reward only, normalized by 1000. Optional shaping belongs in
   ## the training adapter, never hidden in the game ABI. No implicit auto-reset.
+  ## -3: a live seat whose actions are decoded from the caller chose a movement index
+  ## its forbid mask lists (pw_set_seat_forbid_objectives); nothing is stepped.
   if handle == nil or actions == nil or rewards == nil or terminals == nil: return -1
   ready()
   let env = cast[ptr NativeEnv](handle)
   if env.world.winner != -1 or env.world.tick >= env.world.endTick: return -2
+  for slot in 0..<Seats:
+    if not env.forbidAny[slot] or env.world.cogs[slot].hp <= 0 or
+        (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
+    let movement = actions[slot*ActionSizes.len]
+    if movement in 0'i32..<ActionSizes[0].int32 and env.forbidden[slot][movement]: return -3
   try:
     var commands: array[Seats,Command]
     var wasDead: array[Seats,bool]
@@ -563,7 +608,7 @@ proc pw_sample_actions*(handle: pointer, seat: cint, logits: FloatBuffer, action
   try:
     var input: array[LogitSize, float32]
     for i in 0..<LogitSize: input[i] = logits[i]
-    let picked = sampleActions(input, env.sampling[seat], env.sampleRng[seat])
+    let picked = sampleActions(input, env.sampling[seat], env.sampleRng[seat], env.forbidden[seat])
     if env.sampling[seat].enabled: inc env.sampleDraws[seat]
     for head in 0..<ActionSizes.len: actions[head] = picked[head]
     return 0
@@ -575,6 +620,84 @@ proc pw_seat_sample_draws*(handle: pointer, seat: cint): cint {.exportc, cdecl, 
   if handle == nil or seat notin 0..<Seats: return -1
   ready()
   cint(cast[ptr NativeEnv](handle).sampleDraws[seat])
+
+proc pw_set_seat_forbid_objectives*(handle: pointer, seat: cint, indices: ptr UncheckedArray[int32],
+    count: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Decoder objective forbid for one seat (the hosted bundle option
+  ## decoder.forbid_objectives): the `count` movement-head indices (distinct, 0..50, at
+  ## least one index left allowed) are never selected by pw_sample_actions for the seat
+  ## (argmax or draw, as if their logits were -inf), and pw_step returns -3 without
+  ## stepping when the caller hands one of them for the seat while it is alive (a dead
+  ## seat's actions are ignored by the decoder anyway). count 0 clears (indices may
+  ## be NULL). With no seat forbidding anything the library is byte-identical to one
+  ## without this call. Kept across pw_reset. Returns 0, -1 for bad arguments (the mask
+  ## is then unchanged).
+  if handle == nil or seat notin 0..<Seats or count < 0 or count >= ActionSizes[0].int32: return -1
+  if count > 0 and indices == nil: return -1
+  var mask: ObjectiveMask
+  for i in 0..<count.int:
+    let index = indices[i]
+    if index notin 0'i32..<ActionSizes[0].int32 or mask[index]: return -1
+    mask[index] = true
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.forbidden[seat] = mask
+  env.forbidAny[seat] = mask.forbidsAny
+  0
+
+proc pw_seat_forbidden_objectives*(handle: pointer, seat: cint, mask: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## The seat's forbid mask: mask (int32[51], may be NULL) gets 1 for each forbidden
+  ## movement-head index and 0 otherwise, the logit mask a trainer applies before it
+  ## samples. Returns the number forbidden, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  var n = 0
+  for index in 0..<ActionSizes[0]:
+    let on = env.forbidden[seat][index]
+    if mask != nil: mask[index] = on.int32
+    if on: inc n
+  cint(n)
+
+proc pw_set_seat_strafe*(handle: pointer, seat: cint, range, legMin, legMax, shotLegMin, shotLegMax,
+    reversePermille: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Decoder strafe legs for one seat (the hosted bundle option decoder.strafe_legs; see
+  ## neural_contract.strafeActions): with range > 0, on every pw_step while the seat sees
+  ## an apparent enemy within `range` and is not in a trench, the caller's movement index
+  ## for it is replaced by a compass leg perpendicular to the nearest such enemy (3/4
+  ## lateral plus the direction to the heart or pickup the movement index names), held
+  ## legMin..legMax ticks, or shotLegMin..shotLegMax when a shoot order the gun can take
+  ## starts it (a ready shot with fewer than shotLegMin ticks left on the leg starts a new
+  ## one), reversing with probability reversePermille/1000 per new leg. The draws come
+  ## from the seat's own stream, seeded from the match seed and the slot as the hosted
+  ## seat seeds it. The pw-diag / base.bas values are 5250, 3, 6, 6, 9, 800. range 0 turns
+  ## it off (the other arguments are then ignored); off on every seat is byte-identical
+  ## to a library without this call. Kept across pw_reset (the leg state and stream are
+  ## reset). Returns 0, -1 for bad arguments (1 <= min <= max <= 72 for legs,
+  ## 6 <= min <= max <= 72 for shot legs, range <= 20000, 0 <= permille <= 1000).
+  if handle == nil or seat notin 0..<Seats: return -1
+  var options: StrafeOptions
+  if range != 0:
+    options = StrafeOptions(enabled: true, range: range, legTicks: [legMin, legMax],
+      shotLegTicks: [shotLegMin, shotLegMax], reversePermille: reversePermille)
+    if strafeOptionsError(options).len > 0: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.strafe[seat] = options
+  0
+
+proc pw_seat_strafe_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Strafe telemetry, three int32: [legs started, decisions whose movement index the
+  ## strafe replaced (both since the last create/reset), the movement index it executed
+  ## on the last pw_step or -1 when the caller's index stood]. The third is what a
+  ## trainer records as the executed movement. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  output[0] = env.strafeState[seat].legs
+  output[1] = env.strafeState[seat].ticks
+  output[2] = env.strafeLast[seat]
+  0
 
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
   ## Diagnostic: resident 64x64 terrain blocks (16 KiB each) across all tables.

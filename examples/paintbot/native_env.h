@@ -131,6 +131,35 @@ int pw_seat_fire_held(void *handle, int seat);
 int pw_set_seat_sampling(void *handle, int seat, int32_t temperature_permille, int32_t head_mask);
 int pw_sample_actions(void *handle, int seat, const float *logits, int32_t *actions);
 int pw_seat_sample_draws(void *handle, int seat);
+/* A hosted seat decides, and so draws, only on ticks it is alive on the pre-step world: a
+ * probe that wants the hosted seat's exact draws calls pw_sample_actions for live seats only. */
+/* Decoder objective forbid (additive; the hosted bundle option decoder.forbid_objectives).
+ * pw_set_seat_forbid_objectives: the `count` movement-head indices (distinct, 0..50, fewer
+ * than 51) are never selected for the seat by pw_sample_actions (argmax or draw, as if
+ * their logits were -inf), and pw_step returns -3 without stepping when the caller hands
+ * one of them for a live seat whose actions it decodes; count 0 clears (indices may be NULL).
+ * Kept across pw_reset; -1 bad args. pw_seat_forbidden_objectives: mask int32[51] (may be
+ * NULL) gets 1 per forbidden index, 0 otherwise (the trainer's logit mask); returns the
+ * count, -1 bad args. No seat forbidding anything = byte-identical to before. */
+int pw_set_seat_forbid_objectives(void *handle, int seat, const int32_t *indices, int32_t count);
+int pw_seat_forbidden_objectives(void *handle, int seat, int32_t *mask);
+/* Decoder strafe legs (additive; the hosted bundle option decoder.strafe_legs, base.bas's
+ * contact footwork). pw_set_seat_strafe with range > 0: on every pw_step while the seat sees
+ * an apparent enemy within range and is not in a trench, the caller's movement index for it
+ * is replaced by a compass leg (43..50) perpendicular to the nearest such enemy, turned 3/4
+ * lateral plus the direction to the heart/pickup the caller's index names, held leg_min..
+ * leg_max ticks, or shot_min..shot_max when a shoot order the gun can take starts it (a
+ * ready shot with fewer than shot_min ticks left starts a new leg), reversing across the
+ * line with probability reverse_permille/1000 per new leg; draws from the seat's own stream
+ * seeded from the match seed and the slot exactly as the hosted seat seeds it. Defaults of
+ * the bundle option: 5250, 3, 6, 6, 9, 800. range 0 = off (the default; byte-identical).
+ * Kept across pw_reset (legs and stream reset); -1 bad args (1 <= leg_min <= leg_max <= 72,
+ * 6 <= shot_min <= shot_max <= 72, range <= 20000, 0 <= permille <= 1000).
+ * pw_seat_strafe_stats: int32[3] = {legs started, decisions replaced (since create/reset),
+ * movement index executed on the last pw_step or -1 if the caller's stood}; -1 bad args. */
+int pw_set_seat_strafe(void *handle, int seat, int32_t range, int32_t leg_min, int32_t leg_max,
+                       int32_t shot_min, int32_t shot_max, int32_t reverse_permille);
+int pw_seat_strafe_stats(void *handle, int seat, int32_t *stats);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
 #ifdef __cplusplus

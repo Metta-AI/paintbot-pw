@@ -232,3 +232,86 @@ suite "native BASIC neural host":
       let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
       checkpoint schema & " " & decoder
       check bad[0].failed
+  test "the forbid and strafe decoder options are read from a schema-2 manifest, logged, and replay exactly":
+    const Schema1 = "paintbot-neural-basic/1"
+    const Schema2 = "paintbot-neural-basic/2"
+    let both = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"forbid_objectives\": [9, 10], \"strafe_legs\": {}}"))
+    check not both[0].failed
+    check both[0].neural.forbidAny and both[0].neural.forbidden[9] and both[0].neural.forbidden[10]
+    check not both[0].neural.forbidden[0]
+    check both[0].neural.strafe == defaultStrafeOptions()
+    check both[0].neural.telemetry(10, 3) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 forbid_objectives=9,10 forbid_hits=0" &
+      " strafe=r5250,legs3-6,shot6-9,rev800 strafe_legs=0 strafe_ticks=0"
+    let custom = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"fire_hold_teammates\": true, \"strafe_legs\": {\"range\": 3000, \"legs\": [2, 4], \"shot_legs\": [7, 8], \"reverse_permille\": 500}}"))
+    check not custom[0].failed and not custom[0].neural.forbidAny
+    check custom[0].neural.strafe == StrafeOptions(enabled: true, range: 3000, legTicks: [2'i32, 4], shotLegTicks: [7'i32, 8], reversePermille: 500)
+    check custom[0].neural.telemetry(10, 3) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 fire_holds=0 strafe=r3000,legs2-4,shot7-8,rev500 strafe_legs=0 strafe_ticks=0"
+    # The zero model's logits are all equal, so argmax takes index 0 ("keep"): forbidding 0
+    # sends the seat to heart 1 instead, and counts the decision.
+    let keep = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(Schema2, ActionContractV2Hash))
+    let moved = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"forbid_objectives\": [0]}"))
+    var w = newWorld(2026)
+    let kept = keep.decide(w)
+    let went = moved.decide(w)
+    check kept[0].goal == w.cogs[0].pos
+    check went[0].goal == w.controlHearts[0].pos
+    check moved[0].neural.forbidHits == 1
+    # Replay determinism with every seat running forbid + strafe + sampling + hold: the same
+    # match seed twice gives the same world hash every tick; the options change the match.
+    proc play(manifest: string, seed: int32, ticks: int): (seq[uint32], int) =
+      let players = fixture(NeuralSource, true, ActionContractV2Hash, manifest)
+      var world = newWorld(seed)
+      for tick in 0..<ticks:
+        let commands = players.decide(world)
+        for slot in 0..<Seats: check not players[slot].failed
+        world.step(commands)
+        result[0].add world.stateHash()
+      for slot in 0..<Seats: result[1] += players[slot].neural.strafeState.legs
+    let options = manifestJson(Schema2, ActionContractV2Hash,
+      "{\"fire_hold_teammates\": true, \"forbid_objectives\": [0, 9, 10], \"strafe_legs\": {}, \"sampling\": {\"mode\": \"categorical\"}}")
+    let once = play(options, 2026, 300)
+    check once == play(options, 2026, 300)
+    check once[1] > 0   # legs were run
+    let sampledOnly = manifestJson(Schema2, ActionContractV2Hash, "{\"fire_hold_teammates\": true, \"sampling\": {\"mode\": \"categorical\"}}")
+    check once[0] != play(sampledOnly, 2026, 300)[0]
+    check once[0] != play(options, 2027, 300)[0]
+    # Schema 1 and schema 2 without the fields: unchanged behaviour and log line.
+    for (schema, contract) in [(Schema1, ActionContractHash), (Schema2, ActionContractHash), (Schema2, ActionContractV2Hash)]:
+      let plain = fixture(NeuralSource, true, contract, manifestJson(schema, contract))
+      check not plain[0].failed
+      check not plain[0].neural.forbidAny and not plain[0].neural.strafe.enabled
+      check plain[0].neural.telemetry(10, 3) == "neural: peak_ops=10 budget=4000000 model=w64 ticks=3"
+    # Rejected: under schema 1; bad index lists; bad strafe fields.
+    var everything = "["
+    for i in 0..<ActionSizes[0]:
+      if i > 0: everything.add ","
+      everything.add $i
+    everything.add "]"
+    for (schema, decoder) in [(Schema1, "{\"forbid_objectives\": [9, 10]}"),
+                              (Schema1, "{\"strafe_legs\": {}}"),
+                              (Schema2, "{\"forbid_objectives\": []}"),
+                              (Schema2, "{\"forbid_objectives\": [51]}"),
+                              (Schema2, "{\"forbid_objectives\": [-1]}"),
+                              (Schema2, "{\"forbid_objectives\": [9, 9]}"),
+                              (Schema2, "{\"forbid_objectives\": [9.0]}"),
+                              (Schema2, "{\"forbid_objectives\": \"9,10\"}"),
+                              (Schema2, "{\"forbid_objectives\": " & everything & "}"),
+                              (Schema2, "{\"strafe_legs\": true}"),
+                              (Schema2, "{\"strafe_legs\": {\"range\": 0}}"),
+                              (Schema2, "{\"strafe_legs\": {\"range\": 20001}}"),
+                              (Schema2, "{\"strafe_legs\": {\"range\": 5250.5}}"),
+                              (Schema2, "{\"strafe_legs\": {\"legs\": [0, 6]}}"),
+                              (Schema2, "{\"strafe_legs\": {\"legs\": [7, 6]}}"),
+                              (Schema2, "{\"strafe_legs\": {\"legs\": [3]}}"),
+                              (Schema2, "{\"strafe_legs\": {\"shot_legs\": [5, 9]}}"),
+                              (Schema2, "{\"strafe_legs\": {\"shot_legs\": [6, 73]}}"),
+                              (Schema2, "{\"strafe_legs\": {\"reverse_permille\": 1001}}"),
+                              (Schema2, "{\"strafe_legs\": {\"seed\": 1}}")]:
+      let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
+      checkpoint schema & " " & decoder
+      check bad[0].failed

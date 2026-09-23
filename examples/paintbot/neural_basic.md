@@ -48,6 +48,38 @@ candidates and the contract hashes are the same with or without them.
   Caveat: the actor's float32 logits are argmax-stable across CPU architectures but not
   bit-stable, so a sampled match reproduces exactly on one engine build and architecture
   (the hosted platform's), not necessarily between an arm64 laptop and an x86 host.
+- `"decoder": {"forbid_objectives": [9, 10]}` (default absent = byte-identical to before):
+  the listed movement-head candidate indices (distinct, 0..50, at least one left allowed)
+  are never selected, argmax or sampled, as if their logits were -inf
+  (`neural_contract.argmaxActions` / `sampleActions` with an `ObjectiveMask`); the rest of
+  a sampled movement head is renormalised and every other head is untouched. The actor's
+  logits are still checked for finiteness as before. 9 and 10 are the two river hearts,
+  the pw-diag river veto. The native training ABI's `pw_set_seat_forbid_objectives` is the
+  same mask (its `pw_seat_forbidden_objectives` hands a trainer the logit mask, and
+  `pw_step` refuses a forbidden index from the caller). With the option on, the telemetry
+  line gains ` forbid_objectives=<indices> forbid_hits=<n>`, the decisions whose unmasked
+  argmax objective was forbidden.
+- `"decoder": {"strafe_legs": {"range": 5250, "legs": [3, 6], "shot_legs": [6, 9], "reverse_permille": 800}}`
+  (default absent = byte-identical; every field optional, the defaults shown are base.bas's
+  and the pw-diag measurement's): base.bas's footwork in contact (`neural_contract.strafeActions`).
+  While the seat sees an apparent enemy within `range` and is not in a trench, its movement
+  head is replaced by a compass step (indices 43..50): a leg perpendicular to the nearest
+  such enemy, turned 3/4 lateral plus the direction to the heart or pickup the movement
+  head chose, held `legs` ticks (inclusive range), reversing across the line with
+  probability `reverse_permille`/1000 at each new leg. A shoot order the gun can take this
+  tick is only issued with at least `shot_legs[0]` ticks of the current leg left; when fewer
+  remain a new leg of `shot_legs` ticks starts on that tick, so the seat's own movement
+  over the windup is the planned step contract v2's lead subtracts. No order is dropped;
+  aim, fire, grenade and sneak stand. Out of contact the leg ends. Integer geometry; the
+  draws (two per new leg) come from the seat's own SplitMix64 stream seeded from the match
+  seed and the slot with its own salt (`strafeRng`), so the option never shifts the
+  sampling draws and never touches the world's stream: the same match seed replays the
+  same legs. Order of the options in a decision: forbid and sampling select the heads,
+  the strafe rewrites the movement head, the heads are decoded, the fire hold gates the
+  shot. The native training ABI's `pw_set_seat_strafe` is the same rule on the same
+  stream (`pw_seat_strafe_stats` reports legs, replaced decisions and the executed
+  movement index). With the option on, the telemetry line gains
+  ` strafe=r<range>,legs<a>-<b>,shot<c>-<d>,rev<p> strafe_legs=<n> strafe_ticks=<n>`.
 
 The archive is bounded to 16 MiB model, 64 KiB BASIC, and 8 KiB manifest.
 Duplicates, unexpected paths/files, encryption, incorrect hashes, and oversized

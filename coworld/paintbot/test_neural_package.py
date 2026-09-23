@@ -100,9 +100,6 @@ class PackageTests(unittest.TestCase):
             unpack_package(out.getvalue())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
     def test_sampling_option(self):
         schema2 = {"schema": "paintbot-neural-basic/2"}
         for sampling in ({"mode": "categorical"},
@@ -121,3 +118,39 @@ if __name__ == "__main__":
                                   ({"mode": "categorical", "seed": 1}, "unknown decoder.sampling field"), (True, "must be a dict"), ([], "must be a dict")):
             with self.assertRaisesRegex(ValueError, message, msg=repr(sampling)):
                 unpack_package(package({**schema2, "decoder": {"sampling": sampling}}))
+
+    def test_forbid_objectives_option(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        for forbid in ([9, 10], [0], [50, 1], list(range(50))):
+            _, _, manifest = unpack_package(package({**schema2, "decoder": {"forbid_objectives": forbid}}))
+            self.assertEqual(manifest["decoder"]["forbid_objectives"], forbid)
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {"forbid_objectives": [9, 10]}}))
+        for forbid, message in (([], "non-empty"), ([51], "indices"), ([-1], "indices"), ([9.0], "indices"), ([True], "indices"),
+                                (["9"], "indices"), ([9, 9], "repeats"), (list(range(51)), "leave an objective"),
+                                ("9,10", "must be a list"), ({"9": 1}, "must be a list")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(forbid)):
+                unpack_package(package({**schema2, "decoder": {"forbid_objectives": forbid}}))
+
+    def test_strafe_legs_option(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        for strafe in ({}, {"range": 5250, "legs": [3, 6], "shot_legs": [6, 9], "reverse_permille": 800},
+                       {"range": 1, "legs": [1, 1], "shot_legs": [6, 6], "reverse_permille": 0},
+                       {"range": 20000, "legs": [72, 72], "shot_legs": [72, 72], "reverse_permille": 1000}):
+            _, _, manifest = unpack_package(package({**schema2, "decoder": {"forbid_objectives": [9, 10], "strafe_legs": strafe}}))
+            self.assertEqual(manifest["decoder"]["strafe_legs"], strafe)
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {"strafe_legs": {}}}))
+        for strafe, message in (({"range": 0}, "range must be within"), ({"range": 20001}, "range must be within"),
+                                ({"range": 5250.0}, "integer"), ({"range": True}, "integer"), ({"legs": [0, 6]}, "legs must be"),
+                                ({"legs": [7, 6]}, "legs must be"), ({"legs": [3, 73]}, "legs must be"), ({"legs": [3]}, r"\[min, max\]"),
+                                ({"legs": "3-6"}, r"\[min, max\]"), ({"legs": [3, 6.0]}, "integer"), ({"shot_legs": [5, 9]}, "shot_legs must be"),
+                                ({"shot_legs": [9, 8]}, "shot_legs must be"), ({"reverse_permille": 1001}, "reverse_permille"),
+                                ({"reverse_permille": -1}, "reverse_permille"), ({"seed": 1}, "unknown decoder.strafe_legs field"),
+                                (True, "must be a dict"), ([], "must be a dict")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(strafe)):
+                unpack_package(package({**schema2, "decoder": {"strafe_legs": strafe}}))
+
+
+if __name__ == "__main__":
+    unittest.main()

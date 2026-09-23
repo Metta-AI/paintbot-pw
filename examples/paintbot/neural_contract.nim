@@ -451,6 +451,218 @@ proc sampleActions*(logits: openArray[float32], options: SamplingOptions,
     result[head] = pick.int32
     offset += size
 
+# Decoder objective forbid (bundle option decoder.forbid_objectives, schema 2; not a
+# contract change): the listed movement-head candidate indices are never chosen, as if
+# their logits were -inf. The actor's logits are still checked for finiteness exactly as
+# argmax checks them; the forbidden entries are then skipped by argmax and carry no mass
+# in a sampled draw (the remaining candidates are renormalised). With nothing forbidden
+# these are exactly argmaxActions / sampleActions (the same code runs), so the option
+# absent is byte-identical. The pw-diag river veto forbids 9 and 10, the two river hearts.
+type
+  ObjectiveMask* = array[ActionSizes[0], bool]  # true = the movement-head index is forbidden
+
+proc forbidsAny*(mask: ObjectiveMask): bool =
+  for forbidden in mask:
+    if forbidden: return true
+  false
+
+proc argmaxActions*(logits: openArray[float32], forbidden: ObjectiveMask): array[ActionSizes.len, int32] =
+  ## argmaxActions with the forbidden movement-head indices skipped: the first maximum
+  ## among the allowed ones. Nothing forbidden = argmaxActions.
+  result = argmaxActions(logits)   # size and finiteness checks, every other head
+  if not forbidden.forbidsAny: return
+  var best = -1
+  for i in 0..<ActionSizes[0]:
+    if forbidden[i]: continue
+    if best < 0 or logits[i] > logits[best]: best = i
+  if best < 0: raise newException(ValueError, "every objective candidate is forbidden")
+  result[0] = best.int32
+
+proc sampleActions*(logits: openArray[float32], options: SamplingOptions,
+    rng: var Rng, forbidden: ObjectiveMask): array[ActionSizes.len, int32] =
+  ## sampleActions with the forbidden movement-head indices removed from the draw (and
+  ## from argmax when the movement head is not sampled). Still exactly one draw per
+  ## sampled head per call. Nothing forbidden = sampleActions; options disabled = the
+  ## masked argmax with no draw.
+  if not forbidden.forbidsAny: return sampleActions(logits, options, rng)
+  if not options.enabled: return argmaxActions(logits, forbidden)
+  if logits.len != LogitSize: raise newException(ValueError,"invalid neural logit size")
+  if options.temperature < MinSamplingTemperature or options.temperature > MaxSamplingTemperature:
+    raise newException(ValueError,"invalid sampling temperature")
+  let argmax = argmaxActions(logits, forbidden)   # also the finiteness check
+  var offset = 0
+  for head,size in ActionSizes:
+    if not options.heads[head]:
+      result[head] = argmax[head]
+      offset += size
+      continue
+    let top = float64(logits[offset+argmax[head]])
+    let inverse = 1.0 / float64(options.temperature)
+    var total = 0.0
+    for i in 0..<size:
+      if head == 0 and forbidden[i]: continue
+      total += exp((float64(logits[offset+i]) - top) * inverse)
+    let threshold = rng.uniform53() * total
+    var cumulative = 0.0
+    var pick = -1
+    for i in 0..<size:
+      if head == 0 and forbidden[i]: continue
+      pick = i   # the last allowed index when rounding leaves the threshold uncovered
+      cumulative += exp((float64(logits[offset+i]) - top) * inverse)
+      if threshold < cumulative: break
+    result[head] = pick.int32
+    offset += size
+
+# Decoder strafe legs (bundle option decoder.strafe_legs, schema 2; not a contract change):
+# base.bas's footwork in contact (its planLeg), as pw-diag measured it (first-contact.md,
+# lever 2). While the seat sees an apparent enemy within range and is not in a trench,
+# its movement head is replaced by a compass step: a leg perpendicular to the nearest such
+# enemy, turned 3/4 lateral plus the direction to the objective the movement head chose
+# (a heart or pickup), held for legs[0]..legs[1] ticks, reversing across the line with
+# probability reverse_permille/1000 at every new leg. A shoot order the gun can take this
+# tick is only issued with at least shot_legs[0] ticks of the current leg left: when fewer
+# remain a new leg of shot_legs[0]..shot_legs[1] ticks starts on that tick, so the seat's
+# own movement over the windup is the planned step contract v2's lead subtracts. No order
+# is dropped. Out of contact the leg ends. Integer geometry only; the random draws (two
+# per new leg: reverse, then length) come from a stream the seat owns, SplitMix64 seeded
+# from the match seed and the slot like the sampling stream but with its own salt, so it
+# never shifts the sampling draws and the world's rng is untouched.
+type
+  StrafeOptions* = object
+    enabled*: bool
+    range*: int32                   # contact: an apparent enemy within this distance
+    legTicks*: array[2, int32]      # leg length without a shot, inclusive
+    shotLegTicks*: array[2, int32]  # leg length when a ready shot starts it, inclusive
+    reversePermille*: int32         # chance per new leg of reversing across the line
+  StrafeState* = object
+    leg*: int32        # ticks left on the current leg (0 = none)
+    zig*: int32        # +1 / -1: which side of the line to the threat
+    direction*: int32  # compass 0..7 of the current leg (movement index 43+direction)
+    legs*: int32       # legs started (telemetry)
+    ticks*: int32      # decisions whose movement head the strafe replaced (telemetry)
+
+const
+  StrafeSalt* = 0x5354524146450000'u64  # "STRAFE" in the high bytes, slot below it
+  DefaultStrafeRange* = 5250'i32        # base.bas's contact range (d2 <= 27562500) = GunRange
+  DefaultStrafeLegs* = [3'i32, 6]
+  DefaultStrafeShotLegs* = [6'i32, 9]
+  DefaultStrafeReversePermille* = 800'i32
+  MaxStrafeRange* = 20000'i32
+  MaxStrafeLegTicks* = 72'i32
+  MinStrafeShotLegTicks* = LeadOwnMoves.int32 + 1  # the order tick plus the windup's moves
+  StrafeFirstCompass* = 43
+static: doAssert DefaultStrafeRange == GunRange and MinStrafeShotLegTicks == 6
+
+proc defaultStrafeOptions*(): StrafeOptions =
+  StrafeOptions(enabled: true, range: DefaultStrafeRange, legTicks: DefaultStrafeLegs,
+    shotLegTicks: DefaultStrafeShotLegs, reversePermille: DefaultStrafeReversePermille)
+
+proc strafeOptionsError*(o: StrafeOptions): string =
+  ## "" when the parameters are usable; otherwise why not (the host and the native ABI
+  ## reject the same values).
+  if o.range < 1 or o.range > MaxStrafeRange: return "range must be within 1 .. " & $MaxStrafeRange
+  if o.legTicks[0] < 1 or o.legTicks[0] > o.legTicks[1] or o.legTicks[1] > MaxStrafeLegTicks:
+    return "legs must be [min, max] with 1 <= min <= max <= " & $MaxStrafeLegTicks
+  if o.shotLegTicks[0] < MinStrafeShotLegTicks or o.shotLegTicks[0] > o.shotLegTicks[1] or
+      o.shotLegTicks[1] > MaxStrafeLegTicks:
+    return "shot_legs must be [min, max] with " & $MinStrafeShotLegTicks & " <= min <= max <= " & $MaxStrafeLegTicks
+  if o.reversePermille < 0 or o.reversePermille > 1000: return "reverse_permille must be within 0 .. 1000"
+  ""
+
+proc strafeRng*(matchSeed: int32, slot: int): Rng =
+  ## The seat's strafe stream for a match (its own salt: independent of the sampling stream).
+  initRng(matchSeed, StrafeSalt xor (uint64(slot+1) shl 32))
+
+proc strafeSeed*(matchSeed: int32, slot: int): uint64 =
+  strafeRng(matchSeed, slot).state
+
+proc initStrafeState*(slot: int): StrafeState =
+  ## No leg; the first leg side alternates by pairs of team members, as base.bas seeds zig.
+  result.zig = if (slot div 2) mod 4 < 2: 1 else: -1
+
+proc isqrt64(n: int64): int64 =
+  if n <= 0: return 0
+  var x = n
+  var y = (x+1) div 2
+  while y < x:
+    x = y
+    y = (x + n div x) div 2
+  x
+
+proc strafeActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
+    bodies: array[Seats, int], options: StrafeOptions, state: var StrafeState, rng: var Rng,
+    forbidden: ObjectiveMask = default(ObjectiveMask)): bool =
+  ## Apply the strafe to the seat's selected head indices on the pre-step world, before
+  ## they are decoded: returns whether the movement head was replaced (by a compass index
+  ## 43..50). `bodies` are the seat's apparent identities (observedBodies). Compass
+  ## headings the forbid mask lists are never taken. Options disabled = untouched.
+  if not options.enabled: return false
+  let me = w.cogs[slot]
+  if me.hp <= 0 or w.trenchAt(me.pos) >= 0:
+    state.leg = 0
+    return false
+  var threat = -1
+  var best = int64(options.range) * options.range
+  for identity in 0..<Seats:
+    let body = bodies[identity]
+    if body < 0 or body == slot or w.cogs[body].hp <= 0: continue
+    if w.observedTeam(slot, body) == team(slot): continue
+    let d = distance2(me.pos, w.cogs[body].pos)
+    if d > int64(options.range) * options.range: continue
+    if threat < 0 or d < best:
+      threat = body
+      best = d
+  if threat < 0:
+    state.leg = 0
+    return false
+  let gear = w.equipment[slot]
+  let ready = if gear.sprayCan: gear.sprayCooldown == 0 else: me.cooldown == 0 and gear.windup == 0
+  let wantShot = actions[2] != 0 and ready
+  if state.leg <= 0 or (wantShot and state.leg < options.shotLegTicks[0]):
+    if int32(rng.next() mod 1000'u64) < options.reversePermille: state.zig = -state.zig
+    let span = if wantShot: options.shotLegTicks else: options.legTicks
+    state.leg = span[0] + int32(rng.next() mod uint64(span[1] - span[0] + 1))
+    inc state.legs
+    # Perpendicular to the line to the threat, scaled to 1000, on the zig side.
+    let tx = int64(w.cogs[threat].pos.x) - me.pos.x
+    let tz = int64(w.cogs[threat].pos.z) - me.pos.z
+    let reach = isqrt64(tx*tx + tz*tz)
+    var lx, lz = 0'i64
+    if reach > 0:
+      lx = -tz * 1000 * state.zig div reach
+      lz = tx * 1000 * state.zig div reach
+    # Keep some progress toward the objective the movement head chose (heart or pickup).
+    if actions[0] in 1'i32..42'i32:
+      let (found, goal) = w.goalCandidate(slot, actions[0].int)
+      if found:
+        let fx = int64(goal.x) - me.pos.x
+        let fz = int64(goal.z) - me.pos.z
+        let far = isqrt64(fx*fx + fz*fz)
+        if far > 60:
+          lx = lx * 3 div 4 + fx * 1000 div far
+          lz = lz * 3 div 4 + fz * 1000 div far
+    # The allowed compass heading nearest the leg (a diagonal's projection is scaled by
+    # 1/sqrt 2 so all eight headings compete fairly); movement compass steps are mirrored
+    # for team 1 exactly as goalCandidate mirrors them.
+    let flip = if team(slot) == 0: 1'i64 else: -1'i64
+    var bestScore = low(int64)
+    var heading = -1
+    for k, delta in Directions:
+      if forbidden[StrafeFirstCompass + k]: continue
+      let dot = flip * (delta[0].int64 * lx + delta[1].int64 * lz)
+      let score = if delta[0] != 0 and delta[1] != 0: dot * 7071 else: dot * 10000
+      if heading < 0 or score > bestScore:
+        heading = k
+        bestScore = score
+    if heading < 0:
+      state.leg = 0
+      return false
+    state.direction = heading.int32
+  dec state.leg
+  actions[0] = int32(StrafeFirstCompass + state.direction)
+  inc state.ticks
+  true
+
 proc decodeLogits*(w: World, slot: int, logits: openArray[float32],
     bodies: array[Seats, int], version: ActionContractVersion,
     memory: AimMemory, fireHold = false): Command =
