@@ -71,6 +71,22 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
                    "polarity are fixed", {"useRetreat": 1, "useDial": 1}),
     "a7-echo": ("the old echoing relay, where every adopter repeats the callout, as the control "
                 "arm for the one-voice change", {"useEcho": 1}),
+    # Headroom: how much is Jev's objective pick worth at all? These two replace it with no
+    # judgment - a fixed rule, and a coin - while everything else stays identical. If the
+    # shipped build barely beats the rule, the prompt is not where the wins are.
+    "a8-rule": ("headroom control: the objective is the cheapest candidate with no enemy seen "
+                "near it, chosen by code with no Jev judgment", {"useRule": 1}),
+    "a9-shuffle": ("headroom control: the objective is a uniformly random candidate",
+                   {"useShuffle": 1}),
+    "a10-terrain": ("trenches, water, remembered supplies and nearby enemies around each "
+                    "candidate, with the rules that make them matter", {"useTerrain": 1}),
+    "a11-grenade": ("grenades land where they hurt the enemy most: clusters and trenches",
+                    {"useSmartGrenade": 1}),
+    "a12-spray": ("fetch a spray can against trench fights and clusters, aim bursts down the "
+                  "line with the most enemies", {"useSpray": 1}),
+    "a13-weapons": ("smart grenades and spray together", {"useSmartGrenade": 1, "useSpray": 1}),
+    "a14-rule-weapons": ("the code rule's objective with smart grenades and spray",
+                         {"useRule": 1, "useSmartGrenade": 1, "useSpray": 1}),
 }
 
 
@@ -111,6 +127,8 @@ def main() -> None:
                         help="episodes per arm, split evenly between the two side assignments")
     parser.add_argument("--fire", action="store_true",
                         help="create the requests and record them in requests.json")
+    parser.add_argument("--arms", nargs="*", default=None,
+                        help="only these arms (default: all); with --fire, appends to requests.json")
     args = parser.parse_args()
 
     assert args.episodes % 2 == 0, "episodes must be even so the two side halves are equal"
@@ -152,9 +170,10 @@ def main() -> None:
     if args.fire:
         # The manifest is the only record of which side each candidate took: the API returns
         # `notes` as null, so a reader that infers the side from the request scores every win as
-        # a loss. Write it before reading anything back.
-        manifest = {}
-        for arm in ARMS:
+        # a loss. Write it before reading anything back, and never overwrite earlier runs.
+        record = out / "requests.json"
+        manifest = json.loads(record.read_text()) if record.exists() else {}
+        for arm in (args.arms or ARMS):
             for side in ("even", "odd"):
                 path = out / f"{arm}-{side}.json"
                 result = subprocess.run(["coworld", "xp-request", "create", str(path)],
@@ -165,8 +184,8 @@ def main() -> None:
                     continue
                 manifest[found.group(0)] = {"arm": arm, "candidate_even": side == "even"}
                 print(f"{arm}-{side}: {found.group(0)}")
-        (out / "requests.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        print(f"\nwrote {out / 'requests.json'} with {len(manifest)} requests")
+        record.write_text(json.dumps(manifest, indent=2) + "\n")
+        print(f"\nwrote {record} with {len(manifest)} requests")
         print(f"score with: python3 coworld/paintbot/tools/jev_results.py "
               f"{(out / 'requests.json').relative_to(ROOT)}")
         return

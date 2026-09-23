@@ -3,7 +3,7 @@
 ## fog-gated; testing an enemy's position still needs that enemy to be visible.
 import std/[unittest, os, strutils]
 import polyworld/[cli, basic]
-import ../examples/paintbot/[sim, bots, oracle, game]
+import ../examples/paintbot/[sim, bots, oracle, game, topography]
 
 proc run(source: string, w: var World): seq[string] =
   let path = getTempDir()/"paintbot-trench-api.bas"
@@ -49,3 +49,23 @@ shout(strFromInt(trenchX(9999)))
     check got[0] == $w.trenchAt(inside)
     check got[0] != "-1"
     check got[1] == $w.trenchAt(outside)
+
+  test "waterAt agrees with the movement rule that slows a cog to a quarter":
+    var w = newWorld(4)
+    # Find one wet and one dry point on the map with the engine's own test.
+    var wet, dry = Point(x: -1, z: -1)
+    var z = minZ() + 200
+    while z < maxZ() - 200 and (wet.x < 0 or dry.x < 0):
+      var x = minX() + 200
+      while x < maxX() - 200:
+        let isWet = riverBlend(x, z) > 0 and terrainHeight(x, z) < RiverWaterHeight
+        if isWet and wet.x < 0: wet = Point(x: x.int32, z: z.int32)
+        if not isWet and dry.x < 0: dry = Point(x: x.int32, z: z.int32)
+        x += 150
+      z += 150
+    check wet.x >= 0
+    check dry.x >= 0
+    let got = run("shout(strFromInt(waterAt(" & $wet.x & ", " & $wet.z & ")))\n" &
+                  "shout(strFromInt(waterAt(" & $dry.x & ", " & $dry.z & ")))\n", w)
+    check got[0] == "1"
+    check got[1] == "0"

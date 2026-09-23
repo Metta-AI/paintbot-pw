@@ -773,13 +773,14 @@ class SeatStagingTests(unittest.TestCase):
         with self.subTest("not UTF-8"):
             out = self._run({3: b"\xff\xfe idle = 1\n"})
             self._assert_forfeited(out, 3, "Policy initialization failed: BASIC source is not UTF-8")
-        with self.subTest("over 64 KiB"):
-            out = self._run({12: b"x" * 65537})
-            self._assert_forfeited(out, 12, "Policy initialization failed: BASIC source exceeds 64 KiB")
-        with self.subTest("exactly 64 KiB is accepted"):
-            out = self._run({12: b"x" * 65536})
+        # The limit is 128 KiB, matching maxSourceBytes in bots.nim; the boundary is exact.
+        with self.subTest("over 128 KiB"):
+            out = self._run({12: b"x" * (128 * 1024 + 1)})
+            self._assert_forfeited(out, 12, "Policy initialization failed: BASIC source exceeds 128 KiB")
+        with self.subTest("exactly 128 KiB is accepted"):
+            out = self._run({12: b"x" * (128 * 1024)})
             self.assertEqual((out["rc"], out["failure"]), (0, None))
-            self.assertEqual(out["contents"]["12"], hashlib.sha256(b"x" * 65536).hexdigest())
+            self.assertEqual(out["contents"]["12"], hashlib.sha256(b"x" * (128 * 1024)).hexdigest())
 
     def test_a_hash_mismatch_still_forfeits_by_exception_name(self):
         import host

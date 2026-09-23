@@ -44,15 +44,15 @@ suite "Jev-advised BASIC baseline":
 
   test "drafting the oracle request stays inside the BASIC budget":
     # With the oracle on and no replies the askers draft and ship requests every ask interval.
-    # Limits are 20,000 instructions, 50,000 work units and 1,024 string handles per decision;
+    # Limits are 50,000 instructions, 125,000 work units and 1,024 string handles per decision;
     # measured peaks are about 10,100 / 22,200 / 91, and about 10,900 / 25,500 / 101 with every
     # switch on. Guard three quarters of each limit.
     let (_, players) = play(Jev, 4, advised = true)
     check drainOracleAsks().len > 0
     for slot in 0..<Seats:
       check not players[slot].failed
-      check peakInstructions[slot] < 15_000
-      check peakWork[slot] < 37_500
+      check peakInstructions[slot] < 37_500
+      check peakWork[slot] < 93_750
       check peakStrings[slot] < 768
 
   test "Jev's pick is relayed as a squad callout that squadmates decode":
@@ -199,6 +199,12 @@ suite "Jev-advised BASIC baseline":
       "wide": @[("useWide", 1)],
       "retreat and dial": @[("useRetreat", 1), ("useDial", 1)],
       "echo": @[("useEcho", 1)],
+      "terrain": @[("useTerrain", 1)],
+      "smart grenade": @[("useSmartGrenade", 1)],
+      "spray": @[("useSpray", 1)],
+      "weapons": @[("useSmartGrenade", 1), ("useSpray", 1)],
+      "everything": @[("useTerrain", 1), ("useSmartGrenade", 1), ("useSpray", 1)],
+      "explore": @[("useExplore", 1)],
     }
     # Git may check the file out with CRLF, so normalise before matching on line boundaries.
     let shipped = readFile(Jev).replace("\r\n", "\n")
@@ -224,7 +230,9 @@ suite "Jev-advised BASIC baseline":
       var w = newWorld(4)
       let players = loadBots(@[BotGroup(path: path, count: Seats)])
       var asked = 0
-      while w.tick < 360 and w.winner == -1:
+      # 720 ticks, not 360: the terrain arm's instruction overrun only appeared after 360, so a
+      # shorter run passed an arm that disables seats in a real match.
+      while w.tick < 720 and w.winner == -1:
         let commands = players.decide(w)
         for ask in drainOracleAsks():
           inc asked
@@ -240,6 +248,32 @@ suite "Jev-advised BASIC baseline":
       check asked > 0
       for slot in 0..<Seats:
         check not players[slot].failed
-        check peakInstructions[slot] < 15_000
-        check peakWork[slot] < 37_500
+        check peakInstructions[slot] < 37_500
+        check peakWork[slot] < 93_750
         check peakStrings[slot] < 768
+
+  test "the terrain prompt describes trenches, water, supplies and nearby enemies":
+    var source = readFile(Jev).replace("\r\n", "\n").replace("\n  useTerrain = 0\n", "\n  useTerrain = 1\n")
+    check "  useTerrain = 1" in source
+    let path = getTempDir() / "paintbot-jev-terrain.bas"
+    writeFile(path, source)
+    defer: removeFile(path)
+    resetOracle()
+    oracleEnabled = true
+    var w = newWorld(4)
+    let players = loadBots(@[BotGroup(path: path, count: Seats)])
+    discard players.decide(w)
+    let body = parseJson(drainOracleAsks()[0].body)
+    let state = body["state"]
+    for c in state["candidates"]:
+      for field in ["nearest_trench_m", "enemies_near", "enemies_in_trenches_near",
+                    "water_on_route_m", "grenade_pickup_m", "spray_pickup_m",
+                    "medkit_pickup_m", "armor_pickup_m"]:
+        check c.hasKey(field)
+        check c[field].kind == JInt
+      # A heart has a nearest trench whenever the map has trenches at all.
+      check c["nearest_trench_m"].getInt >= 0
+    for field in ["has_grenade", "has_spray", "armor"]:
+      check state["me"].hasKey(field)
+    check "Trenches are pits" in state["rules"].getStr
+    check "a quarter of its speed" in state["rules"].getStr
