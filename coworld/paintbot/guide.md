@@ -332,6 +332,22 @@ stacking with sneaking and carrying penalties. Dry banks retain normal speed;
 the water causes no damage. Terrain height, line of sight, and navigation use
 the lake bed. Earlier replays preserve their original river geometry and rules.
 
+### Routes that measure time (rules 38)
+
+Until rules 38 the navigator walked straight at any goal no wall blocked, and water blocks
+nothing; behind that shortcut it searched an unweighted grid. So any objective across the lake
+was reached by wading at a quarter speed. Re-simulating 60 hosted games of the Jev baseline
+against the league leader, 73% of its deaths happened in that water.
+
+Rules 38 route by time. A lake cell costs four steps in the grid search, so the field measures
+how long a route takes, not how long it is. From dry land a cog takes the straight shortcut, or
+pulls its path taut, only while that line stays dry; a cog already in the water keeps the old
+freedom, since every way out starts in it, and a cog that would otherwise have no move at all
+falls back to the old rule rather than standing still. Walking one cog across the lake, rules 37
+wade and rules 38 go round without touching water and arrive sooner
+(`tests/test_paintbot_dry_navigation.nim`). Every earlier replay keeps its original routes: 160
+hosted rules-37 games re-simulate hash for hash under the new engine.
+
 ### Glory (rules 37)
 
 (There are no rules 36. Version 0.3.32 stamped its recordings 36 while the live engine still
@@ -434,6 +450,15 @@ with fog-gated vision and no shared memory.
   two cover from outside it on the opposing side and step in if nobody is capturing.
 - **Refusing bad fights.** A cog that sees more opponents nearby than teammates heads for the
   heart that is far from them and close to it.
+- **Dry routes.** When the straight way to a target more than 8 m off crosses water (`waterAt`,
+  ten samples), the cog first walks to whichever of six points beside the route is quickest to
+  go through, a wet metre costing six dry ones, and keeps that point until it arrives, the target
+  moves 10 m, or ten seconds pass. It was measured against the league leader as a switch on the
+  Jev baseline: 89 of 120 against 12 of 60 for the same build without it. Against the previous
+  baseline over 100 side-swapped matches it wins 83-17 under rules 37 (time wading 18.9% to
+  11.2%). Under rules 38 the navigator already routes around the lake - the previous baseline
+  wades 3.9% of the time there - and the habit adds little on top: 59-41, which does not separate
+  from a coin flip. It stays because it never hurts and does not depend on the engine's routing.
 
 It no longer collects spray cans (a can replaces the gun, which loses at range) or uniforms.
 Measured in the engine over 100 side-swapped matches it beat the previous baseline 100-0, using

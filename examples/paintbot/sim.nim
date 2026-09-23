@@ -777,6 +777,8 @@ type NavCache = object
   fields: Table[int,seq[int32]] # target cell -> BFS distance per cell, -1 unreachable
   recent: seq[int]              # targets, least recently used first
   targets: Table[Point,int]     # goal -> nearest connected cell (or -1)
+  water: seq[bool]              # rules 38: whether each cell's centre is in the lake
+  weighted: bool                # rules 38: `fields` measure time, a lake cell costing four
 when defined(pwTraining):
   var nav {.threadvar.}: NavCache
 else:
@@ -814,6 +816,18 @@ proc walkClear*(w: World, a,b: Point):bool =
     let z=a.z.int+(b.z-a.z).int*i div steps
     if islandTerrain and islandMargin(x,z)<Radius div 3+40:return false
   true
+proc navCellOf(p:Point,nx,nz:int):int =
+  let x=(p.x.int-minX()) div NavCell;let z=(p.z.int-minZ()) div NavCell
+  if x<0 or z<0 or x>=nx or z>=nz: -1 else: z*nx+x
+proc navSegmentDry(a,b:Point,nx,nz:int):bool =
+  ## Rules 38: no lake cell lies under the segment from a to b, a itself excluded.
+  ## Integer steps at half a cell, so the answer is the same on every platform.
+  let dx=b.x.int64-a.x.int64;let dz=b.z.int64-a.z.int64
+  let steps=max(1'i64,int64(sqrt(float64(dx*dx+dz*dz))) div (NavCell div 2))
+  for k in 1'i64..steps:
+    let c=navCellOf(point(int(a.x.int64+dx*k div steps),int(a.z.int64+dz*k div steps)),nx,nz)
+    if c>=0 and nav.water[c]:return false
+  true
 proc navigationPoint(n,nx:int):Point =
   point(minX()+(n mod nx)*NavCell+NavCell div 2,
         minZ()+(n div nx)*NavCell+NavCell div 2)
@@ -843,7 +857,13 @@ proc nearestConnectedCell(goal:Point,nx,nz:int):int =
         else:x=gx+ring
 proc waypoint*(w:World,start,goal:Point):Point =
   if visionRulesVersion<22:return w.legacyWaypoint(start,goal)
-  if w.walkClear(start,goal):return goal
+  # Rules 38: the route measures time, not distance. A cog in the lake moves at a quarter of
+  # its speed, and the old search - a straight line whenever no wall is in the way, else an
+  # unweighted grid - walked straight through it. From dry land a cog now takes a shortcut or
+  # a pulled string only when it stays dry; a cog already wading keeps the old freedom, since
+  # every way out of the water starts in it.
+  let wetRouting=visionRulesVersion>=38
+  if not wetRouting and w.walkClear(start,goal):return goal
   let nx=(maxX()-minX()) div NavCell
   let nz=(maxZ()-minZ()) div NavCell
   let bounds=[minX(),minZ(),maxX(),maxZ()]
@@ -851,9 +871,11 @@ proc waypoint*(w:World,start,goal:Point):Point =
   # The grid depends only on cover and bounds. A world whose cover payload address or
   # length differs from the last is compared by content; the grid survives if it agrees.
   let same=nav.edges.len==nx*nz and nav.bounds==bounds and nav.length==w.cover.len and
+    nav.weighted==wetRouting and
     ((nav.payload==payload and defined(pwTraining)) or nav.cover==w.cover)
   if not same:
     nav.cover=w.cover;nav.bounds=bounds;nav.fields.clear();nav.recent.setLen(0);nav.targets.clear()
+    nav.weighted=wetRouting;nav.water.setLen(0)
     nav.edges=newSeq[seq[int]](nx*nz)
     for n in 0..<nx*nz:
       let a=navigationPoint(n,nx)
@@ -865,6 +887,15 @@ proc waypoint*(w:World,start,goal:Point):Point =
         if w.walkClear(a,navigationPoint(j,nx)):
           nav.edges[n].add j;nav.edges[j].add n
   nav.payload=payload;nav.length=w.cover.len
+  if wetRouting and nav.water.len!=nx*nz:
+    # The lake is fixed geometry, so it is sampled once per grid, at each cell's centre.
+    nav.water=newSeq[bool](nx*nz)
+    for n in 0..<nx*nz:
+      let c=navigationPoint(n,nx)
+      nav.water[n]=riverBlend(c.x.int,c.z.int)>0 and terrainHeight(c.x.int,c.z.int)<RiverWaterHeight
+  let dryOnly=wetRouting and (let c=navCellOf(start,nx,nz); c<0 or not nav.water[c])
+  if wetRouting and w.walkClear(start,goal) and (not dryOnly or navSegmentDry(start,goal,nx,nz)):
+    return goal
   var target = -1
   if goal in nav.targets:target=nav.targets[goal]
   else:
@@ -875,13 +906,31 @@ proc waypoint*(w:World,start,goal:Point):Point =
   if target notin nav.fields:
     var distances=newSeq[int32](nx*nz)
     for d in distances.mitems:d = -1
-    var queue = @[target];distances[target]=0
-    var head=0
-    while head<queue.len:
-      let n=queue[head];inc head
-      for j in nav.edges[n]:
-        if distances[j]<0:
-          distances[j]=distances[n]+1;queue.add j
+    if wetRouting:
+      # Dial's buckets: exact for step costs of 1 and 4, and deterministic in scan order.
+      distances[target]=0
+      var buckets:array[5,seq[int]]
+      buckets[0].add target
+      var pending=1
+      var d=0'i32
+      while pending>0:
+        let bucket=buckets[d mod 5];buckets[d mod 5].setLen(0)
+        pending-=bucket.len
+        for n in bucket:
+          if distances[n]!=d:continue
+          for j in nav.edges[n]:
+            let nd=d+(if nav.water[j]:4'i32 else:1'i32)
+            if distances[j]<0 or nd<distances[j]:
+              distances[j]=nd;buckets[nd mod 5].add j;inc pending
+        inc d
+    else:
+      var queue = @[target];distances[target]=0
+      var head=0
+      while head<queue.len:
+        let n=queue[head];inc head
+        for j in nav.edges[n]:
+          if distances[j]<0:
+            distances[j]=distances[n]+1;queue.add j
     if nav.fields.len>=NavFieldLimit:
       # Bounded eviction of the least recently used field; results never depend on it.
       nav.fields.del(nav.recent[0]);nav.recent.delete(0)
@@ -895,15 +944,21 @@ proc waypoint*(w:World,start,goal:Point):Point =
   var anchor = -1
   let sx=(start.x.int-minX()) div NavCell
   let sz=(start.z.int-minZ()) div NavCell
-  for z in max(0,sz-3)..min(nz-1,sz+3):
-    for x in max(0,sx-3)..min(nx-1,sx+3):
-      let n=z*nx+x
-      if distances[n]<0:continue
-      let p=navigationPoint(n,nx)
-      let cost=distances[n].int64*10000000+distance2(start,p)
-      if cost<best and w.walkClear(start,p):
-        best=cost;anchor=n
+  # From dry land the anchor must be reachable without wading; if that leaves nothing - a cog
+  # on a shore whose every open neighbour is wet - fall back to the old rule, never stand still.
+  for pass in 0..1:
+    if pass==1 and (anchor>=0 or not dryOnly):break
+    let needDry=dryOnly and pass==0
+    for z in max(0,sz-3)..min(nz-1,sz+3):
+      for x in max(0,sx-3)..min(nx-1,sx+3):
+        let n=z*nx+x
+        if distances[n]<0:continue
+        let p=navigationPoint(n,nx)
+        let cost=distances[n].int64*10000000+distance2(start,p)
+        if cost<best and w.walkClear(start,p) and (not needDry or navSegmentDry(start,p,nx,nz)):
+          best=cost;anchor=n
   if anchor<0:return
+  let pullDry=dryOnly and navSegmentDry(start,navigationPoint(anchor,nx),nx,nz)
   result=navigationPoint(anchor,nx)
   for step in 0..<8:
     var next = -1
@@ -912,6 +967,7 @@ proc waypoint*(w:World,start,goal:Point):Point =
     if next<0:break
     let p=navigationPoint(next,nx)
     if not w.walkClear(start,p):break
+    if pullDry and not navSegmentDry(start,p,nx,nz):break
     result=p;anchor=next
 proc stepEquipment(w: var World, commands: array[Seats, Command])
 proc step*(w: var World, commands: array[Seats, Command],

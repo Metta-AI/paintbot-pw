@@ -202,8 +202,6 @@ suite "Jev-advised BASIC baseline":
       "weapons": @[("useSmartGrenade", 1), ("useSpray", 1)],
       "everything": @[("useTerrain", 1), ("useSmartGrenade", 1), ("useSpray", 1)],
       "explore": @[("useExplore", 1)],
-      "dry route": @[("useDryRoute", 1)],
-      "dry route and weapons": @[("useDryRoute", 1), ("useSmartGrenade", 1), ("useSpray", 1)],
     }
     # Git may check the file out with CRLF, so normalise before matching on line boundaries.
     let shipped = readFile(Jev).replace("\r\n", "\n")
