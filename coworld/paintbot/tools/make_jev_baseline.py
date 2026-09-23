@@ -403,6 +403,7 @@ if jevInit = 0 then
   ' pair it with useSmartGrenade so the throw goes to the densest cluster.
   useRush = 0
   kRushR2 = 6250000
+  kRushMin = 2
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -1320,7 +1321,7 @@ if useRush and hasGrenade and not carrying and foesSeen > 1 then
     end if
     i = i + 2
   wend
-  if ruBest >= 2 then
+  if ruBest >= kRushMin then
     goalX = ruX
     goalY = ruY
     holding = 0
