@@ -49,13 +49,14 @@ proc bodyForSeat(observer, identity: int): int =
 proc visibleToBot(slot, other: int): bool = bodyForSeat(slot, other) >= 0
 const DataNames = ["selfId","selfTeam","selfX","selfY","selfHp","carrying","homeX","homeY","heartX","heartY","worldTick","ownHeartX","ownHeartY","ownHeartStolen","hasGrenade","hasSpray","armorHp","livesLeft","grenadeCharge","trenchId"]
 proc limits*(): Limits =
-  # Only the global count needed raising: a seat that drafts a structured advisor request names
-  # a field per fact instead of concatenating one sentence, which costs variables rather than
-  # work. Measured peaks for the advised baseline with every switch on are about 10,900
-  # instructions, 25,500 work units and 101 string handles, all inside the original budget.
+  # An advised seat drafts a structured request and, with the terrain prompt on, probes water
+  # along three routes and scans every trench and remembered supply for three candidates on the
+  # ask tick. That peaked at 19,000 of the old 20,000 instructions and disabled seats late in a
+  # match, so the budget carries headroom: the heaviest measured arm uses about 38% of it. The
+  # plain baseline peaks near 5,000 instructions and is unaffected.
   result=defaultLimits()
-  result.maxSourceBytes=64*1024; result.maxInstructions=20000
-  result.maxMemoryBytes=2*1024*1024; result.maxWorkUnits=50000
+  result.maxSourceBytes=128*1024; result.maxInstructions=50000
+  result.maxMemoryBytes=2*1024*1024; result.maxWorkUnits=125000
   result.maxArrayElements=4096;result.maxGlobals=512;result.maxCallDepth=16
   result.maxPrintBytes=1024;result.maxPrintEvents=128
 proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
@@ -155,6 +156,30 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
   discard result.addFunction("mapMaxY",0,proc(a:openArray[int32]):int32 = maxZ().int32,4)
   discard result.addFunction("terrainHeight",2,proc(a:openArray[int32]):int32 =
     if visionRulesVersion >= 9: terrainHeight(clamp(a[0].int,minX(),maxX()),clamp(a[1].int,minZ(),maxZ())).int32 else: 0'i32,4)
+  # Trenches are public geometry - the tactical map outlines them - so they are not fog-gated.
+  # Asking trenchAt about an enemy still needs that enemy's position, which only a cog that
+  # can see it has, so nothing hidden leaks through it.
+  discard result.addFunction("trenchCount",0,proc(a:openArray[int32]):int32 =
+    active.trenches.len.int32,4)
+  proc trenchField(field: int): HostProc =
+    result = proc(a:openArray[int32]):int32 =
+      if a[0] < 0 or a[0] >= active.trenches.len: return -1
+      let t = active.trenches[a[0]]
+      case field
+      of 0: t.x + t.w div 2
+      of 1: t.z + t.h div 2
+      of 2: t.w
+      else: t.h
+  for field, name in ["trenchX", "trenchY", "trenchW", "trenchH"]:
+    discard result.addFunction(name,1,trenchField(field),4)
+  discard result.addFunction("trenchAt",2,proc(a:openArray[int32]):int32 =
+    active.trenchAt(Point(x:a[0],z:a[1])).int32,8)
+  # The lake is public geometry too. A cog in it moves at a quarter of its speed, and the
+  # navigator routes by distance rather than time, so without this a policy cannot know that
+  # the shortest way to a heart is the slowest one - and the most exposed.
+  discard result.addFunction("waterAt",2,proc(a:openArray[int32]):int32 =
+    let x = clamp(a[0].int,minX(),maxX()); let z = clamp(a[1].int,minZ(),maxZ())
+    int32(visionRulesVersion >= 30 and riverBlend(x, z) > 0 and terrainHeight(x, z) < RiverWaterHeight),8)
   discard result.addFunction("walkTo",2,proc(a:openArray[int32]):int32 =
     commands[slot].walk=true;commands[slot].goal=Point(x:a[0],z:a[1]);1,4)
   discard result.addFunction("lookAt",2,proc(a:openArray[int32]):int32 =
@@ -162,6 +187,10 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
   discard result.addFunction("shootAt",2,proc(a:openArray[int32]):int32 =
     commands[slot].shoot=true;commands[slot].aim=Point(x:clamp(a[0],minX().int32,maxX().int32),z:clamp(a[1],minZ().int32,maxZ().int32));1,4)
 proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
+  # A hosted game journals every advisor request and answer to the asking seat's own log:
+  # it is the only record of a decision's exact state that leaves the pod.
+  when defined(coworld):
+    oracleJournal = proc(slot: int, line: string) = playerLog(slot, line)
   let sources=groups.expandBotSources(controllerKinds(Seats,playerSlot))
   var paths: array[Seats, string]
   var nextSlot = 0

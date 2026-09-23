@@ -5,7 +5,7 @@ import json
 import zipfile
 
 MAX_MODEL_BYTES = 16 * 1024 * 1024
-MAX_SOURCE_BYTES = 64 * 1024
+MAX_SOURCE_BYTES = 128 * 1024  # matches maxSourceBytes in bots.nim
 MAX_MANIFEST_BYTES = 8192
 # Schema 1: bundles built against action contract v1. Schema 2: the same three files;
 # the manifest may name action contract v2 (lead-compensated identity aim), which only

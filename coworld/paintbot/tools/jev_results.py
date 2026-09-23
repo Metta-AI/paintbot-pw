@@ -53,14 +53,16 @@ def main() -> None:
             ours, theirs = (even, odd) if meta["candidate_even"] else (odd, even)
             if ours == theirs:
                 continue
-            arms[meta["arm"]].append(1 if ours > theirs else 0)
+            key = meta["arm"] if "opponent" not in meta else f'{meta["arm"]} vs {meta["opponent"]}'
+            arms[key].append(1 if ours > theirs else 0)
 
-    print(f"{'arm':<16} {'n':>4} {'wins':>5} {'rate':>6}   95% Wilson")
+    width = max([16] + [len(a) for a in arms])
+    print(f"{'arm':<{width}} {'n':>4} {'wins':>5} {'rate':>6}   95% Wilson")
     for arm, results in sorted(arms.items()):
         wins, n = sum(results), len(results)
         p, lo, hi = wilson(wins, n)
         flag = "" if lo <= 0.5 <= hi else "   <- separates from a coin flip"
-        print(f"{arm:<16} {n:>4} {wins:>5} {p:>6.3f}   [{lo:.3f}, {hi:.3f}]{flag}")
+        print(f"{arm:<{width}} {n:>4} {wins:>5} {p:>6.3f}   [{lo:.3f}, {hi:.3f}]{flag}")
 
 
 if __name__ == "__main__":

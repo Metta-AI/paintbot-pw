@@ -20,7 +20,7 @@ from oracle import MAX_ANSWER, Oracle, flatten
 from seats import load_seats, verified_policy, write_json
 from neural_package import stage_package
 
-MAX_SOURCE = 65536  # BASIC source limit per seat (64 KiB)
+MAX_SOURCE = 128 * 1024  # BASIC source limit per seat; matches maxSourceBytes in bots.nim
 WASM_MAGIC = b"\x00asm"
 
 
@@ -45,7 +45,8 @@ def check_source(data):
     if data.startswith(WASM_MAGIC):
         raise SourceRejected("WASM modules are no longer accepted; submit a BASIC source file")
     if len(data) > MAX_SOURCE:
-        raise SourceRejected("BASIC source exceeds 64 KiB")
+        # Stated from the constant, so the message cannot drift from the limit it enforces.
+        raise SourceRejected(f"BASIC source exceeds {MAX_SOURCE // 1024} KiB")
     try:
         data.decode("utf-8")
     except UnicodeDecodeError:

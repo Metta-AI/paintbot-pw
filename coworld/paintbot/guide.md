@@ -86,8 +86,8 @@ Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 Actions: `walkTo(x,y)`, `lookAt(x,y)`, `shootAt(x,y)`, `chargeGrenade(held)`.
 Release by calling `chargeGrenade(0)` or not calling it on the next tick.
 `shout(stringHandle)` is public communication; PRINT remains private.
-Source is limited to 64 KiB, memory to 2 MiB, and each decision to 20,000
-instructions / 50,000 work units and a string pool of 1,024 handles / 64 KiB (reset every decision).
+Source is limited to 128 KiB, memory to 2 MiB, and each decision to 50,000
+instructions / 125,000 work units and a string pool of 1,024 handles / 64 KiB (reset every decision).
 
 ## Replays
 
@@ -535,7 +535,7 @@ information beyond the older BASIC scalar getters.
 
 The bundle manifest uses schema `paintbot-neural-basic/1`, hashes both payloads,
 and binds the versioned observation/action contracts. Expanded files are bounded
-to 64 KiB BASIC, 16 MiB model, and 8 KiB manifest. Native inference is separately
+to 128 KiB BASIC, 16 MiB model, and 8 KiB manifest. Native inference is separately
 limited to 4,000,000 counted operations per seat/tick; BASIC's bytecode limits
 still apply. Invalid models, buffers, or inference results disable the offending
 seat with an explicit policy error and a safe action.

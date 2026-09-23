@@ -3,7 +3,7 @@
 ## bridge, the host asks the operator-configured endpoint, and the flattened answer comes back
 ## on a later tick. Everything a script sees is int32; probabilities, scores and confidences are
 ## scaled by 1000. Without a configured oracle every ask is refused and nothing else changes.
-import std/[json, tables]
+import std/[json, tables, hashes, strutils]
 import polyworld/basic
 import sim
 
@@ -56,11 +56,15 @@ type
     lastTick: int32
     nextId: int32
     answers: OrderedTable[int32, Stored]
+    journaledQuestions: seq[string] ## hashes of question sets already written to this seat's log
+
+type OracleJournal* = proc(slot: int, line: string) {.closure.}
 
 when defined(pwTraining):
   # Training worlds never have an advisor: every ask is refused. The per-seat drafts are
   # still written by scripts, so they are thread-local like the rest of the seat state.
   var
+    oracleJournal* {.threadvar.}: OracleJournal
     oracleEnabled* {.threadvar.}: bool
     oracleInterval* {.threadvar.}: int
     currentTick {.threadvar.}: int32
@@ -69,6 +73,10 @@ when defined(pwTraining):
     seatsReady {.threadvar.}: bool
 else:
   var
+    ## Where each request and answer is written, one line each, for offline replay. Hosted
+    ## episodes return only the seats' logs - the host's own journal never leaves the pod - so
+    ## this is the only way a decision's exact state reaches anyone who wants to re-ask it.
+    oracleJournal*: OracleJournal
     oracleEnabled*: bool
     oracleInterval* = DefaultOracleInterval
     currentTick: int32
@@ -106,8 +114,22 @@ proc deliverOracleReply*(reply: OracleReply) =
   if seat.inflight == reply.id.int32: seat.inflight = 0
   # An answered request with nothing usable in it must not settle as 0: `oraclePoll` reports 0
   # as OraclePending, so the asking seat would wait on it for the rest of the match.
-  seat.answers[reply.id.int32] = Stored(status: (if reply.status < 0 or reply.answers.len == 0:
-      OracleFailed else: reply.answers.len.int32), answers: reply.answers)
+  let status = (if reply.status < 0 or reply.answers.len == 0: OracleFailed
+      else: reply.answers.len.int32)
+  seat.answers[reply.id.int32] = Stored(status: status, answers: reply.answers)
+  if oracleJournal != nil:
+    # Scaled by 1000, as a script reads them. `t` is the tick the answer landed, so the gap to
+    # the matching `oracle-ask` is the latency the seat actually experienced.
+    var answers = newJObject()
+    for key, a in reply.answers:
+      var item = %*{"v": a.value, "c": a.confidence}
+      if a.probabilities.len > 0:
+        var probs = newJObject()
+        for label, pr in a.probabilities: probs[label] = %pr
+        item["p"] = probs
+      answers[key] = item
+    oracleJournal(reply.slot, "oracle-ans id=" & $reply.id & " t=" & $currentTick & " status=" &
+        $status & " " & $answers & "\n")
   while seat.answers.len > MaxStoredAnswers:
     var oldest = high(int32)
     for id in seat.answers.keys: oldest = min(oldest, id)
@@ -192,7 +214,7 @@ proc criterionJson(text: string, extras: seq[tuple[name, text: string]]): JsonNo
         result[extra.name].add first
       result[extra.name].add %extra.text
 
-proc bodyJson(draft: Draft): string =
+proc draftParts(draft: Draft): tuple[state, questions: JsonNode] =
   var state = newJObject()
   for key, value in draft.ints: state.setField(key, %value)
   for key, value in draft.texts: state.setField(key, %value)
@@ -212,7 +234,15 @@ proc bodyJson(draft: Draft): string =
       for i, label in q.labels: criteria[label] = criterionJson(q.texts[i], q.extras[i])
       item["criteria"] = criteria
     questions[key] = item
+  (state, questions)
+
+proc bodyJson(draft: Draft): string =
+  let (state, questions) = draft.draftParts()
   $(%*{"state": state, "questions": questions})
+
+proc questionsHash(questions: string): string =
+  ## Short stable name for a question set, so each ask's line carries only its state.
+  toHex(cast[uint32](hash(questions)))
 
 proc addOracleFunctions*(host: var Host, slot: int, strings: StringPool) =
   ## Registers the oracle API for one seat. String arguments are pool handles.
@@ -266,11 +296,22 @@ proc addOracleFunctions*(host: var Host, slot: int, strings: StringPool) =
     seat.draft = newDraft()
     if not oracleEnabled or seat.inflight != 0 or draft.questions.len == 0: return 0
     if seat.asked and currentTick - seat.lastTick < oracleInterval.int32: return 0
-    let body = draft.bodyJson()
+    let (state, questions) = draft.draftParts()
+    let body = $(%*{"state": state, "questions": questions})
     if body.len > MaxBodyBytes: return 0
     inc seat.nextId
     seat.inflight = seat.nextId; seat.asked = true; seat.lastTick = currentTick
     pendingAsks.add OracleAsk(slot: slot, id: seat.nextId, body: body)
+    if oracleJournal != nil:
+      # The question text is fixed per build, so it is written once per distinct set and each
+      # ask names it by hash: a request is then `oracle-q` + `oracle-ask`, exactly as sent.
+      let qs = $questions
+      let h = questionsHash(qs)
+      if h notin seat.journaledQuestions:
+        seat.journaledQuestions.add h
+        oracleJournal(slot, "oracle-q h=" & h & " " & qs & "\n")
+      oracleJournal(slot, "oracle-ask id=" & $seat.nextId & " t=" & $currentTick & " q=" & h &
+          " " & $state & "\n")
     seat.nextId, 68)
   discard host.addFunction("oracleReady", 0, proc(a: openArray[int32]): int32 =
     ## 0 when a fresh `oracleAsk` would be accepted, the ticks still to wait when the interval

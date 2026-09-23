@@ -72,7 +72,31 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
                       "the first switch to re-examine", {"useRetreat": 0, "useDial": 0}),
     "a7-echo": ("the old echoing relay, where every adopter repeats the callout, as the control "
                 "arm for the one-voice change", {"useEcho": 1}),
+    # Headroom: how much is Jev's objective pick worth at all? These two replace it with no
+    # judgment - a fixed rule, and a coin - while everything else stays identical. If the
+    # shipped build barely beats the rule, the prompt is not where the wins are.
+    "a8-rule": ("headroom control: the objective is the cheapest candidate with no enemy seen "
+                "near it, chosen by code with no Jev judgment", {"useRule": 1}),
+    "a9-shuffle": ("headroom control: the objective is a uniformly random candidate",
+                   {"useShuffle": 1}),
+    "a10-terrain": ("trenches, water, remembered supplies and nearby enemies around each "
+                    "candidate, with the rules that make them matter", {"useTerrain": 1}),
+    "a11-grenade": ("grenades land where they hurt the enemy most: clusters and trenches",
+                    {"useSmartGrenade": 1}),
+    "a12-spray": ("fetch a spray can against trench fights and clusters, aim bursts down the "
+                  "line with the most enemies", {"useSpray": 1}),
+    "a13-weapons": ("smart grenades and spray together", {"useSmartGrenade": 1, "useSpray": 1}),
+    "a14-rule-weapons": ("the code rule's objective with smart grenades and spray",
+                         {"useRule": 1, "useSmartGrenade": 1, "useSpray": 1}),
 }
+
+
+def shown(path: Path) -> str:
+    """A path as a command would take it: relative inside the repo, absolute outside it."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
 
 
 def arm_source(base: str, overrides: dict[str, int]) -> str:
@@ -112,6 +136,14 @@ def main() -> None:
                         help="episodes per arm, split evenly between the two side assignments")
     parser.add_argument("--fire", action="store_true",
                         help="create the requests and record them in requests.json")
+    parser.add_argument("--arms", nargs="*", default=None,
+                        help="only these arms (default: all); with --fire, appends to requests.json")
+    parser.add_argument("--opponent", default=None,
+                        help="policy to play every selected arm against: a bare name:vN or a "
+                             "policy-version UUID. Default: head-to-head against the reference arm. "
+                             "Pin a rival by UUID so a mid-run update cannot swap the opponent.")
+    parser.add_argument("--label", default=None,
+                        help="opponent's name for notes and the manifest (default: the ref itself)")
     args = parser.parse_args()
 
     assert args.episodes % 2 == 0, "episodes must be even so the two side halves are equal"
@@ -122,8 +154,23 @@ def main() -> None:
     base = JEV.read_text(encoding="utf-8")
     assert "oracleReady()" in base, f"{JEV} predates the readiness probe; regenerate it first"
 
+    refs: dict[str, str] = {}
+
     def policy(arm: str) -> str:
-        return f"jev-{arm}:v1"
+        if arm not in refs:
+            raise SystemExit(f"{arm} has not been uploaded in this run; pass --fire so the tool "
+                             "uploads it and uses the version the platform returns")
+        return refs[arm]
+
+    def upload(arm: str) -> str:
+        """Upload an arm and return exactly the `name:vN` the platform assigned it."""
+        path = out / f"{arm}.bas"
+        result = subprocess.run(["coworld", "upload-policy", "--file", str(path),
+                                 "--name", f"jev-{arm}"], capture_output=True, text=True)
+        found = re.search(rf"Upload complete: (jev-{re.escape(arm)}:v\d+)", result.stdout)
+        if not found:
+            raise SystemExit(f"upload of {arm} failed: {(result.stdout + result.stderr)[-300:]}")
+        return found.group(1)
 
     print(f"# {len(ARMS)} arms, {args.episodes} episodes each ({half} a side), "
           f"head-to-head against {REFERENCE}\n")
@@ -132,44 +179,54 @@ def main() -> None:
         bas.write_text(arm_source(base, overrides), encoding="utf-8")
         flips = ", ".join(f"{k}={v}" for k, v in overrides.items()) or "shipped defaults"
         print(f"# {arm}: {flips}")
-        print(f"coworld upload-policy --file {bas.relative_to(ROOT)} --name jev-{arm}")
+        print(f"coworld upload-policy --file {shown(bas)} --name jev-{arm}")
 
-    print()
-    for arm, (purpose, _) in ARMS.items():
-        # The reference arm has nothing to play against itself; check it against the baseline.
-        opponent = BASELINE if arm == REFERENCE else policy(REFERENCE)
-        against = "the plain BASIC baseline" if arm == REFERENCE else REFERENCE
-        for candidate_even in (True, False):
-            side = "even" if candidate_even else "odd"
-            name = f"{arm}-{side}"
-            note = (f"jev arm {arm} vs {against}, candidate on {side} seats, {half} episodes: "
-                    f"{purpose}")
-            path = out / f"{name}.json"
-            path.write_text(json.dumps(
-                body(coworld_id=args.coworld_id, candidate=policy(arm), opponent=opponent,
-                     candidate_even=candidate_even, episodes=half, note=note), indent=2) + "\n")
-            print(f"coworld xp-request create {path.relative_to(ROOT)}")
+    if not args.fire:
+        # Bodies are written only by --fire, from the versions the platform actually returns:
+        # a body naming an assumed version can quietly run an older build.
+        print("\n# arm files written; pass --fire to upload them, write the bodies and create "
+              "the requests")
+        return
 
     if args.fire:
         # The manifest is the only record of which side each candidate took: the API returns
         # `notes` as null, so a reader that infers the side from the request scores every win as
-        # a loss. Write it before reading anything back.
-        manifest = {}
-        for arm in ARMS:
+        # a loss. Write it before reading anything back, and never overwrite earlier runs.
+        record = out / "requests.json"
+        manifest = json.loads(record.read_text()) if record.exists() else {}
+        selected = list(args.arms or ARMS)
+        needed = set(selected) | ({REFERENCE} if args.opponent is None else set())
+        for arm in sorted(needed):
+            refs[arm] = upload(arm)
+            print(f"uploaded {refs[arm]}")
+        against_label = args.label or args.opponent or REFERENCE
+        for arm in selected:
             for side in ("even", "odd"):
                 path = out / f"{arm}-{side}.json"
+                if args.opponent is not None:
+                    opponent_ref = args.opponent
+                elif arm == REFERENCE:
+                    opponent_ref = BASELINE
+                else:
+                    opponent_ref = policy(REFERENCE)
+                note = (f"jev arm {arm} ({policy(arm)}) vs {against_label}, candidate on {side} "
+                        f"seats, {half} episodes: {ARMS[arm][0]}")
+                path.write_text(json.dumps(
+                    body(coworld_id=args.coworld_id, candidate=policy(arm), opponent=opponent_ref,
+                         candidate_even=side == "even", episodes=half, note=note), indent=2) + "\n")
                 result = subprocess.run(["coworld", "xp-request", "create", str(path)],
                                         capture_output=True, text=True)
                 found = re.search(r"xreq_[0-9a-f-]{36}", result.stdout)
                 if not found:
                     print(f"{arm}-{side}: FAILED {result.stdout.strip()[:120]}")
                     continue
-                manifest[found.group(0)] = {"arm": arm, "candidate_even": side == "even"}
+                manifest[found.group(0)] = {"arm": arm, "candidate_even": side == "even",
+                                            "candidate": policy(arm), "opponent": against_label}
                 print(f"{arm}-{side}: {found.group(0)}")
-        (out / "requests.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        print(f"\nwrote {out / 'requests.json'} with {len(manifest)} requests")
+        record.write_text(json.dumps(manifest, indent=2) + "\n")
+        print(f"\nwrote {record} with {len(manifest)} requests")
         print(f"score with: python3 coworld/paintbot/tools/jev_results.py "
-              f"{(out / 'requests.json').relative_to(ROOT)}")
+              f"{shown(out / 'requests.json')}")
         return
 
     print("\n# then: coworld xp-request list --mine")

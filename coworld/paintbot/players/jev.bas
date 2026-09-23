@@ -30,6 +30,7 @@ dim heartThreat(16)
 dim candHeart(6)
 dim candKind(6)
 dim viewD(4)
+dim spLen(16)
 dim viewHp(4)
 dim viewCarry(4)
 dim viewClose(4)
@@ -223,6 +224,114 @@ sub heartFacts(j, kind)
   end if
 end sub
 
+' Terrain around one candidate heart, as numbers for the prompt: the nearest trench, enemies near
+' it and in trenches near it, metres of water on the straight route to it (a cog wades at a
+' quarter of its speed), and the nearest remembered supply of each kind. -1 means none known.
+sub terrainFacts(j)
+  hx = controlX(j)
+  hy = controlY(j)
+  tBest = 2147483647
+  k2 = 0
+  while k2 < trenchCount() and k2 < 32
+    ex = trenchX(k2) - hx
+    ey = trenchY(k2) - hy
+    if ex * ex + ey * ey < tBest then
+      tBest = ex * ex + ey * ey
+    end if
+    k2 = k2 + 1
+  wend
+  tTrench = -1
+  if tBest < 2147483647 then
+    isqrt(tBest)
+    tTrench = root / 100
+  end if
+  tFoesNear = 0
+  tFoesTrenched = 0
+  e = 1 - selfTeam
+  while e < 16
+    if visible(e) then
+      ex = playerX(e) - hx
+      ey = playerY(e) - hy
+      if ex * ex + ey * ey < 2250000 then
+        tFoesNear = tFoesNear + 1
+        if trenchAt(playerX(e), playerY(e)) >= 0 then
+          tFoesTrenched = tFoesTrenched + 1
+        end if
+      end if
+    end if
+    e = e + 2
+  wend
+  ex = hx - selfX
+  ey = hy - selfY
+  isqrt(ex * ex + ey * ey)
+  tLen = root
+  tWet = 0
+  s2 = 1
+  while s2 <= 24
+    if waterAt(selfX + ex * s2 / 24, selfY + ey * s2 / 24) then
+      tWet = tWet + 1
+    end if
+    s2 = s2 + 1
+  wend
+  tWater = tWet * tLen / 24 / 100
+  ' Squared distances until the end: a square root is a Newton loop, and taking one per
+  ' remembered pickup per candidate cost more than the rest of the draft together.
+  pG = -1
+  pS = -1
+  pM = -1
+  pA = -1
+  k2 = 0
+  while k2 < pickupCount() and k2 < 32
+    if pickupMemoryTick(k2) > 0 then
+      ex = pickupMemoryX(k2) - hx
+      ey = pickupMemoryY(k2) - hy
+      d2p = ex * ex + ey * ey
+      pk = pickupMemoryKind(k2)
+      if pk = 0 then
+        if pG < 0 or d2p < pG then
+          pG = d2p
+        end if
+      end if
+      if pk = 1 then
+        if pS < 0 or d2p < pS then
+          pS = d2p
+        end if
+      end if
+      if pk = 2 then
+        if pM < 0 or d2p < pM then
+          pM = d2p
+        end if
+      end if
+      if pk = 3 then
+        if pA < 0 or d2p < pA then
+          pA = d2p
+        end if
+      end if
+    end if
+    k2 = k2 + 1
+  wend
+  tGrenade = -1
+  if pG >= 0 then
+    isqrt(pG)
+    tGrenade = root / 100
+  end if
+  tSpray = -1
+  if pS >= 0 then
+    isqrt(pS)
+    tSpray = root / 100
+  end if
+  tMedkit = -1
+  if pM >= 0 then
+    isqrt(pM)
+    tMedkit = root / 100
+  end if
+  tArmor = -1
+  if pA >= 0 then
+    isqrt(pA)
+    tArmor = root / 100
+  end if
+end sub
+
 ' One retreat option: its distance out as a field, and "R<k>" into retLabel for the criterion.
 sub retOption(k, bx, by)
   isqrt(bx * bx + by * by)
@@ -361,6 +470,25 @@ if jevInit = 0 then
   ' so three listeners in earshot can hold a dead asker's heart indefinitely and never promote a
   ' new asker. useEcho = 1 restores the old behaviour exactly, as the control arm of an A/B.
   useEcho = 0
+  ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
+  ' option, logged beside the pick the policy would have made, so every decision carries a known
+  ' propensity and a journaled run can be scored offline for another rule. It also draws from
+  ' the dodge legs' random stream. A data-collection mode, never for play.
+  useExplore = 0
+  kExplore = 200
+  ' Terrain in the prompt: trenches, water and remembered supplies around each candidate, enemies
+  ' near it and in trenches near it, this cog's loadout, and the rules that make those matter.
+  useTerrain = 0
+  ' Grenades land where they hurt the enemy most - two to every cog in the blast, six to each in
+  ' the trench it lands in - instead of on the gun's target. Clusters and trenches win.
+  useSmartGrenade = 0
+  ' Spray: fetch a can when enemies fight from a trench (gunfire mostly passes over them, spray
+  ' ignores the cover) or bunch up (a burst hits every cog in its cone for three), and aim each
+  ' burst where the cone holds most. A can replaces the gun until death, so only then.
+  useSpray = 0
+  ' Once a second one seat per team logs hearts held and the running score: the dense signal a
+  ' decision can be scored against when only the winner keeps a final score.
+  useTrace = 1
   ' Wider objective list (a guard option, the big heart, a strike on an enemy heart). Off: it looked
   ' fine at 1,200 ticks (+17.1) but loses full-length games (1/8 against 8/8 without it).
   useWide = 0
@@ -432,6 +560,57 @@ if nearSeat >= 0 then
     closing = prevD - root
   end if
 end if
+' Enemies fighting from trenches and the tightest enemy cluster in view: what decides whether a
+' grenade or a spray can is worth more than the gun. Computed only when something uses it.
+if useTerrain or useSmartGrenade or useSpray then
+  trenchFoe = -1
+  trenchFoeD2 = 2147483647
+  clusterSize = 0
+  clusterSlot = -1
+  i = 1 - selfTeam
+  while i < 16
+    if visible(i) then
+      if trenchAt(playerX(i), playerY(i)) >= 0 then
+        dx = playerX(i) - selfX
+        dy = playerY(i) - selfY
+        if dx * dx + dy * dy < trenchFoeD2 then
+          trenchFoeD2 = dx * dx + dy * dy
+          trenchFoe = i
+        end if
+      end if
+      cNear = 0
+      cO = 1 - selfTeam
+      while cO < 16
+        if visible(cO) then
+          cfx = playerX(cO) - playerX(i)
+          cfy = playerY(cO) - playerY(i)
+          if cfx * cfx + cfy * cfy < 360000 then
+            cNear = cNear + 1
+          end if
+        end if
+        cO = cO + 2
+      wend
+      if cNear > clusterSize then
+        clusterSize = cNear
+        clusterSlot = i
+      end if
+    end if
+    i = i + 2
+  wend
+  wantSpray = 0
+  if useSpray and not hasSpray and not carrying then
+    if trenchFoe >= 0 and trenchFoeD2 < 4000000 then
+      wantSpray = 1
+    end if
+    if clusterSize >= 3 then
+      cfx = playerX(clusterSlot) - selfX
+      cfy = playerY(clusterSlot) - selfY
+      if cfx * cfx + cfy * cfy < 4000000 then
+        wantSpray = 1
+      end if
+    end if
+  end if
+end if
 ' Public score integral (points per owned heart per second, kept x24), heart counts, flips.
 ownedCount = 0
 enemyCount = 0
@@ -459,6 +638,10 @@ while j < heartCount() and j < 16
   end if
   j = j + 1
 wend
+' Territory once a second from one seat per team, for scoring decisions offline.
+if useTrace and worldTick mod 24 = 0 and mySquad = 0 and mySeat = 0 then
+  print "terr t="; worldTick; " ours="; ownedCount; " enemy="; enemyCount; " neutral="; neutralCount; " s_ours="; ourScore24 / 24; " s_enemy="; theirScore24 / 24
+end if
 ' Threat near each heart from the sighting map, refreshed twice a second.
 if worldTick mod 12 = selfId mod 12 then
   j = 0
@@ -669,6 +852,21 @@ if jevReq > 0 then
         ansConf = 1000
       end if
     end if
+    ' The pick the policy would have made is kept as greedyObj; with probability kExplore / 1000 a
+    ' uniformly random option is applied instead. Logged side by side, every decision then has a
+    ' known propensity, which off-policy scoring needs.
+    greedyObj = ansObj
+    explored = 0
+    if useExplore and ansObj >= 0 then
+      nextRandom()
+      if rngState mod 1000 < kExplore then
+        nextRandom()
+        ansObj = rngState mod (candN + 1)
+        ansConf = 1000
+        explored = 1
+      end if
+    end if
+    applied = 0
     if ansObj >= 0 then
       lastDirectiveTick = worldTick
       shoutTick = worldTick
@@ -722,6 +920,7 @@ if jevReq > 0 then
           lastDirectiveTick = worldTick
           shoutTick = worldTick
           amSpeaker = 1
+          applied = 1
         end if
       end if
       if objOutId = 0 and ansObj < candN then
@@ -777,7 +976,7 @@ if jevReq > 0 then
         survLives = livesLeft
       end if
     end if
-    print "ans t="; worldTick; " id="; jevReq; " obj="; jevObjective; " guard="; jevGuard; " ansobj="; ansObj; " rawobj="; rawObj; " n="; candN + 1; " ret="; ansRet; " plose="; v; " dial="; retreatDial; " fresh="; fresh
+    print "ans t="; worldTick; " id="; jevReq; " obj="; jevObjective; " guard="; jevGuard; " ansobj="; ansObj; " rawobj="; rawObj; " n="; candN + 1; " ret="; ansRet; " plose="; v; " dial="; retreatDial; " fresh="; fresh; " greedy="; greedyObj; " explored="; explored; " applied="; applied; " conf="; ansConf
     jevReq = 0
   end if
 end if
@@ -977,7 +1176,7 @@ if not carrying and thief < 0 then
   while j < pickupCount() and j < 32
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
       kind = pickupMemoryKind(j)
-      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3 and selfHp = 3)
+      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3 and selfHp = 3) or (kind = 1 and wantSpray)
       if wanted then
         dx = pickupMemoryX(j) - selfX
         dy = pickupMemoryY(j) - selfY
@@ -1120,6 +1319,12 @@ if wantSquad or wantSelf then
   end if
   oracleStateText(strNew("rules"), strNew("Owned hearts keep scoring with nobody standing on them. The first team to 900 points wins. A team with no lives left loses on the spot. Hearts are named by index: a heart's distance and reach time are measured from the cog being asked."))
   oracleStateText(strNew("me.limits"), strNew("I see only my forward cone; enemies not listed may exist. Teammates share nothing except shouts within 12 m. Hearts and scores are public."))
+  if useTerrain then
+    oracleState(strNew("me.has_grenade"), hasGrenade)
+    oracleState(strNew("me.has_spray"), hasSpray)
+    oracleState(strNew("me.armor"), armorHp)
+    oracleStateText(strNew("rules"), strNew("Owned hearts keep scoring with nobody standing on them. The first team to 900 points wins. A team with no lives left loses on the spot. Hearts are named by index. A heart's distance, reach time and water on the route are measured from the cog being asked; the other distances are measured from the heart. Water in the lake slows a cog to a quarter of its speed and leaves it exposed. Trenches are pits: 70% of gunfire from outside passes over a cog standing in one, and climbing out is five times slower. A grenade flies over walls and deals two damage to every cog in its blast, and six to each cog in the trench it lands in, which kills through full armour; grenades refill five seconds after pickup. A spray can hits every cog in a short cone for three damage and ignores trench cover, but it replaces the gun until the carrier dies. A tight enemy group is where one grenade or one spray burst hurts the most cogs. Medkits, armour and spray refill thirty seconds after pickup. A value of -1 means none is known."))
+  end if
 end if
 if wantSquad then
   candCount = 0
@@ -1219,6 +1424,17 @@ if candCount > 0 then
   oracleStateText(strNew("candidates[0].action"), fAction)
   oracleStateText(strNew("candidates[0].owner"), fOwner)
   oracleStateText(strNew("candidates[0].being_captured_by"), fCapture)
+  if useTerrain then
+    terrainFacts(candHeart(0))
+    oracleState(strNew("candidates[0].nearest_trench_m"), tTrench)
+    oracleState(strNew("candidates[0].enemies_near"), tFoesNear)
+    oracleState(strNew("candidates[0].enemies_in_trenches_near"), tFoesTrenched)
+    oracleState(strNew("candidates[0].water_on_route_m"), tWater)
+    oracleState(strNew("candidates[0].grenade_pickup_m"), tGrenade)
+    oracleState(strNew("candidates[0].spray_pickup_m"), tSpray)
+    oracleState(strNew("candidates[0].medkit_pickup_m"), tMedkit)
+    oracleState(strNew("candidates[0].armor_pickup_m"), tArmor)
+  end if
   oracleCriterion(strNew("objective"), strNew("C0"), strNew("Work on the objective described in `candidates[0]`."))
 end if
 if candCount > 1 then
@@ -1234,6 +1450,17 @@ if candCount > 1 then
   oracleStateText(strNew("candidates[1].action"), fAction)
   oracleStateText(strNew("candidates[1].owner"), fOwner)
   oracleStateText(strNew("candidates[1].being_captured_by"), fCapture)
+  if useTerrain then
+    terrainFacts(candHeart(1))
+    oracleState(strNew("candidates[1].nearest_trench_m"), tTrench)
+    oracleState(strNew("candidates[1].enemies_near"), tFoesNear)
+    oracleState(strNew("candidates[1].enemies_in_trenches_near"), tFoesTrenched)
+    oracleState(strNew("candidates[1].water_on_route_m"), tWater)
+    oracleState(strNew("candidates[1].grenade_pickup_m"), tGrenade)
+    oracleState(strNew("candidates[1].spray_pickup_m"), tSpray)
+    oracleState(strNew("candidates[1].medkit_pickup_m"), tMedkit)
+    oracleState(strNew("candidates[1].armor_pickup_m"), tArmor)
+  end if
   oracleCriterion(strNew("objective"), strNew("C1"), strNew("Work on the objective described in `candidates[1]`."))
 end if
 if candCount > 2 then
@@ -1249,6 +1476,17 @@ if candCount > 2 then
   oracleStateText(strNew("candidates[2].action"), fAction)
   oracleStateText(strNew("candidates[2].owner"), fOwner)
   oracleStateText(strNew("candidates[2].being_captured_by"), fCapture)
+  if useTerrain then
+    terrainFacts(candHeart(2))
+    oracleState(strNew("candidates[2].nearest_trench_m"), tTrench)
+    oracleState(strNew("candidates[2].enemies_near"), tFoesNear)
+    oracleState(strNew("candidates[2].enemies_in_trenches_near"), tFoesTrenched)
+    oracleState(strNew("candidates[2].water_on_route_m"), tWater)
+    oracleState(strNew("candidates[2].grenade_pickup_m"), tGrenade)
+    oracleState(strNew("candidates[2].spray_pickup_m"), tSpray)
+    oracleState(strNew("candidates[2].medkit_pickup_m"), tMedkit)
+    oracleState(strNew("candidates[2].armor_pickup_m"), tArmor)
+  end if
   oracleCriterion(strNew("objective"), strNew("C2"), strNew("Work on the objective described in `candidates[2]`."))
 end if
   oracleCriterion(strNew("objective"), strNew("current"), strNew("Keep the objective this squad already has, named by `me.current_objective_heart`."))
@@ -1649,6 +1887,147 @@ if hasGrenade and best >= 0 then
     chargeGrenade(grenadeCharge < need)
     if grenadeCharge >= need then
       shout(strNew("Grenade out!"))
+    end if
+  end if
+end if
+
+' ---- Grenades where they hurt most. ----
+' The baseline throws at its gun's target. This lands the grenade on the visible enemy whose blast
+' does the enemy the most damage - two to every cog in it, six to each in the trench it lands in -
+' so a cluster or a trench beats a lone cog in the open. Once charging, the target is kept: a
+' charge sized for one distance overshoots another.
+if useSmartGrenade and hasGrenade and not carrying then
+  if grenadeCharge = 0 then
+    sgScore = 0
+    i = 1 - selfTeam
+    while i < 16
+      spLen(i) = -2
+      if visible(i) then
+        spLen(i) = trenchAt(playerX(i), playerY(i))
+      end if
+      i = i + 2
+    wend
+    i = 1 - selfTeam
+    while i < 16
+      if visible(i) then
+        sgLx = playerX(i)
+        sgLy = playerY(i)
+        dx = sgLx - selfX
+        dy = sgLy - selfY
+        d2 = dx * dx + dy * dy
+        if d2 > 202500 and d2 < 1562500 then
+          sgLt = spLen(i)
+          sgS = 0
+          sgO = 1 - selfTeam
+          while sgO < 16
+            if visible(sgO) then
+              cfx = playerX(sgO) - sgLx
+              cfy = playerY(sgO) - sgLy
+              if cfx * cfx + cfy * cfy < 108900 then
+                sgOt = spLen(sgO)
+                if sgOt >= 0 and sgOt = sgLt then
+                  sgS = sgS + 6
+                else
+                  if sgOt >= 0 then
+                    sgS = sgS + 1
+                  else
+                    sgS = sgS + 2
+                  end if
+                end if
+              end if
+            end if
+            sgO = sgO + 2
+          wend
+          ' Never onto a teammate, with the baseline's own margin.
+          sgO = selfTeam
+          while sgO < 16
+            if sgO <> selfId and visible(sgO) then
+              cfx = playerX(sgO) - sgLx
+              cfy = playerY(sgO) - sgLy
+              if cfx * cfx + cfy * cfy < 202500 then
+                sgS = 0
+              end if
+            end if
+            sgO = sgO + 2
+          wend
+          if sgS > sgScore then
+            sgScore = sgS
+            sgX = sgLx
+            sgY = sgLy
+          end if
+        end if
+      end if
+      i = i + 2
+    wend
+  end if
+  if sgScore > 0 then
+    dx = sgX - selfX
+    dy = sgY - selfY
+    isqrt(dx * dx + dy * dy)
+    need = (root - 150) * 24 / 1130 + 1
+    if need < 1 then
+      need = 1
+    end if
+    lookAt(sgX, sgY)
+    chargeGrenade(grenadeCharge < need)
+    if grenadeCharge >= need then
+      print "gren t="; worldTick; " score="; sgScore
+      sgScore = 0
+    end if
+  end if
+end if
+' ---- Spray down the line that holds the most enemies. ----
+' A burst hits every cog in a ~62 degree cone within 8.5 m for three damage, so aimed down the
+' line with the most enemies in it one burst can drop several. The baseline aims at its gun target.
+if useSpray and hasSpray and not carrying then
+  i = 1 - selfTeam
+  while i < 16
+    spLen(i) = 0
+    if visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      d2 = dx * dx + dy * dy
+      if d2 < 810000 then
+        isqrt(d2)
+        spLen(i) = root
+      end if
+    end if
+    i = i + 2
+  wend
+  spBest = 0
+  i = 1 - selfTeam
+  while i < 16
+    if spLen(i) > 0 then
+      spAx = playerX(i) - selfX
+      spAy = playerY(i) - selfY
+      spN = 0
+      sgO = 1 - selfTeam
+      while sgO < 16
+        if spLen(sgO) > 0 then
+          spDot = spAx * (playerX(sgO) - selfX) + spAy * (playerY(sgO) - selfY)
+          ' cos 31 degrees is 0.857: inside the cone when the angle between them is smaller.
+          if spDot > 0 then
+            if spDot * 1000 >= 857 * spLen(i) * spLen(sgO) then
+              spN = spN + 1
+            end if
+          end if
+        end if
+        sgO = sgO + 2
+      wend
+      if spN > spBest then
+        spBest = spN
+        spX = playerX(i)
+        spY = playerY(i)
+      end if
+    end if
+    i = i + 2
+  wend
+  if spBest >= 2 then
+    lookAt(spX, spY)
+    if gunWait = 0 then
+      shootAt(spX, spY)
+      gunWait = 25
+      print "spray t="; worldTick; " cone="; spBest
     end if
   end if
 end if
