@@ -571,7 +571,7 @@
           ? "Match drawn"
           : `${w.winner ? "Azure" : "Ember"} wins`
         : "Match scoreboard",
-      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}${state.rulesVersion >= 37 ? `<br>Glory: Ember <b>${w.glory?.[0] ?? 0}</b> — <b>${w.glory?.[1] ?? 0}</b> Azure. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10, friendly fire taken in the opening thirty seconds 30 per hit. Nothing that helps you win pays glory. The loser's glory drops to zero; the winner's is the match score.` : ""}<br>${state.rulesVersion >= 34 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; an eliminated team loses immediately and the survivor's meter fills. At 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 28 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; at 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
+      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}${state.rulesVersion >= 37 ? `<br>Glory: Ember <b>${w.glory?.[0] ?? 0}</b> — <b>${w.glory?.[1] ?? 0}</b> Azure. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10, friendly fire taken in the opening thirty seconds 30 per hit${state.rulesVersion >= 38 ? ", and each glory heart picked up 20" : ""}. Nothing that helps you win pays glory. The loser's glory drops to zero; the winner's is the match score.` : ""}<br>${state.rulesVersion >= 34 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; an eliminated team loses immediately and the survivor's meter fills. At 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 28 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; at 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
     $("dialogbody")
       .querySelectorAll("[data-seat]")
@@ -867,10 +867,11 @@
   // side to Azure's, filled by the owning team; a capture in progress traces
   // the outline in the capturing team's color.
   const heartStripOrder = [];
-  const GLORY_KINDS = ["gloryQuietSupplies", "gloryFriendlyFire"];
+  const GLORY_KINDS = ["gloryQuietSupplies", "gloryFriendlyFire", "gloryHeart"];
   const GLORY_REASONS = {
     gloryQuietSupplies: "thirty seconds without supplies",
     gloryFriendlyFire: "friendly fire taken in the opening thirty seconds",
+    gloryHeart: "picked up a glory heart",
   };
   const GLORY_TOAST_TICKS = 72;
   // Rules 37: the engine keeps each glory award for a few seconds; show the recent ones,
@@ -891,6 +892,40 @@
     }
     toast.innerHTML = [...lines.values()].sort((a, b) => a.tick - b.tick).map(l =>
       `<div class="${l.team ? "blue" : "red"}">${l.team ? "Azure" : "Ember"} <b>+${l.amount}</b> glory · ${GLORY_REASONS[l.kind] || escape(String(l.kind))}</div>`).join("");
+  }
+  // Rules 38: a "+20" rises over the cog that took a glory heart. Each pop is keyed by
+  // tick and seat, starts its CSS animation already `age` ticks in (so seeking lands
+  // mid-rise), follows the cog, and is dropped once it has faded or the playhead rewinds.
+  const GLORY_POP_TICKS = 36;
+  const gloryPops = new Map();
+  function updateGloryPops(data) {
+    const layer = $("glory-pops");
+    if (!layer) return;
+    const w = data.world;
+    const live = new Set();
+    const rect = $("canvas").getBoundingClientRect();
+    for (const pick of data.rulesVersion >= 38 ? w.gloryPickups || [] : []) {
+      const age = w.tick - pick.tick;
+      const p = data.screen[pick.seat];
+      if (age < 0 || age >= GLORY_POP_TICKS || !data.visible[pick.seat] || !p || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1) continue;
+      const key = `${pick.tick}:${pick.seat}`;
+      live.add(key);
+      let pop = gloryPops.get(key);
+      if (!pop) {
+        pop = document.createElement("div");
+        pop.className = `glory-pop ${team(pick.seat) ? "blue" : "red"}`;
+        pop.textContent = `+${pick.amount}`;
+        pop.style.animationDelay = `${-age / 24}s`;
+        layer.appendChild(pop);
+        gloryPops.set(key, pop);
+      }
+      pop.style.left = `${rect.left + p[0] * rect.width}px`;
+      pop.style.top = `${rect.top + p[1] * rect.height}px`;
+      pop.style.animationPlayState = data.paused ? "paused" : "running";
+    }
+    for (const [key, pop] of gloryPops) {
+      if (!live.has(key)) { pop.remove(); gloryPops.delete(key); }
+    }
   }
   function updateHeartStrip(w, control) {
     const strip = $("heart-strip");
@@ -1431,6 +1466,7 @@
     $("territorytoggle").hidden = !control;
     updateHeartStrip(w, control);
     updateGloryToast(w, data.rulesVersion);
+    updateGloryPops(data);
     document.querySelector("header")?.classList.toggle("glory", data.rulesVersion >= 37);
     $("modehint").textContent = control
       ? (data.rulesVersion >= 37 ? "Fill the heart meter or eliminate the enemy to win · Only the winner keeps its glory" : data.rulesVersion >= 34 ? "Fill the heart meter or eliminate the enemy to win · 900 points · 10-minute limit" : data.rulesVersion >= 28 ? "Fill the heart meter to win · 900 points · 10-minute limit" : data.rulesVersion >= 25 ? (w.bigHeart >= 0 ? `Big heart ${w.bigHeart + 1}: 5 points/s · ${30 - Math.floor(t / 24) % 30}s left` : w.bigHeartRound > 0 ? "All big hearts used · Normal hearts: 1 point/s" : "First big heart at 0:30 · Normal hearts: 1 point/s") : data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
@@ -1467,7 +1503,7 @@
       const scoreLine = $(`score${s}`).parentElement;
       const bigOwned = data.rulesVersion >= 25 && w.bigHeart >= 0 && w.controlHearts[w.bigHeart].owner === s;
       scoreLine.title = glory !== null
-        ? `Glory ${glory} · ${owned} hearts held. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10, friendly fire taken in the opening thirty seconds 30 per hit. Only the winner keeps it.`
+        ? `Glory ${glory} · ${owned} hearts held. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10, friendly fire taken in the opening thirty seconds 30 per hit${data.rulesVersion >= 38 ? ", each glory heart picked up 20" : ""}. Only the winner keeps it.`
         : `${owned} hearts held${bigOwned ? " · Big heart: 5 points/s" : ""}`;
       scoreLine.querySelector('small').textContent = glory !== null ? ` GLORY` : data.rulesVersion >= 28 ? ` / ${w.controlHearts.length * 90} · ${owned} ♥` : data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
       w.cogs.forEach((c, i) => {

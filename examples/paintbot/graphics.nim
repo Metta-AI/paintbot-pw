@@ -949,6 +949,15 @@ proc runGraphics*() =
         shapes.box(p.x, p.y+0.49, p.z, 0.26, 0.03, 0.08, rgbx(215, 69, 66, 255), spin)
         shapes.box(p.x, p.y+0.49, p.z, 0.08, 0.03, 0.26, rgbx(215, 69, 66, 255), spin)
 
+    # Rules 38 glory hearts: small spinning gold hearts that blink out in their last five seconds.
+    for heart in world.gloryHearts:
+      if not pointSeen(heart.pos): continue
+      let left = heart.expiresAt-world.tick
+      if left < 5*TickRate and int(heartAnimationTime*6) mod 2 == 0: continue
+      let pulse = 0.5+0.5*sin(heartAnimationTime*4)
+      shapes.addCircle(position(heart.pos, 0.04), 0.7+0.12*pulse, rgbx(255, 214, 92, 120))
+      shapes.heartSculpture(position(heart.pos, 1.1+0.18*sin(heartAnimationTime*2.2)), eye,
+        rgbx(255, 196, 60, 255), heartAnimationTime*3, 0.32)
     for g in world.grenades:
       let f = clamp((world.tick-g.releasedAt).float32/max(1,
           g.landsAt-g.releasedAt).float32, 0, 1)

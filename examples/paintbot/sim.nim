@@ -31,6 +31,14 @@ const
   GloryFriendlyFire* = 30
   GloryFriendlyFireTicks* = 30*TickRate
   GloryEventLifetime* = 4*TickRate
+  # Glory hearts (rules 38): small hearts appear in mirrored pairs at random open spots,
+  # stay GloryHeartTicks, and pay GloryHeartAward to the team of the first cog to touch one.
+  GloryHeartAward* = 20
+  GloryHeartTicks* = 30*TickRate
+  GloryHeartFirstTick* = 20*TickRate
+  GloryHeartMinGap* = 10*TickRate
+  GloryHeartMaxGap* = 20*TickRate
+  GloryHeartReach* = 120
   SpawnTemperature* = 1000
   HeartSpawnRadius* = 350
   # Compile-time exponential table keeps native/WASM sampling integer-only.
@@ -87,10 +95,17 @@ type
   SoundCue* = object
     listener*, kind*, direction*, distance*, tick*: int32
   GloryKind* = enum
-    gloryQuietSupplies, gloryFriendlyFire
+    gloryQuietSupplies, gloryFriendlyFire, gloryHeart
   GloryEvent* = object
     tick*, team*, amount*: int32
     kind*: GloryKind
+  GloryHeart* = object
+    pos*: Point
+    expiresAt*: int32
+  GloryPickup* = object
+    ## Rules 38: who took a glory heart, where, and when; kept for the viewer's +20.
+    tick*, seat*, amount*: int32
+    pos*: Point
   World* = object
     seed*, tick*: int32
     rng*: Rng
@@ -117,6 +132,9 @@ type
     glory*: array[2, int32] # Rules 37: the winner's score, in seconds; see GloryQuietSupplies and friends.
     lastSupplyTick*: array[2, int32] # The last tick each team collected a supply.
     gloryEvents*: seq[GloryEvent] # Recent awards, kept GloryEventLifetime ticks for the viewer.
+    gloryHearts*: seq[GloryHeart] # Rules 38: glory hearts on the field.
+    nextGloryHeart*: int32 # Rules 38: the tick the next pair appears.
+    gloryPickups*: seq[GloryPickup] # Rules 38: recent pickups, kept GloryEventLifetime ticks.
   TerritoryWorld = object
     seed*, tick*: int32
     rng*: Rng
@@ -172,7 +190,7 @@ when defined(pwTraining):
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
   var damageScale* {.threadvar.}: ptr array[Seats, int32]
 else:
-  var visionRulesVersion* = 37
+  var visionRulesVersion* = 38
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
@@ -542,6 +560,7 @@ proc newWorld*(seed: int32, endTick: int32 = 0): World =
   if visionRulesVersion >= 37:
     let seconds = result.endTick div TickRate
     result.glory = [seconds, seconds]
+  if visionRulesVersion >= 38: result.nextGloryHeart = GloryHeartFirstTick
   if visionRulesVersion >= 8:
     for lot in roundVillage():
       result.cover.add Cover(x: (lot.x-lot.radius).int32,
@@ -607,6 +626,50 @@ proc updateGlory*(w: var World) =
       w.lastSupplyTick[side] = w.tick
       w.earnGlory(side, gloryQuietSupplies, GloryQuietSupplies)
 
+proc gloryHeartSpot(w: var World): (bool, Point) =
+  ## A random open spot on dry land whose mirror is open too; false after 32 misses.
+  for attempt in 0..<32:
+    let p = point(w.rng.between(int32(minX()+400), int32(maxX()-400)).int,
+      w.rng.between(int32(minZ()+400), int32(maxZ()-400)).int)
+    let q = point(Width-p.x.int, Height-p.z.int)
+    if distance2(p, q) < 800'i64*800: continue
+    var open = true
+    for spot in [p, q]:
+      if w.blocked(spot) or riverBlend(spot.x.int, spot.z.int) > 0: open = false
+    if open: return (true, p)
+  (false, Point())
+
+proc updateGloryHearts*(w: var World) =
+  ## Rules 38, once per tick before the tick counter advances: forget old pickups, let
+  ## expired hearts vanish, pay the first living cog (in fair seat order) within reach of
+  ## a heart, and spawn the next mirrored pair on schedule.
+  if visionRulesVersion < 38: return
+  var recent: seq[GloryPickup]
+  for pickup in w.gloryPickups:
+    if w.tick-pickup.tick < GloryEventLifetime: recent.add pickup
+  w.gloryPickups = recent
+  var remaining: seq[GloryHeart]
+  for heart in w.gloryHearts:
+    if w.tick >= heart.expiresAt: continue
+    var taker = -1
+    for k in 0..<Seats:
+      let i = if w.tick mod 2 == 1: k xor 1 else: k
+      if w.cogs[i].hp > 0 and distance2(w.cogs[i].pos, heart.pos) <= GloryHeartReach.int64*GloryHeartReach:
+        taker = i
+        break
+    if taker < 0:
+      remaining.add heart
+      continue
+    w.earnGlory(team(taker), gloryHeart, GloryHeartAward)
+    w.gloryPickups.add GloryPickup(tick: w.tick, seat: taker.int32, amount: GloryHeartAward, pos: heart.pos)
+  w.gloryHearts = remaining
+  if w.tick >= w.nextGloryHeart:
+    let (found, p) = w.gloryHeartSpot()
+    if found:
+      for spot in [p, point(Width-p.x.int, Height-p.z.int)]:
+        w.gloryHearts.add GloryHeart(pos: spot, expiresAt: w.tick+GloryHeartTicks)
+    w.nextGloryHeart = w.tick+w.rng.between(GloryHeartMinGap, GloryHeartMaxGap)
+
 proc settleGlory*(w: var World) =
   ## Only winners keep glory: the loser's drops to zero, and a draw pays nobody.
   if visionRulesVersion < 37 or w.winner == -1: return
@@ -633,6 +696,8 @@ proc stateHash*(w: World): uint32 =
         if visionRulesVersion >= 27: result.addHashy(value)
       elif name == "glory" or name == "lastSupplyTick" or name == "gloryEvents":
         if visionRulesVersion >= 37: result.addHashy(value)
+      elif name == "gloryHearts" or name == "nextGloryHeart" or name == "gloryPickups":
+        if visionRulesVersion >= 38: result.addHashy(value)
       else: result.addHashy(value)
     return
   if visionRulesVersion >= 13:

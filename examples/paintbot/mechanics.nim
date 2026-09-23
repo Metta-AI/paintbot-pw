@@ -525,6 +525,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     else: airborne.add g
   w.grenades = airborne
   w.pickupEquipment(attacked)
+  w.updateGloryHearts()
   if visionRulesVersion>=13:
     w.updateTerritory()
     if visionRulesVersion >= 23:
