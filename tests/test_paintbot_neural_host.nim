@@ -4,12 +4,13 @@ import ../examples/paintbot/[bots, sim, neural_contract, neural_host]
 
 proc u32(s: var string, value: uint32) =
   for i in 0..3: s.add char((value shr (8*i)) and 255)
-proc zeroModel(actionContract = ActionContractHash): string =
+proc zeroModel(actionContract = ActionContractHash,
+    observationContract = ObservationContractHash, inputs = ObservationSize): string =
   const h = 64
-  const n = ObservationSize*h + 3*h*h + LogitSize*h
+  let n = inputs*h + 3*h*h + LogitSize*h
   result = "PWNET001"
-  for x in [1,ObservationSize,h,LogitSize,ActionSizes.len,n]: result.u32(x.uint32)
-  result.add ObservationContractHash
+  for x in [1,inputs,h,LogitSize,ActionSizes.len,n]: result.u32(x.uint32)
+  result.add observationContract
   result.add actionContract
   for x in ActionSizes: result.u32(x.uint32)
   result.add repeat('\0', n*4)
@@ -20,10 +21,11 @@ run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState()
 paintbot_act(neuralLogits())
 """
 proc fixture(source: string, model = true, actionContract = ActionContractHash,
-    manifest = ""): array[Seats,Bot] =
+    manifest = "", observationContract = ObservationContractHash,
+    inputs = ObservationSize): array[Seats,Bot] =
   let path = getTempDir()/"paintbot-neural-host-test.bas"
   writeFile(path,source)
-  if model: writeFile(path & ".model.bin", zeroModel(actionContract))
+  if model: writeFile(path & ".model.bin", zeroModel(actionContract, observationContract, inputs))
   if manifest.len > 0: writeFile(path & ".neural.json", manifest)
   defer:
     removeFile(path)
@@ -130,6 +132,48 @@ suite "native BASIC neural host":
     let unknown = fixture(NeuralSource, true, "0" & ActionContractV2Hash[1..^1])
     discard unknown.decide(w)
     check unknown[0].failed
+
+  test "the bundle's observation contract hash selects the encoder and its width; unknown hashes are rejected":
+    let v1 = fixture(NeuralSource)
+    check v1[0].neural.observationContract == ocV1
+    check v1[0].neural.observation.len == ObservationSize
+    let v2 = fixture(NeuralSource, true, ActionContractHash, "", ObservationContractV2Hash, ObservationSizeV2)
+    check v2[0].neural.observationContract == ocV2
+    check v2[0].neural.observation.len == ObservationSizeV2
+    var w = newWorld(2026)
+    w.cogs[0].pos = w.controlHearts[8].pos # in the river: the terrain block is not all zero
+    discard v2.decide(w)
+    check not v2[0].failed
+    var expected: array[ObservationSizeV2, float32]
+    encodeObservation(w, 0, expected, ocV2)
+    check v2[0].neural.observation == @expected
+    check v2[0].neural.observation[ObservationSize] == 1
+    check v2[0].neural.nativeWork == int64(2*(ObservationSizeV2*64 + 3*64*64 + LogitSize*64) + 32*64)
+    discard v1.decide(w)
+    var expected1: array[ObservationSize, float32]
+    encodeObservation(w, 0, expected1)
+    check v1[0].neural.observation == @expected1
+    # Observation v2 with action v2 and a schema-2 manifest binding both hashes.
+    let both = fixture(NeuralSource, true, ActionContractV2Hash,
+      "{\"schema\": \"paintbot-neural-basic/2\", \"observation_contract\": \"" & ObservationContractV2Hash &
+      "\", \"action_contract\": \"" & ActionContractV2Hash & "\", \"sha256\": {}}",
+      ObservationContractV2Hash, ObservationSizeV2)
+    discard both.decide(w)
+    check not both[0].failed
+    check both[0].neural.observationContract == ocV2 and both[0].neural.contract == acV2
+    # A manifest naming v1 cannot carry a v2 actor.
+    let unbound = fixture(NeuralSource, true, ActionContractHash,
+      manifestJson("paintbot-neural-basic/2", ActionContractHash), ObservationContractV2Hash, ObservationSizeV2)
+    discard unbound.decide(w)
+    check unbound[0].failed
+    # Width must match the named contract, both ways; an unknown hash fails the seat.
+    for (hash, inputs) in [(ObservationContractV2Hash, ObservationSize),
+        (ObservationContractHash, ObservationSizeV2),
+        ("0" & ObservationContractV2Hash[1..^1], ObservationSizeV2),
+        ("0" & ObservationContractHash[1..^1], ObservationSize)]:
+      let bad = fixture(NeuralSource, true, ActionContractHash, "", hash, inputs)
+      discard bad.decide(w)
+      check bad[0].failed
 
   test "the fire-hold decoder option is read from a schema-2 manifest; older bundles are unaffected":
     const Schema1 = "paintbot-neural-basic/1"

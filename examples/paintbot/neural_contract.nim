@@ -17,7 +17,20 @@ const
   ## Directional aim, movement, fire, grenade and sneak decode exactly as in v1.
   ActionContractV2* = "paintbot-pw.rules37.action.v2.51-25-2-2-2"
   ActionContractV2Hash* = "51f602ef167919ca825595f9d81777cb807afbb0938a20102457d0594e2b4317"
-  Directions = [(1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1)]
+  ## Observation contract v2: the v1 observation, unchanged in order and value, in
+  ## columns 0 .. ObservationSize-1, followed by a public terrain block
+  ## (TerrainBlockSize floats; encodeTerrainBlock documents every column). Selected per
+  ## seat by the actor's embedded observation hash; v1 actors keep the v1 encoder.
+  TerrainBlockSize* = 58
+  ObservationSizeV2* = ObservationSize + TerrainBlockSize
+  ObservationContractV2* = "paintbot-pw.rules37.obs.v2.float506"
+  ObservationContractV2Hash* = "e0d7b0b97975725c470ef6119ca2a6caf4aaa6f34cd15bee02bd306489c029e5"
+  ## Terrain heights (w.elevation: terrain plus trench, centimetres; the playable
+  ## rules-37 span measures -260 .. 551) are divided by this, so every height and height
+  ## delta the block carries lies within about [-1, 1] (the river bed below a level
+  ## bank is -200 / 800 = -0.25).
+  TerrainHeightScale* = 800
+  Directions =[(1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1)]
   # Lead compensation (contract v2), derived from the gun in mechanics.nim (rules >= 10):
   # the tick a shoot order is applied the shooter first moves, then gunAim = aim - pos is
   # locked; the ray leaves GunWindupTicks ticks later from wherever the shooter then
@@ -41,8 +54,11 @@ const
   # and no farther along it than the aim point itself.
   FireHoldRadius* = Radius
 static: doAssert FireHoldRadius == 55
+static: doAssert ObservationSizeV2 == 506 and ObservationContractV2 == "paintbot-pw.rules37.obs.v2.float" & $ObservationSizeV2
 
 type
+  ObservationContractVersion* = enum
+    ocV1 = 1, ocV2 = 2
   ActionContractVersion* = enum
     acV1 = 1, acV2 = 2
   AimMemory* = object
@@ -67,6 +83,24 @@ proc actionContractVersion*(hash: string): ActionContractVersion =
   if hash == ActionContractHash: acV1
   elif hash == ActionContractV2Hash: acV2
   else: raise newException(ValueError, "unknown neural action contract")
+
+proc observationContractHash*(version: ObservationContractVersion): string =
+  case version
+  of ocV1: ObservationContractHash
+  of ocV2: ObservationContractV2Hash
+proc observationContractId*(version: ObservationContractVersion): string =
+  case version
+  of ocV1: ObservationContract
+  of ocV2: ObservationContractV2
+proc observationSize*(version: ObservationContractVersion): int =
+  case version
+  of ocV1: ObservationSize
+  of ocV2: ObservationSizeV2
+proc observationContractVersion*(hash: string): ObservationContractVersion =
+  ## The contract an actor or manifest hash names; ValueError for anything else.
+  if hash == ObservationContractHash: ocV1
+  elif hash == ObservationContractV2Hash: ocV2
+  else: raise newException(ValueError, "unknown neural observation contract")
 
 proc observedBodies*(w: World, slot: int): array[Seats, int] =
   ## Match BASIC identity resolution, including uniforms and duplicate identities.
@@ -188,6 +222,82 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32]) =
   if slot notin 0..<Seats or output.len != ObservationSize:
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   w.encodeObservation(slot, output, w.observedBodies(slot))
+
+proc inWater*(p: Point): bool =
+  ## Standing in the river's water: exactly the predicate mechanics.nim uses to quarter a
+  ## wading seat's speed (rules >= 30; bank ground above the waterline is dry).
+  visionRulesVersion >= 30 and riverBlend(p.x.int, p.z.int) > 0 and
+    terrainHeight(p.x.int, p.z.int) < RiverWaterHeight
+
+proc encodeTerrainBlock*(w: World, slot: int, output: var openArray[float32],
+    bodies: array[Seats, int]) =
+  ## Observation contract v2's terrain block (TerrainBlockSize floats), written at
+  ## output[0 ..< TerrainBlockSize]. Public terrain only, read at points the v1 block
+  ## already reveals: the seat's own position, the ten public hearts and the bodies the
+  ## seat can see under its apparent identities (fog and uniforms exactly as v1; a slot v1
+  ## leaves empty stays empty here). "Wet" is inWater, "height" is w.elevation (terrain
+  ## plus trench) / TerrainHeightScale.
+  ##   0      self wet (0/1)
+  ##   1      self height
+  ##   2+2i   heart i (0..9) wet               (0 when the heart is absent)
+  ##   3+2i   heart i height minus self height  (0 when the heart is absent)
+  ##   22+2j  identity j (0..15) wet               (0 when v1's identity slot j is empty)
+  ##   23+2j  identity j height minus self height  (0 when empty; the seat's own slot reads 0)
+  ##   54     visible apparent enemies wet / 8
+  ##   55     visible apparent enemies dry / 8
+  ##   56     visible apparent teammates wet / 8 (the seat itself excluded)
+  ##   57     visible apparent teammates dry / 8 (the seat itself excluded)
+  if slot notin 0..<Seats or output.len != TerrainBlockSize:
+    raise newException(ValueError, "invalid neural terrain block dimensions or seat")
+  for i in 0..<output.len: output[i] = 0
+  let me = w.cogs[slot]
+  let side = team(slot)
+  let own = w.elevation(me.pos)
+  const scale = TerrainHeightScale.float32
+  output[0] = inWater(me.pos).float32
+  output[1] = float32(own)/scale
+  for i in 0..<10:
+    if i >= w.controlHearts.len: continue
+    let p = w.controlHearts[i].pos
+    output[2+2*i] = inWater(p).float32
+    output[3+2*i] = float32(w.elevation(p)-own)/scale
+  var enemyWet, enemyDry, mateWet, mateDry = 0
+  for identity in 0..<Seats:
+    let body = bodies[identity]
+    if body < 0: continue
+    let p = w.cogs[body].pos
+    let wet = inWater(p)
+    output[22+2*identity] = wet.float32
+    output[23+2*identity] = float32(w.elevation(p)-own)/scale
+    if identity == slot: continue
+    let relation = relativeTeam(w.observedTeam(slot, body), side)
+    if relation < 0:
+      if wet: inc enemyWet else: inc enemyDry
+    elif relation > 0:
+      if wet: inc mateWet else: inc mateDry
+  output[54] = float32(enemyWet)/8
+  output[55] = float32(enemyDry)/8
+  output[56] = float32(mateWet)/8
+  output[57] = float32(mateDry)/8
+static: doAssert 58 == TerrainBlockSize
+
+proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
+    bodies: array[Seats, int], version: ObservationContractVersion) =
+  ## The observation of the given contract. v1 is the encoder above, called unchanged;
+  ## v2 writes the same v1 floats in columns 0 .. ObservationSize-1 and the terrain
+  ## block after them.
+  if slot notin 0..<Seats or output.len != observationSize(version):
+    raise newException(ValueError, "invalid neural observation dimensions or seat")
+  case version
+  of ocV1: w.encodeObservation(slot, output, bodies)
+  of ocV2:
+    w.encodeObservation(slot, output.toOpenArray(0, ObservationSize-1), bodies)
+    w.encodeTerrainBlock(slot, output.toOpenArray(ObservationSize, ObservationSizeV2-1), bodies)
+proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
+    version: ObservationContractVersion) =
+  if slot notin 0..<Seats or output.len != observationSize(version):
+    raise newException(ValueError, "invalid neural observation dimensions or seat")
+  w.encodeObservation(slot, output, w.observedBodies(slot), version)
 
 proc resetAimMemory*(m: var AimMemory) =
   m.tick = -1
