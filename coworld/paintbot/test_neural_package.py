@@ -153,6 +153,37 @@ class PackageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, message, msg=repr(strafe)):
                 unpack_package(package({**schema2, "decoder": {"strafe_legs": strafe}}))
 
+    def test_aim_snap_option(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        for snap in ({}, {"max_angle_deg": 22.5}, {"max_angle_deg": 30}, {"max_angle_deg": 0.001},
+                     {"max_angle_deg": 90}, {"max_angle_deg": 12.345}):
+            _, _, manifest = unpack_package(package({**schema2, "decoder": {"aim_snap": snap}}))
+            self.assertEqual(manifest["decoder"]["aim_snap"], snap)
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {"aim_snap": {}}}))
+        for snap, message in (({"max_angle_deg": 0}, "multiple of 0.001 within"), ({"max_angle_deg": -5}, "within"),
+                              ({"max_angle_deg": 90.001}, "within"), ({"max_angle_deg": 22.5001}, "multiple of 0.001"),
+                              ({"max_angle_deg": float("nan")}, "within"), ({"max_angle_deg": 10 ** 400}, "within"),
+                              ({"max_angle_deg": "22.5"}, "must be a number"), ({"max_angle_deg": True}, "must be a number"),
+                              ({"degrees": 22.5}, "unknown decoder.aim_snap field"), (True, "must be a dict"), ([], "must be a dict")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(snap)):
+                unpack_package(package({**schema2, "decoder": {"aim_snap": snap}}))
+
+    def test_steady_shot_option(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        for decoder in ({"steady_shot": {}}, {"steady_shot": {}, "forbid_objectives": [9, 10], "aim_snap": {},
+                                              "sampling": {"mode": "categorical"}, "strafe_legs": {}, "fire_hold_teammates": True}):
+            _, _, manifest = unpack_package(package({**schema2, "decoder": decoder}))
+            self.assertEqual(manifest["decoder"], decoder)
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {"steady_shot": {}}}))
+        for steady, message in (({"ticks": 6}, "unknown decoder.steady_shot field"), (True, "must be a dict"), ([], "must be a dict")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(steady)):
+                unpack_package(package({**schema2, "decoder": {"steady_shot": steady}}))
+        for forbid in ([0], [0, 9, 10], [10, 0]):
+            with self.assertRaisesRegex(ValueError, "steady_shot needs movement index 0"):
+                unpack_package(package({**schema2, "decoder": {"steady_shot": {}, "forbid_objectives": forbid}}))
+
 
 if __name__ == "__main__":
     unittest.main()

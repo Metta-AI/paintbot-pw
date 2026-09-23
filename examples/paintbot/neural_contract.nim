@@ -773,6 +773,138 @@ proc strafeActions*(w: World, slot: int, actions: var array[ActionSizes.len, int
   inc state.ticks
   true
 
+# Decoder aim snap (bundle option decoder.aim_snap, schema 2; not a contract change): the
+# pw-diag2 rules-39 diagnosis (lever 1) found 63 % of the champion's rays fired with a
+# compass aim (index 17..24) while an enemy was visible, a median 10 degrees off it,
+# hitting about 0.06. When the decision issues a shoot order with a compass aim and an
+# enemy the seat can see (its apparent identities: fog-gated, apparent team, exactly
+# observedBodies) stands within max_angle of that compass heading, the aim head becomes
+# that enemy's identity index (1..16), so the identity candidate (contract v2: the
+# lead-compensated aim point) is what the order aims at. The heading is the compass
+# direction the index names (mirrored for team 1 exactly as aimCandidate mirrors it);
+# the enemy's bearing is its body's position seen from the seat's. Among the enemies
+# within the angle the nearest in angle wins, then the nearer body, then the lower
+# identity index. Integer geometry: the angle test compares squared cosines against a
+# Q15 threshold (AimSnapCosScale) derived once from the angle in millidegrees, so the
+# snap is exact and platform-independent given that threshold (the log line prints it).
+# Stateless: nothing is kept between decisions and no stream is drawn.
+type
+  AimSnapOptions* = object
+    enabled*: bool
+    maxAngleMillideg*: int32  # 1 .. MaxAimSnapMillideg
+    cosQ15*: int64            # round(cos(max angle) * AimSnapCosScale): the integer threshold
+
+const
+  AimSnapCosScale* = 32768'i64
+  DefaultAimSnapMillideg* = 22500'i32  # the pw-diag2 counterfactual's 22.5 degrees
+  MaxAimSnapMillideg* = 90000'i32
+  AimFirstCompass* = 17
+static: doAssert Width.int64*Width + Height.int64*Height < (1'i64 shl 26)
+
+proc aimSnapOptionsError*(maxAngleMillideg: int32): string =
+  ## "" when the angle is usable; otherwise why not (the host and the native ABI reject
+  ## the same values).
+  if maxAngleMillideg < 1 or maxAngleMillideg > MaxAimSnapMillideg:
+    return "max_angle_deg must be a multiple of 0.001 within 0.001 .. 90"
+  ""
+
+proc aimSnapOptions*(maxAngleMillideg: int32): AimSnapOptions =
+  ## The enabled option for a valid angle, with its integer threshold; ValueError otherwise.
+  let problem = aimSnapOptionsError(maxAngleMillideg)
+  if problem.len > 0: raise newException(ValueError, "decoder.aim_snap." & problem)
+  let radians = float64(maxAngleMillideg) / 1000.0 * PI / 180.0
+  AimSnapOptions(enabled: true, maxAngleMillideg: maxAngleMillideg,
+    cosQ15: max(0'i64, int64(round(cos(radians) * float64(AimSnapCosScale)))))
+
+proc aimSnapActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
+    bodies: array[Seats, int], options: AimSnapOptions): bool =
+  ## Apply the aim snap to the seat's selected head indices on the pre-step world, before
+  ## they are decoded: returns whether the aim head was replaced (by an identity index
+  ## 1..16). Only a live seat's shoot order (head 2 = 1) with a compass aim (17..24) is
+  ## considered. `bodies` are the seat's apparent identities (observedBodies). Options
+  ## disabled = untouched.
+  if not options.enabled or actions[2] == 0: return false
+  if actions[1] notin AimFirstCompass.int32..(AimFirstCompass+Directions.len-1).int32: return false
+  let me = w.cogs[slot]
+  if me.hp <= 0: return false
+  let flip = if team(slot) == 0: 1'i64 else: -1'i64
+  let delta = Directions[actions[1] - AimFirstCompass]
+  let hx = flip * delta[0]
+  let hz = flip * delta[1]
+  let threshold = options.cosQ15 * options.cosQ15 * (hx*hx + hz*hz)
+  const scale2 = AimSnapCosScale * AimSnapCosScale
+  var best = -1
+  var bestDot, bestE2 = 0'i64
+  for identity in 0..<Seats:
+    let body = bodies[identity]
+    if body < 0 or body == slot or w.cogs[body].hp <= 0: continue
+    if w.observedTeam(slot, body) == team(slot): continue
+    let ex = int64(w.cogs[body].pos.x) - me.pos.x
+    let ez = int64(w.cogs[body].pos.z) - me.pos.z
+    let e2 = ex*ex + ez*ez
+    let dot = hx*ex + hz*ez
+    if e2 == 0 or dot <= 0: continue
+    # angle <= max  <=>  dot / (|h| |e|) >= cos(max)  <=>  dot^2 S^2 >= cosQ^2 |h|^2 |e|^2
+    # (dot^2 < 2^28, |e|^2 < 2^26, |h|^2 <= 2, cosQ and S <= 2^15: every product fits in 63 bits).
+    if dot*dot*scale2 < threshold*e2: continue
+    # Nearer in angle = a larger dot / |e|: dot_a^2 |e_b|^2 > dot_b^2 |e_a|^2.
+    let a = dot*dot*bestE2
+    let b = bestDot*bestDot*e2
+    if best < 0 or a > b or (a == b and e2 < bestE2):
+      best = identity
+      bestDot = dot
+      bestE2 = e2
+  if best < 0: return false
+  actions[1] = int32(best + 1)
+  true
+
+# Decoder steady shot (bundle option decoder.steady_shot, schema 2; not a contract
+# change): the second half of pw-diag2's lever 1. Under rules 39 the champion's sampled
+# movement index changed during 85 % of its shot windups, a median 85 u of own drift that
+# v2's lead never subtracted (base.bas: 0). With the option on, the seat stands still
+# (movement index 0 = SteadyMovement: goal = its own position, so the world makes no step
+# and v2's planned own step is zero) on every decision from a shoot order the gun takes
+# until the ray leaves, stated in the gun's own windup state (mechanics.nim stepEquipment):
+#   - the order tick: the decision's shoot head is 1 and the gun takes the order on this
+#     step (gunTakesOrder): the seat is alive, carries the gun (no spray can, whose branch
+#     replaces the gun's), equipment.windup == 0 and cogs.cooldown <= 1 on the pre-step
+#     world (the step decrements the cooldown before it tests it, so 1 fires). The step
+#     then sets windup = GunWindupTicks and locks gunAim after this tick's move;
+#   - the windup ticks: the seat is alive, carries the gun and equipment.windup > 0 on the
+#     pre-step world (GunWindupTicks .. 1), whatever the shoot head says. The ray leaves
+#     after the move of the tick whose pre-step windup is 1, so these are exactly the
+#     GunWindupTicks moves the lead's own-drift term (LeadOwnMoves) counts.
+# Six decisions per shot, all read from the world, so the rule keeps no state and draws
+# nothing; every other head stands. The fire hold (and the training ABI's fire period)
+# is decided after the decode, so an order it then drops has still stood its order tick;
+# no windup starts for it and the next decision is free.
+type
+  SteadyShotHold* = enum
+    ssNone = 0, ssOrder = 1, ssWindup = 2
+const SteadyMovement* = 0'i32
+static: doAssert LeadOwnMoves == GunWindupTicks
+
+proc gunTakesOrder*(w: World, slot: int): bool =
+  ## Whether a shoot order decided on this pre-step world starts the gun's windup on the
+  ## coming step (the gun branch of mechanics.nim stepEquipment).
+  let c = w.cogs[slot]
+  let e = w.equipment[slot]
+  c.hp > 0 and not e.sprayCan and e.windup == 0 and c.cooldown <= 1
+
+proc steadyShotActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
+    enabled: bool): SteadyShotHold =
+  ## Apply the steady shot to the seat's selected head indices on the pre-step world,
+  ## before they are decoded: on an order tick or a windup tick (see above) the movement
+  ## head becomes SteadyMovement and which of the two is returned; ssNone = untouched.
+  if not enabled: return ssNone
+  let c = w.cogs[slot]
+  let e = w.equipment[slot]
+  if c.hp <= 0 or e.sprayCan: return ssNone
+  if e.windup > 0: result = ssWindup
+  elif actions[2] != 0 and w.gunTakesOrder(slot): result = ssOrder
+  else: return ssNone
+  actions[0] = SteadyMovement
+
 proc decodeLogits*(w: World, slot: int, logits: openArray[float32],
     bodies: array[Seats, int], version: ActionContractVersion,
     memory: AimMemory, fireHold = false): Command =

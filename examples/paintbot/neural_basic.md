@@ -86,6 +86,40 @@ candidates and the contract hashes are the same with or without them.
   stream (`pw_seat_strafe_stats` reports legs, replaced decisions and the executed
   movement index). With the option on, the telemetry line gains
   ` strafe=r<range>,legs<a>-<b>,shot<c>-<d>,rev<p> strafe_legs=<n> strafe_ticks=<n>`.
+- `"decoder": {"aim_snap": {"max_angle_deg": 22.5}}` (default absent = byte-identical;
+  `max_angle_deg` optional, 22.5, a multiple of 0.001 within 0.001..90): pw-diag2's lever 1
+  (`neural_contract.aimSnapActions`). When a decision issues a shoot order with a compass
+  aim (aim index 17..24) and an enemy the seat can see (its apparent identities: fog-gated,
+  apparent team, exactly what the observation shows) stands within `max_angle_deg` of that
+  compass heading (mirrored for team 1 as the aim candidate is), the aim head becomes that
+  enemy's identity index (1..16), so the order aims at the identity candidate (under
+  contract v2 the lead-compensated point). The nearest in angle wins, then the nearer body,
+  then the lower identity index. Only shoot orders: an aim without a shot also turns the
+  seat's vision cone, which the option leaves to the policy. Integer geometry against the
+  threshold `round(cos(angle) * 32768)`; stateless, no draws. The native training ABI's
+  `pw_set_seat_aim_snap` (angle in millidegrees) is the same rule (`pw_seat_aim_snap_stats`
+  reports snaps and the executed aim index). With the option on, the telemetry line gains
+  ` aim_snap=<deg>deg,cos_q15=<threshold> aim_snaps=<n>`.
+- `"decoder": {"steady_shot": {}}` (default absent = byte-identical; no parameters): the
+  other half of pw-diag2's lever 1 (`neural_contract.steadyShotActions`). The seat stands
+  still (movement index 0: the goal is its own position, so it makes no step and contract
+  v2's planned own step is zero) on every decision from a shoot order the gun takes until
+  the ray leaves, stated in the gun's own windup state: the order tick (the shoot head is 1
+  and, on the pre-step world, the seat is alive, carries the gun rather than a spray can,
+  its windup is 0 and its cooldown at most 1, which the step decrements before it tests)
+  and every tick whose pre-step windup is above 0 (5..1, whatever the shoot head says; the
+  ray leaves after the move of the tick whose windup is 1). Six decisions per shot and zero
+  own drift over the windup, which is what base.bas does. Stateless, no draws; every other
+  head stands. The fire hold is decided after the decode, so an order it drops has still
+  stood its order tick. Movement index 0 is the steady stance, so a bundle that also
+  forbids index 0 is rejected. The native training ABI's `pw_set_seat_steady_shot` is the
+  same rule (`pw_seat_steady_stats` reports order ticks and decisions held and the executed
+  movement index). With the option on, the telemetry line gains
+  ` steady_shot=on steady_shots=<n> steady_ticks=<n>`.
+- Order of every option within one decision: forbid and sampling (or argmax) select the
+  heads; the aim snap rewrites the aim head; the strafe, then the steady shot, rewrite the
+  movement head (a steadied decision overrides the strafe's leg for that tick); the heads
+  are decoded under the contract; the fire hold gates the decoded shot.
 
 The archive is bounded to 16 MiB model, 64 KiB BASIC, and 8 KiB manifest.
 Duplicates, unexpected paths/files, encryption, incorrect hashes, and oversized

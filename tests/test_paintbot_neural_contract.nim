@@ -728,3 +728,283 @@ suite "Decoder strafe legs (bundle option, not a contract change)":
         result.add a[0]
     check run(w, 2026) == run(w, 2026)
     check run(w, 2026) != run(w, 2027)
+
+suite "Decoder aim snap (bundle option, not a contract change)":
+  setup:
+    visionRulesVersion = 37
+  proc place(w: var World, seat: int, offsets: openArray[(int, int, int)]): Point =
+    ## `seat` in the open, facing its first placed body, with each (body, dx, dz) placed at
+    ## its offset, every line clear, every placed body visible to the seat and no pickup
+    ## near the seat; everyone else far away along the edge, still and unshielded. Returns
+    ## the seat's position.
+    for slot in 0..<Seats:
+      w.cogs[slot].pos = point(200 + slot*80, maxZ() - 60)
+    for gz in countup(1000, 3000, 100):
+      for gx in countup(200, 4000, 100):
+        let s = point(gx, gz)
+        if w.blocked(s) or w.trenchAt(s) >= 0: continue
+        var ok = true
+        for pickup in w.pickups:
+          if distance2(pickup.pos, s) < 300*300: ok = false
+        for (body, dx, dz) in offsets:
+          let p = point(gx + dx, gz + dz)
+          if p.x < minX()+100 or p.x > maxX()-100 or p.z < minZ()+100 or p.z > maxZ()-100 or
+              w.blocked(p) or w.trenchAt(p) >= 0 or not w.lineClear(s, p):
+            ok = false
+            break
+        if not ok: continue
+        w.cogs[seat].pos = s
+        w.cogs[seat].aim = point(gx + 2*offsets[0][1], gz + 2*offsets[0][2])
+        for (body, dx, dz) in offsets: w.cogs[body].pos = point(gx + dx, gz + dz)
+        for (body, dx, dz) in offsets:
+          if not w.visible(seat, body): ok = false
+        if not ok: continue
+        for slot in 0..<Seats:
+          w.cogs[slot].goal = w.cogs[slot].pos
+          w.cogs[slot].shield = 0
+          w.equipment[slot].armor = 0
+        return s
+    raise newException(AssertionDefect, "no open placement")
+  proc offsetAt(degrees: float, reach: int): (int, int) =
+    (int(round(float(reach) * cos(degrees * PI / 180))), int(round(float(reach) * sin(degrees * PI / 180))))
+  let snap = aimSnapOptions(DefaultAimSnapMillideg)
+  test "options: 22.5 degrees is cos_q15 30274; the angle is validated":
+    check snap.enabled and snap.maxAngleMillideg == 22500 and snap.cosQ15 == 30274
+    check aimSnapOptions(90000).cosQ15 == 0 and aimSnapOptions(1).cosQ15 == AimSnapCosScale
+    for bad in [0'i32, -1, 90001]:
+      check aimSnapOptionsError(bad) != ""
+      expect ValueError: discard aimSnapOptions(bad)
+    check aimSnapOptionsError(45000) == ""
+  test "a compass shoot order within the angle of a visible enemy takes that enemy's identity":
+    # Compass index 17 is east (+x) for team 0. Enemy seat 1 at 20 degrees: snapped; at
+    # 25 degrees: not; at 22.4 / 22.6 around the threshold.
+    for (degrees, snaps) in [(0.0, true), (10.0, true), (-20.0, true), (22.4, true), (22.6, false), (25.0, false), (-25.0, false)]:
+      var w = newWorld(2026, 2400)
+      let (dx, dz) = offsetAt(degrees, 2000)
+      discard w.place(0, [(1, dx, dz)])
+      let bodies = w.observedBodies(0)
+      let identity = identityOf(bodies, 1)
+      require identity >= 0
+      var a = [3'i32, 17, 1, 1, 1]
+      checkpoint $degrees
+      check w.aimSnapActions(0, a, bodies, snap) == snaps
+      check a == (if snaps: [3'i32, int32(identity+1), 1, 1, 1] else: [3'i32, 17, 1, 1, 1])
+    # Every compass heading: an enemy 15 degrees off it is snapped from that heading only.
+    for k in 0..7:
+      var w = newWorld(2026, 2400)
+      let heading = float(k) * 45.0
+      let (dx, dz) = offsetAt(heading + 15.0, 1500)
+      discard w.place(0, [(1, dx, dz)])
+      w.cogs[0].aim = point(w.cogs[0].pos.x.int + dx*2, w.cogs[0].pos.z.int + dz*2)  # face it
+      let bodies = w.observedBodies(0)
+      require identityOf(bodies, 1) >= 0
+      for index in 17'i32..24'i32:
+        var a = [0'i32, index, 1, 0, 0]
+        checkpoint $k & " " & $index
+        check w.aimSnapActions(0, a, bodies, snap) == (index == 17 + k)
+  test "nearest in angle wins, then the nearer body, then the lower identity":
+    var w = newWorld(2026, 2400)
+    let (ax, az) = offsetAt(18.0, 1200)
+    let (bx, bz) = offsetAt(6.0, 3000)
+    discard w.place(0, [(1, ax, az), (3, bx, bz)])
+    var bodies = w.observedBodies(0)
+    var a = [0'i32, 17, 1, 0, 0]
+    check w.aimSnapActions(0, a, bodies, snap)
+    check a[1] == int32(identityOf(bodies, 3) + 1)   # 6 degrees beats 18, farther or not
+    # Same bearing: the nearer body.
+    var w2 = newWorld(2026, 2400)
+    let (cx, cz) = offsetAt(10.0, 2600)
+    discard w2.place(0, [(1, cx, cz), (3, cx div 2, cz div 2)])
+    bodies = w2.observedBodies(0)
+    var b = [0'i32, 17, 1, 0, 0]
+    check w2.aimSnapActions(0, b, bodies, snap)
+    check b[1] == int32(identityOf(bodies, 3) + 1)
+    # Same bearing and distance (two bodies on one point): the lower identity index.
+    var w3 = newWorld(2026, 2400)
+    discard w3.place(0, [(5, 2000, 300), (3, 2000, 300)])
+    bodies = w3.observedBodies(0)
+    let i3 = identityOf(bodies, 3)
+    let i5 = identityOf(bodies, 5)
+    require i3 >= 0 and i5 >= 0
+    var c = [0'i32, 17, 1, 0, 0]
+    check w3.aimSnapActions(0, c, bodies, snap)
+    check c[1] == int32(min(i3, i5) + 1)
+  test "team 1 compass headings are mirrored; teammates, disguised enemies and unseen enemies are never snapped":
+    # Seat 1 (team 1): compass 17 points west in world space.
+    var w = newWorld(2026, 2400)
+    discard w.place(1, [(0, -2000, 200)])
+    w.cogs[1].aim = point(w.cogs[1].pos.x.int - 3000, w.cogs[1].pos.z.int)
+    var bodies = w.observedBodies(1)
+    require identityOf(bodies, 0) >= 0
+    var a = [0'i32, 17, 1, 0, 0]
+    check w.aimSnapActions(1, a, bodies, snap)
+    check a[1] == int32(identityOf(bodies, 0) + 1)
+    var east = [0'i32, 21, 1, 0, 0]   # compass 4 = east for team 1
+    check not w.aimSnapActions(1, east, bodies, snap)
+    # A teammate in the cone: untouched.
+    var t = newWorld(2026, 2400)
+    discard t.place(0, [(2, 2000, 100)])
+    var b = [0'i32, 17, 1, 0, 0]
+    check not t.aimSnapActions(0, b, t.observedBodies(0), snap)
+    check b[1] == 17
+    # An enemy in a uniform reads as a teammate (apparent team): untouched.
+    var u = newWorld(2026, 2400)
+    discard u.place(0, [(1, 2000, 100)])
+    u.uniforms[1] = true
+    let ub = u.observedBodies(0)
+    var c = [0'i32, 17, 1, 0, 0]
+    check not u.aimSnapActions(0, c, ub, snap)
+    # Facing north, an enemy just north of east is outside the vision cone: not in the
+    # seat's bodies, not snapped, though the geometry would qualify.
+    var f = newWorld(2026, 2400)
+    let s = f.place(0, [(1, 2000, 100)])
+    f.cogs[0].aim = point(s.x.int, s.z.int + 3000)
+    require not f.visible(0, 1)
+    var d = [0'i32, 17, 1, 0, 0]
+    check not f.aimSnapActions(0, d, f.observedBodies(0), snap)
+  test "only a live seat's compass shoot orders; disabled is untouched":
+    var w = newWorld(2026, 2400)
+    discard w.place(0, [(1, 2000, 100)])
+    let bodies = w.observedBodies(0)
+    for heads in [[0'i32, 17, 0, 0, 0],   # no shoot order
+                  [0'i32, 0, 1, 0, 0],    # keep aim
+                  [0'i32, 2, 1, 0, 0]]:   # an identity already
+      var a = heads
+      check not w.aimSnapActions(0, a, bodies, snap)
+      check a == heads
+    var off = [0'i32, 17, 1, 0, 0]
+    check not w.aimSnapActions(0, off, bodies, AimSnapOptions())
+    var behind = [0'i32, 21, 1, 0, 0]   # west: the enemy is behind
+    check not w.aimSnapActions(0, behind, bodies, aimSnapOptions(90000))
+    var wide = [0'i32, 18, 1, 0, 0]    # south-east (+x,+z) is 42 degrees off: only a wide snap takes it
+    check not w.aimSnapActions(0, wide, bodies, snap)
+    check w.aimSnapActions(0, wide, bodies, aimSnapOptions(45000))
+    w.cogs[0].hp = 0
+    var dead = [0'i32, 17, 1, 0, 0]
+    check not w.aimSnapActions(0, dead, bodies, snap)
+  test "the snapped order hits a still target 15 degrees off the compass heading; the compass order misses":
+    var w = newWorld(2026, 2400)
+    let (dx, dz) = offsetAt(15.0, 1200)
+    discard w.place(0, [(1, dx, dz)])
+    require w.cogs[0].cooldown == 0 and w.equipment[0].windup == 0 and not w.equipment[0].sprayCan
+    var memory: AimMemory
+    memory.resetAimMemory()
+    let bodies = w.observedBodies(0)
+    var compass = [0'i32, 17, 1, 0, 0]
+    var snapped = compass
+    require w.aimSnapActions(0, snapped, bodies, snap)
+    for (name, heads, expectedHp) in [("compass", compass, 3'i32), ("snapped", snapped, 2'i32)]:
+      var trial = w
+      let command = trial.decodeActions(0, heads, bodies, acV2, memory)
+      for tick in 0..GunWindupTicks:
+        var commands: array[Seats, Command]
+        commands[0] = if tick == 0: command else: Command(aim: command.aim)
+        trial.step(commands)
+      checkpoint name
+      check trial.cogs[1].hp == expectedHp
+
+suite "Decoder steady shot (bundle option, not a contract change)":
+  setup:
+    visionRulesVersion = 37
+  test "the order tick: a shoot order the gun takes stands the seat; every other head stands":
+    var w = newWorld(2026, 2400)
+    require w.cogs[0].hp > 0 and not w.equipment[0].sprayCan
+    w.cogs[0].cooldown = 0
+    w.equipment[0].windup = 0
+    var a = [7'i32, 17, 1, 1, 1]
+    check w.steadyShotActions(0, a, true) == ssOrder
+    check a == [SteadyMovement, 17, 1, 1, 1]
+    w.cogs[0].cooldown = 1          # the step decrements before it tests: 1 still fires
+    var b = [7'i32, 3, 1, 0, 0]
+    check w.steadyShotActions(0, b, true) == ssOrder and b[0] == 0
+    for (cooldown, shoot) in [(2'i32, 1'i32), (24'i32, 1'i32), (0'i32, 0'i32)]:
+      w.cogs[0].cooldown = cooldown
+      var c = [7'i32, 3, shoot, 0, 0]
+      checkpoint $cooldown & " " & $shoot
+      check w.steadyShotActions(0, c, true) == ssNone
+      check c == [7'i32, 3, shoot, 0, 0]
+    w.cogs[0].cooldown = 0
+    var off = [7'i32, 3, 1, 0, 0]
+    check w.steadyShotActions(0, off, false) == ssNone and off[0] == 7
+    w.equipment[0].sprayCan = true   # the spray can replaces the gun: no windup to steady
+    var spray = [7'i32, 3, 1, 0, 0]
+    check w.steadyShotActions(0, spray, true) == ssNone and spray[0] == 7
+    w.equipment[0].sprayCan = false
+    w.cogs[0].hp = 0
+    var dead = [7'i32, 3, 1, 0, 0]
+    check w.steadyShotActions(0, dead, true) == ssNone and dead[0] == 7
+  test "the windup ticks: windup 5..1 stands the seat whatever the shoot head says":
+    var w = newWorld(2026, 2400)
+    for windup in 1'i32..GunWindupTicks.int32:
+      w.equipment[0].windup = windup
+      for shoot in 0'i32..1'i32:
+        var a = [12'i32, 20, shoot, 0, 0]
+        check w.steadyShotActions(0, a, true) == ssWindup
+        check a == [SteadyMovement, 20, shoot, 0, 0]
+    w.equipment[0].sprayCan = true   # a frozen gun windup under a spray can is not held
+    var s = [12'i32, 20, 1, 0, 0]
+    check w.steadyShotActions(0, s, true) == ssNone
+  test "gunTakesOrder is exactly the engine's windup start, over a whole match of bot play":
+    var w = newWorld(77, 1800)
+    var predicted, started, lateCooldown = 0
+    while w.winner == -1 and w.tick < w.endTick:
+      var commands: array[Seats, Command]
+      var takes: array[Seats, bool]
+      for slot in 0..<Seats:
+        var actions: array[ActionSizes.len, int32]
+        w.trainingBotActions(slot, 2, actions)
+        actions[2] = int32((w.tick + slot) mod 4 != 0)
+        commands[slot] = w.decodeActions(slot, actions)
+        takes[slot] = commands[slot].shoot and w.gunTakesOrder(slot)
+      var cooldowns: array[Seats, int32]
+      for slot in 0..<Seats: cooldowns[slot] = w.cogs[slot].cooldown
+      w.step(commands)
+      for slot in 0..<Seats:
+        if w.cogs[slot].hp <= 0: continue   # a death on the step clears the windup
+        let begun = w.equipment[slot].windup == GunWindupTicks
+        if takes[slot]: inc predicted
+        if begun: inc started
+        if takes[slot] and cooldowns[slot] == 1: inc lateCooldown
+        check takes[slot] == begun
+    check predicted > 100 and predicted == started and lateCooldown > 0
+  test "a steadied shot: the seat stands from the order until the ray leaves, six decisions, then walks; the v2 lead subtracts nothing":
+    var w = newWorld(2026, 2400)
+    for slot in 0..<Seats:
+      w.cogs[slot].pos = point(200 + slot*80, maxZ() - 60)
+      w.cogs[slot].goal = w.cogs[slot].pos
+    # Seat 0 in the open with room to walk east; a shoot order every decision.
+    var s: Point
+    block find:
+      for gz in countup(1000, 3000, 100):
+        for gx in countup(600, 4000, 100):
+          s = point(gx, gz)
+          var clear = true
+          for pickup in w.pickups:
+            if distance2(pickup.pos, s) < 600*600: clear = false
+          if clear and w.openGround(s, point(gx + 400, gz)) and w.walkClear(s, point(gx + 400, gz)): break find
+    w.cogs[0].pos = s; w.cogs[0].goal = s; w.cogs[0].aim = point(s.x.int + 3000, s.z.int)
+    w.cogs[0].cooldown = 0
+    w.equipment[0].windup = 0
+    w.equipment[0].armor = 0
+    var memory: AimMemory
+    memory.resetAimMemory()
+    var held: seq[SteadyShotHold]
+    var positions: seq[Point]
+    for tick in 0..8:
+      var heads = [int32(43), 17, 1, 0, 0]   # compass east, fire
+      held.add w.steadyShotActions(0, heads, true)
+      var commands: array[Seats, Command]
+      commands[0] = w.decodeActions(0, heads, w.observedBodies(0), acV2, memory)
+      positions.add w.cogs[0].pos
+      w.step(commands)
+    check held == @[ssOrder, ssWindup, ssWindup, ssWindup, ssWindup, ssWindup, ssNone, ssNone, ssNone]
+    # Still from the order's pre-step position through the tick the ray leaves; walking after.
+    check w.equipment[0].windup == 0
+    for k in 0..5: check positions[k] == s
+    check positions[6] == s and positions[7] != s
+    # Under v2 the order tick's planned own step is zero: an identity order decodes to the
+    # body's position plus its lead only.
+    var v = newWorld(2026, 2400)
+    var heads = [int32(43), 1, 1, 0, 0]
+    check v.steadyShotActions(0, heads, true) == ssOrder
+    check v.plannedStep(0, v.cogs[0].pos, false) == Point()

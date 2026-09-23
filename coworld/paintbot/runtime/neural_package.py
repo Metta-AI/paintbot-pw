@@ -14,15 +14,19 @@ MAX_MANIFEST_BYTES = 8192
 SCHEMA = "paintbot-neural-basic/1"
 SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
 # Schema-2 decoder options: "decoder": {"fire_hold_teammates": true, "sampling": {...},
-# "forbid_objectives": [9, 10], "strafe_legs": {...}}.
+# "forbid_objectives": [9, 10], "strafe_legs": {...}, "aim_snap": {"max_angle_deg": 22.5},
+# "steady_shot": {}}.
 # Every key must be one the host knows and every value the declared type, so a bundle
 # asking for an option this release lacks is rejected at staging rather than played
 # without it. The rules here mirror neural_host.nim's exactly.
-DECODER_OPTIONS = {"fire_hold_teammates": bool, "sampling": dict, "forbid_objectives": list, "strafe_legs": dict}
+DECODER_OPTIONS = {"fire_hold_teammates": bool, "sampling": dict, "forbid_objectives": list, "strafe_legs": dict,
+                   "aim_snap": dict, "steady_shot": dict}
 SAMPLING_HEADS = 5
 MIN_SAMPLING_TEMPERATURE, MAX_SAMPLING_TEMPERATURE = 0.01, 10.0
 OBJECTIVE_CANDIDATES = 51  # movement-head size in both action contracts
 MAX_STRAFE_RANGE, MAX_STRAFE_LEG_TICKS, MIN_STRAFE_SHOT_LEG_TICKS = 20000, 72, 6
+DEFAULT_AIM_SNAP_DEG, MAX_AIM_SNAP_MILLIDEG = 22.5, 90000
+STEADY_MOVEMENT = 0  # the movement-head index the steady shot stands the seat on
 
 
 def _is_int(value):
@@ -71,6 +75,31 @@ def validate_strafe_legs(value):
                          % (MIN_STRAFE_SHOT_LEG_TICKS, MAX_STRAFE_LEG_TICKS))
     if not 0 <= options["reverse_permille"] <= 1000:
         raise ValueError("decoder.strafe_legs.reverse_permille must be within 0 .. 1000")
+
+
+def validate_aim_snap(value):
+    """decoder.aim_snap: {"max_angle_deg": a}, a optional (22.5), a multiple of 0.001 within 0.001 .. 90."""
+    if not isinstance(value, dict):
+        raise ValueError("decoder.aim_snap must be an object")
+    for key, field in value.items():
+        if key != "max_angle_deg":
+            raise ValueError("unknown decoder.aim_snap field: " + str(key))
+        if isinstance(field, bool) or not isinstance(field, (int, float)):
+            raise ValueError("decoder.aim_snap.max_angle_deg must be a number")
+        try:
+            scaled = float(field) * 1000
+        except OverflowError:
+            scaled = float("inf")
+        if scaled != scaled or not 0.5 <= scaled <= MAX_AIM_SNAP_MILLIDEG + 0.5 or abs(scaled - round(scaled)) > 1e-6:
+            raise ValueError("decoder.aim_snap.max_angle_deg must be a multiple of 0.001 within 0.001 .. 90")
+
+
+def validate_steady_shot(value):
+    """decoder.steady_shot: {} (no parameters)."""
+    if not isinstance(value, dict):
+        raise ValueError("decoder.steady_shot must be an object")
+    for key in value:
+        raise ValueError("unknown decoder.steady_shot field: " + str(key))
 
 
 def validate_sampling(value):
@@ -148,6 +177,12 @@ def unpack_package(data):
                 validate_forbid_objectives(value)
             elif key == "strafe_legs":
                 validate_strafe_legs(value)
+            elif key == "aim_snap":
+                validate_aim_snap(value)
+            elif key == "steady_shot":
+                validate_steady_shot(value)
+        if "steady_shot" in decoder and STEADY_MOVEMENT in decoder.get("forbid_objectives", []):
+            raise ValueError("decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
     files["policy.bas"].decode("utf-8")
     if not files["model.bin"]:
         raise ValueError("empty neural model")

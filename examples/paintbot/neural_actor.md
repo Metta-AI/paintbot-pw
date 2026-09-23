@@ -155,6 +155,10 @@ the training ABI's `pw_set_seat_sampling` / `pw_sample_actions` draw from the sa
 `decoder.strafe_legs` replaces the movement head with base.bas's contact legs
 (`neural_basic.md`); candidates and hashes are unchanged, and the training ABI's
 `pw_set_seat_forbid_objectives` / `pw_set_seat_strafe` are the same rules.
+`decoder.aim_snap` turns a compass shoot order toward a visible enemy's identity and
+`decoder.steady_shot` stands the seat from a shoot order until the ray leaves
+(`neural_basic.md`); candidates and hashes are unchanged, and the training ABI's
+`pw_set_seat_aim_snap` / `pw_set_seat_steady_shot` are the same rules.
 
 Movement (heart, visible pickup or `pos+200*compass`), directional aim
 (`pos+5000*compass`), fire, grenade and sneak decode identically under both.
@@ -211,6 +215,13 @@ int32 out[51])` returns the mask for a trainer's logits. `pw_set_seat_strafe(han
 range, leg_min, leg_max, shot_min, shot_max, reverse_permille)` (range 0 = off) applies
 the strafe to the caller's heads inside `pw_step`; `pw_seat_strafe_stats(handle, seat,
 int32 out[3])` = {legs, replaced decisions, movement index executed last step or -1}.
+`pw_set_seat_aim_snap(handle, seat, max_angle_millideg)` (0 = off, 22500 = 22.5 degrees)
+and `pw_set_seat_steady_shot(handle, seat, 0|1)` apply those rules to the caller's heads
+inside `pw_step` (aim snap, strafe, steady shot, decode, hold); `pw_seat_aim_snap_stats(handle,
+seat, int32 out[3])` = {snaps, aim index executed last step or -1, cosine threshold} and
+`pw_seat_steady_stats(handle, seat, int32 out[3])` = {order ticks held, decisions held,
+movement index executed last step (0) or -1}. The steady shot refuses a seat whose forbid
+mask lists index 0, and the forbid call refuses index 0 while the steady shot is on.
 
 `pw_seat_stats(handle, int32 out[16*8])` fills, per seat in seat order,
 `{damage_dealt_enemy, damage_dealt_team, hits_enemy, hits_taken, kills, deaths,
