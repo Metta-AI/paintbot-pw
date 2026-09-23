@@ -217,3 +217,62 @@ req = oracleAsk()
     oracleEnabled = false
     discard bots(Probe).decide(w)
     check shouts[2] == @["-1"]
+
+  test "the journal reproduces each request exactly and records its answer":
+    # Hosted episodes return only the seats' logs, so the journal is the only way to replay a
+    # decision offline. It must rebuild the body byte for byte, or re-asking Jev with a variant
+    # prompt would compare against a request that was never sent.
+    var lines: seq[tuple[slot: int, line: string]]
+    oracleJournal = proc(slot: int, line: string) = lines.add (slot, line)
+    defer: oracleJournal = nil
+    var w = arena()
+    let players = bots(Advised)
+    discard players.decide(w)
+    let asks = drainOracleAsks()
+    check asks.len == 1
+    var questions: Table[string, string]
+    var askLine = ""
+    for (slot, line) in lines:
+      check slot == 2
+      check line.endsWith("\n")
+      check line.count('\n') == 1
+      if line.startsWith("oracle-q "):
+        let parts = line.strip.split(' ', 2)
+        questions[parts[1][2..^1]] = parts[2]
+      elif line.startsWith("oracle-ask "): askLine = line.strip
+    check questions.len == 1
+    let parts = askLine.split(' ', 4)
+    check parts[1] == "id=1"
+    let rebuilt = "{\"state\":" & parts[4] & ",\"questions\":" & questions[parts[3][2..^1]] & "}"
+    check rebuilt == asks[0].body
+
+    # A second ask with the same question set names it by hash and does not repeat the text.
+    lines = @[]
+    deliverOracleReply(OracleReply(slot: 2, id: 1, status: -1))
+    while w.tick < 24: w.step(default(array[Seats,Command]))
+    discard bots(Advised).decide(w)
+    discard drainOracleAsks()
+    var sawQuestions = false
+    for (slot, line) in lines:
+      if line.startsWith("oracle-q "): sawQuestions = true
+    check not sawQuestions
+
+    # The answer line carries value, confidence and the distribution, scaled as a script reads them.
+    lines = @[]
+    var answers: Table[string, OracleAnswer]
+    answers["formation"] = OracleAnswer(value: 1, confidence: 800,
+        probabilities: {"spread": 250'i32, "pairs": 750'i32}.toTable)
+    deliverOracleReply(OracleReply(slot: 2, id: 2, status: 1, answers: answers))
+    check lines.len == 1
+    check lines[0].line.startsWith("oracle-ans id=2 ")
+    check "status=1" in lines[0].line
+    let body = parseJson(lines[0].line.strip.split(' ', 4)[4])
+    check body["formation"]["v"].getInt == 1
+    check body["formation"]["c"].getInt == 800
+    check body["formation"]["p"]["pairs"].getInt == 750
+
+  test "no journal is written when nothing is listening":
+    check oracleJournal == nil
+    var w = arena()
+    discard bots(Advised).decide(w)
+    check drainOracleAsks().len == 1

@@ -155,6 +155,24 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
   discard result.addFunction("mapMaxY",0,proc(a:openArray[int32]):int32 = maxZ().int32,4)
   discard result.addFunction("terrainHeight",2,proc(a:openArray[int32]):int32 =
     if visionRulesVersion >= 9: terrainHeight(clamp(a[0].int,minX(),maxX()),clamp(a[1].int,minZ(),maxZ())).int32 else: 0'i32,4)
+  # Trenches are public geometry - the tactical map outlines them - so they are not fog-gated.
+  # Asking trenchAt about an enemy still needs that enemy's position, which only a cog that
+  # can see it has, so nothing hidden leaks through it.
+  discard result.addFunction("trenchCount",0,proc(a:openArray[int32]):int32 =
+    active.trenches.len.int32,4)
+  proc trenchField(field: int): HostProc =
+    result = proc(a:openArray[int32]):int32 =
+      if a[0] < 0 or a[0] >= active.trenches.len: return -1
+      let t = active.trenches[a[0]]
+      case field
+      of 0: t.x + t.w div 2
+      of 1: t.z + t.h div 2
+      of 2: t.w
+      else: t.h
+  for field, name in ["trenchX", "trenchY", "trenchW", "trenchH"]:
+    discard result.addFunction(name,1,trenchField(field),4)
+  discard result.addFunction("trenchAt",2,proc(a:openArray[int32]):int32 =
+    active.trenchAt(Point(x:a[0],z:a[1])).int32,8)
   discard result.addFunction("walkTo",2,proc(a:openArray[int32]):int32 =
     commands[slot].walk=true;commands[slot].goal=Point(x:a[0],z:a[1]);1,4)
   discard result.addFunction("lookAt",2,proc(a:openArray[int32]):int32 =
@@ -162,6 +180,10 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
   discard result.addFunction("shootAt",2,proc(a:openArray[int32]):int32 =
     commands[slot].shoot=true;commands[slot].aim=Point(x:clamp(a[0],minX().int32,maxX().int32),z:clamp(a[1],minZ().int32,maxZ().int32));1,4)
 proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
+  # A hosted game journals every advisor request and answer to the asking seat's own log:
+  # it is the only record of a decision's exact state that leaves the pod.
+  when defined(coworld):
+    oracleJournal = proc(slot: int, line: string) = playerLog(slot, line)
   let sources=groups.expandBotSources(controllerKinds(Seats,playerSlot))
   var paths: array[Seats, string]
   var nextSlot = 0
