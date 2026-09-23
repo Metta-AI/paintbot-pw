@@ -496,9 +496,11 @@ timer out by `kHold`. Before the switch existed every squadmate repeated the cal
 multiplied the traffic on a channel the enemy can read — one measured episode logged 450 directive
 adoptions on the echoing team against 76 on the quiet one — and let two listeners in earshot keep
 each other's directive alive indefinitely, so a squad could hold a dead asker's heart forever and
-never promote a new asker. `useEcho = 1` restores that behaviour for comparison; it won 23 of 60
-head-to-head hosted episodes against `useEcho = 0` (95% Wilson [0.271, 0.510]), which is not a
-separation, so the switch is set on the mechanism and not on the measurement.
+never promote a new asker. `useEcho = 1` restores that behaviour for comparison, and it loses: over two independent
+60-episode head-to-head batteries on 0.3.36, sides swapped in equal halves, the echoing build took
+42 of 120 (0.350, 95% Wilson [0.271, 0.439], exact two-sided p = 0.0013). Neither battery could be
+called on its own — they landed 0.267 and 0.433, which is what a Wilson half-width of 0.12 at n =
+60 does to two honest samples.
 Where no oracle is configured, as in certification pods (two seats play it there), every ask is
 refused and the file plays exactly like `base.bas`: `tests/test_paintbot_jev_baseline.nim` holds
 it to the same state hash and checks the drafting cost with the oracle on. The layer was

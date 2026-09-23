@@ -16,8 +16,12 @@ The design follows what 100 hosted episodes on this Coworld established (see the
   Not because Red is favoured - rules 35 mirrored the map - but because 60 head-to-head
   episodes came out 35/60 to the even side from noise alone, which is the size of the effects
   these batteries chase. An unbalanced battery measures the draw.
-- **Win rate is the only usable statistic.** The loser's glory is zeroed at the final tick, so
-  the score margin carries no information; count paired wins and take a Wilson interval.
+- **Win rate is the right statistic *here*.** The loser's glory is zeroed at the final tick, so
+  the gap between the two scores only restates who won. The winner's own glory is a real
+  measure of how fast the win was, and against an opponent an arm nearly always beats that is
+  what to compare - but these arms are close to each other, so each has a glory number only for
+  the games it won and the means are over selected, non-comparable subsets. Count paired wins
+  and take a Wilson interval.
 - **`episode_player_llm_spend_limit_usd` is not optional.** A seat with no budget has no
   advisor, plays as the baseline and still scores, so the request looks healthy and measures
   nothing.
