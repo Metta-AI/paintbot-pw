@@ -437,6 +437,10 @@ if jevInit = 0 then
   ' of the centre of the teammates it can see within 20 m, leaning toward its goal.
   useTight = 0
   kTightR = 500
+  ' kHoldW: the baseline holds fire while a teammate stands within 95 cm of the line to its target,
+  ' but a ray only hits bodies within 55 cm of it. The league leader fights side by side about 1 m
+  ' apart, which a 95 cm rule reads as blocked; a narrower width keeps a close line shooting.
+  kHoldW = 95
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -2005,6 +2009,8 @@ def build(base: str) -> str:
     s = splice(s, "' Quiet approach to the objective when nothing is in sight but something was heard.\n", WEAPONS)
     s = splice(s, "' Remember seen supplies for ten seconds and equip when it is safe to.\n", COVER_SPOT)
     s = swap(s, STEADY_AIM_OLD, STEADY_AIM_NEW)
+    s = swap(s, "        if along > 0 and along < reach and across < 95 then\n",
+             "        if along > 0 and along < reach and across < kHoldW then\n")
     s = splice(s, "' Quiet approach to the objective when nothing is in sight but something was heard.\n", STEADY)
     # A spray can joins the supplies worth walking to, when useSpray says a fight calls for one.
     s = swap(s, "      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < 3) or "
