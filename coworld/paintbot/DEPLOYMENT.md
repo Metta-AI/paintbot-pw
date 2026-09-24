@@ -607,3 +607,27 @@ Neural canaries, seed 2026 against the plain BASIC filler, all 16 seats exit 0 w
 - live champion preserved: `daveey-pw-neural:v6` (fire hold, sampling, forbid, aim_snap, steady_shot) ran as
   `ereq_4e72887d`. Its replay file is identical to its 0.3.41 canary `ereq_c61f7ffb` (4673 ticks, hash
   4040610610).
+
+## Decoder option `fire_hold_teammates` radius — 0.3.44
+
+#95 lets the fire-hold option take a radius, `"fire_hold_teammates": {"radius": r}`. The boolean form is
+unchanged. Decoder-only: no `sim.nim`, `game.nim`, host or BASIC-path change, rules stay 39, earlier replays and
+hashes are unaffected, and the league was not paused.
+
+Deployed from main `e6c80a0`, which also carries #94 and #96 (`jev.bas`) and #97 (training-library seat command).
+The local engine and verifier are byte-identical to a build of #96's head. build.yml run 36059076259 was green on
+all three OSes. One Deploy Coworld run, 36062210079 (`Deploy Coworld 0.3.44 (upload)`).
+Before dispatch, the pre-dispatch check found no deploy run in flight or in the previous 30 minutes, and
+`next-version` returned 0.3.44 in the same minute. Version 0.3.44 is certified and canonical as
+`cow_dba67cc4-bd2e-4c01-89b4-66049b7b7db0`
+(manifest `sha256:e4433d22f78c717c2873e161020d47a11d7fec86121087ea60af604f9dc55320`). Hosted smoke passed
+(`ereq_0b71c2c2`, `ereq_3be490d8`, `ereq_6a3406eb`, `ereq_ade7785e`, `ereq_aefc037e`). The league lock reads 0.3.44.
+
+Neural canaries, seed 2026 against the plain BASIC filler, all 16 seats exit 0 with hash-verified replays:
+
+- v1 preserved: the contract-v1 bundle ran as `ereq_38e9ad6e`. Its replay file is identical to 0.3.43's.
+- live champion preserved: `daveey-pw-neural:v10` ran as `ereq_cf44ac27`. Its replay file is identical to its
+  0.3.43 canary (1741 ticks, hash 815691807).
+- radius on: the same net with `{"fire_hold_teammates": {"radius": 150}}` ran twice, as `ereq_9b1df085` and
+  `ereq_7f495314`. The two replay files are identical (2146 ticks, hash 4228959489), and every neural seat log
+  carries `fire_hold_radius=150`.
