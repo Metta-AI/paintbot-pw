@@ -101,6 +101,11 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
                       {"useKite": 1, "useRush": 1, "useSmartGrenade": 1}),
     "a24-high": ("step to higher ground while an enemy is in view", {"useHigh": 1}),
     "a25-cover-spot": ("cover cogs stand on the high point beside their post", {"useCoverSpot": 1}),
+    "a26-steady": ("stand still from a gun order until its ray leaves, aiming without drift",
+                   {"useSteady": 1}),
+    "a27-steady40": ("steady only for targets within 40 m", {"useSteady": 1, "kSteadyR2": 16000000}),
+    "a28-tight": ("keep within 5 m of the visible squad's centre while an enemy is in view",
+                  {"useTight": 1}),
 }
 
 
