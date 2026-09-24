@@ -26,6 +26,8 @@ dim lastSeen(16)
 ' Jev layer knowledge: enemy sighting map (16 x 10 cells of 5 m), heart history, candidates
 ' that outlive an ask until its answer lands, retreat points.
 dim enemyCellTick(160)
+dim hiDX(8)
+dim hiDY(8)
 dim heartOwnerPrev(16)
 dim heartThreat(16)
 dim candHeart(6)
@@ -576,6 +578,15 @@ if jevInit = 0 then
   useRush = 0
   kRushR2 = 6250000
   kRushMin = 2
+  ' useHigh: gunfire spreads 1% less per 4 cm the shooter stands above its target (capped at 50%),
+  ' and the ground rises a median 1.3 m within 4 m of any spot, yet the league leader lands 42% of
+  ' its hits from higher ground to our 30%. While an enemy is in view and the cog is neither
+  ' kiting nor carrying, it steps to the highest dry point kHighR away if that is kHighMin higher;
+  ' with kHighHold it then holds its local peak instead of walking back down toward the objective.
+  useHigh = 0
+  kHighR = 400
+  kHighMin = 60
+  kHighHold = 0
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -1412,6 +1423,7 @@ if useRetreat and worldTick < jevRetUntil and not carrying then
 end if
 
 ' ---- Kite. ----
+ktOn = 0
 if useKite and not carrying and foesSeen > 0 then
   ktFoes = 0
   e = 1 - selfTeam
@@ -1438,6 +1450,7 @@ if useKite and not carrying and foesSeen > 0 then
     i = i + 2
   wend
   if ktFoes - ktMates >= kKiteMargin then
+    ktOn = 1
     cx = foeSumX / foesSeen
     cy = foeSumY / foesSeen
     away = -1
@@ -1459,6 +1472,57 @@ if useKite and not carrying and foesSeen > 0 then
       goalX = controlX(away)
       goalY = controlY(away)
       holding = 0
+    end if
+  end if
+end if
+
+' ---- High ground. ----
+if useHigh and best >= 0 and not carrying and ktOn = 0 then
+  if hiDX(0) = 0 then
+    hiDX(0) = 100
+    hiDY(0) = 0
+    hiDX(1) = 71
+    hiDY(1) = 71
+    hiDX(2) = 0
+    hiDY(2) = 100
+    hiDX(3) = -71
+    hiDY(3) = 71
+    hiDX(4) = -100
+    hiDY(4) = 0
+    hiDX(5) = -71
+    hiDY(5) = -71
+    hiDX(6) = 0
+    hiDY(6) = -100
+    hiDX(7) = 71
+    hiDY(7) = -71
+  end if
+  hiBest = terrainHeight(selfX, selfY) + kHighMin
+  hiX = -1
+  k = 0
+  while k < 8
+    px = selfX + hiDX(k) * kHighR / 100
+    py = selfY + hiDY(k) * kHighR / 100
+    if px > mapMinX() + 200 and px < mapMaxX() - 200 and py > mapMinY() + 200 and py < mapMaxY() - 200 then
+      if waterAt(px, py) = 0 then
+        h = terrainHeight(px, py)
+        if h > hiBest then
+          hiBest = h
+          hiX = px
+          hiY = py
+        end if
+      end if
+    end if
+    k = k + 1
+  wend
+  if hiX >= 0 then
+    goalX = hiX
+    goalY = hiY
+    holding = 0
+  else
+    if kHighHold then
+      goalX = selfX
+      goalY = selfY
+      holding = 1
     end if
   end if
 end if

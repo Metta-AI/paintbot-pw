@@ -99,6 +99,7 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
     "a22-kite-focus": ("kite and focus fire", {"useKite": 1, "useFocus": 1}),
     "a23-kite-rush": ("kite; grenade carriers walk in on a visible cluster and grenade it",
                       {"useKite": 1, "useRush": 1, "useSmartGrenade": 1}),
+    "a24-high": ("step to higher ground while an enemy is in view", {"useHigh": 1}),
 }
 
 

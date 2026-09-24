@@ -545,3 +545,41 @@ Neural canaries on the new version, all 16 seats exit 0 with hash-verified repla
 
 From this release on, the league has a schema-2 neural ZIP competing, so a future decoder or
 contract change must canary a copy of the live bundle before it ships.
+
+## Decoder options `aim_snap` and `steady_shot` — 0.3.41
+
+#84 adds two more per-bundle decoder options under manifest schema `paintbot-neural-basic/2`:
+`"aim_snap": {"max_angle_deg": a}` turns a compass shot into an identity shot at the nearest
+visible enemy within `a` degrees, and `"steady_shot": {}` holds the seat's movement still through
+the fire wind-up. Bundles without the keys decode exactly as before. Decoder-only: no `sim.nim`,
+`game.nim`, host or BASIC-path change, rules stay 39, replays and hashes of earlier versions are
+unaffected, and the league was not paused.
+
+Deployed from main `eb80ace`, which is `6872562` (#84) plus #85 (the `basic-jev` certification
+player, its tools and test; not compiled into the engine: the local `-d:coworld` engine and
+verifier built from `6872562` and `eb80ace` are byte-identical). #74 (`replay_stats.nim`) and #83
+(guide) are also new since 0.3.40. build.yml run 35943893362 was green on all three OSes. One
+Deploy Coworld run, 35945608868 (`Deploy Coworld 0.3.41 (upload)`); before dispatch, the
+pre-dispatch check found no other deploy run in flight or in the previous 30 minutes, and
+`next-version` returned 0.3.41 in the same minute. Version 0.3.41 is certified and canonical as
+`cow_eec883b7-879d-47b0-acb3-775e622ecf6a`
+(manifest `sha256:b8049c7875273624aa681d11f79512e1840e2640205633d577f4c12ab9519946`). Hosted smoke
+passed (`ereq_25d74f79`, `ereq_5db6dc07`, `ereq_73ea2f2e`, `ereq_9f2416f3`, `ereq_c39e5e19`). The
+league lock reads `canonical_game_version` 0.3.41; round #1544 is the first created after the
+promotion.
+
+Neural canaries, seed 2026 against the plain BASIC filler, all 16 seats exit 0 with hash-verified
+replays. For each one, a local reproduction on the `eb80ace` engine with the hosted seat names
+produced the same replay file as the hosted episode.
+
+- v1 preserved: the contract-v1 bundle ran on 0.3.40 as `ereq_f2474819` and on 0.3.41 as
+  `ereq_361dbec0`. The two replay files are identical (1199 ticks, hash 7539732).
+- live champion preserved: `daveey-pw-neural:v3` (fire hold + sampling) ran on 0.3.40 as
+  `ereq_69c88bfd` and on 0.3.41 as `ereq_e2582649`. The two replay files are identical (3281
+  ticks, hash 76913534).
+- options on: the same weights with `{"fire_hold_teammates": true, "sampling": {"mode":
+  "categorical", "temperature": 1.0}, "forbid_objectives": [9, 10], "aim_snap": {"max_angle_deg":
+  22.5}, "steady_shot": {}}` ran twice with the same body, as `ereq_facffeed` and `ereq_d9922245`.
+  The two replay files are identical (3032 ticks, hash 3187462050). Every neural seat log carries
+  `aim_snap=22.500deg,cos_q15=30274 aim_snaps=N steady_shot=on steady_shots=N steady_ticks=N`
+  next to the forbid, fire-hold and sampling telemetry.

@@ -15,18 +15,24 @@ SCHEMA = "paintbot-neural-basic/1"
 SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
 # Schema-2 decoder options: "decoder": {"fire_hold_teammates": true, "sampling": {...},
 # "forbid_objectives": [9, 10], "strafe_legs": {...}, "aim_snap": {"max_angle_deg": 22.5},
-# "steady_shot": {}}.
+# "steady_shot": {}, "aim_retarget": {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000},
+# "shot_gate": {"max_range": 5250}}.
 # Every key must be one the host knows and every value the declared type, so a bundle
 # asking for an option this release lacks is rejected at staging rather than played
 # without it. The rules here mirror neural_host.nim's exactly.
 DECODER_OPTIONS = {"fire_hold_teammates": bool, "sampling": dict, "forbid_objectives": list, "strafe_legs": dict,
-                   "aim_snap": dict, "steady_shot": dict}
+                   "aim_snap": dict, "steady_shot": dict, "aim_retarget": dict, "shot_gate": dict}
 SAMPLING_HEADS = 5
 MIN_SAMPLING_TEMPERATURE, MAX_SAMPLING_TEMPERATURE = 0.01, 10.0
 OBJECTIVE_CANDIDATES = 51  # movement-head size in both action contracts
 MAX_STRAFE_RANGE, MAX_STRAFE_LEG_TICKS, MIN_STRAFE_SHOT_LEG_TICKS = 20000, 72, 6
 DEFAULT_AIM_SNAP_DEG, MAX_AIM_SNAP_MILLIDEG = 22.5, 90000
 STEADY_MOVEMENT = 0  # the movement-head index the steady shot stands the seat on
+# decoder.aim_retarget defaults are base.bas's target rule; decoder.shot_gate's is the gun range.
+AIM_RETARGET_DEFAULTS = {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000}
+MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT = 20000, 1000000000
+SHOT_GATE_DEFAULTS = {"max_range": 5250}
+MAX_SHOT_GATE_RANGE = 20000
 
 
 def _is_int(value):
@@ -100,6 +106,42 @@ def validate_steady_shot(value):
         raise ValueError("decoder.steady_shot must be an object")
     for key in value:
         raise ValueError("unknown decoder.steady_shot field: " + str(key))
+
+
+def validate_aim_retarget(value):
+    """decoder.aim_retarget: {"max_range": r, "hp_weight": h, "carry_weight": c}, every field optional
+    (5250, 160000, 2500000), integers with r within 1 .. 20000 and h, c within 0 .. 1e9."""
+    if not isinstance(value, dict):
+        raise ValueError("decoder.aim_retarget must be an object")
+    options = dict(AIM_RETARGET_DEFAULTS)
+    for key, field in value.items():
+        if key not in AIM_RETARGET_DEFAULTS:
+            raise ValueError("unknown decoder.aim_retarget field: " + str(key))
+        if not _is_int(field):
+            raise ValueError("decoder.aim_retarget.%s must be an integer" % key)
+        options[key] = field
+    if not 1 <= options["max_range"] <= MAX_RETARGET_RANGE:
+        raise ValueError("decoder.aim_retarget.max_range must be within 1 .. %d" % MAX_RETARGET_RANGE)
+    for key in ("hp_weight", "carry_weight"):
+        if not 0 <= options[key] <= MAX_RETARGET_WEIGHT:
+            raise ValueError("decoder.aim_retarget.%s must be within 0 .. %d" % (key, MAX_RETARGET_WEIGHT))
+    return options
+
+
+def validate_shot_gate(value):
+    """decoder.shot_gate: {"max_range": r}, r optional (5250), an integer within 1 .. 20000."""
+    if not isinstance(value, dict):
+        raise ValueError("decoder.shot_gate must be an object")
+    options = dict(SHOT_GATE_DEFAULTS)
+    for key, field in value.items():
+        if key not in SHOT_GATE_DEFAULTS:
+            raise ValueError("unknown decoder.shot_gate field: " + str(key))
+        if not _is_int(field):
+            raise ValueError("decoder.shot_gate.%s must be an integer" % key)
+        options[key] = field
+    if not 1 <= options["max_range"] <= MAX_SHOT_GATE_RANGE:
+        raise ValueError("decoder.shot_gate.max_range must be within 1 .. %d" % MAX_SHOT_GATE_RANGE)
+    return options
 
 
 def validate_sampling(value):
@@ -181,6 +223,10 @@ def unpack_package(data):
                 validate_aim_snap(value)
             elif key == "steady_shot":
                 validate_steady_shot(value)
+            elif key == "aim_retarget":
+                validate_aim_retarget(value)
+            elif key == "shot_gate":
+                validate_shot_gate(value)
         if "steady_shot" in decoder and STEADY_MOVEMENT in decoder.get("forbid_objectives", []):
             raise ValueError("decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
     files["policy.bas"].decode("utf-8")

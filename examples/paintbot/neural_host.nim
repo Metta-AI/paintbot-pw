@@ -59,6 +59,14 @@ type
     # steadyShots counts the order ticks it held, steadyTicks every decision it held.
     steadyShot*: bool
     steadyShots*, steadyTicks*: int
+    # decoder.aim_retarget: the options (stateless rule); aimRetargets counts the decisions
+    # whose aim it replaced with the rule's enemy identity.
+    aimRetarget*: AimRetargetOptions
+    aimRetargets*: int
+    # decoder.shot_gate: the options (stateless rule); shotGates counts the shoot orders it
+    # dropped.
+    shotGate*: ShotGateOptions
+    shotGates*: int
     # The seat's apparent identities for this tick, resolved once for the observation
     # and the action decode (both read the same pre-action world).
     bodies: array[Seats, int]
@@ -108,6 +116,15 @@ proc steadyShotTelemetry*(shots, ticks: int): string =
   ## The steady-shot part of the seat log line: order ticks held and decisions held.
   " steady_shot=on steady_shots=" & $shots & " steady_ticks=" & $ticks
 
+proc aimRetargetTelemetry*(options: AimRetargetOptions, retargets: int): string =
+  ## The aim-retarget part of the seat log line: the parameters and the decisions retargeted.
+  " aim_retarget=r" & $options.maxRange & ",hp" & $options.hpWeight & ",carry" & $options.carryWeight &
+    " aim_retargets=" & $retargets
+
+proc shotGateTelemetry*(options: ShotGateOptions, gates: int): string =
+  ## The shot-gate part of the seat log line: the range and the shoot orders dropped.
+  " shot_gate=r" & $options.maxRange & " shot_gates=" & $gates
+
 proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
     fireHolds = -1, sampling = "", options = ""): string =
   ## One private seat-log line: peak native operations in a tick against the budget, the
@@ -129,7 +146,9 @@ proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
     (if seat.forbidAny: forbidTelemetry(seat.forbidden, seat.forbidHits) else: "") &
     (if seat.strafe.enabled: strafeTelemetry(seat.strafe, seat.strafeState) else: "") &
     (if seat.aimSnap.enabled: aimSnapTelemetry(seat.aimSnap, seat.aimSnaps) else: "") &
-    (if seat.steadyShot: steadyShotTelemetry(seat.steadyShots, seat.steadyTicks) else: ""))
+    (if seat.steadyShot: steadyShotTelemetry(seat.steadyShots, seat.steadyTicks) else: "") &
+    (if seat.aimRetarget.enabled: aimRetargetTelemetry(seat.aimRetarget, seat.aimRetargets) else: "") &
+    (if seat.shotGate.enabled: shotGateTelemetry(seat.shotGate, seat.shotGates) else: ""))
 
 proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
   ## decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}. mode is
@@ -224,6 +243,39 @@ proc parseSteadyShot*(value: JsonNode): bool =
   for key, field in value: raise newException(ValueError, "unknown decoder.steady_shot field: " & key)
   true
 
+proc optionInteger(field: JsonNode, name: string): int32 =
+  ## An integer manifest field that fits int32; ValueError naming the field otherwise.
+  if field.kind != JInt or field.getBiggestInt < int32.low or field.getBiggestInt > int32.high:
+    raise newException(ValueError, name & " must be an integer")
+  int32(field.getBiggestInt)
+
+proc parseAimRetargetOptions*(value: JsonNode): AimRetargetOptions =
+  ## decoder.aim_retarget: {"max_range": r, "hp_weight": h, "carry_weight": c}; every
+  ## field optional (base.bas's 5250, 160000, 2500000), integers, r within 1 .. 20000 and
+  ## h, c within 0 .. 1e9; anything else rejects the bundle.
+  if value.kind != JObject: raise newException(ValueError, "decoder.aim_retarget must be an object")
+  var maxRange = DefaultRetargetRange
+  var hpWeight = DefaultRetargetHpWeight
+  var carryWeight = DefaultRetargetCarryWeight
+  for key, field in value:
+    case key
+    of "max_range": maxRange = optionInteger(field, "decoder.aim_retarget.max_range")
+    of "hp_weight": hpWeight = optionInteger(field, "decoder.aim_retarget.hp_weight")
+    of "carry_weight": carryWeight = optionInteger(field, "decoder.aim_retarget.carry_weight")
+    else: raise newException(ValueError, "unknown decoder.aim_retarget field: " & key)
+  aimRetargetOptions(maxRange, hpWeight, carryWeight)
+
+proc parseShotGateOptions*(value: JsonNode): ShotGateOptions =
+  ## decoder.shot_gate: {"max_range": r}; r optional (5250), an integer within 1 .. 20000;
+  ## anything else rejects the bundle.
+  if value.kind != JObject: raise newException(ValueError, "decoder.shot_gate must be an object")
+  var maxRange = DefaultShotGateRange
+  for key, field in value:
+    case key
+    of "max_range": maxRange = optionInteger(field, "decoder.shot_gate.max_range")
+    else: raise newException(ValueError, "unknown decoder.shot_gate field: " & key)
+  shotGateOptions(maxRange)
+
 proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
   let modelPath = sourcePath & ".model.bin"
@@ -260,6 +312,8 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   var strafe: StrafeOptions
   var aimSnap: AimSnapOptions
   var steadyShot = false
+  var aimRetarget: AimRetargetOptions
+  var shotGate: ShotGateOptions
   if fileExists(manifestPath):
     if getFileSize(manifestPath) > 8192: raise newException(ValueError, "oversized neural manifest")
     let manifest = parseJson(readFile(manifestPath))
@@ -288,6 +342,10 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
           aimSnap = parseAimSnapOptions(value)
         of "steady_shot":
           steadyShot = parseSteadyShot(value)
+        of "aim_retarget":
+          aimRetarget = parseAimRetargetOptions(value)
+        of "shot_gate":
+          shotGate = parseShotGateOptions(value)
         else: raise newException(ValueError, "unknown decoder option: " & key)
       # The steady shot stands the seat still with movement index 0; a bundle that also
       # forbids index 0 asks for both, so it is rejected rather than resolved either way.
@@ -304,6 +362,8 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result.strafeState = initStrafeState(slot)
   result.aimSnap = aimSnap
   result.steadyShot = steadyShot
+  result.aimRetarget = aimRetarget
+  result.shotGate = shotGate
   result.memory.resetAimMemory()
   result.observation = newSeq[float32](observationSize(observationContract))
   result.logits = newSeq[float32](LogitSize)
@@ -379,15 +439,24 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
     try:
       let bodies = seat.bodiesFor()
       var command: Command
-      if seat.forbidAny or seat.strafe.enabled or seat.aimSnap.enabled or seat.steadyShot:
-        # Order: forbid (selection), sampling or argmax, aim snap (aim), strafe (movement),
-        # steady shot (movement), decode, hold.
+      if seat.forbidAny or seat.strafe.enabled or seat.aimSnap.enabled or seat.steadyShot or
+          seat.aimRetarget.enabled or seat.shotGate.enabled:
+        # Order: forbid (selection), sampling or argmax, aim retarget (aim), aim snap (aim),
+        # shot gate (shoot), strafe (movement), steady shot (movement), decode, hold.
         var actions = if seat.sampling.enabled: sampleActions(seat.logits, seat.sampling, seat.sampleRng, seat.forbidden)
                       else: argmaxActions(seat.logits, seat.forbidden)
         if seat.sampling.enabled: inc seat.sampleDraws
         if seat.forbidAny and seat.forbidden[argmaxActions(seat.logits)[0]]: inc seat.forbidHits
-        if seat.aimSnap.enabled and seat.world[].aimSnapActions(seat.slot, actions, bodies, seat.aimSnap):
-          inc seat.aimSnaps
+        if seat.aimRetarget.enabled and seat.world[].aimRetargetActions(seat.slot, actions, bodies,
+            seat.contract, seat.memory, seat.aimRetarget):
+          inc seat.aimRetargets
+        let beforeSnap = actions
+        var snapped = seat.aimSnap.enabled and seat.world[].aimSnapActions(seat.slot, actions, bodies, seat.aimSnap)
+        if seat.shotGate.enabled and seat.world[].shotGateActions(seat.slot, actions, beforeSnap, snapped,
+            bodies, seat.contract, seat.memory, seat.shotGate):
+          snapped = false   # a dropped order never shot, so it was never snapped
+          inc seat.shotGates
+        if snapped: inc seat.aimSnaps
         if seat.strafe.enabled:
           discard seat.world[].strafeActions(seat.slot, actions, bodies, seat.strafe, seat.strafeState,
             seat.strafeRng, seat.forbidden)
