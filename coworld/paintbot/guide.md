@@ -5,6 +5,10 @@
 After a completed episode with the Jev BASIC policy, export its objective decisions
 from the 16 private seat logs and final results:
 
+The exporter also joins the score arm's typed candidate values to the policy's
+applied objective. Exploratory overrides stay fallbacks. Retreat and survival
+answers remain private evidence until their executed effects can be joined.
+
 ```bash
 python3 coworld/paintbot/tools/export_semantic_trajectory.py \
   --seats /path/to/episode/seats.json \

@@ -84,10 +84,31 @@ class SemanticTrajectoryTests(unittest.TestCase):
         self.assertIsNone(decision["attempts"][0]["parsed_action"])
         self.assertIsNone(decision["executed_action"])
 
-    def test_score_arm_requires_its_own_action_join(self):
+    def test_score_arm_joins_typed_values_to_the_applied_directive(self):
+        self.questions["value_C0"] = {"type": "score", "criteria": {"low": {}, "high": {}}}
+        self.questions["value_C1"] = {"type": "score", "criteria": {"low": {}, "high": {}}}
+        for slot, explored in ((0, 0), (1, 1)):
+            self.journal(slot, raw=0, ansobj=1 if not explored else 0, explored=explored)
+            path = self.root / f"player-{slot}.log"
+            lines = path.read_text().splitlines()
+            answer = json.loads(lines[3].split(" ", 4)[4])
+            answer.update({"value_C0": {"v": 200}, "value_C1": {"v": 800}})
+            lines[3] = "oracle-ans id=1 t=12 status=1 " + json.dumps(answer)
+            lines[4] = lines[4].replace("greedy=0", "greedy=1")
+            lines.append("score t=12 id=1 v0=200 v1=800 v2=-1 pick=1")
+            path.write_text("\n".join(lines) + "\n")
+        accepted, override = self.exported()["decisions"]
+        self.assertEqual(accepted["action_status"], "accepted")
+        self.assertEqual(accepted["attempts"][0]["parsed_action"], {"choice": "C1"})
+        self.assertEqual(accepted["executed_action"]["objective_choice"], "C1")
+        self.assertEqual(override["action_status"], "fallback")
+        self.assertEqual(override["attempts"][0]["rejection_reason"], "policy_override")
+        self.assertEqual(override["executed_action"]["objective_choice"], "C0")
+
+    def test_score_arm_rejects_a_pick_without_matching_typed_values(self):
         self.journal(0)
         path = self.root / "player-0.log"
-        path.write_text(path.read_text() + "score t=12 id=1 v0=1 v1=2 pick=1\n")
+        path.write_text(path.read_text() + "score t=12 id=1 v0=200 v1=800 v2=-1 pick=1\n")
         with self.assertRaisesRegex(ValueError, "Score-arm"):
             self.exported()
 

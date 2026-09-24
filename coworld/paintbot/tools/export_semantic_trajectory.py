@@ -2,8 +2,9 @@
 
 The output is one ``CompleteEpisode`` JSONL row in the Coworld decision trajectory
 contract. Only the Jev baseline's objective choice has an authoritative applied
-directive in the policy log. Other oracle questions remain in the request/answer
-evidence; this exporter does not invent executed actions for them.
+directive in the policy log. The score arm derives its choice from the typed
+candidate values before joining that directive. Other oracle questions remain
+request/answer evidence; this exporter does not invent executed actions for them.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ def read_seat(path: Path) -> dict[int, dict]:
     failures: dict[int, dict] = {}
     policy_asks: dict[int, dict] = {}
     outcomes: dict[int, dict] = {}
+    scores: dict[int, dict] = {}
     for line in path.read_text().splitlines():
         if line.startswith("oracle-q "):
             _, key, body = line.split(" ", 2)
@@ -84,8 +86,11 @@ def read_seat(path: Path) -> dict[int, dict]:
                 raise ValueError("Duplicate objective outcome")
             outcomes[entry["id"]] = entry
         elif line.startswith("score t="):
-            raise ValueError("Score-arm decisions need a separate executed-action join")
-    if set(policy_asks) != set(asks) or not set(answers | applied | failures | outcomes) <= set(asks):
+            entry = fields(line)
+            if entry["id"] in scores:
+                raise ValueError("Duplicate Jev score-arm result")
+            scores[entry["id"]] = entry
+    if set(policy_asks) != set(asks) or not set(answers | applied | failures | outcomes | scores) <= set(asks):
         raise ValueError("Jev policy and oracle request IDs do not match")
     for request_id, ask in asks.items():
         policy_ask = policy_asks[request_id]
@@ -99,6 +104,33 @@ def read_seat(path: Path) -> dict[int, dict]:
             raise ValueError("Applied Jev advice requires a delivered oracle answer")
         if request_id in failures and request_id in answers and answers[request_id]["status"] >= 1:
             raise ValueError("Failed Jev advice has a successful oracle answer")
+        if request_id in scores:
+            if request_id not in answers or request_id not in applied:
+                raise ValueError("Score-arm result needs a delivered answer and policy action")
+            score = scores[request_id]
+            answer = answers[request_id]
+            effect = applied[request_id]
+            candidate_count = policy_ask["cand"]
+            if candidate_count < 0 or candidate_count > 3:
+                raise ValueError("Score-arm candidate count is outside the policy bound")
+            values = [
+                answer["body"][f"value_C{index}"]["v"]
+                if f"value_C{index}" in answer["body"] else -1
+                for index in range(3)
+            ]
+            best = (
+                max(range(candidate_count), key=lambda index: values[index])
+                if candidate_count and max(values[:candidate_count]) >= 0 else -1
+            )
+            if (
+                answer["status"] < 1
+                or any(f"value_C{index}" not in ask["questions"] for index in range(candidate_count))
+                or score["t"] != effect["t"] or score["t"] < answer["tick"]
+                or [score[f"v{index}"] for index in range(3)] != values
+                or score["pick"] != best
+                or (best >= 0 and effect["greedy"] != best)
+            ):
+                raise ValueError("Score-arm result differs from the delivered typed values or policy choice")
     return {
         request_id: {
             **ask,
@@ -106,6 +138,7 @@ def read_seat(path: Path) -> dict[int, dict]:
             "applied": applied.get(request_id),
             "failure": failures.get(request_id),
             "outcome": outcomes.get(request_id),
+            "score": scores.get(request_id),
         }
         for request_id, ask in asks.items()
     }
@@ -150,15 +183,18 @@ def export(
             if answer is not None and answer["tick"] < record["tick"]:
                 raise ValueError("Oracle answer predates its request")
             chosen = effect["rawobj"] if effect is not None else -1
+            score_pick = record["score"]["pick"] if record["score"] is not None else -1
+            if score_pick >= 0:
+                chosen = score_pick
             if chosen < -1 or chosen >= len(labels):
                 raise ValueError("Model selected an unknown objective")
             applied = bool(
                 effect is not None
                 and effect["applied"] == 1
                 and effect["explored"] == 0
-                and effect["ansobj"] == effect["rawobj"]
+                and effect["ansobj"] == chosen
             )
-            if effect is not None and effect["rawobj"] == len(labels) - 1 and effect["ansobj"] == effect["rawobj"] and effect["explored"] == 0:
+            if effect is not None and score_pick < 0 and effect["rawobj"] == len(labels) - 1 and effect["ansobj"] == effect["rawobj"] and effect["explored"] == 0:
                 status = "accepted"
                 reason = None
             elif applied:
@@ -166,7 +202,7 @@ def export(
                 reason = None
             elif effect is not None:
                 status = "fallback"
-                reason = "policy_override" if effect["ansobj"] != effect["rawobj"] else "objective_not_applied"
+                reason = "policy_override" if effect["ansobj"] != chosen else "objective_not_applied"
             else:
                 status = "missing"
                 reason = "oracle_failed" if record["failure"] is not None else "answer_not_consumed"
