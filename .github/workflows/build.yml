@@ -69,6 +69,7 @@ jobs:
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_seat_stats.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_scripts.nim
+      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_command.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_curriculum.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_contract_v2.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold.nim

@@ -52,6 +52,19 @@ int pw_seat_script_status(void *handle, int seat, char *message, int32_t capacit
  * a visible body's position or pos+5000*compass (clamped); anything else has no exact
  * candidate. */
 int pw_seat_orders(void *handle, int seat, int32_t *ten);
+/* Raw command (additive; command-space opponents and replayed recordings). The seat
+ * executes nine = {walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak,
+ * direct} (flags 0/1) on the NEXT pw_step only, built as BASIC's orders build a command:
+ * the goal verbatim (walkTo; the world clamps where it walks and stores the point), the aim
+ * clamped to the map (lookAt/shootAt; (0,0) = no aim order). For that step the seat's
+ * action heads are neither decoded nor checked against its forbid mask (no decoder option
+ * runs for it and its contract-v2 aim memory is not recorded); a scripted seat's script
+ * still runs but its order is replaced. The fire hold and fire period apply only if already
+ * set on the seat (off by default). pw_seat_orders echoes the executed command (an
+ * unscripted seat reports zeros again after a step without one). A second call before the
+ * step replaces the first; pw_reset drops it. A library whose caller never calls it is
+ * byte-identical to one without it. Returns 0, -1 bad args. */
+int pw_set_seat_command(void *handle, int seat, const int32_t *nine);
 /* Curriculum knobs (additive to v1), kept across pw_reset; defaults 1 and 1000 leave
  * every world byte-identical to a library without them.
  * pw_set_seat_fire_period: the seat's shoot order (script, Nim bot or caller) is honoured

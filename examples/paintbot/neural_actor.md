@@ -265,3 +265,10 @@ goal is a heart or visible pickup position or `pos+200*compass` (clamped) and th
 is a visible body's position or `pos+5000*compass` (clamped); other orders have no
 exact head candidate and any mapping is an approximation. Worlds without scripts are
 byte-identical to a build without this call.
+`pw_set_seat_command(handle, seat, int32[9])` takes the same nine fields the other way:
+the seat executes that raw command on the next `pw_step` only, instead of its decoded
+heads or its script's order. It is built as BASIC builds one (goal verbatim, aim clamped
+to the map as `lookAt` clamps it), skips the seat's head decode and forbid check for that
+step, applies the fire hold and fire period only if already set, and is echoed by
+`pw_seat_orders`. A command-space opponent, or a recording's commands replayed seat by
+seat, reproduces the recorded world hash for hash. Never calling it is byte-identical.

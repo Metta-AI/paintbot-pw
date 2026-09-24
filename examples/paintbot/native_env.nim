@@ -100,6 +100,14 @@ type
     shotGate: array[Seats,ShotGateOptions]
     shotGates: array[Seats,int32]
     shotGateLast: array[Seats,int32]
+    # Raw commands (pw_set_seat_command): a seat with a pending command executes it on the
+    # next pw_step instead of its decoded heads or its script's order (no forbid check, no
+    # head decode or decoder option for it); commandShown marks an unscripted seat whose
+    # pw_seat_orders echo holds a command, cleared on its next step without one. Nothing
+    # here is part of the world or its hash; unused, every flag stays false.
+    commandPending: array[Seats,bool]
+    commandNext: array[Seats,Command]
+    commandShown: array[Seats,bool]
     decided: array[Seats,Command]
     decidedTick: int32
     decidedValid: bool
@@ -361,6 +369,9 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     env.resetSampling()
     env.resetStrafe()
     env.resetSnapSteady()
+    for slot in 0..<Seats:
+      env.commandPending[slot] = false
+      env.commandShown[slot] = false
     return 0
   except CatchableError: return -1
 
@@ -401,7 +412,7 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
   let env = cast[ptr NativeEnv](handle)
   if env.world.winner != -1 or env.world.tick >= env.world.endTick: return -2
   for slot in 0..<Seats:
-    if not env.forbidAny[slot] or env.world.cogs[slot].hp <= 0 or
+    if not env.forbidAny[slot] or env.world.cogs[slot].hp <= 0 or env.commandPending[slot] or
         (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
     let movement = actions[slot*ActionSizes.len]
     if movement in 0'i32..<ActionSizes[0].int32 and env.forbidden[slot][movement]: return -3
@@ -410,7 +421,7 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
     var wasDead: array[Seats,bool]
     for slot in 0..<Seats:
       wasDead[slot] = env.world.cogs[slot].hp <= 0
-      if env.scripts[slot].len > 0 and env.overrideMask[slot] == 0: continue
+      if env.commandPending[slot] or (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
       commands[slot] = env.decodeSeat(slot, actions)
     if env.scriptCount > 0:
       # The production tick: every BASIC seat decides on the pre-step world (hearing
@@ -434,6 +445,17 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
           if (mask and 8) != 0: cmd.chargeGrenade = caller.chargeGrenade
           if (mask and 16) != 0: cmd.sneak = caller.sneak
           commands[slot] = cmd
+    for slot in 0..<Seats:
+      if env.commandPending[slot]:
+        # The raw command replaces whatever the seat would have executed (a scripted
+        # seat's script has still run and heard/shouted as usual), and is echoed.
+        commands[slot] = env.commandNext[slot]
+        env.scriptOrders[slot] = env.commandNext[slot]
+        env.commandPending[slot] = false
+        env.commandShown[slot] = env.scripts[slot].len == 0
+      elif env.commandShown[slot]:
+        env.scriptOrders[slot] = Command()
+        env.commandShown[slot] = false
     for slot in 0..<Seats:
       if env.fireHold[slot] and env.world.holdFire(slot, commands[slot],
           if env.fireHoldRadius[slot] > 0: env.fireHoldRadius[slot] else: FireHoldRadius.int32):
@@ -548,7 +570,8 @@ proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int
   ## [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct, scripted].
   ## walkTo sets walk+goal; lookAt sets aim; shootAt sets shoot+aim (the last call of
   ## each kind wins, as in the game). aim (0,0) means no aim order, as the game reads
-  ## it. Unscripted seats report zeros with scripted=0.
+  ## it. A seat given a raw command (pw_set_seat_command) for the last step reports that
+  ## command instead. Other unscripted seats report zeros with scripted=0.
   if handle == nil or seat notin 0..<Seats or output == nil: return -1
   ready()
   let env = cast[ptr NativeEnv](handle)
@@ -557,6 +580,31 @@ proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int
   output[3] = c.shoot.int32; output[4] = c.aim.x; output[5] = c.aim.z
   output[6] = c.chargeGrenade.int32; output[7] = c.sneak.int32; output[8] = c.direct.int32
   output[9] = int32(env.scripts[seat].len > 0)
+  0
+
+proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## A raw command for one seat on the next pw_step only, nine int32 in pw_seat_orders'
+  ## layout: [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct],
+  ## the flags 0 or 1. The seat executes exactly this command, built as BASIC's orders
+  ## build one: walkTo's goal verbatim (the world clamps where it walks, and stores the
+  ## point), lookAt/shootAt's aim clamped to the map (aim (0,0) = no aim order). For that
+  ## step the seat's heads are not decoded and not checked against its forbid mask (no
+  ## decoder option runs for it; its contract-v2 aim memory is not recorded), and a
+  ## scripted seat's script still runs but its order is replaced. The fire hold and the
+  ## fire period apply only if already set on the seat (both off by default).
+  ## pw_seat_orders echoes the command after the step (an unscripted seat reports zeros
+  ## again after a step without one). A later call before the step replaces it; pw_reset
+  ## drops it. Never calling it is byte-identical to a library without it. Returns 0, -1
+  ## for bad arguments.
+  if handle == nil or seat notin 0..<Seats or nine == nil: return -1
+  for i in [0, 3, 6, 7, 8]:
+    if nine[i] notin 0'i32..1'i32: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.commandNext[seat] = Command(walk: nine[0] == 1, goal: Point(x: nine[1], z: nine[2]), shoot: nine[3] == 1,
+    aim: Point(x: clamp(nine[4], minX().int32, maxX().int32), z: clamp(nine[5], minZ().int32, maxZ().int32)),
+    chargeGrenade: nine[6] == 1, sneak: nine[7] == 1, direct: nine[8] == 1)
+  env.commandPending[seat] = true
   0
 
 proc pw_set_action_contract*(handle: pointer, version: int32): cint {.exportc, cdecl, dynlib.} =
