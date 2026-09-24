@@ -32,6 +32,9 @@ type
     # applies holdFire to every decoded command; fireHolds counts the orders it held.
     fireHoldTeammates*: bool
     fireHolds*: int
+    # decoder.fire_hold_teammates {"radius": r}: the hold's radius (FireHoldRadius = 55 for
+    # the boolean form and when the field is absent).
+    fireHoldRadius*: int32
     # decoder.sampling: the seat's own draw stream (seeded from the match seed and the
     # slot the first time the seat sees the world; never part of the world or its hash),
     # the options, and how many decisions were drawn. Off = argmax, no stream, no draw.
@@ -126,7 +129,7 @@ proc shotGateTelemetry*(options: ShotGateOptions, gates: int): string =
   " shot_gate=r" & $options.maxRange & " shot_gates=" & $gates
 
 proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
-    fireHolds = -1, sampling = "", options = ""): string =
+    fireHolds = -1, sampling = "", options = "", fireHoldRadius = FireHoldRadius.int32): string =
   ## One private seat-log line: peak native operations in a tick against the budget, the
   ## model width and the ticks played; with the fire-hold decoder option on, also the
   ## number of shoot orders it held (omitted, and the line unchanged, when it is off).
@@ -134,6 +137,7 @@ proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
   result = "neural: peak_ops=" & $peakOperations & " budget=" & $MaxNeuralOperations &
     " model=w" & $hiddenSize & " ticks=" & $ticks
   if fireHolds >= 0: result.add " fire_holds=" & $fireHolds
+  if fireHoldRadius != FireHoldRadius.int32 and fireHolds >= 0: result.add " fire_hold_radius=" & $fireHoldRadius
   result.add sampling
   result.add options
 
@@ -148,7 +152,8 @@ proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
     (if seat.aimSnap.enabled: aimSnapTelemetry(seat.aimSnap, seat.aimSnaps) else: "") &
     (if seat.steadyShot: steadyShotTelemetry(seat.steadyShots, seat.steadyTicks) else: "") &
     (if seat.aimRetarget.enabled: aimRetargetTelemetry(seat.aimRetarget, seat.aimRetargets) else: "") &
-    (if seat.shotGate.enabled: shotGateTelemetry(seat.shotGate, seat.shotGates) else: ""))
+    (if seat.shotGate.enabled: shotGateTelemetry(seat.shotGate, seat.shotGates) else: ""),
+    seat.fireHoldRadius)
 
 proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
   ## decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}. mode is
@@ -276,6 +281,26 @@ proc parseShotGateOptions*(value: JsonNode): ShotGateOptions =
     else: raise newException(ValueError, "unknown decoder.shot_gate field: " & key)
   shotGateOptions(maxRange)
 
+proc parseFireHold*(value: JsonNode): (bool, int32) =
+  ## decoder.fire_hold_teammates: a boolean (true = the hold at the gun's hit tolerance,
+  ## 55; false = off), or an object {"radius": r} with r optional (55), an integer within
+  ## 1 .. MaxFireHoldRadius (the object form turns the hold on); anything else rejects the
+  ## bundle.
+  case value.kind
+  of JBool: return (value.getBool, FireHoldRadius.int32)
+  of JObject:
+    result = (true, FireHoldRadius.int32)
+    for key, field in value:
+      case key
+      of "radius":
+        if field.kind != JInt: raise newException(ValueError, "decoder.fire_hold_teammates.radius must be an integer")
+        let r = field.getBiggestInt
+        if r < 1 or r > MaxFireHoldRadius:
+          raise newException(ValueError, "decoder.fire_hold_teammates.radius must be within 1 .. " & $MaxFireHoldRadius)
+        result[1] = int32(r)
+      else: raise newException(ValueError, "unknown decoder.fire_hold_teammates field: " & key)
+  else: raise newException(ValueError, "decoder.fire_hold_teammates must be a boolean or an object")
+
 proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
   let modelPath = sourcePath & ".model.bin"
@@ -307,6 +332,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
     raise e
   let manifestPath = sourcePath & ".neural.json"
   var fireHold = false
+  var fireHoldRadius = FireHoldRadius.int32
   var sampling: SamplingOptions
   var forbidden: ObjectiveMask
   var strafe: StrafeOptions
@@ -330,8 +356,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
       for key, value in decoder:
         case key
         of "fire_hold_teammates":
-          if value.kind != JBool: raise newException(ValueError, "decoder.fire_hold_teammates must be a boolean")
-          fireHold = value.getBool
+          (fireHold, fireHoldRadius) = parseFireHold(value)
         of "sampling":
           sampling = parseSamplingOptions(value)
         of "forbid_objectives":
@@ -355,6 +380,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result.contract = contract
   result.observationContract = observationContract
   result.fireHoldTeammates = fireHold
+  result.fireHoldRadius = fireHoldRadius
   result.sampling = sampling
   result.forbidden = forbidden
   result.forbidAny = forbidden.forbidsAny
@@ -471,7 +497,7 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
         command = decodeActions(seat.world[], seat.slot, actions, bodies, seat.contract, seat.memory)
       else:
         command = decodeLogits(seat.world[], seat.slot, seat.logits, bodies, seat.contract, seat.memory)
-      if seat.fireHoldTeammates and seat.world[].holdFire(seat.slot, command): inc seat.fireHolds
+      if seat.fireHoldTeammates and seat.world[].holdFire(seat.slot, command, seat.fireHoldRadius): inc seat.fireHolds
       apply(command)
       if seat.contract == acV2:
         seat.memory.recordAimMemory(seat.world[], seat.slot, bodies)

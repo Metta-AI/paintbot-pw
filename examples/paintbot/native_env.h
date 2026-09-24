@@ -117,6 +117,14 @@ int pw_set_seat_override(void *handle, int seat, int32_t mask);
  * seat since the last create/reset (telemetry; 0 with the hold off; -1 bad args). */
 int pw_set_seat_fire_hold(void *handle, int seat, int32_t enabled);
 int pw_seat_fire_held(void *handle, int seat);
+/* Fire-hold radius (additive; decoder.fire_hold_teammates {"radius": r}).
+ * pw_set_seat_fire_hold_radius(handle, seat, r) with r in 1..2000: the seat's hold
+ * (pw_set_seat_fire_hold) tests teammates within r of the line of fire instead of 55; 0
+ * restores 55 (the default; byte-identical). It does not turn the hold on. Kept across
+ * pw_reset. Returns 0, -1 bad args. pw_seat_fire_hold_radius: the effective radius (55
+ * unless set), -1 bad args. */
+int pw_set_seat_fire_hold_radius(void *handle, int seat, int32_t radius);
+int pw_seat_fire_hold_radius(void *handle, int seat);
 /* Decoder sampling (additive; the hosted bundle option decoder.sampling so probes and
  * deployment draw alike). pw_set_seat_sampling: temperature_permille 10..10000 (0.01..10.0)
  * turns categorical sampling on for the heads in head_mask (bit h = head h; 0 = every
