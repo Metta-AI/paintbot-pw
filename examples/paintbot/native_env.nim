@@ -73,6 +73,18 @@ type
     strafeState: array[Seats,StrafeState]
     strafeRng: array[Seats,Rng]
     strafeLast: array[Seats,int32]
+    # Decoder aim snap (pw_set_seat_aim_snap) and steady shot (pw_set_seat_steady_shot),
+    # both kept across resets and both stateless rules applied to the caller's selected
+    # heads in pw_step before they are decoded, in the hosted seat's order: aim snap,
+    # strafe, steady shot. The counts belong to the match; *Last is the head index the
+    # rule executed on the last pw_step (-1 = the caller's stood).
+    aimSnap: array[Seats,AimSnapOptions]
+    aimSnaps: array[Seats,int32]
+    aimSnapLast: array[Seats,int32]
+    steadyShot: array[Seats,bool]
+    steadyShots: array[Seats,int32]
+    steadyTicks: array[Seats,int32]
+    steadyLast: array[Seats,int32]
     decided: array[Seats,Command]
     decidedTick: int32
     decidedValid: bool
@@ -109,6 +121,14 @@ proc resetStrafe(env: ptr NativeEnv) =
     env.strafeState[slot] = initStrafeState(slot)
     env.strafeRng[slot] = strafeRng(env.world.seed, slot)
     env.strafeLast[slot] = -1
+proc resetSnapSteady(env: ptr NativeEnv) =
+  ## Counts belong to the match (options persist).
+  for slot in 0..<Seats:
+    env.aimSnaps[slot] = 0
+    env.aimSnapLast[slot] = -1
+    env.steadyShots[slot] = 0
+    env.steadyTicks[slot] = 0
+    env.steadyLast[slot] = -1
 proc resetCurriculum(env: ptr NativeEnv) =
   ## Knob values persist; the shot history belongs to the match.
   for slot in 0..<Seats:
@@ -182,17 +202,31 @@ proc decodeSeat(env: ptr NativeEnv, slot: int, actions: ActionBuffer): Command =
   ## The caller's five head indices for one seat through the selected contract. Under
   ## v1 the bodies are resolved only for an identity aim, as before; v2 always resolves
   ## them because the seat's memory must be recorded on every decided tick. A seat with
-  ## the strafe on decodes its heads after neural_contract.strafeActions, as the hosted
-  ## seat does.
+  ## the aim snap, the strafe or the steady shot on decodes its heads after
+  ## neural_contract.aimSnapActions, strafeActions and steadyShotActions, in that order,
+  ## as the hosted seat does.
   let offset = slot*ActionSizes.len
-  if env.strafe[slot].enabled:
+  if env.strafe[slot].enabled or env.aimSnap[slot].enabled or env.steadyShot[slot]:
     var heads: array[ActionSizes.len, int32]
     for head in 0..<ActionSizes.len: heads[head] = actions[offset+head]
     let bodies = env.bodiesFor(slot)
+    env.aimSnapLast[slot] = -1
     env.strafeLast[slot] = -1
+    env.steadyLast[slot] = -1
+    if env.world.aimSnapActions(slot, heads, bodies, env.aimSnap[slot]):
+      env.aimSnapLast[slot] = heads[1]
+      inc env.aimSnaps[slot]
     if env.world.strafeActions(slot, heads, bodies, env.strafe[slot], env.strafeState[slot],
         env.strafeRng[slot], env.forbidden[slot]):
       env.strafeLast[slot] = heads[0]
+    let held = env.world.steadyShotActions(slot, heads, env.steadyShot[slot])
+    if held != ssNone:
+      # The steady shot overrides the strafe's leg for this decision: the strafe's index
+      # was not executed (its leg and counts advance as without the steady shot).
+      env.strafeLast[slot] = -1
+      env.steadyLast[slot] = heads[0]
+      inc env.steadyTicks[slot]
+      if held == ssOrder: inc env.steadyShots[slot]
     if env.contract == acV1:
       result = decodeActions(env.world,slot,heads,bodies)
     else:
@@ -228,6 +262,7 @@ proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): p
     env.resetAimMemories()
     env.resetSampling()
     env.resetStrafe()
+    env.resetSnapSteady()
     result = env
   except CatchableError:
     `=destroy`(env[])
@@ -289,6 +324,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     env.resetAimMemories()
     env.resetSampling()
     env.resetStrafe()
+    env.resetSnapSteady()
     return 0
   except CatchableError: return -1
 
@@ -690,6 +726,7 @@ proc pw_set_seat_forbid_objectives*(handle: pointer, seat: cint, indices: ptr Un
     mask[index] = true
   ready()
   let env = cast[ptr NativeEnv](handle)
+  if env.steadyShot[seat] and mask[SteadyMovement]: return -1  # the steady shot stands on index 0
   env.forbidden[seat] = mask
   env.forbidAny[seat] = mask.forbidsAny
   0
@@ -746,6 +783,65 @@ proc pw_seat_strafe_stats*(handle: pointer, seat: cint, output: ptr UncheckedArr
   output[0] = env.strafeState[seat].legs
   output[1] = env.strafeState[seat].ticks
   output[2] = env.strafeLast[seat]
+  0
+
+proc pw_set_seat_aim_snap*(handle: pointer, seat: cint, maxAngleMillideg: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Decoder aim snap for one seat (the hosted bundle option decoder.aim_snap, angle in
+  ## millidegrees: 22500 = 22.5 degrees; see neural_contract.aimSnapActions): with
+  ## maxAngleMillideg in 1..90000, on every pw_step a live caller-decoded seat's shoot order
+  ## with a compass aim (17..24) takes the aim index of the apparent enemy identity (1..16)
+  ## it can see within that angle of the compass heading, the nearest in angle (then the
+  ## nearer body, then the lower identity). 0 turns it off (the default; off on every seat
+  ## is byte-identical to a library without this call). Kept across pw_reset. Returns 0,
+  ## -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats: return -1
+  var options: AimSnapOptions
+  if maxAngleMillideg != 0:
+    if aimSnapOptionsError(maxAngleMillideg).len > 0: return -1
+    options = aimSnapOptions(maxAngleMillideg)
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.aimSnap[seat] = options
+  0
+
+proc pw_seat_aim_snap_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Aim-snap telemetry, three int32: [decisions snapped since the last create/reset, the
+  ## aim index executed on the last pw_step or -1 when the caller's stood, the integer
+  ## threshold round(cos(angle) * 32768) or 0 when off]. The second is what a trainer
+  ## records as the executed aim. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  output[0] = env.aimSnaps[seat]
+  output[1] = env.aimSnapLast[seat]
+  output[2] = int32(env.aimSnap[seat].cosQ15)
+  0
+
+proc pw_set_seat_steady_shot*(handle: pointer, seat: cint, enabled: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Decoder steady shot for one seat (the hosted bundle option decoder.steady_shot; see
+  ## neural_contract.steadyShotActions): with 1, on every pw_step a live caller-decoded seat
+  ## carrying the gun stands still (movement index 0) on the tick a shoot order the gun
+  ## takes is decided (windup 0, cooldown <= 1 on the pre-step world) and on every tick its
+  ## windup is running (windup > 0), i.e. from the order until the ray leaves. 0 (the
+  ## default) is byte-identical to a library without this call. Kept across pw_reset.
+  ## Returns 0, -1 for bad arguments or when the seat's forbid mask lists index 0.
+  if handle == nil or seat notin 0..<Seats or enabled notin 0..1: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  if enabled == 1 and env.forbidden[seat][SteadyMovement]: return -1
+  env.steadyShot[seat] = enabled == 1
+  0
+
+proc pw_seat_steady_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Steady-shot telemetry, three int32: [order ticks held, decisions held (order and
+  ## windup ticks), both since the last create/reset, the movement index executed on the
+  ## last pw_step (0) or -1 when it did not hold]. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  output[0] = env.steadyShots[seat]
+  output[1] = env.steadyTicks[seat]
+  output[2] = env.steadyLast[seat]
   0
 
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =

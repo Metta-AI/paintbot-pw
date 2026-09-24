@@ -1,5 +1,5 @@
 ## Seat-owned FP32 buffers. Integer handles never index shared state.
-import std/[os, json, strutils]
+import std/[os, json, strutils, math]
 import polyworld/rngs
 import polyworld/basic
 import sim, neural_actor, neural_contract
@@ -51,6 +51,14 @@ type
     strafeState*: StrafeState
     strafeRng: Rng
     strafeSeeded: bool
+    # decoder.aim_snap: the options (stateless rule); aimSnaps counts the decisions whose
+    # compass aim it replaced with an identity.
+    aimSnap*: AimSnapOptions
+    aimSnaps*: int
+    # decoder.steady_shot: on/off (stateless rule, read from the gun's windup state);
+    # steadyShots counts the order ticks it held, steadyTicks every decision it held.
+    steadyShot*: bool
+    steadyShots*, steadyTicks*: int
     # The seat's apparent identities for this tick, resolved once for the observation
     # and the action decode (both read the same pre-action world).
     bodies: array[Seats, int]
@@ -90,6 +98,16 @@ proc strafeTelemetry*(options: StrafeOptions, state: StrafeState): string =
     ",shot" & $options.shotLegTicks[0] & "-" & $options.shotLegTicks[1] & ",rev" & $options.reversePermille &
     " strafe_legs=" & $state.legs & " strafe_ticks=" & $state.ticks
 
+proc aimSnapTelemetry*(options: AimSnapOptions, snaps: int): string =
+  ## The aim-snap part of the seat log line: the angle, its integer threshold and the
+  ## decisions snapped.
+  " aim_snap=" & formatFloat(options.maxAngleMillideg.float / 1000, ffDecimal, 3) &
+    "deg,cos_q15=" & $options.cosQ15 & " aim_snaps=" & $snaps
+
+proc steadyShotTelemetry*(shots, ticks: int): string =
+  ## The steady-shot part of the seat log line: order ticks held and decisions held.
+  " steady_shot=on steady_shots=" & $shots & " steady_ticks=" & $ticks
+
 proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
     fireHolds = -1, sampling = "", options = ""): string =
   ## One private seat-log line: peak native operations in a tick against the budget, the
@@ -109,7 +127,9 @@ proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
     if seat.fireHoldTeammates: seat.fireHolds else: -1,
     if seat.sampling.enabled: samplingTelemetry(seat.sampling, seat.samplingLogSeed, seat.sampleDraws) else: "",
     (if seat.forbidAny: forbidTelemetry(seat.forbidden, seat.forbidHits) else: "") &
-    (if seat.strafe.enabled: strafeTelemetry(seat.strafe, seat.strafeState) else: ""))
+    (if seat.strafe.enabled: strafeTelemetry(seat.strafe, seat.strafeState) else: "") &
+    (if seat.aimSnap.enabled: aimSnapTelemetry(seat.aimSnap, seat.aimSnaps) else: "") &
+    (if seat.steadyShot: steadyShotTelemetry(seat.steadyShots, seat.steadyTicks) else: ""))
 
 proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
   ## decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}. mode is
@@ -180,6 +200,30 @@ proc parseStrafeOptions*(value: JsonNode): StrafeOptions =
   let problem = strafeOptionsError(result)
   if problem.len > 0: raise newException(ValueError, "decoder.strafe_legs." & problem)
 
+proc parseAimSnapOptions*(value: JsonNode): AimSnapOptions =
+  ## decoder.aim_snap: {"max_angle_deg": a}; a is optional (22.5), a number that is a
+  ## multiple of 0.001 within 0.001 .. 90; anything else rejects the bundle.
+  if value.kind != JObject: raise newException(ValueError, "decoder.aim_snap must be an object")
+  var millideg = DefaultAimSnapMillideg
+  for key, field in value:
+    case key
+    of "max_angle_deg":
+      if field.kind notin {JFloat, JInt}: raise newException(ValueError, "decoder.aim_snap.max_angle_deg must be a number")
+      let degrees = field.getFloat
+      let scaled = degrees * 1000
+      if degrees != degrees or scaled < 0.5 or scaled > float(MaxAimSnapMillideg) + 0.5 or
+          abs(scaled - round(scaled)) > 1e-6:
+        raise newException(ValueError, "decoder.aim_snap." & aimSnapOptionsError(0))
+      millideg = int32(round(scaled))
+    else: raise newException(ValueError, "unknown decoder.aim_snap field: " & key)
+  aimSnapOptions(millideg)
+
+proc parseSteadyShot*(value: JsonNode): bool =
+  ## decoder.steady_shot: {} (no parameters); anything else rejects the bundle.
+  if value.kind != JObject: raise newException(ValueError, "decoder.steady_shot must be an object")
+  for key, field in value: raise newException(ValueError, "unknown decoder.steady_shot field: " & key)
+  true
+
 proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
   let modelPath = sourcePath & ".model.bin"
@@ -214,6 +258,8 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   var sampling: SamplingOptions
   var forbidden: ObjectiveMask
   var strafe: StrafeOptions
+  var aimSnap: AimSnapOptions
+  var steadyShot = false
   if fileExists(manifestPath):
     if getFileSize(manifestPath) > 8192: raise newException(ValueError, "oversized neural manifest")
     let manifest = parseJson(readFile(manifestPath))
@@ -238,7 +284,15 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
           forbidden = parseForbidObjectives(value)
         of "strafe_legs":
           strafe = parseStrafeOptions(value)
+        of "aim_snap":
+          aimSnap = parseAimSnapOptions(value)
+        of "steady_shot":
+          steadyShot = parseSteadyShot(value)
         else: raise newException(ValueError, "unknown decoder option: " & key)
+      # The steady shot stands the seat still with movement index 0; a bundle that also
+      # forbids index 0 asks for both, so it is rejected rather than resolved either way.
+      if steadyShot and forbidden[SteadyMovement]:
+        raise newException(ValueError, "decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
   result.actor = actor
   result.contract = contract
   result.observationContract = observationContract
@@ -248,6 +302,8 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result.forbidAny = forbidden.forbidsAny
   result.strafe = strafe
   result.strafeState = initStrafeState(slot)
+  result.aimSnap = aimSnap
+  result.steadyShot = steadyShot
   result.memory.resetAimMemory()
   result.observation = newSeq[float32](observationSize(observationContract))
   result.logits = newSeq[float32](LogitSize)
@@ -323,15 +379,22 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
     try:
       let bodies = seat.bodiesFor()
       var command: Command
-      if seat.forbidAny or seat.strafe.enabled:
-        # Order: forbid (selection), sampling or argmax, strafe (movement), decode, hold.
+      if seat.forbidAny or seat.strafe.enabled or seat.aimSnap.enabled or seat.steadyShot:
+        # Order: forbid (selection), sampling or argmax, aim snap (aim), strafe (movement),
+        # steady shot (movement), decode, hold.
         var actions = if seat.sampling.enabled: sampleActions(seat.logits, seat.sampling, seat.sampleRng, seat.forbidden)
                       else: argmaxActions(seat.logits, seat.forbidden)
         if seat.sampling.enabled: inc seat.sampleDraws
         if seat.forbidAny and seat.forbidden[argmaxActions(seat.logits)[0]]: inc seat.forbidHits
+        if seat.aimSnap.enabled and seat.world[].aimSnapActions(seat.slot, actions, bodies, seat.aimSnap):
+          inc seat.aimSnaps
         if seat.strafe.enabled:
           discard seat.world[].strafeActions(seat.slot, actions, bodies, seat.strafe, seat.strafeState,
             seat.strafeRng, seat.forbidden)
+        if seat.steadyShot:
+          let held = seat.world[].steadyShotActions(seat.slot, actions, true)
+          if held != ssNone: inc seat.steadyTicks
+          if held == ssOrder: inc seat.steadyShots
         command = decodeActions(seat.world[], seat.slot, actions, bodies, seat.contract, seat.memory)
       elif seat.sampling.enabled:
         let actions = sampleActions(seat.logits, seat.sampling, seat.sampleRng)

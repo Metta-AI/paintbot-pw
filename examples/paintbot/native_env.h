@@ -161,6 +161,31 @@ int pw_seat_forbidden_objectives(void *handle, int seat, int32_t *mask);
 int pw_set_seat_strafe(void *handle, int seat, int32_t range, int32_t leg_min, int32_t leg_max,
                        int32_t shot_min, int32_t shot_max, int32_t reverse_permille);
 int pw_seat_strafe_stats(void *handle, int seat, int32_t *stats);
+/* Decoder aim snap (additive; the hosted bundle option decoder.aim_snap). pw_set_seat_aim_snap
+ * with max_angle_millideg in 1..90000 (22500 = the bundle default 22.5 degrees): on every
+ * pw_step a live caller-decoded seat's shoot order with a compass aim (17..24) takes the aim
+ * index (1..16) of the apparent enemy identity it can see (fog-gated, apparent team) within
+ * that angle of the compass heading, nearest in angle, then nearer body, then lower identity;
+ * the identity candidate (contract v2: the lead aim point) is then what it aims at. Integer
+ * geometry against threshold round(cos(angle) * 32768). 0 = off (the default; byte-identical).
+ * Kept across pw_reset; -1 bad args. pw_seat_aim_snap_stats: int32[3] = {decisions snapped
+ * (since create/reset), aim index executed on the last pw_step or -1 if the caller's stood,
+ * the cosine threshold or 0 when off}; -1 bad args.
+ * Decoder steady shot (additive; decoder.steady_shot). pw_set_seat_steady_shot(handle, seat,
+ * 1): a live caller-decoded seat carrying the gun stands still (movement index 0) on the step
+ * a shoot order the gun takes is decided (pre-step windup 0 and cooldown <= 1) and on every
+ * step its windup runs (pre-step windup > 0), i.e. from the order until the ray leaves (six
+ * decisions per shot; v2's own-drift term is then zero and true). 0 = off (the default;
+ * byte-identical). Kept across pw_reset; -1 bad args or when the seat's forbid mask lists
+ * index 0 (and pw_set_seat_forbid_objectives refuses index 0 while it is on).
+ * pw_seat_steady_stats: int32[3] = {order ticks held, decisions held (since create/reset),
+ * movement index executed on the last pw_step (0) or -1}; -1 bad args.
+ * Order inside pw_step for one seat: aim snap, strafe, steady shot, decode, fire hold (a
+ * steady-held step reports the strafe's executed index as -1). */
+int pw_set_seat_aim_snap(void *handle, int seat, int32_t max_angle_millideg);
+int pw_seat_aim_snap_stats(void *handle, int seat, int32_t *stats);
+int pw_set_seat_steady_shot(void *handle, int seat, int32_t enabled);
+int pw_seat_steady_stats(void *handle, int seat, int32_t *stats);
 /* Observation contract selection (additive). pw_create_observation is pw_create with the
  * observation contract chosen, kept across pw_reset: 1 = v1
  * "paintbot-pw.rules37.obs.v1.float448" (identical to pw_create), 2 = v2

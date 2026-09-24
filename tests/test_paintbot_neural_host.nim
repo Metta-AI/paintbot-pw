@@ -359,3 +359,74 @@ suite "native BASIC neural host":
       let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
       checkpoint schema & " " & decoder
       check bad[0].failed
+  test "the aim snap and steady shot decoder options are read from a schema-2 manifest, logged, and replay exactly":
+    const Schema1 = "paintbot-neural-basic/1"
+    const Schema2 = "paintbot-neural-basic/2"
+    let both = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"aim_snap\": {\"max_angle_deg\": 22.5}, \"steady_shot\": {}}"))
+    check not both[0].failed
+    check both[0].neural.aimSnap == aimSnapOptions(22500) and both[0].neural.steadyShot
+    check both[0].neural.telemetry(10, 3) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 aim_snap=22.500deg,cos_q15=30274 aim_snaps=0" &
+      " steady_shot=on steady_shots=0 steady_ticks=0"
+    # max_angle_deg is optional (22.5); integers and three decimals are fine.
+    for (decoder, millideg) in [("{\"aim_snap\": {}}", 22500'i32), ("{\"aim_snap\": {\"max_angle_deg\": 30}}", 30000'i32),
+                                ("{\"aim_snap\": {\"max_angle_deg\": 0.001}}", 1'i32),
+                                ("{\"aim_snap\": {\"max_angle_deg\": 90}}", 90000'i32),
+                                ("{\"aim_snap\": {\"max_angle_deg\": 12.345}}", 12345'i32)]:
+      let one = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(Schema2, ActionContractV2Hash, decoder))
+      checkpoint decoder
+      check not one[0].failed and one[0].neural.aimSnap == aimSnapOptions(millideg) and not one[0].neural.steadyShot
+    let steadyOnly = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"fire_hold_teammates\": true, \"steady_shot\": {}, \"forbid_objectives\": [9, 10]}"))
+    check not steadyOnly[0].failed and steadyOnly[0].neural.steadyShot and not steadyOnly[0].neural.aimSnap.enabled
+    check steadyOnly[0].neural.telemetry(10, 3) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 fire_holds=0 forbid_objectives=9,10 forbid_hits=0" &
+      " steady_shot=on steady_shots=0 steady_ticks=0"
+    # Replay determinism with every seat sampling + snap + steady (+ strafe + hold): the same
+    # match seed twice gives the same world hash every tick; the options change the match.
+    proc play(manifest: string, seed: int32, ticks: int): (seq[uint32], int, int) =
+      let players = fixture(NeuralSource, true, ActionContractV2Hash, manifest)
+      var world = newWorld(seed)
+      for tick in 0..<ticks:
+        let commands = players.decide(world)
+        for slot in 0..<Seats: check not players[slot].failed
+        world.step(commands)
+        result[0].add world.stateHash()
+      for slot in 0..<Seats:
+        result[1] += players[slot].neural.aimSnaps
+        result[2] += players[slot].neural.steadyShots
+    let options = manifestJson(Schema2, ActionContractV2Hash,
+      "{\"fire_hold_teammates\": true, \"strafe_legs\": {}, \"sampling\": {\"mode\": \"categorical\"}, " &
+      "\"aim_snap\": {\"max_angle_deg\": 45}, \"steady_shot\": {}}")
+    let once = play(options, 2026, 400)
+    check once == play(options, 2026, 400)
+    check once[1] > 0 and once[2] > 0   # snaps and steadied shots happened
+    let without = manifestJson(Schema2, ActionContractV2Hash,
+      "{\"fire_hold_teammates\": true, \"strafe_legs\": {}, \"sampling\": {\"mode\": \"categorical\"}}")
+    check once[0] != play(without, 2026, 400)[0]
+    check once[0] != play(options, 2027, 400)[0]
+    # Schema 1 and schema 2 without the fields: unchanged behaviour and log line.
+    for (schema, contract) in [(Schema1, ActionContractHash), (Schema2, ActionContractHash), (Schema2, ActionContractV2Hash)]:
+      let plain = fixture(NeuralSource, true, contract, manifestJson(schema, contract))
+      check not plain[0].failed
+      check not plain[0].neural.aimSnap.enabled and not plain[0].neural.steadyShot
+      check plain[0].neural.telemetry(10, 3) == "neural: peak_ops=10 budget=4000000 model=w64 ticks=3"
+    # Rejected: under schema 1; bad angles and fields; steady shot with index 0 forbidden.
+    for (schema, decoder) in [(Schema1, "{\"aim_snap\": {}}"),
+                              (Schema1, "{\"steady_shot\": {}}"),
+                              (Schema2, "{\"aim_snap\": true}"),
+                              (Schema2, "{\"aim_snap\": {\"max_angle_deg\": 0}}"),
+                              (Schema2, "{\"aim_snap\": {\"max_angle_deg\": -5}}"),
+                              (Schema2, "{\"aim_snap\": {\"max_angle_deg\": 90.001}}"),
+                              (Schema2, "{\"aim_snap\": {\"max_angle_deg\": 22.5001}}"),
+                              (Schema2, "{\"aim_snap\": {\"max_angle_deg\": \"22.5\"}}"),
+                              (Schema2, "{\"aim_snap\": {\"max_angle_deg\": true}}"),
+                              (Schema2, "{\"aim_snap\": {\"degrees\": 22.5}}"),
+                              (Schema2, "{\"steady_shot\": true}"),
+                              (Schema2, "{\"steady_shot\": {\"ticks\": 6}}"),
+                              (Schema2, "{\"steady_shot\": {}, \"forbid_objectives\": [0, 9]}"),
+                              (Schema2, "{\"forbid_objectives\": [0], \"steady_shot\": {}}")]:
+      let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
+      checkpoint schema & " " & decoder
+      check bad[0].failed
