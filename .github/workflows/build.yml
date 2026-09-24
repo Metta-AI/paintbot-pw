@@ -86,3 +86,6 @@ jobs:
       - run: python -m unittest test_runtime
         if: runner.os != 'Windows'
         working-directory: polyworld/coworld/paintbot
+      - run: python -m unittest test_semantic_trajectory
+        if: runner.os != 'Windows'
+        working-directory: polyworld/coworld/paintbot
