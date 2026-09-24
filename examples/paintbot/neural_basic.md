@@ -35,6 +35,16 @@ candidates and the contract hashes are the same with or without them.
   decoder gates it. The same rule is the native training ABI's `pw_set_seat_fire_hold`,
   so a policy trained under it is deployed under it. With the option on, the seat's
   telemetry line ends in ` fire_holds=<n>`, the orders held in the match.
+- `"decoder": {"fire_hold_teammates": {"radius": 150}}`: the same hold with a wider
+  radius (`radius` optional, 55, an integer within 1..2000). The object form turns the
+  hold on; `true` keeps meaning exactly the 55-unit hold above, byte-identical, and
+  `{"radius": 55}` equals `true`. pw-diag4 found 97-100 % of the champion's gun friendly
+  fire comes from teammates outside 55 units of the line when the order is given who walk
+  into the ray during the five-tick windup; 150 units holds those orders. The test is
+  otherwise unchanged (visible teammates, apparent team, line of sight, no farther than
+  the aim point). The native training ABI's `pw_set_seat_fire_hold_radius` sets the same
+  radius. With a radius other than 55 the telemetry line gains ` fire_hold_radius=<r>`
+  after ` fire_holds=<n>`.
 - `"decoder": {"sampling": {"mode": "categorical", "temperature": 1.0, "heads": [0, 1, 2, 3, 4]}}`
   (default absent = argmax, byte-identical to before): the listed heads are drawn from
   `softmax(logits / temperature)` instead of taken by argmax, the others keep argmax.

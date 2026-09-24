@@ -518,3 +518,61 @@ suite "native BASIC neural host":
       let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
       checkpoint schema & " " & decoder
       check bad[0].failed
+  test "the fire hold's radius is read from a schema-2 manifest, logged, and replays exactly; true stays 55":
+    const Schema1 = "paintbot-neural-basic/1"
+    const Schema2 = "paintbot-neural-basic/2"
+    let wide = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"fire_hold_teammates\": {\"radius\": 150}}"))
+    check not wide[0].failed and wide[0].neural.fireHoldTeammates and wide[0].neural.fireHoldRadius == 150
+    check wide[0].neural.telemetry(10, 3) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 fire_holds=0 fire_hold_radius=150"
+    # The object form turns the hold on; radius optional (55), 1 .. 2000; true/false as before.
+    for (decoder, on, radius) in [("{\"fire_hold_teammates\": {}}", true, 55'i32),
+                                  ("{\"fire_hold_teammates\": {\"radius\": 55}}", true, 55'i32),
+                                  ("{\"fire_hold_teammates\": {\"radius\": 1}}", true, 1'i32),
+                                  ("{\"fire_hold_teammates\": {\"radius\": 2000}}", true, 2000'i32),
+                                  ("{\"fire_hold_teammates\": true}", true, 55'i32),
+                                  ("{\"fire_hold_teammates\": false}", false, 55'i32)]:
+      let one = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(Schema2, ActionContractV2Hash, decoder))
+      checkpoint decoder
+      check not one[0].failed and one[0].neural.fireHoldTeammates == on and one[0].neural.fireHoldRadius == radius
+      if on and radius == 55:
+        check one[0].neural.telemetry(10, 3) == "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 fire_holds=0"
+    # Replay determinism with every seat sampling and holding at 150; the same seed twice is
+    # the same match, and the radius changes it against the boolean form.
+    proc play(manifest: string, seed: int32, ticks: int): (seq[uint32], int) =
+      let players = fixture(NeuralSource, true, ActionContractV2Hash, manifest)
+      var world = newWorld(seed)
+      for tick in 0..<ticks:
+        let commands = players.decide(world)
+        for slot in 0..<Seats: check not players[slot].failed
+        world.step(commands)
+        result[0].add world.stateHash()
+      for slot in 0..<Seats: result[1] += players[slot].neural.fireHolds
+    let options = manifestJson(Schema2, ActionContractV2Hash,
+      "{\"fire_hold_teammates\": {\"radius\": 150}, \"sampling\": {\"mode\": \"categorical\"}}")
+    let boolean = manifestJson(Schema2, ActionContractV2Hash,
+      "{\"fire_hold_teammates\": true, \"sampling\": {\"mode\": \"categorical\"}}")
+    let explicit55 = manifestJson(Schema2, ActionContractV2Hash,
+      "{\"fire_hold_teammates\": {\"radius\": 55}, \"sampling\": {\"mode\": \"categorical\"}}")
+    let once = play(options, 2026, 400)
+    check once == play(options, 2026, 400)
+    let base = play(boolean, 2026, 400)
+    check once[1] > base[1] and base[1] > 0
+    check once[0] != base[0]
+    check play(explicit55, 2026, 400) == base   # radius 55 is exactly the boolean form
+    # Rejected: under schema 1; bad radii, types and fields.
+    for (schema, decoder) in [(Schema1, "{\"fire_hold_teammates\": {\"radius\": 150}}"),
+                              (Schema2, "{\"fire_hold_teammates\": {\"radius\": 0}}"),
+                              (Schema2, "{\"fire_hold_teammates\": {\"radius\": -150}}"),
+                              (Schema2, "{\"fire_hold_teammates\": {\"radius\": 2001}}"),
+                              (Schema2, "{\"fire_hold_teammates\": {\"radius\": 99999999999}}"),
+                              (Schema2, "{\"fire_hold_teammates\": {\"radius\": 150.0}}"),
+                              (Schema2, "{\"fire_hold_teammates\": {\"radius\": \"150\"}}"),
+                              (Schema2, "{\"fire_hold_teammates\": {\"radius\": true}}"),
+                              (Schema2, "{\"fire_hold_teammates\": {\"range\": 150}}"),
+                              (Schema2, "{\"fire_hold_teammates\": 150}"),
+                              (Schema2, "{\"fire_hold_teammates\": [150]}")]:
+      let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
+      checkpoint schema & " " & decoder
+      check bad[0].failed

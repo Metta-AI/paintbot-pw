@@ -13,14 +13,14 @@ MAX_MANIFEST_BYTES = 8192
 # contract hashes are what the host binds and decodes by.
 SCHEMA = "paintbot-neural-basic/1"
 SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
-# Schema-2 decoder options: "decoder": {"fire_hold_teammates": true, "sampling": {...},
+# Schema-2 decoder options: "decoder": {"fire_hold_teammates": true (or {"radius": 150}), "sampling": {...},
 # "forbid_objectives": [9, 10], "strafe_legs": {...}, "aim_snap": {"max_angle_deg": 22.5},
 # "steady_shot": {}, "aim_retarget": {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000},
 # "shot_gate": {"max_range": 5250}}.
 # Every key must be one the host knows and every value the declared type, so a bundle
 # asking for an option this release lacks is rejected at staging rather than played
 # without it. The rules here mirror neural_host.nim's exactly.
-DECODER_OPTIONS = {"fire_hold_teammates": bool, "sampling": dict, "forbid_objectives": list, "strafe_legs": dict,
+DECODER_OPTIONS = {"fire_hold_teammates": (bool, dict), "sampling": dict, "forbid_objectives": list, "strafe_legs": dict,
                    "aim_snap": dict, "steady_shot": dict, "aim_retarget": dict, "shot_gate": dict}
 SAMPLING_HEADS = 5
 MIN_SAMPLING_TEMPERATURE, MAX_SAMPLING_TEMPERATURE = 0.01, 10.0
@@ -29,6 +29,9 @@ MAX_STRAFE_RANGE, MAX_STRAFE_LEG_TICKS, MIN_STRAFE_SHOT_LEG_TICKS = 20000, 72, 6
 DEFAULT_AIM_SNAP_DEG, MAX_AIM_SNAP_MILLIDEG = 22.5, 90000
 STEADY_MOVEMENT = 0  # the movement-head index the steady shot stands the seat on
 # decoder.aim_retarget defaults are base.bas's target rule; decoder.shot_gate's is the gun range.
+# decoder.fire_hold_teammates: true = the hold at the gun's hit tolerance (55 units); the object form
+# {"radius": r} turns the hold on at radius r (optional, 55), an integer within 1 .. 2000.
+DEFAULT_FIRE_HOLD_RADIUS, MAX_FIRE_HOLD_RADIUS = 55, 2000
 AIM_RETARGET_DEFAULTS = {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000}
 MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT = 20000, 1000000000
 SHOT_GATE_DEFAULTS = {"max_range": 5250}
@@ -106,6 +109,25 @@ def validate_steady_shot(value):
         raise ValueError("decoder.steady_shot must be an object")
     for key in value:
         raise ValueError("unknown decoder.steady_shot field: " + str(key))
+
+
+def validate_fire_hold(value):
+    """decoder.fire_hold_teammates: a bool, or {"radius": r} with r optional (55), an integer within 1 .. 2000.
+    Returns (enabled, radius)."""
+    if isinstance(value, bool):
+        return value, DEFAULT_FIRE_HOLD_RADIUS
+    if not isinstance(value, dict):
+        raise ValueError("decoder.fire_hold_teammates must be a bool or an object")
+    radius = DEFAULT_FIRE_HOLD_RADIUS
+    for key, field in value.items():
+        if key != "radius":
+            raise ValueError("unknown decoder.fire_hold_teammates field: " + str(key))
+        if not _is_int(field):
+            raise ValueError("decoder.fire_hold_teammates.radius must be an integer")
+        if not 1 <= field <= MAX_FIRE_HOLD_RADIUS:
+            raise ValueError("decoder.fire_hold_teammates.radius must be within 1 .. %d" % MAX_FIRE_HOLD_RADIUS)
+        radius = field
+    return True, radius
 
 
 def validate_aim_retarget(value):
@@ -211,9 +233,12 @@ def unpack_package(data):
         for key, value in decoder.items():
             if key not in DECODER_OPTIONS:
                 raise ValueError("unknown decoder option: " + str(key))
-            if type(value) is not DECODER_OPTIONS[key]:
-                raise ValueError("decoder." + key + " must be a " + DECODER_OPTIONS[key].__name__)
-            if key == "sampling":
+            allowed = DECODER_OPTIONS[key] if isinstance(DECODER_OPTIONS[key], tuple) else (DECODER_OPTIONS[key],)
+            if type(value) not in allowed:
+                raise ValueError("decoder." + key + " must be a " + " or a ".join(t.__name__ for t in allowed))
+            if key == "fire_hold_teammates":
+                validate_fire_hold(value)
+            elif key == "sampling":
                 validate_sampling(value)
             elif key == "forbid_objectives":
                 validate_forbid_objectives(value)

@@ -50,6 +50,9 @@ type
     # mix), goes through neural_contract.holdFire; fireHeld counts the orders held since
     # the last create/reset. Off on every seat = byte-identical to a library without it.
     fireHold: array[Seats,bool]
+    # Hold radius per seat (pw_set_seat_fire_hold_radius, kept across resets): 0 = the
+    # default FireHoldRadius (55), so a zeroed handle is today's rule.
+    fireHoldRadius: array[Seats,int32]
     fireHeld: array[Seats,int32]
     # Decoder sampling (pw_set_seat_sampling, kept across resets like the knobs): the
     # seat's draw stream, seeded from the match seed and the slot exactly as the hosted
@@ -432,7 +435,9 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
           if (mask and 16) != 0: cmd.sneak = caller.sneak
           commands[slot] = cmd
     for slot in 0..<Seats:
-      if env.fireHold[slot] and env.world.holdFire(slot, commands[slot]): inc env.fireHeld[slot]
+      if env.fireHold[slot] and env.world.holdFire(slot, commands[slot],
+          if env.fireHoldRadius[slot] > 0: env.fireHoldRadius[slot] else: FireHoldRadius.int32):
+        inc env.fireHeld[slot]
       env.gateFire(slot, commands[slot])
     combatTelemetry = addr env.stats
     damageScale = addr env.damagePermille
@@ -684,6 +689,26 @@ proc pw_set_seat_fire_hold*(handle: pointer, seat: cint, enabled: int32): cint {
   let env = cast[ptr NativeEnv](handle)
   env.fireHold[seat] = enabled == 1
   0
+
+proc pw_set_seat_fire_hold_radius*(handle: pointer, seat: cint, radius: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The fire hold's radius for one seat (the hosted bundle option
+  ## decoder.fire_hold_teammates {"radius": r}): with radius in 1..2000, the hold
+  ## (pw_set_seat_fire_hold) drops the seat's shoot order when a teammate it can see stands
+  ## within `radius` of the line of fire instead of the gun's hit tolerance (55). 0 restores
+  ## the default 55 (the default; byte-identical to a library without this call). It does
+  ## not turn the hold on or off. Kept across pw_reset. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or radius < 0 or radius > MaxFireHoldRadius: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.fireHoldRadius[seat] = radius
+  0
+
+proc pw_seat_fire_hold_radius*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The seat's effective fire-hold radius (55 unless set). Returns -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats: return -1
+  ready()
+  let r = cast[ptr NativeEnv](handle).fireHoldRadius[seat]
+  cint(if r > 0: r else: FireHoldRadius.int32)
 
 proc pw_seat_fire_held*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
   ## Shoot orders the fire hold dropped for the seat since the last create/reset (0 with

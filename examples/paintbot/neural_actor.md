@@ -145,8 +145,9 @@ a host that also knows v2.
 Decoder options are not contracts. A schema-2 bundle may ask for `decoder.fire_hold_teammates`
 (`neural_basic.md`): the decoded shoot order is dropped when a visible teammate stands in
 the gun's corridor to the aim point. The candidates every head resolves to and both
-contract hashes are unchanged by it; the training ABI's `pw_set_seat_fire_hold` is the
-same rule (`native_env.h`). It may also ask for `decoder.sampling` (`neural_basic.md`):
+contract hashes are unchanged by it; the training ABI's `pw_set_seat_fire_hold` (with
+`pw_set_seat_fire_hold_radius` for the object form's `radius`) is the same rule
+(`native_env.h`). It may also ask for `decoder.sampling` (`neural_basic.md`):
 the listed heads are drawn from `softmax(logits / temperature)` on a seat-owned SplitMix64
 stream seeded from the match seed and the slot (`neural_contract.sampleActions`,
 `samplingRng`), the rest keep argmax; the candidates and hashes are again unchanged, and

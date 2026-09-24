@@ -8,7 +8,7 @@ import unittest
 import zipfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
-from neural_package import (unpack_package, validate_aim_retarget, validate_shot_gate, MAX_MODEL_BYTES,
+from neural_package import (unpack_package, validate_aim_retarget, validate_shot_gate, validate_fire_hold, MAX_MODEL_BYTES,
                             AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
                             MAX_SHOT_GATE_RANGE)
 
@@ -185,6 +185,32 @@ class PackageTests(unittest.TestCase):
         for forbid in ([0], [0, 9, 10], [10, 0]):
             with self.assertRaisesRegex(ValueError, "steady_shot needs movement index 0"):
                 unpack_package(package({**schema2, "decoder": {"steady_shot": {}, "forbid_objectives": forbid}}))
+
+    def test_fire_hold_radius_option(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        # The boolean form is unchanged; the object form turns the hold on, radius 55 by default.
+        self.assertEqual(validate_fire_hold(True), (True, 55))
+        self.assertEqual(validate_fire_hold(False), (False, 55))
+        self.assertEqual(validate_fire_hold({}), (True, 55))
+        self.assertEqual(validate_fire_hold({"radius": 150}), (True, 150))
+        for hold in (True, False, {}, {"radius": 150}, {"radius": 1}, {"radius": 2000}, {"radius": 55}):
+            _, _, manifest = unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": hold}}))
+            self.assertEqual(manifest["decoder"]["fire_hold_teammates"], hold)
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {"fire_hold_teammates": {"radius": 150}}}))
+        for hold, message in (({"radius": 0}, "radius must be within 1 .. 2000"), ({"radius": -150}, "within"),
+                              ({"radius": 2001}, "within"), ({"radius": 10 ** 12}, "within"),
+                              ({"radius": 150.0}, "radius must be an integer"), ({"radius": "150"}, "must be an integer"),
+                              ({"radius": True}, "must be an integer"), ({"radius": None}, "must be an integer"),
+                              ({"range": 150}, "unknown decoder.fire_hold_teammates field"),
+                              (150, "must be a bool or a dict"), ([150], "must be a bool or a dict"), ("true", "must be a bool")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(hold)):
+                unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": hold}}))
+
+    def test_fire_hold_radius_limits_match_the_engine(self):
+        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
+        self.assertRegex(source, r"(?m)^  MaxFireHoldRadius\* = 2000'i32$")
+        self.assertRegex(source, r"(?m)^static: doAssert FireHoldRadius == 55$")
 
     def test_aim_retarget_option(self):
         schema2 = {"schema": "paintbot-neural-basic/2"}

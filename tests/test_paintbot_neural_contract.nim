@@ -262,6 +262,29 @@ suite "Decoder fire hold (bundle option, not a contract change)":
       w.cogs[slot].shield = 0
       w.equipment[slot].armor = 0
     (s, m, t)
+  test "the hold radius (decoder.fire_hold_teammates {radius}): default 55, a wider radius holds a teammate beside the line":
+    var w = newWorld(2026, 2400)
+    let (s, m, t) = w.lane(0, 2, 1)
+    let command = Command(walk: true, goal: s, aim: t, shoot: true)
+    for (offset, heldAt55, heldAt150) in [(0, true, true), (55, true, true), (56, false, true), (100, false, true),
+                                          (150, false, true), (151, false, false), (-150, false, true), (-151, false, false)]:
+      w.cogs[2].pos = point(m.x.int, m.z.int + offset)
+      checkpoint $offset
+      check w.teammateInLine(0, t) == heldAt55
+      check w.teammateInLine(0, t, FireHoldRadius.int32) == heldAt55
+      check w.teammateInLine(0, t, 150) == heldAt150
+      var a = command
+      var b = command
+      check w.holdFire(0, a) == heldAt55 and a.shoot == not heldAt55
+      check w.holdFire(0, b, 150) == heldAt150 and b.shoot == not heldAt150
+    # Still only up to the aim point and never behind the shooter, whatever the radius.
+    w.cogs[2].pos = point(t.x.int + 300, t.z.int)
+    check not w.teammateInLine(0, t, 2000)
+    w.cogs[2].pos = point(s.x.int - 300, s.z.int)
+    check not w.teammateInLine(0, t, 2000)
+    # The widest radius is a valid argument (every product still fits in 63 bits).
+    w.cogs[2].pos = point(m.x.int, m.z.int + 100)
+    check w.teammateInLine(0, t, MaxFireHoldRadius)
   test "a teammate in the line of fire holds the order; off the line or beyond the target it fires":
     var w = newWorld(2026, 2400)
     let shooter = 0

@@ -53,6 +53,11 @@ const
   # ray sample against Radius) of the segment from the seat to the aim the order leaves,
   # and no farther along it than the aim point itself.
   FireHoldRadius* = Radius
+  # decoder.fire_hold_teammates {"radius": r}: pw-diag4 found 97-100 % of the v7
+  # champion's gun friendly fire comes from teammates outside the 55-unit hold at the
+  # order tick who walk into the ray during the windup; a wider radius holds those
+  # orders. 1 .. MaxFireHoldRadius; the default (and the boolean form) stays Radius.
+  MaxFireHoldRadius* = 2000'i32
 static: doAssert FireHoldRadius == 55
 static: doAssert ObservationSizeV2 == 506 and ObservationContractV2 == "paintbot-pw.rules37.obs.v2.float" & $ObservationSizeV2
 
@@ -402,10 +407,11 @@ proc orderedAim*(w: World, slot: int, command: Command): Point =
   elif command.walk and command.goal != w.cogs[slot].pos: command.goal
   else: w.cogs[slot].aim
 
-proc teammateInLine*(w: World, slot: int, aim: Point): bool =
+proc teammateInLine*(w: World, slot: int, aim: Point, radius = FireHoldRadius.int32): bool =
   ## Whether a teammate's body, as the seat itself can see it (fog-gated, apparent team,
-  ## and the gun's own line-of-sight test), lies within FireHoldRadius of the segment
-  ## from the seat to `aim` and no farther along it than `aim`. Integer geometry only.
+  ## and the gun's own line-of-sight test), lies within `radius` (default FireHoldRadius,
+  ## the gun's hit tolerance) of the segment from the seat to `aim` and no farther along
+  ## it than `aim`. Integer geometry only.
   let origin = w.cogs[slot].pos
   let dx = int64(aim.x) - origin.x
   let dz = int64(aim.z) - origin.z
@@ -420,20 +426,22 @@ proc teammateInLine*(w: World, slot: int, aim: Point): bool =
     let along = ex*dx + ez*dz
     if along < 0 or along > len2: continue
     # perpendicular^2 = e2 - along^2/len2 <= R^2  <=>  e2*len2 - along^2 <= R^2*len2
-    # (|e|^2, |d|^2 < 2^27 on a 6400 x 4000 map, so every product fits in 63 bits).
+    # (|e|^2, |d|^2 < 2^27 on a 6400 x 4000 map and R <= MaxFireHoldRadius < 2^11, so
+    # every product fits in 63 bits).
     let e2 = ex*ex + ez*ez
-    if e2*len2 - along*along > FireHoldRadius.int64*FireHoldRadius*len2: continue
+    if e2*len2 - along*along > radius.int64*radius*len2: continue
     if visionRulesVersion >= 9 and not w.lineClear(origin, p): continue
     return true
   false
 
-proc holdFire*(w: World, slot: int, command: var Command): bool =
+proc holdFire*(w: World, slot: int, command: var Command, radius = FireHoldRadius.int32): bool =
   ## The decoder fire hold: drop the shoot order when a teammate is in the line of fire
-  ## (teammateInLine of the aim the order leaves). The aim, movement and every other part
-  ## of the command are untouched, so the world still turns to face the target. Applies to
-  ## the shoot order whichever weapon it would fire. Returns whether the order was held.
+  ## (teammateInLine of the aim the order leaves, within `radius` of it). The aim,
+  ## movement and every other part of the command are untouched, so the world still turns
+  ## to face the target. Applies to the shoot order whichever weapon it would fire.
+  ## Returns whether the order was held.
   if not command.shoot or w.cogs[slot].hp <= 0: return false
-  if not w.teammateInLine(slot, w.orderedAim(slot, command)): return false
+  if not w.teammateInLine(slot, w.orderedAim(slot, command), radius): return false
   command.shoot = false
   true
 
