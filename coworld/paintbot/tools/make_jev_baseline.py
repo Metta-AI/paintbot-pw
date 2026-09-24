@@ -423,6 +423,20 @@ if jevInit = 0 then
   useCoverSpot = 0
   kCoverR = 200
   kCoverMin = 40
+  ' useSteady: a shot's ray leaves five ticks after the order, from wherever the shooter then
+  ' stands, along the direction locked at the order. The baseline dodges through its windups and
+  ' aims off its own expected drift; the league leader's v15 fires every shot standing still and
+  ' hits 37% to v10's 27%. With useSteady the cog aims at the target itself and stands still from
+  ' the order until the ray leaves.
+  useSteady = 0
+  ' kSteadyR2 > 0 limits steady shots to targets within that squared distance; farther targets
+  ' are shot on the move as before, since standing still for a long, unlikely shot is exposure.
+  kSteadyR2 = 0
+  ' useTight: the league leader's cogs die a median 2 m from a teammate, ours 9 m, and it puts 3.7
+  ' guns on each of our victims to our 2.2. While an enemy is in view, a cog keeps within kTightR
+  ' of the centre of the teammates it can see within 20 m, leaning toward its goal.
+  useTight = 0
+  kTightR = 500
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -1077,6 +1091,45 @@ end if
 
 """
 
+STEADY_AIM_OLD = """  if inContact and worldTick >= pathUntil then
+    tx = tx - legX * 5
+    ty = ty - legY * 5
+  else
+    tx = tx - myVX * 5
+    ty = ty - myVY * 5
+  end if
+"""
+STEADY_AIM_NEW = """  stFar = 0
+  if kSteadyR2 > 0 then
+    dx = playerX(best) - selfX
+    dy = playerY(best) - selfY
+    if dx * dx + dy * dy > kSteadyR2 then
+      stFar = 1
+    end if
+  end if
+  if useSteady = 0 or stFar then
+    if inContact and worldTick >= pathUntil then
+      tx = tx - legX * 5
+      ty = ty - legY * 5
+    else
+      tx = tx - myVX * 5
+      ty = ty - myVY * 5
+    end if
+  end if
+"""
+
+STEADY = """' ---- Steady: stand still from a gun order until its ray leaves. ----
+if useSteady and hasSpray = 0 then
+  if (gunWait = 25 or gunWait = 73) and stFar = 0 then
+    stUntil = worldTick + 6
+  end if
+  if worldTick < stUntil then
+    walkTo(selfX, selfY)
+  end if
+end if
+
+"""
+
 FOCUS = """' ---- Focus fire. ----
 if useFocus and foesSeen > 0 then
   fcX = selfX
@@ -1250,7 +1303,38 @@ LIMITS = (
 
 
 def overrides_and_ask() -> str:
-    return """\' ---- Regroup. ----
+    return """\' ---- Tight: keep within kTightR of the visible squad's centre while an enemy is in view. ----
+if useTight and best >= 0 and not carrying then
+  tgX = selfX
+  tgY = selfY
+  tgN = 1
+  i = selfTeam
+  while i < 16
+    if i <> selfId and visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      if dx * dx + dy * dy < 4000000 then
+        tgX = tgX + playerX(i)
+        tgY = tgY + playerY(i)
+        tgN = tgN + 1
+      end if
+    end if
+    i = i + 2
+  wend
+  if tgN > 1 then
+    tgX = tgX / tgN
+    tgY = tgY / tgN
+    dx = goalX - tgX
+    dy = goalY - tgY
+    isqrt(dx * dx + dy * dy)
+    if root > kTightR then
+      goalX = tgX + dx * kTightR / root
+      goalY = tgY + dy * kTightR / root
+      holding = 0
+    end if
+  end if
+end if
+\' ---- Regroup. ----
 ' A cog with no ally within 15 m, while an enemy was seen in the last two seconds, walks to its
 ' nearest visible ally (up to 40 m away) instead of on toward the objective.
 if useRegroup and not carrying then
@@ -1920,6 +2004,8 @@ def build(base: str) -> str:
     s = splice(s, "' Facing with nothing to shoot: sweep, then turn to speech and sound.\n", overrides_and_ask())
     s = splice(s, "' Quiet approach to the objective when nothing is in sight but something was heard.\n", WEAPONS)
     s = splice(s, "' Remember seen supplies for ten seconds and equip when it is safe to.\n", COVER_SPOT)
+    s = swap(s, STEADY_AIM_OLD, STEADY_AIM_NEW)
+    s = splice(s, "' Quiet approach to the objective when nothing is in sight but something was heard.\n", STEADY)
     # A spray can joins the supplies worth walking to, when useSpray says a fight calls for one.
     s = swap(s, "      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < 3) or "
                 "(kind = 3 and armorHp < 3 and selfHp = 3)\n",

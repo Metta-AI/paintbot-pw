@@ -213,6 +213,10 @@ suite "Jev-advised BASIC baseline":
       "high ground": @[("useHigh", 1)],
       "cover spot": @[("useCoverSpot", 1)],
       "cover spot and high ground": @[("useCoverSpot", 1), ("useHigh", 1)],
+      "steady": @[("useSteady", 1)],
+      "tight": @[("useTight", 1)],
+      "steady and tight": @[("useSteady", 1), ("useTight", 1)],
+      "steady within 40 m": @[("useSteady", 1), ("kSteadyR2", 16000000)],
       "champion and high ground, holding": @[("useKite", 1), ("kKiteMargin", 2), ("useRush", 1),
           ("useSmartGrenade", 1), ("useHigh", 1), ("kHighHold", 1)],
     }
