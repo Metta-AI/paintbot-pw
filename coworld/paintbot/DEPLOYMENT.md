@@ -583,3 +583,27 @@ produced the same replay file as the hosted episode.
   The two replay files are identical (3032 ticks, hash 3187462050). Every neural seat log carries
   `aim_snap=22.500deg,cos_q15=30274 aim_snaps=N steady_shot=on steady_shots=N steady_ticks=N`
   next to the forbid, fire-hold and sampling telemetry.
+
+## Decoder options `aim_retarget` and `shot_gate` — 0.3.42
+
+#88 adds two more per-bundle decoder options under manifest schema `paintbot-neural-basic/2`. The option
+reference is in `examples/paintbot/neural_basic.md`. Bundles without the keys decode exactly as before.
+Decoder-only: no `sim.nim`, `game.nim`, host or BASIC-path change, rules stay 39, replays and hashes of earlier
+versions are unaffected, and the league was not paused.
+
+Deployed from main `995263c` (#88 on top of #87's docs; nothing else has landed since 0.3.41). build.yml run
+35961072898 was green on all three OSes. One Deploy Coworld run, 35962923095 (`Deploy Coworld 0.3.42 (upload)`).
+Before dispatch, the pre-dispatch check found no other deploy run in flight or in the previous 30 minutes, and
+`next-version` returned 0.3.42 in the same minute. Version 0.3.42 is certified and canonical as
+`cow_338e99e7-4512-4bf7-8428-703afe9e32e3`
+(manifest `sha256:8a1a4d579ee61c566870111ae3174067951899fcc9c235200d4aba0cfdacc445`). Hosted smoke passed
+(`ereq_190a62d4`, `ereq_5cc2888e`, `ereq_850217a2`, `ereq_a7a19775`, `ereq_bce654d9`). The league lock reads
+`canonical_game_version` 0.3.42; round #1568 is the first created after the promotion.
+
+Neural canaries, seed 2026 against the plain BASIC filler, all 16 seats exit 0 with hash-verified replays:
+
+- v1 preserved: the contract-v1 bundle ran as `ereq_fcd5b4ae`. Its replay file is identical to 0.3.41's
+  `ereq_361dbec0` (1199 ticks, hash 7539732).
+- live champion preserved: `daveey-pw-neural:v6` (fire hold, sampling, forbid, aim_snap, steady_shot) ran as
+  `ereq_4e72887d`. Its replay file is identical to its 0.3.41 canary `ereq_c61f7ffb` (4673 ticks, hash
+  4040610610).
