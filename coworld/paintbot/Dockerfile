@@ -1,8 +1,7 @@
 # syntax=docker/dockerfile:1
-FROM ubuntu:24.04 AS compiler
-RUN sed -i 's#security.ubuntu.com#archive.ubuntu.com#' /etc/apt/sources.list.d/ubuntu.sources \
-    && apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc g++ git curl ca-certificates xz-utils python3
+FROM python:3.12-slim AS compiler
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc g++ git curl ca-certificates xz-utils
 RUN curl -fsSL https://github.com/nim-lang/nightlies/releases/download/2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef/nim-2.2.10-linux_x64.tar.xz | tar xJ -C /opt
 ENV PATH=/opt/nim-2.2.10/bin:$PATH
 WORKDIR /src
