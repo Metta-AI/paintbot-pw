@@ -441,6 +441,9 @@ if jevInit = 0 then
   ' but a ray only hits bodies within 55 cm of it. The league leader fights side by side about 1 m
   ' apart, which a 95 cm rule reads as blocked; a narrower width keeps a close line shooting.
   kHoldW = 95
+  ' kLead: ticks of the target's last-tick motion the aim leads by. The baseline uses 6 (the windup);
+  ' the league leader's v15 leads about 1 and hits 45% to our 41%, since targets dodge mid-windup.
+  kLead = 6
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -2009,6 +2012,8 @@ def build(base: str) -> str:
     s = splice(s, "' Quiet approach to the objective when nothing is in sight but something was heard.\n", WEAPONS)
     s = splice(s, "' Remember seen supplies for ten seconds and equip when it is safe to.\n", COVER_SPOT)
     s = swap(s, STEADY_AIM_OLD, STEADY_AIM_NEW)
+    s = swap(s, "    tx = tx + (tx - oldX(best)) * 6\n    ty = ty + (ty - oldY(best)) * 6\n",
+             "    tx = tx + (tx - oldX(best)) * kLead\n    ty = ty + (ty - oldY(best)) * kLead\n")
     s = swap(s, "        if along > 0 and along < reach and across < 95 then\n",
              "        if along > 0 and along < reach and across < kHoldW then\n")
     s = splice(s, "' Quiet approach to the objective when nothing is in sight but something was heard.\n", STEADY)
