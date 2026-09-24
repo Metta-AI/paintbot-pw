@@ -186,6 +186,39 @@ int pw_set_seat_aim_snap(void *handle, int seat, int32_t max_angle_millideg);
 int pw_seat_aim_snap_stats(void *handle, int seat, int32_t *stats);
 int pw_set_seat_steady_shot(void *handle, int seat, int32_t enabled);
 int pw_seat_steady_stats(void *handle, int seat, int32_t *stats);
+/* Decoder aim retarget (additive; the hosted bundle option decoder.aim_retarget).
+ * pw_set_seat_aim_retarget(handle, seat, 1, max_range, hp_weight, carry_weight) with
+ * max_range in 1..20000 and both weights in 0..1000000000 (5250, 160000, 2500000 = base.bas's
+ * rule and the bundle defaults): on every pw_step a live caller-decoded seat's shoot order
+ * with an identity or compass aim (1..24) takes the aim index (1..16) of the visible apparent
+ * enemy identity (the observation's identity block: fog-gated, apparent team) minimising
+ * d^2 - (3 - hp) * hp_weight - carrying * carry_weight among those with d <= max_range, d
+ * measured from the seat to the identity's aim candidate exactly as pw_action_candidates
+ * reports it for the step's movement and sneak heads (contract v2: the lead point); ties go
+ * to the lower identity; none qualifies = the order stands. enabled 0 = off (the default;
+ * byte-identical; the other arguments are then ignored). Kept across pw_reset; -1 bad args.
+ * pw_seat_aim_retarget_stats: int32[3] = {decisions whose aim it replaced (since
+ * create/reset), aim index executed on the last pw_step or -1 if the caller's stood,
+ * max_range or 0 when off}; -1 bad args.
+ * Decoder shot gate (additive; decoder.shot_gate). pw_set_seat_shot_gate(handle, seat,
+ * max_range) with max_range in 1..20000 (5250 = the bundle default): on every pw_step a live
+ * caller-decoded seat's shoot order, as it stands after the aim retarget and the aim snap,
+ * becomes no shot when its aim is still a compass index (17..24; no snap configured, or no
+ * enemy in the snap's cone), when the snap aimed it at an enemy whose body lies beyond
+ * max_range, or when it is an identity aim whose aim candidate lies beyond max_range. A keep
+ * aim (0), and an identity aim within range or that no visible body carries, pass (pw-diag3's
+ * --shot-gate). A dropped decision keeps its pre-snap aim head, so the strafe, the steady
+ * shot and the fire hold see a decision without a shot. 0 = off (the default;
+ * byte-identical). Kept across pw_reset; -1 bad args. pw_seat_shot_gate_stats: int32[3] =
+ * {shoot orders dropped (since create/reset), shoot head executed on the last pw_step (0) or
+ * -1 if the caller's stood, max_range or 0 when off}; -1 bad args.
+ * Order inside pw_step for one seat: aim retarget, aim snap, shot gate, strafe, steady shot,
+ * decode, fire hold. */
+int pw_set_seat_aim_retarget(void *handle, int seat, int32_t enabled, int32_t max_range,
+                             int32_t hp_weight, int32_t carry_weight);
+int pw_seat_aim_retarget_stats(void *handle, int seat, int32_t *stats);
+int pw_set_seat_shot_gate(void *handle, int seat, int32_t max_range);
+int pw_seat_shot_gate_stats(void *handle, int seat, int32_t *stats);
 /* Observation contract selection (additive). pw_create_observation is pw_create with the
  * observation contract chosen, kept across pw_reset: 1 = v1
  * "paintbot-pw.rules37.obs.v1.float448" (identical to pw_create), 2 = v2

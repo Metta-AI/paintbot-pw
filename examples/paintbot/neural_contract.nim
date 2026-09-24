@@ -905,6 +905,159 @@ proc steadyShotActions*(w: World, slot: int, actions: var array[ActionSizes.len,
   else: return ssNone
   actions[0] = SteadyMovement
 
+# Decoder aim retarget (bundle option decoder.aim_retarget, schema 2; not a contract
+# change): the pw-diag3 rules-39 diagnosis found target choice decides v4 against
+# base.bas. Only 41 % of v4's rays went at the enemy base.bas's own rule picks; the
+# others hit 0.15. Every live-field opponent picks by that rule 85-88 % of the time.
+# With the option on, every shoot order the policy makes (shoot head 1, identity or
+# compass aim; a keep aim, index 0, is left alone) takes the aim index of the visible
+# apparent enemy identity with the smallest
+#   cost = d^2 - (3 - hp) * hp_weight - carrying * carry_weight
+# among those with d <= max_range, where d is measured from the seat's position to the
+# identity's aim candidate under the seat's action contract (v2: the lead-compensated
+# point, with the seat's own planned step from the movement and sneak heads as they
+# stand, exactly what pw_action_candidates reports). The inputs are the seat's own
+# observation identity block (present, apparent team -1, hp, carrying; observedBodies)
+# and its aim candidates: no hidden state. Ties go to the lower identity. When no enemy
+# qualifies the order stands (and the aim snap, which runs next, may still snap it).
+# Stateless, no draws. The defaults are base.bas's rule and diag3_run.py --retarget.
+type
+  AimRetargetOptions* = object
+    enabled*: bool
+    maxRange*: int32     # 1 .. MaxRetargetRange
+    hpWeight*: int32     # 0 .. MaxRetargetWeight, per missing hp point
+    carryWeight*: int32  # 0 .. MaxRetargetWeight, for an enemy carrying a heart
+
+const
+  DefaultRetargetRange* = 5250'i32         # GunRange
+  DefaultRetargetHpWeight* = 160000'i32    # base.bas: (3 - hp) * 160000
+  DefaultRetargetCarryWeight* = 2500000'i32  # base.bas: carrier bonus
+  MaxRetargetRange* = 20000'i32
+  MaxRetargetWeight* = 1_000_000_000'i32
+  RetargetFullHp* = 3'i64
+static: doAssert DefaultRetargetRange == GunRange
+
+proc aimRetargetOptionsError*(maxRange, hpWeight, carryWeight: int32): string =
+  ## "" when the parameters are usable; otherwise why not (the host and the native ABI
+  ## reject the same values).
+  if maxRange < 1 or maxRange > MaxRetargetRange: return "max_range must be within 1 .. " & $MaxRetargetRange
+  if hpWeight < 0 or hpWeight > MaxRetargetWeight: return "hp_weight must be within 0 .. " & $MaxRetargetWeight
+  if carryWeight < 0 or carryWeight > MaxRetargetWeight: return "carry_weight must be within 0 .. " & $MaxRetargetWeight
+  ""
+
+proc aimRetargetOptions*(maxRange = DefaultRetargetRange, hpWeight = DefaultRetargetHpWeight,
+    carryWeight = DefaultRetargetCarryWeight): AimRetargetOptions =
+  ## The enabled option for valid parameters (the defaults are base.bas's); ValueError otherwise.
+  let problem = aimRetargetOptionsError(maxRange, hpWeight, carryWeight)
+  if problem.len > 0: raise newException(ValueError, "decoder.aim_retarget." & problem)
+  AimRetargetOptions(enabled: true, maxRange: maxRange, hpWeight: hpWeight, carryWeight: carryWeight)
+
+proc plannedOwnStep(w: World, slot: int, actions: array[ActionSizes.len, int32],
+    version: ActionContractVersion): Point =
+  ## The own step a v2 identity candidate subtracts for these heads: the planned move of
+  ## the movement and sneak heads (pw_action_candidates' rule); zero under v1.
+  if version != acV2: return Point()
+  let (found, goal) = w.goalCandidate(slot, actions[0].int)
+  w.plannedStep(slot, if found: goal else: w.cogs[slot].pos, actions[4] != 0)
+
+proc aimRetargetActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
+    bodies: array[Seats, int], version: ActionContractVersion, memory: AimMemory,
+    options: AimRetargetOptions): bool =
+  ## Apply the aim retarget to the seat's selected head indices on the pre-step world,
+  ## before the aim snap and the decode: returns whether the aim head was replaced (by
+  ## an identity index 1..16 other than the one it held). Only a live seat's shoot order
+  ## (head 2 = 1) with an identity or compass aim (1..24) is considered. `bodies` are
+  ## the seat's apparent identities (observedBodies) and `memory` its aim memory, the
+  ## ones the decode reads. Options disabled = untouched.
+  if not options.enabled or actions[2] == 0 or actions[1] == 0: return false
+  let me = w.cogs[slot]
+  if me.hp <= 0: return false
+  let ownStep = w.plannedOwnStep(slot, actions, version)
+  let reach2 = int64(options.maxRange) * options.maxRange
+  var best = -1
+  var bestCost = 0'i64
+  for identity in 0..<Seats:
+    let body = bodies[identity]
+    if body < 0 or w.observedTeam(slot, body) == team(slot): continue
+    let (found, aim) = w.aimCandidate(slot, identity + 1, bodies, version, memory, ownStep)
+    if not found: continue
+    let d2 = distance2(me.pos, aim)
+    if d2 > reach2: continue
+    let other = w.cogs[body]
+    let cost = d2 - (RetargetFullHp - other.hp) * options.hpWeight -
+      (if other.carrying: int64(options.carryWeight) else: 0'i64)
+    if best < 0 or cost < bestCost:
+      best = identity
+      bestCost = cost
+  if best < 0 or actions[1] == int32(best + 1): return false
+  actions[1] = int32(best + 1)
+  true
+
+# Decoder shot gate (bundle option decoder.shot_gate, schema 2; not a contract change):
+# after retarget, 9 % of v4's rays were still compass shots at nothing within range,
+# hitting 0.016; each costs a cooldown and a six-tick steady stand. With the option on,
+# a live seat's shoot order, as it stands after the aim retarget and the aim snap, is
+# dropped (shoot head 0) when
+#   - its aim is still a compass index (17..24): no snap is configured, or the snap found
+#     no visible enemy in its cone;
+#   - the aim snap turned it into an enemy identity whose body lies beyond max_range;
+#   - it is an identity aim (the policy's or the retarget's) whose aim candidate lies
+#     beyond max_range, measured as the retarget measures it.
+# A keep aim (index 0), and an identity aim within range or one no visible body carries,
+# pass: exactly pw-diag3's `--shot-gate` counterfactual (diag3_run.py gate_drop), with
+# the snap test read from the snap itself (observedBodies) instead of the diag state. A
+# dropped order is the decision without the shot: its aim head returns to what it was
+# before the snap (the snap only rewrites shoot orders), so the strafe, the steady
+# shot, the decode and the fire hold all see a decision that never ordered a shot.
+# Stateless, no draws.
+type
+  ShotGateOptions* = object
+    enabled*: bool
+    maxRange*: int32  # 1 .. MaxShotGateRange
+
+const
+  DefaultShotGateRange* = 5250'i32  # GunRange
+  MaxShotGateRange* = 20000'i32
+static: doAssert DefaultShotGateRange == GunRange
+
+proc shotGateOptionsError*(maxRange: int32): string =
+  ## "" when the range is usable; otherwise why not (host and native ABI agree).
+  if maxRange < 1 or maxRange > MaxShotGateRange: return "max_range must be within 1 .. " & $MaxShotGateRange
+  ""
+
+proc shotGateOptions*(maxRange = DefaultShotGateRange): ShotGateOptions =
+  ## The enabled option for a valid range; ValueError otherwise.
+  let problem = shotGateOptionsError(maxRange)
+  if problem.len > 0: raise newException(ValueError, "decoder.shot_gate." & problem)
+  ShotGateOptions(enabled: true, maxRange: maxRange)
+
+proc shotGateActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
+    beforeSnap: array[ActionSizes.len, int32], snapped: bool, bodies: array[Seats, int],
+    version: ActionContractVersion, memory: AimMemory, options: ShotGateOptions): bool =
+  ## Apply the shot gate to the heads as they stand after the aim snap (`snapped`: the
+  ## snap replaced the aim; `beforeSnap`: the heads it received): returns whether the
+  ## shoot order was dropped, in which case `actions` becomes `beforeSnap` with shoot
+  ## head 0. Options disabled = untouched.
+  if not options.enabled or actions[2] == 0: return false
+  let me = w.cogs[slot]
+  if me.hp <= 0: return false
+  let aim = actions[1]
+  let reach2 = int64(options.maxRange) * options.maxRange
+  var drop = false
+  if aim >= AimFirstCompass.int32:
+    drop = true
+  elif aim >= 1:
+    if snapped:
+      drop = distance2(me.pos, w.cogs[bodies[aim - 1]].pos) > reach2
+    else:
+      let (found, point) = w.aimCandidate(slot, aim.int, bodies, version, memory,
+        w.plannedOwnStep(slot, actions, version))
+      drop = found and distance2(me.pos, point) > reach2
+  if not drop: return false
+  actions = beforeSnap
+  actions[2] = 0
+  true
+
 proc decodeLogits*(w: World, slot: int, logits: openArray[float32],
     bodies: array[Seats, int], version: ActionContractVersion,
     memory: AimMemory, fireHold = false): Command =

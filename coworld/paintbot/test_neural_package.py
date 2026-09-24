@@ -8,7 +8,9 @@ import unittest
 import zipfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
-from neural_package import unpack_package, MAX_MODEL_BYTES
+from neural_package import (unpack_package, validate_aim_retarget, validate_shot_gate, MAX_MODEL_BYTES,
+                            AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
+                            MAX_SHOT_GATE_RANGE)
 
 
 def package(overrides=None, extra=None):
@@ -183,6 +185,66 @@ class PackageTests(unittest.TestCase):
         for forbid in ([0], [0, 9, 10], [10, 0]):
             with self.assertRaisesRegex(ValueError, "steady_shot needs movement index 0"):
                 unpack_package(package({**schema2, "decoder": {"steady_shot": {}, "forbid_objectives": forbid}}))
+
+    def test_aim_retarget_option(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        # The defaults are exactly base.bas's rule and pw-diag3's counterfactual.
+        self.assertEqual(validate_aim_retarget({}), {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000})
+        self.assertEqual(validate_aim_retarget({"hp_weight": 0}), {"max_range": 5250, "hp_weight": 0, "carry_weight": 2500000})
+        for retarget in ({}, {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000}, {"max_range": 1},
+                         {"max_range": 20000}, {"hp_weight": 0, "carry_weight": 0},
+                         {"hp_weight": 1000000000, "carry_weight": 1000000000}):
+            _, _, manifest = unpack_package(package({**schema2, "decoder": {"aim_retarget": retarget}}))
+            self.assertEqual(manifest["decoder"]["aim_retarget"], retarget)
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {"aim_retarget": {}}}))
+        for retarget, message in (({"max_range": 0}, "max_range must be within 1 .. 20000"),
+                                  ({"max_range": -5250}, "max_range must be within"), ({"max_range": 20001}, "max_range must be within"),
+                                  ({"hp_weight": -1}, "hp_weight must be within 0 .. 1000000000"),
+                                  ({"hp_weight": 1000000001}, "hp_weight must be within"),
+                                  ({"carry_weight": -1}, "carry_weight must be within 0 .. 1000000000"),
+                                  ({"carry_weight": 2 ** 40}, "carry_weight must be within"),
+                                  ({"max_range": 5250.0}, "max_range must be an integer"), ({"max_range": "5250"}, "must be an integer"),
+                                  ({"max_range": True}, "must be an integer"), ({"hp_weight": 1.5}, "hp_weight must be an integer"),
+                                  ({"carry_weight": None}, "carry_weight must be an integer"),
+                                  ({"range": 5250}, "unknown decoder.aim_retarget field"), (True, "must be a dict"),
+                                  ([], "must be a dict"), (5250, "must be a dict")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(retarget)):
+                unpack_package(package({**schema2, "decoder": {"aim_retarget": retarget}}))
+
+    def test_shot_gate_option(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        self.assertEqual(validate_shot_gate({}), {"max_range": 5250})
+        for gate in ({}, {"max_range": 5250}, {"max_range": 1}, {"max_range": 20000}):
+            _, _, manifest = unpack_package(package({**schema2, "decoder": {"shot_gate": gate}}))
+            self.assertEqual(manifest["decoder"]["shot_gate"], gate)
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {"shot_gate": {}}}))
+        for gate, message in (({"max_range": 0}, "max_range must be within 1 .. 20000"), ({"max_range": -1}, "within"),
+                              ({"max_range": 20001}, "within"), ({"max_range": 5250.5}, "must be an integer"),
+                              ({"max_range": "5250"}, "must be an integer"), ({"max_range": False}, "must be an integer"),
+                              ({"range": 5250}, "unknown decoder.shot_gate field"), (True, "must be a dict"),
+                              ([], "must be a dict"), (5250, "must be a dict")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(gate)):
+                unpack_package(package({**schema2, "decoder": {"shot_gate": gate}}))
+        # The full lever set pw-diag3 measured, together.
+        decoder = {"fire_hold_teammates": True, "sampling": {"mode": "categorical"}, "forbid_objectives": [9, 10],
+                   "aim_snap": {"max_angle_deg": 22.5}, "steady_shot": {}, "strafe_legs": {}, "aim_retarget": {},
+                   "shot_gate": {"max_range": 5250}}
+        _, _, manifest = unpack_package(package({**schema2, "decoder": decoder}))
+        self.assertEqual(manifest["decoder"], decoder)
+
+    def test_retarget_and_gate_defaults_match_the_engine(self):
+        # neural_contract.nim holds the host's defaults and limits; the packager must agree.
+        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
+        consts = {name: int(value.replace("_", "")) for name, value in
+                  re.findall(r"^  (\w+)\* = ([0-9_]+)'i32", source, re.M)}
+        self.assertEqual(AIM_RETARGET_DEFAULTS, {"max_range": consts["DefaultRetargetRange"],
+                                                 "hp_weight": consts["DefaultRetargetHpWeight"],
+                                                 "carry_weight": consts["DefaultRetargetCarryWeight"]})
+        self.assertEqual((MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT), (consts["MaxRetargetRange"], consts["MaxRetargetWeight"]))
+        self.assertEqual(SHOT_GATE_DEFAULTS, {"max_range": consts["DefaultShotGateRange"]})
+        self.assertEqual(MAX_SHOT_GATE_RANGE, consts["MaxShotGateRange"])
 
 
 if __name__ == "__main__":
