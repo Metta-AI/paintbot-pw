@@ -447,6 +447,9 @@ if jevInit = 0 then
   ' kHpBias: how much closer (in cm^2) a target counts per missing heart. The league leader's v15
   ' shoots the nearest clear enemy 96% of the time, our baseline 86%.
   kHpBias = 160000
+  ' kStillBias: a target that did not move last tick has most likely started a steady shot of its
+  ' own and will stand for the rest of our windup. It counts kStillBias cm^2 closer.
+  kStillBias = 0
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -2015,7 +2018,12 @@ def build(base: str) -> str:
     s = splice(s, "' Quiet approach to the objective when nothing is in sight but something was heard.\n", WEAPONS)
     s = splice(s, "' Remember seen supplies for ten seconds and equip when it is safe to.\n", COVER_SPOT)
     s = swap(s, STEADY_AIM_OLD, STEADY_AIM_NEW)
-    s = swap(s, "      cost = d2 - (3 - playerHp(i)) * 160000\n", "      cost = d2 - (3 - playerHp(i)) * kHpBias\n")
+    s = swap(s, "      cost = d2 - (3 - playerHp(i)) * 160000\n", "      cost = d2 - (3 - playerHp(i)) * kHpBias\n"
+             "      if kStillBias > 0 and lastSeen(i) = worldTick - 1 then\n"
+             "        if playerX(i) = oldX(i) and playerY(i) = oldY(i) then\n"
+             "          cost = cost - kStillBias\n"
+             "        end if\n"
+             "      end if\n")
     s = swap(s, "    tx = tx + (tx - oldX(best)) * 6\n    ty = ty + (ty - oldY(best)) * 6\n",
              "    tx = tx + (tx - oldX(best)) * kLead\n    ty = ty + (ty - oldY(best)) * kLead\n")
     s = swap(s, "        if along > 0 and along < reach and across < 95 then\n",
