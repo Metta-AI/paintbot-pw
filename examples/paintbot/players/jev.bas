@@ -445,7 +445,7 @@ while i < 16
     dy = playerY(i) - selfY
     d2 = dx * dx + dy * dy
     if i mod 2 <> selfTeam then
-      cost = d2 - (3 - playerHp(i)) * 160000
+      cost = d2 - (3 - playerHp(i)) * kHpBias
       if playerCarrying(i) then
         cost = cost - 2500000
         thief = i
@@ -616,6 +616,9 @@ if jevInit = 0 then
   ' kLead: ticks of the target's last-tick motion the aim leads by. The baseline uses 6 (the windup);
   ' the league leader's v15 leads about 1 and hits 45% to our 41%, since targets dodge mid-windup.
   kLead = 6
+  ' kHpBias: how much closer (in cm^2) a target counts per missing heart. The league leader's v15
+  ' shoots the nearest clear enemy 96% of the time, our baseline 86%.
+  kHpBias = 160000
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
