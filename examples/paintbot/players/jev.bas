@@ -587,6 +587,14 @@ if jevInit = 0 then
   kHighR = 400
   kHighMin = 60
   kHighHold = 0
+  ' useCoverSpot: the two cover cogs of a squad (seats 2 and 3) are posted about 3.2 m from the
+  ' heart whatever the ground. This moves each to the highest dry point within kCoverR of its post
+  ' when that is kCoverMin higher, so it already stands above the heart's approaches when the enemy
+  ' arrives (useHigh only climbs once an enemy is in view). Staying near the post keeps it close
+  ' to the heart: an earlier version ranked spots 4-10 m out and lost.
+  useCoverSpot = 0
+  kCoverR = 200
+  kCoverMin = 40
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -1286,6 +1294,58 @@ if heartCount() > 0 then
     dy = goalY - selfY
     if dx * dx + dy * dy < 8100 then
       holding = 1
+    end if
+  end if
+end if
+
+' ---- Cover spot: a cover cog stands on the high point beside its post. ----
+if useCoverSpot and objective >= 0 and seat >= 2 and not carrying then
+  if goalX <> controlX(objective) or goalY <> controlY(objective) then
+    if hiDX(0) = 0 then
+      hiDX(0) = 100
+      hiDY(0) = 0
+      hiDX(1) = 71
+      hiDY(1) = 71
+      hiDX(2) = 0
+      hiDY(2) = 100
+      hiDX(3) = -71
+      hiDY(3) = 71
+      hiDX(4) = -100
+      hiDY(4) = 0
+      hiDX(5) = -71
+      hiDY(5) = -71
+      hiDX(6) = 0
+      hiDY(6) = -100
+      hiDX(7) = 71
+      hiDY(7) = -71
+    end if
+    csBest = terrainHeight(goalX, goalY) + kCoverMin
+    csX = -1
+    k = 0
+    while k < 8
+      px = goalX + hiDX(k) * kCoverR / 100
+      py = goalY + hiDY(k) * kCoverR / 100
+      if px > mapMinX() + 200 and px < mapMaxX() - 200 and py > mapMinY() + 200 and py < mapMaxY() - 200 then
+        if waterAt(px, py) = 0 then
+          h = terrainHeight(px, py)
+          if h > csBest then
+            csBest = h
+            csX = px
+            csY = py
+          end if
+        end if
+      end if
+      k = k + 1
+    wend
+    if csX >= 0 then
+      goalX = csX
+      goalY = csY
+      dx = goalX - selfX
+      dy = goalY - selfY
+      holding = 0
+      if dx * dx + dy * dy < 8100 then
+        holding = 1
+      end if
     end if
   end if
 end if
