@@ -1,5 +1,27 @@
 # Paintbot PW
 
+## Private Jev decision export
+
+After a completed episode with the Jev BASIC policy, export its objective decisions
+from the 16 private seat logs and final results:
+
+```bash
+python3 coworld/paintbot/tools/export_semantic_trajectory.py \
+  --seats /path/to/episode/seats.json \
+  --results /path/to/episode/results.json \
+  --episode-id paintbot-run-1 \
+  --source-revision "$(git rev-parse HEAD)" \
+  --output /path/to/private/paintbot-run-1.jsonl
+```
+
+The output is one `CompleteEpisode` JSONL row using Coworld trajectory schema 1.
+Each decision joins the seat-visible oracle state and typed question to its delivered
+answer and the BASIC policy's objective directive. Policy overrides, failed requests,
+and unanswered requests stay separate from accepted choices. The `objout` observation
+is attached as a reward only when the policy applied the model's objective.
+The exporter refuses score-arm runs because their chosen objective follows a different
+path. It creates the output with mode `0600`; keep the input seat logs and output private.
+
 Sixteen wheeled cogs fight for territory in Heartwick. Red uses even slots;
 Blue uses odd slots. Ten stationary hearts divide the entire map into nearest-heart
 regions. Each team starts with its base heart; eight hearts start neutral gray.
