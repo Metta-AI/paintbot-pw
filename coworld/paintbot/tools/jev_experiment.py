@@ -88,6 +88,17 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
     "a13-weapons": ("smart grenades and spray together", {"useSmartGrenade": 1, "useSpray": 1}),
     "a14-rule-weapons": ("the code rule's objective with smart grenades and spray",
                          {"useRule": 1, "useSmartGrenade": 1, "useSpray": 1}),
+    "a16-ball": ("both squads take squad 0's objective, so all eight fight together against a "
+                 "leader that concentrates fire", {"useBall": 1}),
+    "a17-regroup": ("a cog alone near enemies walks to its nearest ally first", {"useRegroup": 1}),
+    "a18-ball-regroup": ("both", {"useBall": 1, "useRegroup": 1}),
+    "a19-focus": ("shoot the enemy nearest the local group's centre, wounded first",
+                  {"useFocus": 1}),
+    "a20-ball-focus": ("one group of eight that shoots one target", {"useBall": 1, "useFocus": 1}),
+    "a21-kite": ("fall back when outgunned within gun range, not just within 26 m", {"useKite": 1}),
+    "a22-kite-focus": ("kite and focus fire", {"useKite": 1, "useFocus": 1}),
+    "a23-kite-rush": ("kite; grenade carriers walk in on a visible cluster and grenade it",
+                      {"useKite": 1, "useRush": 1, "useSmartGrenade": 1}),
 }
 
 

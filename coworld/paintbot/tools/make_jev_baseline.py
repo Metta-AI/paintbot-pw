@@ -379,6 +379,31 @@ if jevInit = 0 then
   ' so three listeners in earshot can hold a dead asker's heart indefinitely and never promote a
   ' new asker. useEcho = 1 restores the old behaviour exactly, as the control arm of an A/B.
   useEcho = 0
+  ' Against the league leader we die to concentrated fire: at our deaths 3.1 of his guns could see
+  ' the victim on average, at his 1.8 of ours, and a quarter of our victims had no ally who could
+  ' shoot back. useBall sends both squads to squad 0's objective, so all eight fight together;
+  ' useRegroup sends a cog caught alone near enemies to its nearest ally first.
+  useBall = 0
+  useRegroup = 0
+  ' useFocus picks the enemy nearest the centre of this cog and the allies within 15 m, with a
+  ' wounded foe counted kFocusHp cm^2 closer per missing heart, so a group converges on one
+  ' target instead of each cog shooting whoever stands nearest to it.
+  useFocus = 0
+  kFocusHp = 1440000
+  ' useKite: the base refusal counts foes within 26 m, but the league leader lands 80% of its
+  ' hits from 30-55 m. A cog that sees kKiteMargin more foes within gun range than it has allies
+  ' within 20 m falls back to the heart far from them and near us, so its squad arrives together.
+  useKite = 0
+  kKiteMargin = 1
+  kKiteFoeR2 = 27562500
+  kKiteMateR2 = 4000000
+  ' useRush: we carry a grenade half our alive time and throw almost none - the leader's clusters
+  ' sit at 30-50 m and a grenade lands at most 12.8 m out. A carrier that sees two or more enemies
+  ' bunched within 3.3 m, no farther than kRushR2 away, walks in to throw range (overriding kite);
+  ' pair it with useSmartGrenade so the throw goes to the densest cluster.
+  useRush = 0
+  kRushR2 = 6250000
+  kRushMin = 2
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -954,6 +979,21 @@ TERRITORY_COLLECT = """        if pass = squad then
 TERRITORY_OVERRIDE = """  if objective < 0 and otherTarget >= 0 then
     objective = otherTarget
   end if
+  ' Ball: squad 1 takes squad 0's objective - the one squad 0 announced, when heard in the last
+  ' ten seconds, else the one every cog computes for it - so all eight arrive together.
+  if useBall and squad = 1 then
+    if otherSquadObj >= 0 and worldTick - otherSquadTick < 240 then
+      if otherSquadObj < heartCount() then
+        if controlOwner(otherSquadObj) <> selfTeam then
+          objective = otherSquadObj
+        end if
+      end if
+    else
+      if otherTarget >= 0 then
+        objective = otherTarget
+      end if
+    end if
+  end if
   ' Jev's objective wins while it is fresh and still not ours.
   if jevObjective >= 0 and useObjective and worldTick < jevObjectiveUntil then
     if jevObjective < heartCount() then
@@ -962,6 +1002,61 @@ TERRITORY_OVERRIDE = """  if objective < 0 and otherTarget >= 0 then
       end if
     end if
   end if
+"""
+
+FOCUS = """' ---- Focus fire. ----
+if useFocus and foesSeen > 0 then
+  fcX = selfX
+  fcY = selfY
+  fcN = 1
+  i = selfTeam
+  while i < 16
+    if i <> selfId and visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      if dx * dx + dy * dy < 2250000 then
+        fcX = fcX + playerX(i)
+        fcY = fcY + playerY(i)
+        fcN = fcN + 1
+      end if
+    end if
+    i = i + 2
+  wend
+  fcX = fcX / fcN
+  fcY = fcY / fcN
+  fcBest = -1
+  fcCost = 2147483647
+  i = 1 - selfTeam
+  while i < 16
+    if visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      if dx * dx + dy * dy <= 27562500 then
+        ex = playerX(i) - fcX
+        ey = playerY(i) - fcY
+        cost = ex * ex + ey * ey - (3 - playerHp(i)) * kFocusHp
+        if playerCarrying(i) then
+          cost = cost - 2500000
+        end if
+        if cost < fcCost then
+          fcCost = cost
+          fcBest = i
+        end if
+      end if
+    end if
+    i = i + 2
+  wend
+  if fcBest >= 0 then
+    ' bestCost keeps its meaning (distance from this cog) for the spray and pickup rules.
+    best = fcBest
+    dx = playerX(best) - selfX
+    dy = playerY(best) - selfY
+    bestCost = dx * dx + dy * dy - (3 - playerHp(best)) * 160000
+    if playerCarrying(best) then
+      bestCost = bestCost - 2500000
+    end if
+  end if
+end if
 """
 
 RETREAT_RULE = """' Refuse a fight we are visibly losing: head for the heart that is far from them and near us.
@@ -1082,7 +1177,43 @@ LIMITS = (
 
 
 def overrides_and_ask() -> str:
-    return """\' ---- Jev overrides on the goal. ----
+    return """\' ---- Regroup. ----
+' A cog with no ally within 15 m, while an enemy was seen in the last two seconds, walks to its
+' nearest visible ally (up to 40 m away) instead of on toward the objective.
+if useRegroup and not carrying then
+  rgBest = 2147483647
+  rgMate = -1
+  i = selfTeam
+  while i < 16
+    if i <> selfId and visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      if dx * dx + dy * dy < rgBest then
+        rgBest = dx * dx + dy * dy
+        rgMate = i
+      end if
+    end if
+    i = i + 2
+  wend
+  rgDanger = 0
+  e = 1 - selfTeam
+  while e < 16
+    if lastSeen(e) > 0 then
+      if worldTick - lastSeen(e) < 48 then
+        rgDanger = 1
+      end if
+    end if
+    e = e + 2
+  wend
+  if rgMate >= 0 and rgDanger then
+    if rgBest > 2250000 and rgBest < 16000000 then
+      goalX = playerX(rgMate)
+      goalY = playerY(rgMate)
+      holding = 0
+    end if
+  end if
+end if
+' ---- Jev overrides on the goal. ----
 ' Guard: stand on one of our hearts that is under threat until the hold runs out.
 if jevGuard >= 0 and useObjective and worldTick < jevGuardUntil and not carrying then
   if jevGuard < heartCount() then
@@ -1103,6 +1234,98 @@ if useRetreat and worldTick < jevRetUntil and not carrying then
   goalX = jevRetX
   goalY = jevRetY
   holding = 0
+end if
+
+' ---- Kite. ----
+if useKite and not carrying and foesSeen > 0 then
+  ktFoes = 0
+  e = 1 - selfTeam
+  while e < 16
+    if visible(e) then
+      dx = playerX(e) - selfX
+      dy = playerY(e) - selfY
+      if dx * dx + dy * dy <= kKiteFoeR2 then
+        ktFoes = ktFoes + 1
+      end if
+    end if
+    e = e + 2
+  wend
+  ktMates = 1
+  i = selfTeam
+  while i < 16
+    if i <> selfId and visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      if dx * dx + dy * dy < kKiteMateR2 then
+        ktMates = ktMates + 1
+      end if
+    end if
+    i = i + 2
+  wend
+  if ktFoes - ktMates >= kKiteMargin then
+    cx = foeSumX / foesSeen
+    cy = foeSumY / foesSeen
+    away = -1
+    awayScore = -2147483647
+    j = 0
+    while j < heartCount() and j < 16
+      ex = (controlX(j) - cx) / 16
+      ey = (controlY(j) - cy) / 16
+      mx = (controlX(j) - selfX) / 16
+      my = (controlY(j) - selfY) / 16
+      score = ex * ex + ey * ey - (mx * mx + my * my) / 2
+      if score > awayScore then
+        away = j
+        awayScore = score
+      end if
+      j = j + 1
+    wend
+    if away >= 0 then
+      goalX = controlX(away)
+      goalY = controlY(away)
+      holding = 0
+    end if
+  end if
+end if
+
+' ---- Rush a cluster with a grenade. ----
+if useRush and hasGrenade and not carrying and foesSeen > 1 then
+  ruBest = 0
+  ruD2 = 2147483647
+  i = 1 - selfTeam
+  while i < 16
+    if visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      d2 = dx * dx + dy * dy
+      if d2 <= kRushR2 then
+        ruN = 0
+        e = 1 - selfTeam
+        while e < 16
+          if visible(e) then
+            cfx = playerX(e) - playerX(i)
+            cfy = playerY(e) - playerY(i)
+            if cfx * cfx + cfy * cfy < 108900 then
+              ruN = ruN + 1
+            end if
+          end if
+          e = e + 2
+        wend
+        if ruN > ruBest or (ruN = ruBest and d2 < ruD2) then
+          ruBest = ruN
+          ruD2 = d2
+          ruX = playerX(i)
+          ruY = playerY(i)
+        end if
+      end if
+    end if
+    i = i + 2
+  wend
+  if ruBest >= kRushMin then
+    goalX = ruX
+    goalY = ruY
+    holding = 0
+  end if
 end if
 
 ' ---- Ask Jev. The squad question goes to one asker per squad; a cog in danger asks for itself. ----
@@ -1561,6 +1784,7 @@ def build(base: str) -> str:
              HEADER + "' Baseline notes follow. Every cog runs this file on its own: no shared memory, fog-gated\n")
     s = splice(s, "dim lastSeen(16)\n", DIMS, before=False)
     s = splice(s, "if started = 0 then\n  started = 1\n", SUBS)
+    s = splice(s, "' Where we want to be. Later rules override earlier ones; one walkTo is issued at the end.\n", FOCUS)
     s = splice(s, "' Where we want to be. Later rules override earlier ones; one walkTo is issued at the end.\n", KNOWLEDGE)
     s = swap(s, "  otherTarget = -1\n  pass = 0\n  while pass < 2\n", TERRITORY_INIT)
     s = swap(s, "        if cost < choiceCost then\n", TERRITORY_COLLECT)
