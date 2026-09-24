@@ -159,6 +159,11 @@ the training ABI's `pw_set_seat_sampling` / `pw_sample_actions` draw from the sa
 `decoder.steady_shot` stands the seat from a shoot order until the ray leaves
 (`neural_basic.md`); candidates and hashes are unchanged, and the training ABI's
 `pw_set_seat_aim_snap` / `pw_set_seat_steady_shot` are the same rules.
+`decoder.aim_retarget` turns every shoot order toward base.bas's target (the visible enemy
+minimising `d^2 - (3 - hp) * 160000 - carrying * 2500000` within 5250) and
+`decoder.shot_gate` drops a shoot order that is not aimed at an enemy in range after the
+retarget and the snap (`neural_basic.md`); candidates and hashes are unchanged, and the
+training ABI's `pw_set_seat_aim_retarget` / `pw_set_seat_shot_gate` are the same rules.
 
 Movement (heart, visible pickup or `pos+200*compass`), directional aim
 (`pos+5000*compass`), fire, grenade and sneak decode identically under both.
@@ -222,6 +227,14 @@ seat, int32 out[3])` = {snaps, aim index executed last step or -1, cosine thresh
 `pw_seat_steady_stats(handle, seat, int32 out[3])` = {order ticks held, decisions held,
 movement index executed last step (0) or -1}. The steady shot refuses a seat whose forbid
 mask lists index 0, and the forbid call refuses index 0 while the steady shot is on.
+`pw_set_seat_aim_retarget(handle, seat, enabled, max_range, hp_weight, carry_weight)`
+(enabled 0 = off; 1, 5250, 160000, 2500000 = the bundle defaults) and
+`pw_set_seat_shot_gate(handle, seat, max_range)` (0 = off, 5250 = the default) apply those
+rules inside `pw_step` in the hosted order (aim retarget, aim snap, shot gate, strafe,
+steady shot, decode, hold); `pw_seat_aim_retarget_stats(handle, seat, int32 out[3])` =
+{retargets, aim index executed last step or -1, max_range} and
+`pw_seat_shot_gate_stats(handle, seat, int32 out[3])` = {orders dropped, shoot head
+executed last step (0) or -1, max_range}.
 
 `pw_seat_stats(handle, int32 out[16*8])` fills, per seat in seat order,
 `{damage_dealt_enemy, damage_dealt_team, hits_enemy, hits_taken, kills, deaths,

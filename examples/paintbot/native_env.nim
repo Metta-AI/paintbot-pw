@@ -85,6 +85,18 @@ type
     steadyShots: array[Seats,int32]
     steadyTicks: array[Seats,int32]
     steadyLast: array[Seats,int32]
+    # Decoder aim retarget (pw_set_seat_aim_retarget) and shot gate (pw_set_seat_shot_gate),
+    # both kept across resets and both stateless rules applied to the caller's selected
+    # heads in pw_step in the hosted seat's order: aim retarget, aim snap, shot gate,
+    # strafe, steady shot. The counts belong to the match; aimRetargetLast is the aim index
+    # the retarget executed on the last pw_step and shotGateLast the shoot head the gate
+    # executed (0), -1 = the caller's stood.
+    aimRetarget: array[Seats,AimRetargetOptions]
+    aimRetargets: array[Seats,int32]
+    aimRetargetLast: array[Seats,int32]
+    shotGate: array[Seats,ShotGateOptions]
+    shotGates: array[Seats,int32]
+    shotGateLast: array[Seats,int32]
     decided: array[Seats,Command]
     decidedTick: int32
     decidedValid: bool
@@ -129,6 +141,10 @@ proc resetSnapSteady(env: ptr NativeEnv) =
     env.steadyShots[slot] = 0
     env.steadyTicks[slot] = 0
     env.steadyLast[slot] = -1
+    env.aimRetargets[slot] = 0
+    env.aimRetargetLast[slot] = -1
+    env.shotGates[slot] = 0
+    env.shotGateLast[slot] = -1
 proc resetCurriculum(env: ptr NativeEnv) =
   ## Knob values persist; the shot history belongs to the match.
   for slot in 0..<Seats:
@@ -202,18 +218,35 @@ proc decodeSeat(env: ptr NativeEnv, slot: int, actions: ActionBuffer): Command =
   ## The caller's five head indices for one seat through the selected contract. Under
   ## v1 the bodies are resolved only for an identity aim, as before; v2 always resolves
   ## them because the seat's memory must be recorded on every decided tick. A seat with
-  ## the aim snap, the strafe or the steady shot on decodes its heads after
-  ## neural_contract.aimSnapActions, strafeActions and steadyShotActions, in that order,
-  ## as the hosted seat does.
+  ## the aim retarget, the aim snap, the shot gate, the strafe or the steady shot on
+  ## decodes its heads after neural_contract.aimRetargetActions, aimSnapActions,
+  ## shotGateActions, strafeActions and steadyShotActions, in that order, as the hosted
+  ## seat does.
   let offset = slot*ActionSizes.len
-  if env.strafe[slot].enabled or env.aimSnap[slot].enabled or env.steadyShot[slot]:
+  if env.strafe[slot].enabled or env.aimSnap[slot].enabled or env.steadyShot[slot] or
+      env.aimRetarget[slot].enabled or env.shotGate[slot].enabled:
     var heads: array[ActionSizes.len, int32]
     for head in 0..<ActionSizes.len: heads[head] = actions[offset+head]
     let bodies = env.bodiesFor(slot)
+    env.aimRetargetLast[slot] = -1
     env.aimSnapLast[slot] = -1
+    env.shotGateLast[slot] = -1
     env.strafeLast[slot] = -1
     env.steadyLast[slot] = -1
-    if env.world.aimSnapActions(slot, heads, bodies, env.aimSnap[slot]):
+    if env.world.aimRetargetActions(slot, heads, bodies, env.contract, env.aimMemory[slot],
+        env.aimRetarget[slot]):
+      env.aimRetargetLast[slot] = heads[1]
+      inc env.aimRetargets[slot]
+    let beforeSnap = heads
+    var snapped = env.world.aimSnapActions(slot, heads, bodies, env.aimSnap[slot])
+    if env.world.shotGateActions(slot, heads, beforeSnap, snapped, bodies, env.contract,
+        env.aimMemory[slot], env.shotGate[slot]):
+      # The dropped order was never a shot: the snap (which rewrites only shoot orders)
+      # did not execute on it.
+      snapped = false
+      env.shotGateLast[slot] = 0
+      inc env.shotGates[slot]
+    if snapped:
       env.aimSnapLast[slot] = heads[1]
       inc env.aimSnaps[slot]
     if env.world.strafeActions(slot, heads, bodies, env.strafe[slot], env.strafeState[slot],
@@ -842,6 +875,71 @@ proc pw_seat_steady_stats*(handle: pointer, seat: cint, output: ptr UncheckedArr
   output[0] = env.steadyShots[seat]
   output[1] = env.steadyTicks[seat]
   output[2] = env.steadyLast[seat]
+  0
+
+proc pw_set_seat_aim_retarget*(handle: pointer, seat: cint, enabled, maxRange, hpWeight,
+    carryWeight: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Decoder aim retarget for one seat (the hosted bundle option decoder.aim_retarget; see
+  ## neural_contract.aimRetargetActions): with enabled 1, on every pw_step a live
+  ## caller-decoded seat's shoot order with an identity or compass aim (1..24) takes the
+  ## aim index of the visible apparent enemy identity minimising
+  ## d^2 - (3 - hp) * hpWeight - carrying * carryWeight with d <= maxRange, d measured to
+  ## the identity's aim candidate (pw_action_candidates); none qualifies = the order
+  ## stands. maxRange 1..20000, both weights 0..1e9 (5250, 160000, 2500000 = base.bas's
+  ## rule, the bundle defaults). enabled 0 turns it off (the default; off on every seat is
+  ## byte-identical to a library without this call; the other arguments are then
+  ## ignored). Kept across pw_reset. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or enabled notin 0..1: return -1
+  var options: AimRetargetOptions
+  if enabled == 1:
+    if aimRetargetOptionsError(maxRange, hpWeight, carryWeight).len > 0: return -1
+    options = aimRetargetOptions(maxRange, hpWeight, carryWeight)
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.aimRetarget[seat] = options
+  0
+
+proc pw_seat_aim_retarget_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Aim-retarget telemetry, three int32: [decisions whose aim it replaced since the last
+  ## create/reset, the aim index it executed on the last pw_step or -1 when the caller's
+  ## stood, maxRange or 0 when off]. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  output[0] = env.aimRetargets[seat]
+  output[1] = env.aimRetargetLast[seat]
+  output[2] = if env.aimRetarget[seat].enabled: env.aimRetarget[seat].maxRange else: 0
+  0
+
+proc pw_set_seat_shot_gate*(handle: pointer, seat: cint, maxRange: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Decoder shot gate for one seat (the hosted bundle option decoder.shot_gate; see
+  ## neural_contract.shotGateActions): with maxRange in 1..20000 (5250 = the bundle
+  ## default), on every pw_step a live caller-decoded seat's shoot order, after the aim
+  ## retarget and the aim snap, is dropped when its aim is still a compass index, when
+  ## the snap aimed it at an enemy whose body lies beyond maxRange, or when its identity
+  ## aim candidate lies beyond maxRange; the dropped decision keeps its pre-snap aim. 0
+  ## turns it off (the default; off on every seat is byte-identical to a library without
+  ## this call). Kept across pw_reset. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats: return -1
+  var options: ShotGateOptions
+  if maxRange != 0:
+    if shotGateOptionsError(maxRange).len > 0: return -1
+    options = shotGateOptions(maxRange)
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  env.shotGate[seat] = options
+  0
+
+proc pw_seat_shot_gate_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Shot-gate telemetry, three int32: [shoot orders dropped since the last create/reset,
+  ## the shoot head it executed on the last pw_step (0) or -1 when the caller's stood,
+  ## maxRange or 0 when off]. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  output[0] = env.shotGates[seat]
+  output[1] = env.shotGateLast[seat]
+  output[2] = if env.shotGate[seat].enabled: env.shotGate[seat].maxRange else: 0
   0
 
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =

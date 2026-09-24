@@ -430,3 +430,91 @@ suite "native BASIC neural host":
       let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
       checkpoint schema & " " & decoder
       check bad[0].failed
+  test "the aim retarget and shot gate decoder options are read from a schema-2 manifest, logged, and replay exactly":
+    const Schema1 = "paintbot-neural-basic/1"
+    const Schema2 = "paintbot-neural-basic/2"
+    let both = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"aim_retarget\": {}, \"shot_gate\": {}}"))
+    check not both[0].failed
+    check both[0].neural.aimRetarget == aimRetargetOptions(5250, 160000, 2500000)
+    check both[0].neural.shotGate == shotGateOptions(5250)
+    check both[0].neural.telemetry(10, 3) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 aim_retarget=r5250,hp160000,carry2500000 aim_retargets=0" &
+      " shot_gate=r5250 shot_gates=0"
+    # Every field is optional (base.bas's rule, the gun range); integers within their ranges.
+    for (decoder, retarget, gate) in [
+        ("{\"aim_retarget\": {\"max_range\": 4000}}", aimRetargetOptions(4000, 160000, 2500000), ShotGateOptions()),
+        ("{\"aim_retarget\": {\"hp_weight\": 0, \"carry_weight\": 0}}", aimRetargetOptions(5250, 0, 0), ShotGateOptions()),
+        ("{\"aim_retarget\": {\"max_range\": 1, \"hp_weight\": 1000000000, \"carry_weight\": 1000000000}}",
+         aimRetargetOptions(1, 1_000_000_000, 1_000_000_000), ShotGateOptions()),
+        ("{\"aim_retarget\": {\"max_range\": 20000}}", aimRetargetOptions(20000), ShotGateOptions()),
+        ("{\"shot_gate\": {\"max_range\": 1}}", AimRetargetOptions(), shotGateOptions(1)),
+        ("{\"shot_gate\": {\"max_range\": 20000}}", AimRetargetOptions(), shotGateOptions(20000))]:
+      let one = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(Schema2, ActionContractV2Hash, decoder))
+      checkpoint decoder
+      check not one[0].failed and one[0].neural.aimRetarget == retarget and one[0].neural.shotGate == gate
+    let full = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(Schema2, ActionContractV2Hash,
+      "{\"fire_hold_teammates\": true, \"aim_snap\": {}, \"steady_shot\": {}, \"aim_retarget\": {\"max_range\": 4000, " &
+      "\"hp_weight\": 1, \"carry_weight\": 2}, \"shot_gate\": {\"max_range\": 3000}}"))
+    check not full[0].failed
+    check full[0].neural.telemetry(10, 3) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 fire_holds=0 aim_snap=22.500deg,cos_q15=30274 aim_snaps=0" &
+      " steady_shot=on steady_shots=0 steady_ticks=0 aim_retarget=r4000,hp1,carry2 aim_retargets=0 shot_gate=r3000 shot_gates=0"
+    # Replay determinism with every seat sampling + retarget + snap + gate (+ strafe, steady,
+    # hold): the same match seed twice gives the same world hash every tick; the options
+    # change the match.
+    proc play(manifest: string, seed: int32, ticks: int): (seq[uint32], int, int) =
+      let players = fixture(NeuralSource, true, ActionContractV2Hash, manifest)
+      var world = newWorld(seed)
+      for tick in 0..<ticks:
+        let commands = players.decide(world)
+        for slot in 0..<Seats: check not players[slot].failed
+        world.step(commands)
+        result[0].add world.stateHash()
+      for slot in 0..<Seats:
+        result[1] += players[slot].neural.aimRetargets
+        result[2] += players[slot].neural.shotGates
+    let options = manifestJson(Schema2, ActionContractV2Hash,
+      "{\"fire_hold_teammates\": true, \"strafe_legs\": {}, \"sampling\": {\"mode\": \"categorical\"}, " &
+      "\"aim_snap\": {}, \"steady_shot\": {}, \"aim_retarget\": {}, \"shot_gate\": {}}")
+    let once = play(options, 2026, 400)
+    check once == play(options, 2026, 400)
+    check once[1] > 0 and once[2] > 0   # retargets and gated orders happened
+    let without = manifestJson(Schema2, ActionContractV2Hash,
+      "{\"fire_hold_teammates\": true, \"strafe_legs\": {}, \"sampling\": {\"mode\": \"categorical\"}, " &
+      "\"aim_snap\": {}, \"steady_shot\": {}}")
+    check once[0] != play(without, 2026, 400)[0]
+    check once[0] != play(options, 2027, 400)[0]
+    # Schema 1 and schema 2 without the fields: unchanged behaviour and log line.
+    for (schema, contract) in [(Schema1, ActionContractHash), (Schema2, ActionContractHash), (Schema2, ActionContractV2Hash)]:
+      let plain = fixture(NeuralSource, true, contract, manifestJson(schema, contract))
+      check not plain[0].failed
+      check not plain[0].neural.aimRetarget.enabled and not plain[0].neural.shotGate.enabled
+      check plain[0].neural.telemetry(10, 3) == "neural: peak_ops=10 budget=4000000 model=w64 ticks=3"
+    # Rejected: under schema 1; bad types, ranges and fields.
+    for (schema, decoder) in [(Schema1, "{\"aim_retarget\": {}}"),
+                              (Schema1, "{\"shot_gate\": {}}"),
+                              (Schema2, "{\"aim_retarget\": true}"),
+                              (Schema2, "{\"aim_retarget\": []}"),
+                              (Schema2, "{\"aim_retarget\": {\"max_range\": 0}}"),
+                              (Schema2, "{\"aim_retarget\": {\"max_range\": 20001}}"),
+                              (Schema2, "{\"aim_retarget\": {\"max_range\": -5250}}"),
+                              (Schema2, "{\"aim_retarget\": {\"max_range\": 5250.0}}"),
+                              (Schema2, "{\"aim_retarget\": {\"max_range\": \"5250\"}}"),
+                              (Schema2, "{\"aim_retarget\": {\"max_range\": 99999999999}}"),
+                              (Schema2, "{\"aim_retarget\": {\"hp_weight\": -1}}"),
+                              (Schema2, "{\"aim_retarget\": {\"hp_weight\": 1000000001}}"),
+                              (Schema2, "{\"aim_retarget\": {\"hp_weight\": 1.5}}"),
+                              (Schema2, "{\"aim_retarget\": {\"carry_weight\": -1}}"),
+                              (Schema2, "{\"aim_retarget\": {\"carry_weight\": true}}"),
+                              (Schema2, "{\"aim_retarget\": {\"range\": 5250}}"),
+                              (Schema2, "{\"shot_gate\": true}"),
+                              (Schema2, "{\"shot_gate\": 5250}"),
+                              (Schema2, "{\"shot_gate\": {\"max_range\": 0}}"),
+                              (Schema2, "{\"shot_gate\": {\"max_range\": 20001}}"),
+                              (Schema2, "{\"shot_gate\": {\"max_range\": 5250.5}}"),
+                              (Schema2, "{\"shot_gate\": {\"max_range\": null}}"),
+                              (Schema2, "{\"shot_gate\": {\"range\": 5250}}")]:
+      let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
+      checkpoint schema & " " & decoder
+      check bad[0].failed

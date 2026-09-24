@@ -116,10 +116,43 @@ candidates and the contract hashes are the same with or without them.
   same rule (`pw_seat_steady_stats` reports order ticks and decisions held and the executed
   movement index). With the option on, the telemetry line gains
   ` steady_shot=on steady_shots=<n> steady_ticks=<n>`.
+- `"decoder": {"aim_retarget": {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000}}`
+  (default absent = byte-identical; every field optional with exactly those defaults,
+  integers, `max_range` within 1..20000, both weights within 0..1000000000): pw-diag3's
+  lever 1, target choice (`neural_contract.aimRetargetActions`). On every shoot order the
+  policy makes with an identity or compass aim (1..24; a keep aim, 0, is left alone), the
+  aim head becomes the visible apparent enemy identity (the observation's identity block:
+  present, apparent team enemy) with the smallest
+  `d^2 - (3 - hp) * hp_weight - carrying * carry_weight` among those with `d <= max_range`,
+  where `d` runs from the seat to that identity's aim candidate under the bundle's action
+  contract (v2: the lead-compensated point, with the planned own step of the decision's
+  movement and sneak heads, as `pw_action_candidates` reports it). Ties go to the lower
+  identity; when no enemy qualifies the order stands. The defaults are base.bas's own
+  target rule, which every live-field opponent follows 85-88 % of the time. Integer
+  arithmetic; stateless, no draws; it reads nothing the observation and the aim candidates
+  do not. The native training ABI's `pw_set_seat_aim_retarget` is the same rule
+  (`pw_seat_aim_retarget_stats` reports retargets and the executed aim index). With the
+  option on, the telemetry line gains
+  ` aim_retarget=r<max_range>,hp<hp_weight>,carry<carry_weight> aim_retargets=<n>`.
+- `"decoder": {"shot_gate": {"max_range": 5250}}` (default absent = byte-identical;
+  `max_range` optional, 5250, an integer within 1..20000): pw-diag3's lever 3
+  (`neural_contract.shotGateActions`). After the aim retarget and the aim snap, a shoot
+  order becomes no shot when its aim is still a compass index (no aim snap configured, or
+  no enemy in the snap's cone), when the snap aimed it at an enemy whose body lies beyond
+  `max_range`, or when it is an identity aim whose aim candidate lies beyond `max_range`
+  (measured as the retarget measures it). A keep aim, and an identity aim within range or
+  that no visible body carries, pass; this is exactly pw-diag3's `--shot-gate`. A dropped
+  decision keeps the aim head it had before the snap (the snap rewrites only shoot orders),
+  so the strafe, the steady shot (which then stands no order tick) and the fire hold see a
+  decision without a shot. Stateless, no draws. The native training ABI's
+  `pw_set_seat_shot_gate` is the same rule (`pw_seat_shot_gate_stats` reports dropped
+  orders). With the option on, the telemetry line gains
+  ` shot_gate=r<max_range> shot_gates=<n>`.
 - Order of every option within one decision: forbid and sampling (or argmax) select the
-  heads; the aim snap rewrites the aim head; the strafe, then the steady shot, rewrite the
-  movement head (a steadied decision overrides the strafe's leg for that tick); the heads
-  are decoded under the contract; the fire hold gates the decoded shot.
+  heads; the aim retarget, then the aim snap, rewrite the aim head; the shot gate may drop
+  the shot; the strafe, then the steady shot, rewrite the movement head (a steadied
+  decision overrides the strafe's leg for that tick); the heads are decoded under the
+  contract; the fire hold gates the decoded shot.
 
 The archive is bounded to 16 MiB model, 64 KiB BASIC, and 8 KiB manifest.
 Duplicates, unexpected paths/files, encryption, incorrect hashes, and oversized

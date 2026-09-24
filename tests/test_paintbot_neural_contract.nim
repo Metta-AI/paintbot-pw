@@ -1008,3 +1008,338 @@ suite "Decoder steady shot (bundle option, not a contract change)":
     var heads = [int32(43), 1, 1, 0, 0]
     check v.steadyShotActions(0, heads, true) == ssOrder
     check v.plannedStep(0, v.cogs[0].pos, false) == Point()
+
+proc placeOpen(w: var World, seat: int, offsets: openArray[(int, int, int)], facing = (1, 0)): Point =
+  ## `seat` in the open facing `facing`, with each (body, dx, dz) at its offset, every line
+  ## clear and every placed body visible to the seat, no pickup near; everyone else far
+  ## away along the edge, still and unshielded; nobody carrying or disguised. Returns the
+  ## seat's position.
+  for slot in 0..<Seats:
+    w.cogs[slot].pos = point(200 + slot*80, maxZ() - 60)
+    w.cogs[slot].carrying = false
+    w.uniforms[slot] = false
+  for gz in countup(900, 3100, 100):
+    for gx in countup(200, 6000, 100):
+      let s = point(gx, gz)
+      if w.blocked(s) or w.trenchAt(s) >= 0 or inWater(s) or inWater(point(gx - 300, gz)): continue
+      var ok = true
+      for pickup in w.pickups:
+        if distance2(pickup.pos, s) < 300*300: ok = false
+      for (body, dx, dz) in offsets:
+        let p = point(gx + dx, gz + dz)
+        if p.x < minX()+100 or p.x > maxX()-100 or p.z < minZ()+100 or p.z > maxZ()-100 or
+            w.blocked(p) or w.trenchAt(p) >= 0 or not w.lineClear(s, p):
+          ok = false
+          break
+      if not ok: continue
+      w.cogs[seat].pos = s
+      w.cogs[seat].aim = point(gx + 3000*facing[0], gz + 3000*facing[1])
+      for (body, dx, dz) in offsets: w.cogs[body].pos = point(gx + dx, gz + dz)
+      for (body, dx, dz) in offsets:
+        if not w.visible(seat, body): ok = false
+      if not ok: continue
+      for slot in 0..<Seats:
+        w.cogs[slot].goal = w.cogs[slot].pos
+        w.cogs[slot].shield = 0
+        w.equipment[slot].armor = 0
+      return s
+  raise newException(AssertionDefect, "no open placement")
+
+proc diag3Retarget(w: World, slot: int, actions: array[ActionSizes.len, int32], bodies: array[Seats, int],
+    version: ActionContractVersion, memory: AimMemory, maxRange, hpWeight, carryWeight: float64): int =
+  ## pw-diag3's --retarget transliterated (diag3_run.py retarget_aim, mode base): it reads the
+  ## seat's encoded observation identity block (float thresholds, hp = round(hp/3 * 3)) and
+  ## pw_action_candidates' aim points (goal 0 = own position), float64 costs, strict
+  ## minimum in identity order. Returns the aim index 1..16 or 0 for none.
+  var obs: array[ObservationSize, float32]
+  w.encodeObservation(slot, obs, bodies)
+  let me = w.cogs[slot]
+  let (found, goal) = w.goalCandidate(slot, actions[0].int)
+  let ownStep = if version == acV2: w.plannedStep(slot, if found: goal else: me.pos, actions[4] != 0) else: Point()
+  var bestCost = 0.0
+  for k in 1..16:
+    let (aimFound, aim) = w.aimCandidate(slot, k, bodies, version, memory, ownStep)
+    if not aimFound: continue
+    let row = 24 + 80 + 8*(k-1)
+    if obs[row] < 0.5 or obs[row+3] > -0.5: continue
+    let hp = round(float64(obs[row+4]) * 3)
+    let d2 = (float64(aim.x) - float64(me.pos.x))^2 + (float64(aim.z) - float64(me.pos.z))^2
+    if d2 > maxRange*maxRange: continue
+    let cost = d2 - (3 - hp) * hpWeight - (if obs[row+5] > 0.5: carryWeight else: 0.0)
+    if result == 0 or cost < bestCost:
+      result = k
+      bestCost = cost
+
+proc diag3GateDrops(w: World, slot: int, actions: array[ActionSizes.len, int32], bodies: array[Seats, int],
+    version: ActionContractVersion, memory: AimMemory, maxRange: float64): bool =
+  ## pw-diag3's --shot-gate transliterated (diag3_run.py gate_drop), on the heads before
+  ## the snap, reading the world as its diag state did: the seat's visible mask, true
+  ## teams, hp > 0 and the float 22.5-degree cone (30274 / 32768), best by cosine.
+  let me = w.cogs[slot]
+  let k = actions[1].int
+  if k in 1..16:
+    let (found, goal) = w.goalCandidate(slot, actions[0].int)
+    let ownStep = if version == acV2: w.plannedStep(slot, if found: goal else: me.pos, actions[4] != 0) else: Point()
+    let (aimFound, aim) = w.aimCandidate(slot, k, bodies, version, memory, ownStep)
+    return aimFound and hypot(float64(aim.x - me.pos.x), float64(aim.z - me.pos.z)) > maxRange
+  if k < 17: return false
+  let flip = if team(slot) == 0: 1.0 else: -1.0
+  let delta = [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)][k - 17]
+  let n = hypot(float64(delta[0]), float64(delta[1]))
+  let hx = float64(delta[0]) * flip / n
+  let hz = float64(delta[1]) * flip / n
+  var bestCos = -2.0
+  var bestD = -1.0
+  for j in 0..<Seats:
+    if j == slot or not w.visible(slot, j) or team(j) == team(slot) or w.cogs[j].hp <= 0: continue
+    let vx = float64(w.cogs[j].pos.x - me.pos.x)
+    let vz = float64(w.cogs[j].pos.z - me.pos.z)
+    let d = hypot(vx, vz)
+    if d == 0: continue
+    let c = (vx*hx + vz*hz) / d
+    if c >= 30274.0 / 32768.0 and c > bestCos:
+      bestCos = c
+      bestD = d
+  bestD < 0 or bestD > maxRange
+
+suite "Decoder aim retarget (bundle option, not a contract change)":
+  setup:
+    visionRulesVersion = 37
+  let retarget = aimRetargetOptions()
+  var memory: AimMemory
+  memory.resetAimMemory()
+  test "options: base.bas's defaults, validated ranges":
+    check retarget.enabled and retarget.maxRange == 5250 and retarget.hpWeight == 160000 and
+      retarget.carryWeight == 2500000
+    check aimRetargetOptionsError(1, 0, 0) == "" and aimRetargetOptionsError(20000, 1_000_000_000, 1_000_000_000) == ""
+    for (r, h, c) in [(0'i32, 0'i32, 0'i32), (-1'i32, 0'i32, 0'i32), (20001'i32, 0'i32, 0'i32),
+                      (5250'i32, -1'i32, 0'i32), (5250'i32, 1_000_000_001'i32, 0'i32),
+                      (5250'i32, 0'i32, -1'i32), (5250'i32, 0'i32, 1_000_000_001'i32)]:
+      check aimRetargetOptionsError(r, h, c) != ""
+      expect ValueError: discard aimRetargetOptions(r, h, c)
+    check not AimRetargetOptions().enabled
+  test "the enemy with the smallest d^2 - (3 - hp) * 160000 - carrying * 2500000 within range wins":
+    for version in [acV1, acV2]:
+      # Nearest: seat 3 (d^2 2252500) beats seat 1 (2560000) and seat 5 (5780000).
+      var w = newWorld(2026, 2400)
+      discard w.placeOpen(0, [(1, 1600, 0), (3, 1300, 750), (5, 2300, -700)])
+      var bodies = w.observedBodies(0)
+      var a = [0'i32, 17, 1, 0, 0]
+      check w.aimRetargetActions(0, a, bodies, version, memory, retarget)
+      check a == [0'i32, int32(identityOf(bodies, 3) + 1), 1, 0, 0]
+      # Seat 1 at hp 1: 2560000 - 2*160000 = 2240000 < 2252500.
+      w.cogs[1].hp = 1
+      a = [0'i32, 17, 1, 0, 0]
+      check w.aimRetargetActions(0, a, bodies, version, memory, retarget)
+      check a[1] == int32(identityOf(bodies, 1) + 1)
+      # Seat 5 carrying a heart: 5780000 - 2500000 = 3280000 loses; at d^2 3250000: 750000 wins.
+      w.cogs[5].carrying = true
+      a = [0'i32, 17, 1, 0, 0]
+      check w.aimRetargetActions(0, a, bodies, version, memory, retarget)
+      check a[1] == int32(identityOf(bodies, 1) + 1)
+      var w2 = newWorld(2026, 2400)
+      discard w2.placeOpen(0, [(1, 1600, 0), (3, 1300, 750), (5, 1700, -600)])
+      w2.cogs[5].carrying = true
+      bodies = w2.observedBodies(0)
+      a = [0'i32, 2, 1, 0, 0]
+      check w2.aimRetargetActions(0, a, bodies, version, memory, retarget)
+      check a[1] == int32(identityOf(bodies, 5) + 1)
+      # Weights are parameters: with no carrier weight the nearest wins again.
+      a = [0'i32, 2, 1, 0, 0]
+      check w2.aimRetargetActions(0, a, bodies, version, memory, aimRetargetOptions(5250, 160000, 0))
+      check a[1] == int32(identityOf(bodies, 3) + 1)
+  test "range is measured to the aim candidate: 5250 inclusive, and v2's own-step lead moves it":
+    var w = newWorld(2026, 2400)
+    discard w.placeOpen(0, [(1, 5250, 0)])
+    var bodies = w.observedBodies(0)
+    var a = [0'i32, 17, 1, 0, 0]
+    check w.aimRetargetActions(0, a, bodies, acV2, memory, retarget)
+    var w2 = newWorld(2026, 2400)
+    discard w2.placeOpen(0, [(1, 5260, 0)])
+    bodies = w2.observedBodies(0)
+    a = [0'i32, 17, 1, 0, 0]
+    check not w2.aimRetargetActions(0, a, bodies, acV2, memory, retarget)
+    check a == [0'i32, 17, 1, 0, 0]
+    check w2.aimRetargetActions(0, a, bodies, acV2, memory, aimRetargetOptions(5260))
+    # Walking west (compass movement 47 for team 0) puts the v2 aim point 5 steps east of
+    # the body: an enemy at 5150 is then beyond 5250 and not retargeted; standing, it is.
+    var w3 = newWorld(2026, 2400)
+    discard w3.placeOpen(0, [(1, 5150, 0)])
+    bodies = w3.observedBodies(0)
+    let step = w3.plannedStep(0, w3.goalCandidate(0, 47)[1], false)
+    require step.x < -20
+    var walking = [47'i32, 17, 1, 0, 0]
+    check not w3.aimRetargetActions(0, walking, bodies, acV2, memory, retarget)
+    check w3.aimRetargetActions(0, walking, bodies, acV1, memory, retarget)   # v1: the body itself
+    var standing = [0'i32, 17, 1, 0, 0]
+    check w3.aimRetargetActions(0, standing, bodies, acV2, memory, retarget)
+  test "identity and compass shoot orders are retargeted; keep aim, no shot, dead or disabled are not":
+    var w = newWorld(2026, 2400)
+    discard w.placeOpen(0, [(1, 1200, 0), (3, 2500, 300)])
+    let bodies = w.observedBodies(0)
+    let near = int32(identityOf(bodies, 1) + 1)
+    let far = int32(identityOf(bodies, 3) + 1)
+    for aim in [far, 20'i32, 24'i32]:
+      var a = [3'i32, aim, 1, 1, 1]
+      check w.aimRetargetActions(0, a, bodies, acV2, memory, retarget)
+      check a == [3'i32, near, 1, 1, 1]
+    var already = [3'i32, near, 1, 0, 0]
+    check not w.aimRetargetActions(0, already, bodies, acV2, memory, retarget)   # the rule's pick already
+    check already == [3'i32, near, 1, 0, 0]
+    for heads in [[3'i32, 0, 1, 0, 0], [3'i32, 17, 0, 0, 0], [3'i32, far, 0, 1, 0]]:
+      var a = heads
+      check not w.aimRetargetActions(0, a, bodies, acV2, memory, retarget)
+      check a == heads
+    var off = [3'i32, 17, 1, 0, 0]
+    check not w.aimRetargetActions(0, off, bodies, acV2, memory, AimRetargetOptions())
+    w.cogs[0].hp = 0
+    var dead = [3'i32, 17, 1, 0, 0]
+    check not w.aimRetargetActions(0, dead, bodies, acV2, memory, retarget)
+  test "teammates, disguised enemies and unseen enemies are never picked; ties go to the lower identity":
+    var w = newWorld(2026, 2400)
+    discard w.placeOpen(0, [(2, 900, 0), (1, 2000, 200)])
+    var bodies = w.observedBodies(0)
+    var a = [0'i32, 17, 1, 0, 0]
+    check w.aimRetargetActions(0, a, bodies, acV2, memory, retarget)
+    check a[1] == int32(identityOf(bodies, 1) + 1)   # the nearer teammate is skipped
+    w.uniforms[1] = true   # the enemy now reads as a teammate
+    bodies = w.observedBodies(0)
+    a = [0'i32, 17, 1, 0, 0]
+    check not w.aimRetargetActions(0, a, bodies, acV2, memory, retarget)
+    var f = newWorld(2026, 2400)
+    let s = f.placeOpen(0, [(1, 2000, 100)])
+    f.cogs[0].aim = point(s.x.int, s.z.int + 3000)   # facing north: the enemy is outside the cone
+    require not f.visible(0, 1)
+    a = [0'i32, 17, 1, 0, 0]
+    check not f.aimRetargetActions(0, a, f.observedBodies(0), acV2, memory, retarget)
+    var t = newWorld(2026, 2400)
+    discard t.placeOpen(0, [(5, 2000, 300), (3, 2000, 300)])
+    bodies = t.observedBodies(0)
+    a = [0'i32, 17, 1, 0, 0]
+    check t.aimRetargetActions(0, a, bodies, acV2, memory, retarget)
+    check a[1] == int32(min(identityOf(bodies, 3), identityOf(bodies, 5)) + 1)
+
+suite "Decoder shot gate (bundle option, not a contract change)":
+  setup:
+    visionRulesVersion = 37
+  let gate = shotGateOptions()
+  let snap = aimSnapOptions(DefaultAimSnapMillideg)
+  var memory: AimMemory
+  memory.resetAimMemory()
+  proc gated(w: World, slot: int, heads: array[ActionSizes.len, int32], bodies: array[Seats, int],
+      options: ShotGateOptions, snapOn = true): (bool, array[ActionSizes.len, int32]) =
+    ## Snap (when on), then the gate, as the decoders run them.
+    var a = heads
+    let before = a
+    let snapped = snapOn and w.aimSnapActions(slot, a, bodies, snap)
+    result[0] = w.shotGateActions(slot, a, before, snapped, bodies, acV2, memory, options)
+    result[1] = a
+  test "options: 5250 by default, validated range":
+    check gate.enabled and gate.maxRange == 5250
+    check shotGateOptionsError(1) == "" and shotGateOptionsError(20000) == ""
+    for bad in [0'i32, -1, 20001]:
+      check shotGateOptionsError(bad) != ""
+      expect ValueError: discard shotGateOptions(bad)
+  test "a compass order the snap cannot turn into an enemy is dropped; a snapped one within range stands":
+    var w = newWorld(2026, 2400)
+    discard w.placeOpen(0, [(1, 2000, 200)])
+    let bodies = w.observedBodies(0)
+    let enemy = int32(identityOf(bodies, 1) + 1)
+    check w.gated(0, [3'i32, 17, 1, 1, 0], bodies, gate) == (false, [3'i32, enemy, 1, 1, 0])
+    check w.gated(0, [3'i32, 19, 1, 1, 0], bodies, gate) == (true, [3'i32, 19, 0, 1, 0])     # north: nothing there
+    check w.gated(0, [3'i32, 17, 1, 1, 0], bodies, gate, snapOn = false) == (true, [3'i32, 17, 0, 1, 0])
+  test "a snapped enemy beyond range drops the order, and the aim goes back to the compass":
+    var w = newWorld(2026, 2400)
+    discard w.placeOpen(0, [(1, 5400, 300)])
+    let bodies = w.observedBodies(0)
+    require identityOf(bodies, 1) >= 0
+    check w.gated(0, [0'i32, 17, 1, 0, 0], bodies, gate) == (true, [0'i32, 17, 0, 0, 0])
+    let wide = shotGateOptions(5500)
+    check w.gated(0, [0'i32, 17, 1, 0, 0], bodies, wide) == (false, [0'i32, int32(identityOf(bodies, 1) + 1), 1, 0, 0])
+  test "identity orders: dropped only when the aim candidate lies beyond range; keep aim and unseen identities pass":
+    var w = newWorld(2026, 2400)
+    discard w.placeOpen(0, [(1, 5300, 0), (3, 1500, 400), (2, 1000, -300)])
+    let bodies = w.observedBodies(0)
+    let far = int32(identityOf(bodies, 1) + 1)
+    let near = int32(identityOf(bodies, 3) + 1)
+    let mate = int32(identityOf(bodies, 2) + 1)
+    check w.gated(0, [0'i32, far, 1, 0, 0], bodies, gate) == (true, [0'i32, far, 0, 0, 0])
+    check w.gated(0, [0'i32, near, 1, 0, 0], bodies, gate) == (false, [0'i32, near, 1, 0, 0])
+    check w.gated(0, [0'i32, mate, 1, 0, 0], bodies, gate) == (false, [0'i32, mate, 1, 0, 0])   # diag3: range only
+    check w.gated(0, [0'i32, 0, 1, 0, 0], bodies, gate) == (false, [0'i32, 0, 1, 0, 0])
+    var unseen = -1
+    for identity in 0..<Seats:
+      if bodies[identity] < 0: unseen = identity
+    require unseen >= 0
+    check w.gated(0, [0'i32, int32(unseen + 1), 1, 0, 0], bodies, gate) == (false, [0'i32, int32(unseen + 1), 1, 0, 0])
+  test "no shot, a dead seat or the option off: untouched":
+    var w = newWorld(2026, 2400)
+    discard w.placeOpen(0, [(1, 2000, 200)])
+    let bodies = w.observedBodies(0)
+    check w.gated(0, [0'i32, 19, 0, 0, 0], bodies, gate) == (false, [0'i32, 19, 0, 0, 0])
+    check w.gated(0, [0'i32, 19, 1, 0, 0], bodies, ShotGateOptions()) == (false, [0'i32, 19, 1, 0, 0])
+    w.cogs[0].hp = 0
+    check w.gated(0, [0'i32, 19, 1, 0, 0], bodies, gate) == (false, [0'i32, 19, 1, 0, 0])
+
+suite "Aim retarget and shot gate equal pw-diag3's counterfactuals over whole matches":
+  setup:
+    visionRulesVersion = 39
+  test "retarget equals diag3_run.py --retarget on every live shoot order; the gate equals --shot-gate wherever no body is disguised":
+    var decisions, retargets, gateCompared, gateDrops, disguisedDiffers = 0
+    for seed in [11'i32, 12]:
+      var w = newWorld(seed, 3000)
+      var memories: array[Seats, AimMemory]
+      for slot in 0..<Seats: memories[slot].resetAimMemory()
+      var rng = initRng(seed, 0x5245544152474554'u64)
+      let retarget = aimRetargetOptions()
+      let gate = shotGateOptions()
+      let snap = aimSnapOptions(DefaultAimSnapMillideg)
+      while w.winner == -1 and w.tick < w.endTick:
+        var commands: array[Seats, Command]
+        for slot in 0..<Seats:
+          var heads: array[ActionSizes.len, int32]
+          w.trainingBotActions(slot, 2, heads)
+          let r = int(rng.next() mod 100)
+          heads[0] = if r < 50: heads[0] elif r < 85: int32(43 + int(rng.next() mod 8)) else: 0'i32
+          let q = int(rng.next() mod 100)
+          heads[1] = if q < 35: heads[1] elif q < 55: int32(1 + int(rng.next() mod 16))
+                     elif q < 95: int32(17 + int(rng.next() mod 8)) else: 0'i32
+          heads[2] = int32(rng.next() mod 3 != 0)
+          heads[4] = int32(rng.next() mod 10 == 0)
+          let bodies = w.observedBodies(slot)
+          let version = if slot mod 4 < 2: acV2 else: acV1
+          if w.cogs[slot].hp > 0 and heads[2] != 0:
+            inc decisions
+            # Retarget: the engine rule against the transliteration.
+            var a = heads
+            let reference = w.diag3Retarget(slot, heads, bodies, version, memories[slot], 5250, 160000, 2500000)
+            let changed = w.aimRetargetActions(slot, a, bodies, version, memories[slot], retarget)
+            if heads[1] == 0:
+              check not changed and a == heads
+            else:
+              check a[1] == (if reference > 0: int32(reference) else: heads[1])
+              check changed == (reference > 0 and reference != heads[1])
+            if changed: inc retargets
+            # Gate, after the retarget and the snap, against diag3's gate on the retargeted heads.
+            let before = a
+            var snapped = a
+            let didSnap = w.aimSnapActions(slot, snapped, bodies, snap)
+            let dropped = w.shotGateActions(slot, snapped, before, didSnap, bodies, version, memories[slot], gate)
+            let expected = w.diag3GateDrops(slot, before, bodies, version, memories[slot], 5250)
+            var disguised = false
+            for j in 0..<Seats:
+              if w.uniforms[j] and w.visible(slot, j): disguised = true
+            if disguised:
+              if dropped != expected: inc disguisedDiffers
+            else:
+              inc gateCompared
+              check dropped == expected
+              if dropped: check snapped == [before[0], before[1], 0, before[3], before[4]]
+            if dropped: inc gateDrops
+            heads = if dropped: snapped else: (if didSnap: snapped else: a)
+          commands[slot] = w.decodeActions(slot, heads, bodies, version, memories[slot])
+          if version == acV2: memories[slot].recordAimMemory(w, slot, bodies)
+        w.step(commands)
+    checkpoint "decisions " & $decisions & " retargets " & $retargets & " gate compared " & $gateCompared &
+      " drops " & $gateDrops & " disguised differ " & $disguisedDiffers
+    check decisions > 5000 and retargets > 500 and gateCompared > 5000 and gateDrops > 500
