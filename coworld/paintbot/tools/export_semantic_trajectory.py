@@ -201,13 +201,13 @@ def export(
                     "selected_attempt_id": attempt_id if status == "accepted" else None,
                     "executed_action": (
                         {
-                            "objective": effect["obj"],
-                            "guard": effect["guard"],
-                            "objective_choice": labels[effect["ansobj"]]
-                            if 0 <= effect["ansobj"] < len(labels)
-                            else None,
+                            "objective_heart": effect["obj"],
+                            "guard_heart": effect["guard"],
+                            "objective_choice": labels[effect["ansobj"]],
                         }
-                        if effect is not None
+                        if effect is not None and effect["applied"] == 1
+                        else {"objective_choice": "current"}
+                        if status == "accepted"
                         else None
                     ),
                     "action_status": status,

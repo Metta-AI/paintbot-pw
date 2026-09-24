@@ -54,13 +54,16 @@ class SemanticTrajectoryTests(unittest.TestCase):
         self.journal(1, raw=1, ansobj=0, applied=1, explored=1)
         self.journal(2, raw=2, applied=0)
         self.journal(3, answer=False, effect=False, failure=True)
+        self.journal(4, raw=1, applied=0)
         decisions = self.exported()["decisions"]
-        self.assertEqual([row["action_status"] for row in decisions], ["accepted", "fallback", "accepted", "missing"])
+        self.assertEqual([row["action_status"] for row in decisions], ["accepted", "fallback", "accepted", "missing", "fallback"])
         self.assertEqual(decisions[0]["attempts"][0]["parsed_action"], {"choice": "C0"})
         self.assertEqual(decisions[1]["attempts"][0]["parsed_action"], {"choice": "C1"})
         self.assertEqual(decisions[1]["executed_action"]["objective_choice"], "C0")
         self.assertEqual(decisions[2]["attempts"][0]["parsed_action"], {"choice": "current"})
+        self.assertEqual(decisions[2]["executed_action"], {"objective_choice": "current"})
         self.assertIsNone(decisions[3]["executed_action"])
+        self.assertIsNone(decisions[4]["executed_action"])
         self.assertEqual(decisions[0]["observation"], {"me.current_objective_heart": -1})
 
     def test_rejects_answer_mismatch(self):
@@ -69,6 +72,17 @@ class SemanticTrajectoryTests(unittest.TestCase):
         path.write_text(path.read_text().replace("rawobj=0", "rawobj=1"))
         with self.assertRaisesRegex(ValueError, "differs"):
             self.exported()
+
+    def test_partial_oracle_reply_has_no_objective_choice(self):
+        self.journal(0, raw=-1, applied=0)
+        path = self.root / "player-0.log"
+        lines = path.read_text().splitlines()
+        lines[3] = 'oracle-ans id=1 t=12 status=1 {"outnumbered":{"v":100,"c":-1}}'
+        path.write_text("\n".join(lines) + "\n")
+        decision = self.exported()["decisions"][0]
+        self.assertEqual(decision["action_status"], "fallback")
+        self.assertIsNone(decision["attempts"][0]["parsed_action"])
+        self.assertIsNone(decision["executed_action"])
 
     def test_score_arm_requires_its_own_action_join(self):
         self.journal(0)
