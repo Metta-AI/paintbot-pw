@@ -100,6 +100,7 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
     "a23-kite-rush": ("kite; grenade carriers walk in on a visible cluster and grenade it",
                       {"useKite": 1, "useRush": 1, "useSmartGrenade": 1}),
     "a24-high": ("step to higher ground while an enemy is in view", {"useHigh": 1}),
+    "a25-cover-spot": ("cover cogs stand on the high point beside their post", {"useCoverSpot": 1}),
 }
 
 

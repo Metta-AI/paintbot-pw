@@ -211,6 +211,8 @@ suite "Jev-advised BASIC baseline":
       "kite and focus": @[("useKite", 1), ("useFocus", 1)],
       "kite, rush and smart grenade": @[("useKite", 1), ("useRush", 1), ("useSmartGrenade", 1)],
       "high ground": @[("useHigh", 1)],
+      "cover spot": @[("useCoverSpot", 1)],
+      "cover spot and high ground": @[("useCoverSpot", 1), ("useHigh", 1)],
       "champion and high ground, holding": @[("useKite", 1), ("kKiteMargin", 2), ("useRush", 1),
           ("useSmartGrenade", 1), ("useHigh", 1), ("kHighHold", 1)],
     }
