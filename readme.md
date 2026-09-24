@@ -32,6 +32,22 @@ nim c -d:coworld -o:tmp/paintbot-coworld examples/paintbot/paintbot.nim
 
 Pass `--policy` sixteen times to seat different files. The host accepts local, HTTPS and S3 policy URIs with mandatory SHA-256 and size verification. Coworld stages uploaded files automatically.
 
+## Numeric training
+
+The native simulator exposes the versioned 506-float observation and five action heads `[51,25,2,2,2]`
+used by neural BASIC players. Build its training library, then pass the JSONL bridge to Metta RL or PufferLib:
+
+```sh
+POLYWORLD_DEPS="$PWD/tmp/coworld/deps" nim c --app:lib --mm:arc --threads:on -d:pwTraining -d:headless \
+  -o:tmp/libpaintbot_training.dylib examples/paintbot/native_env.nim
+python3 coworld/paintbot/tools/training_bridge.py --library tmp/libpaintbot_training.dylib --variant certification
+```
+
+Use `.so` for the library on Linux. The bridge trains seat 0 against the game's BASIC baseline in the other 15 seats.
+`--variant competition` uses the published 14,400-tick limit; `--ticks` selects a shorter pilot. The selected
+variant's maximum comes from the source manifest. `reset` requires 16 players, `encode` returns the observation
+and five action heads, and `teacher` returns the native bot action. Terminal scores are each seat's team glory.
+
 ## Browser replay viewer and package
 
 With Emscripten installed and Python 3.12 on PATH:
