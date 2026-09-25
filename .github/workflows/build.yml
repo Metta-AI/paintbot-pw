@@ -81,6 +81,7 @@ jobs:
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_retarget_gate.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_spray.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_weapon_stats.nim
+      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
       - run: nim r -d:headless tests/test_paintbot_neural_host.nim

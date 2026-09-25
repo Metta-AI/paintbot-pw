@@ -279,6 +279,19 @@ int pw_seat_spray_stats(void *handle, int seat, int32_t *stats);
  * slowdown), high = terrainHeight >= 216, trench = inside a trench; classes may overlap. Pure
  * telemetry, never part of the world or its hash; -1 bad args. */
 int pw_seat_weapon_stats(void *handle, int seat, int32_t *stats);
+
+/* pw_world_json (training library only): the whole world as one JSON object, {"rulesVersion": R,
+ * "heard": {}, then every World field} -- the object the engine streamed to PW_POLICY_FD each tick
+ * before seats stopped acting through the host (#51) -- for external controllers that plan from
+ * world state and act through pw_set_seat_command. Returns the length in bytes and writes the JSON
+ * (no NUL) only when capacity >= length, so capacity 0 sizes the buffer. Pure read: the world and
+ * its hash are unchanged. -1 bad args. */
+int pw_world_json(void *handle, char *output, int32_t capacity);
+
+/* pw_elevation (training library only): the ground height at (x, z) in this handle's world
+ * (sim.elevation: terrain plus world features), for controllers that raster line of sight from
+ * pw_world_json. Pure read; -1000000 for a nil handle. */
+int pw_elevation(void *handle, int32_t x, int32_t z);
 /* Observation contract selection (additive). pw_create_observation is pw_create with the
  * observation contract chosen, kept across pw_reset: 1 = v1
  * "paintbot-pw.rules37.obs.v1.float448" (identical to pw_create), 2 = v2
