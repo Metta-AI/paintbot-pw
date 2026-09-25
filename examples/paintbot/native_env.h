@@ -288,6 +288,42 @@ int pw_observation_size_for(int32_t obs_version);
 int pw_handle_observation_size(void *handle);
 int pw_observation_contract(void *handle);
 int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, int32_t capacity);
+/* Neural BASIC I/O (PLAN-neural-basic-io), training side; every call additive, and a
+ * handle that never uses them is byte-identical to one without them.
+ * pw_create_observation_inputs: observation contract v2u<K>
+ * "paintbot-pw.rules39.obs.v2u<K>" (K = user_inputs, 1..32; 0 = pw_create_observation(.., 2)):
+ * every pw_observe row is v2's 506 floats followed by K floats, a policy seat's user inputs
+ * as its policy.bas left them (float32(v) / 1000: what its next decision's observation
+ * reads), zeros for every other seat. pw_handle_user_inputs = the handle's K;
+ * pw_handle_observation_size = 506 + K; pw_user_inputs_contract_hash writes the v2u<K>
+ * SHA-256 (0, or -1 bad args).
+ * pw_set_seat_policy_script: the seat runs a bundle's policy.bas under its manifest.json
+ * exactly as the hosted neural seat does (decoder options, sampling, user inputs, action
+ * contract; the seat's own sampling and strafe streams from the match seed and slot), with
+ * no actor: run_neural_net yields the seat's row of the logits passed to pw_step_logits.
+ * The manifest's observation_contract must be the handle's. Rebuilt on pw_reset; length 0
+ * removes it; pw_set_seat_script on the seat replaces it. Per-seat decoder setters do not
+ * apply to it. 0 running, 1 compile failed, 2 manifest rejected (text in
+ * pw_seat_script_status), -1 bad args. While any policy seat is installed pw_step and
+ * pw_script_decide return -4.
+ * pw_step_logits: pw_step with logits = float[16 * 82] in seat order (only policy seats'
+ * rows are read). The trainer runs the actor on the seat's pw_observe row every tick the
+ * seat is alive, its recurrent state cleared as the host clears it (dead, alive after a
+ * death, new match).
+ * pw_seat_policy_choices: int32[22] of the last step = {decided, selected[5], final[5],
+ * temperature_milli[5], mask0 bits 0..31, mask0 bits 32..50, mask1, mask2, mask3, mask4}:
+ * decided = the script selected this step; selected = the heads drawn under the applied
+ * masks and temperatures (the trainer's log-probability target); final = the heads decoded
+ * (-1 if never decoded); temperature 0 = argmax; mask bit i = choice i excluded. -1 bad args
+ * or not a policy seat. */
+void *pw_create_observation_inputs(int32_t seed, int32_t max_ticks, int32_t user_inputs);
+int pw_handle_user_inputs(void *handle);
+int pw_user_inputs_contract_hash(int32_t user_inputs, char *sixty_five_bytes, int32_t capacity);
+int pw_set_seat_policy_script(void *handle, int seat, const char *bas, int32_t bas_len,
+    const char *manifest_json, int32_t manifest_len);
+int pw_step_logits(void *handle, const int32_t *actions, const float *logits, float *rewards,
+    float *terminals);
+int pw_seat_policy_choices(void *handle, int seat, int32_t *twenty_two);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
 #ifdef __cplusplus

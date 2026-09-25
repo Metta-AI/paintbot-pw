@@ -11,11 +11,25 @@ sys.path.insert(0, str(Path(__file__).parent / "runtime"))
 from neural_package import (unpack_package, validate_aim_retarget, validate_shot_gate, validate_fire_hold, MAX_MODEL_BYTES,
                             validate_spray_aim, validate_spray_gate, SPRAY_AIM_DEFAULTS, SPRAY_GATE_DEFAULTS, SPRAY_LIMITS,
                             AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
-                            MAX_SHOT_GATE_RANGE)
+                            MAX_SHOT_GATE_RANGE, validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS,
+                            USER_INPUT_LIMIT, OBSERVATION_V2_SIZE)
 
 
-def package(overrides=None, extra=None):
-    source, model = b"idle = 1\n", b"neutral fixture"
+def actor_bytes(inputs, observation_hash, hidden=64, outputs=82):
+    """A synthetic PWNET001 header (zero weights) with the given input count and observation hash."""
+    heads = [51, 25, 2, 2, 2]
+    parameters = inputs * hidden + 3 * hidden * hidden + outputs * hidden
+    header = b"PWNET001" + b"".join(v.to_bytes(4, "little") for v in (1, inputs, hidden, outputs, len(heads), parameters))
+    return (header + observation_hash.encode() + ("b" * 64).encode() +
+            b"".join(h.to_bytes(4, "little") for h in heads) + bytes(4 * parameters))
+
+
+def v2u_hash(k):
+    return hashlib.sha256(user_inputs_contract_id(k).encode()).hexdigest()
+
+
+def package(overrides=None, extra=None, model=b"neutral fixture"):
+    source = b"idle = 1\n"
     manifest = {"schema": "paintbot-neural-basic/1", "observation_contract": "a" * 64,
                 "action_contract": "b" * 64,
                 "sha256": {"policy.bas": hashlib.sha256(source).hexdigest(),
@@ -316,6 +330,76 @@ class PackageTests(unittest.TestCase):
         self.assertEqual((MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT), (consts["MaxRetargetRange"], consts["MaxRetargetWeight"]))
         self.assertEqual(SHOT_GATE_DEFAULTS, {"max_range": consts["DefaultShotGateRange"]})
         self.assertEqual(MAX_SHOT_GATE_RANGE, consts["MaxShotGateRange"])
+
+
+class UserInputTests(unittest.TestCase):
+    def inputs_package(self, k=3, init=None, observation=None, inputs=None, schema="paintbot-neural-basic/2",
+                       user_inputs="default"):
+        observation = observation or v2u_hash(k)
+        model = actor_bytes(OBSERVATION_V2_SIZE + k if inputs is None else inputs, observation)
+        overrides = {"schema": schema, "observation_contract": observation}
+        if user_inputs == "default":
+            overrides["user_inputs"] = {"count": k, "init": init if init is not None else [0] * k}
+        elif user_inputs is not None:
+            overrides["user_inputs"] = user_inputs
+        return package(overrides, model=model)
+
+    def test_valid_user_inputs(self):
+        for k in (1, 3, MAX_USER_INPUTS):
+            _, _, manifest = unpack_package(self.inputs_package(k, init=[USER_INPUT_LIMIT] + [-USER_INPUT_LIMIT] * (k - 1)))
+            self.assertEqual(manifest["user_inputs"]["count"], k)
+
+    def test_user_inputs_field_rules(self):
+        for value, message in (([], "must be an object"), ({"init": []}, "count is required"),
+                               ({"count": 0, "init": []}, "within 1 .. 32"), ({"count": 33, "init": [0] * 33}, "within 1 .. 32"),
+                               ({"count": 2.0, "init": [0, 0]}, "must be an integer"), ({"count": True, "init": [0]}, "integer"),
+                               ({"count": 2}, "init is required"), ({"count": 2, "init": 5}, "init must be an array"),
+                               ({"count": 2, "init": [0]}, "count entries"), ({"count": 1, "init": [1000001]}, "within -1000000"),
+                               ({"count": 1, "init": [-1000001]}, "within"), ({"count": 1, "init": [0.5]}, "integers"),
+                               ({"count": 1, "init": [0], "scale": 1}, "unknown user_inputs field")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(value)):
+                validate_user_inputs(value)
+            with self.assertRaisesRegex(ValueError, message, msg=repr(value)):
+                unpack_package(self.inputs_package(2, user_inputs=value))
+
+    def test_user_inputs_need_schema_2_and_the_matching_contract(self):
+        with self.assertRaisesRegex(ValueError, "need package schema 2"):
+            unpack_package(self.inputs_package(schema="paintbot-neural-basic/1"))
+        with self.assertRaisesRegex(ValueError, "need observation contract v2u"):
+            unpack_package(self.inputs_package(observation="a" * 64))
+        with self.assertRaisesRegex(ValueError, "v2u3 needs manifest user_inputs"):
+            unpack_package(self.inputs_package(3, user_inputs=None))
+        with self.assertRaisesRegex(ValueError, "does not match observation contract v2u3"):
+            unpack_package(self.inputs_package(3, user_inputs={"count": 2, "init": [0, 0]}))
+
+    def test_user_inputs_check_the_actor_input_count_and_contract(self):
+        with self.assertRaisesRegex(ValueError, "input count must be 509 for 3 user inputs"):
+            unpack_package(self.inputs_package(3, inputs=OBSERVATION_V2_SIZE))
+        observation = v2u_hash(3)
+        model = actor_bytes(OBSERVATION_V2_SIZE + 3, v2u_hash(2))
+        with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
+            unpack_package(package({"schema": "paintbot-neural-basic/2", "observation_contract": observation,
+                                    "user_inputs": {"count": 3, "init": [0, 0, 0]}}, model=model))
+        with self.assertRaisesRegex(ValueError, "invalid neural actor magic"):
+            unpack_package(package({"schema": "paintbot-neural-basic/2", "observation_contract": observation,
+                                    "user_inputs": {"count": 3, "init": [0, 0, 0]}}))
+
+    def test_user_inputs_contract_ids_match_the_engine(self):
+        # neural_contract.nim lists the v2u<K> hashes; each is the SHA-256 of its id.
+        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
+        block = source[source.index("UserInputsContractHashes*"):]
+        block = block[block.index("= ["):]
+        hashes = re.findall(r'"([0-9a-f]{64})"', block[:block.index("]")])
+        self.assertEqual(hashes, [v2u_hash(k) for k in range(1, MAX_USER_INPUTS + 1)])
+        self.assertIn('"paintbot-pw.rules39.obs.v2u" & $k', source)
+        consts = {name: int(value.replace("_", "")) for name, value in
+                  re.findall(r"^  (\w+)\* = ([0-9_]+)(?:'i32)?$", source, re.M)}
+        self.assertEqual((MAX_USER_INPUTS, USER_INPUT_LIMIT), (consts["MaxUserInputs"], consts["UserInputLimit"]))
+
+    def test_packages_without_user_inputs_are_unaffected(self):
+        # An ordinary contract hash with the model never parsed, exactly as before.
+        _, model, _ = unpack_package(package({"schema": "paintbot-neural-basic/2"}))
+        self.assertEqual(model, b"neutral fixture")
 
 
 if __name__ == "__main__":

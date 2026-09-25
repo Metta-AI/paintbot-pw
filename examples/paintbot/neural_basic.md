@@ -204,6 +204,69 @@ Invalid handles, missing models, repeated inference, and nonfinite inference
 results disable the seat through the existing policy-failure mechanism and
 produce a safe empty command. All seats observe the pre-action world.
 
+## Neural BASIC I/O: user inputs, the head-level phase, the command buffer
+
+Everything below is additive: a bundle that uses none of it plays byte-identically, and
+`paintbot_act(neuralLogits())` is exactly `neuralDecode()` followed by `neuralIssue()`.
+All of it counts against the existing instruction/work budget and the 4,000,000-operation
+neural budget; no limit changes. Misuse (wrong order, out-of-range index, a head with every
+choice masked) disables the seat like any other neural error.
+
+**User inputs (BASIC -> net).** A schema-2 manifest may carry
+`"user_inputs": {"count": K, "init": [K integers]}`, K within 1..32, each init value within
+-1,000,000..1,000,000. The actor's observation contract is then
+`paintbot-pw.rules39.obs.v2u<K>` (hash = SHA-256 of that id; the table is
+`neural_contract.UserInputsContractHashes`): v2's 506 floats followed by K user floats, so
+the actor has 506 + K inputs. Manifest, actor hash and input count must all agree (checked
+at staging and at load). `neuralInput(i, v)` (i in 0..K-1) sets input i to v clamped to
++-1,000,000; the net reads `float32(v) / 1000`. Values persist across ticks and deaths
+within a match and start at `init` each match; a value set during tick t is in the
+observation of tick t+1 (one tick of latency, the same in training).
+
+**Head-level phase (net -> BASIC).** Per tick, in this order:
+
+- before selection: `neuralMask(h, bits)` excludes choice i of head h for each set bit i
+  (choices 0..31), `neuralMaskFrom(h, first, bits)` the choices first..first+31 (head 0 has
+  51); later calls overwrite their window. `neuralTemperature(h, milli)` sets head h's
+  temperature to milli/1000 for this tick (h = -1: every head; 0 = argmax; 1..100000); heads
+  without a call keep `decoder.sampling`. Masks add to `decoder.forbid_objectives` on head 0;
+  both last one tick. `neuralMask(0, 1536)` is `forbid_objectives [9, 10]` and
+  `neuralTemperature(-1, 1000)` is `sampling {"temperature": 1.0}`, draw for draw.
+- `neuralSample()`: selection (argmax or the seat's sampling stream) under those masks and
+  temperatures, then the aim-phase decoder options (aim retarget, aim snap, spray aim, shot
+  gate, spray gate). `neuralChoice(h)` reads a head, `neuralSetChoice(h, i)` overrides it
+  (until `neuralDecode`).
+- `neuralDecode()`: samples first if `neuralSample` was not called, then the movement-phase
+  options (strafe legs, steady shot), the decode under the action contract and the fire
+  hold, into the seat's command buffer. Nothing is issued yet.
+- `cmdWalk() cmdGoalX() cmdGoalZ() cmdShoot() cmdAimX() cmdAimZ() cmdGrenade() cmdSneak()
+  cmdDirect()` read the buffer; `cmdSet(field, value)` edits it with field ids 0..8 in that
+  order (flags are value <> 0; an aim coordinate is clamped to the map as `lookAt` clamps
+  it; a goal is kept as `walkTo` keeps it).
+- `neuralIssue()` issues the buffer (once per tick). A tick that decodes and never issues
+  issues nothing from the net. Host calls after it (`chargeGrenade(0)`, `lookAt`, ...)
+  still edit the seat's order as before.
+
+Readers: `neuralObs(i)` = round(observation[i] x 1000) of this tick's observation (any
+index of the contract, user inputs included; e.g. a ready spray can is `hasSpray` and
+`neuralObs(23) = 0`, column 23 being spray cooldown / 60). `neuralGoalX/Z(m)` (m in 0..50)
+and `neuralAimX/Z(k)` (k in 0..24) are the points head choice m / k resolves to this tick
+(`pw_action_candidates`' rule; goal 0 = the seat's position, aim 0 = its current aim;
+INT32_MIN when the candidate does not exist now); the aim readers need `neuralSample` first
+and use the tick's movement and sneak choices for a contract-v2 identity lead.
+
+What stays native: the fire hold, aim retarget, aim snap, shot gate, spray aim and strafe
+legs need int64 geometry, path planning or the seat's own streams, so they remain manifest
+`decoder` options. The spray gate, the grenade mask, objective forbids, temperatures and
+anything built on the candidate readers can be written in BASIC; the spray gate written
+between `neuralSample()` and `neuralDecode()` reproduces `decoder.spray_gate` hash for hash
+(`tests/test_paintbot_neural_basic_io.nim`).
+
+Training runs the same policy.bas: `pw_set_seat_policy_script` in the native ABI drives a
+seat with the bundle's policy.bas and manifest, the trainer passing each tick's logits to
+`pw_step_logits` and reading what the script executed (selected heads, applied masks and
+temperatures) from `pw_seat_policy_choices` (`native_env.h`).
+
 Native inference has a separate deterministic operation count and a maximum of
 4,000,000 operations per seat/tick. This cannot be bypassed by repeated host
 calls. Bytecode and ordinary host work retain their existing limits. `PW_BASIC_PEAKS=1`
@@ -228,10 +291,12 @@ Validation:
 ```
 python3 -m unittest coworld/paintbot/test_neural_package.py
 nim c -r -d:headless tests/test_paintbot_neural_host.nim
+nim c -r -d:headless tests/test_paintbot_neural_basic_io.nim
 nim c -r -d:headless tests/test_paintbot_neural_contract.nim
 nim c -r -d:headless tests/test_paintbot_neural_obs_v2.nim
 nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
 nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold.nim
+nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
 ```
 
 A successful local loader test is not hosted certification. Release must still

@@ -43,6 +43,53 @@ SPRAY_AIM_DEFAULTS = {"max_range": 850}
 SPRAY_GATE_DEFAULTS = {"max_teammates": 0, "min_enemies": 1}
 SPRAY_LIMITS = {"max_range": (1, 850), "max_teammates": (0, 7), "min_enemies": (0, 8)}
 MAX_SHOT_GATE_RANGE = 20000
+# Manifest "user_inputs": {"count": K, "init": [K ints]} (schema 2; PLAN-neural-basic-io part A): policy.bas feeds
+# the net K extra inputs with neuralInput(i, v), v clamped to +-1,000,000 and fed as float32(v) / 1000 one tick
+# later. The actor's observation contract is then v2u<K> (v2's 506 floats + K), whose hash is the SHA-256 of the id
+# below, and its input count is 506 + K. neural_host.nim holds the same rules.
+MAX_USER_INPUTS, USER_INPUT_LIMIT = 32, 1000000
+OBSERVATION_V2_SIZE = 506
+ACTOR_MAGIC = b"PWNET001"
+
+
+def user_inputs_contract_id(count):
+    return "paintbot-pw.rules39.obs.v2u%d" % count
+
+
+USER_INPUTS_CONTRACT_HASHES = {hashlib.sha256(user_inputs_contract_id(k).encode()).hexdigest(): k
+                               for k in range(1, MAX_USER_INPUTS + 1)}
+
+
+def validate_user_inputs(value):
+    """user_inputs: {"count": K, "init": [K ints]}, K within 1 .. 32, init values within +-1,000,000. Returns K."""
+    if not isinstance(value, dict):
+        raise ValueError("user_inputs must be an object")
+    for key in value:
+        if key not in ("count", "init"):
+            raise ValueError("unknown user_inputs field: " + str(key))
+    if "count" not in value:
+        raise ValueError("user_inputs.count is required")
+    count = value["count"]
+    if not _is_int(count) or not 1 <= count <= MAX_USER_INPUTS:
+        raise ValueError("user_inputs.count must be an integer within 1 .. %d" % MAX_USER_INPUTS)
+    if "init" not in value:
+        raise ValueError("user_inputs.init is required")
+    init = value["init"]
+    if not isinstance(init, list):
+        raise ValueError("user_inputs.init must be an array")
+    for item in init:
+        if not _is_int(item) or not -USER_INPUT_LIMIT <= item <= USER_INPUT_LIMIT:
+            raise ValueError("user_inputs.init entries must be integers within -%d .. %d" % (USER_INPUT_LIMIT, USER_INPUT_LIMIT))
+    if len(init) != count:
+        raise ValueError("user_inputs.init must have user_inputs.count entries")
+    return count
+
+
+def actor_header(model):
+    """(input count, observation contract hash) from a PWNET001 actor's header; ValueError when it is not one."""
+    if len(model) < 96 or model[:8] != ACTOR_MAGIC:
+        raise ValueError("invalid neural actor magic")
+    return int.from_bytes(model[12:16], "little"), model[32:96].decode("ascii", "replace")
 
 
 def _is_int(value):
@@ -293,9 +340,28 @@ def unpack_package(data):
                 validate_spray_gate(value)
         if "steady_shot" in decoder and STEADY_MOVEMENT in decoder.get("forbid_objectives", []):
             raise ValueError("decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
+    user_inputs = 0
+    if "user_inputs" in manifest:
+        if manifest.get("schema") != "paintbot-neural-basic/2":
+            raise ValueError("user_inputs need package schema 2")
+        user_inputs = validate_user_inputs(manifest["user_inputs"])
+    named = USER_INPUTS_CONTRACT_HASHES.get(manifest["observation_contract"], 0)
+    if user_inputs and not named:
+        raise ValueError("user_inputs need observation contract v2u<K>")
+    if named and not user_inputs:
+        raise ValueError("observation contract v2u%d needs manifest user_inputs" % named)
+    if user_inputs and named != user_inputs:
+        raise ValueError("user_inputs.count does not match observation contract v2u%d" % named)
     files["policy.bas"].decode("utf-8")
     if not files["model.bin"]:
         raise ValueError("empty neural model")
+    if user_inputs:
+        inputs, observation = actor_header(files["model.bin"])
+        if observation != manifest["observation_contract"]:
+            raise ValueError("package and actor contract mismatch")
+        if inputs != OBSERVATION_V2_SIZE + user_inputs:
+            raise ValueError("neural actor input count must be %d for %d user inputs"
+                             % (OBSERVATION_V2_SIZE + user_inputs, user_inputs))
     return files["policy.bas"], files["model.bin"], manifest
 
 

@@ -129,6 +129,16 @@ contract 1 or 2 (NULL otherwise; `pw_create` is contract 1); the version is kept
 out, 65)` report it; `pw_observation_size()` stays 448. The observation contract never
 touches the world or its hash.
 
+**v2u<K>: v2 + K user inputs** (PLAN-neural-basic-io part A). Id
+`paintbot-pw.rules39.obs.v2u<K>`, K = 1..32, SHA-256 of the id (all 32 listed in
+`neural_contract.UserInputsContractHashes`; K = 1 is `bd80f4d3…`, K = 2 `b064de43…`, K = 3
+`a8c43d03…`); 506 + K floats. Columns 0..505 are v2 unchanged; column 506 + i is
+`float32(v_i) / 1000` where v_i is the value the seat's policy.bas last set with
+`neuralInput(i, v)` (clamped to +-1,000,000) before this tick, or the manifest's
+`user_inputs.init[i]` at match start (`neural_contract.encodeObservationInputs`). The
+manifest's `user_inputs.count` must be K. Training: `pw_create_observation_inputs(seed,
+max_ticks, K)`; a policy seat's rows carry its inputs, every other seat's user columns are 0.
+
 ## Action contracts
 
 Two action contracts share the five heads `[51,25,2,2,2]` and differ only in what an

@@ -631,6 +631,126 @@ proc sampleActions*(logits: openArray[float32], options: SamplingOptions,
     result[head] = pick.int32
     offset += size
 
+# Neural BASIC I/O (PLAN-neural-basic-io): the head-level sampler BASIC drives with
+# neuralMask / neuralTemperature. Per head, a mask of excluded choices and a temperature
+# (0 = argmax). With the mask equal to decoder.forbid_objectives on head 0 and nothing
+# else, and the temperatures equal to decoder.sampling's, it is exactly sampleActions /
+# argmaxActions with that forbid mask: the same argmax (first maximum among the allowed),
+# the same float64 softmax over the allowed choices, one uniform53 draw per sampled head
+# in head order, and the last allowed choice when rounding leaves the threshold uncovered.
+type
+  HeadMasks* = array[ActionSizes.len, array[ActionSizes[0], bool]]  # true = excluded
+  HeadTemperatures* = array[ActionSizes.len, float32]                # 0 = argmax
+const
+  MinBasicTemperatureMilli* = 1'i32
+  MaxBasicTemperatureMilli* = 100000'i32
+
+proc maskedArgmax(logits: openArray[float32], masks: HeadMasks): array[ActionSizes.len, int32] =
+  result = argmaxActions(logits)   # size and finiteness checks
+  var offset = 0
+  for head, size in ActionSizes:
+    var any = false
+    for i in 0..<size:
+      if masks[head][i]: any = true
+    if any:
+      var best = -1
+      for i in 0..<size:
+        if masks[head][i]: continue
+        if best < 0 or logits[offset+i] > logits[offset+best]: best = i
+      if best < 0: raise newException(ValueError, "every choice of head " & $head & " is masked")
+      result[head] = best.int32
+    offset += size
+
+proc sampleHeads*(logits: openArray[float32], temps: HeadTemperatures, masks: HeadMasks,
+    rng: var Rng, draws: var int): array[ActionSizes.len, int32] =
+  ## Headwise: argmax (temperature 0) or a categorical draw from softmax(logits / T) over
+  ## the choices not masked; `draws` counts the uniforms taken.
+  if logits.len != LogitSize: raise newException(ValueError, "invalid neural logit size")
+  let argmax = maskedArgmax(logits, masks)
+  var offset = 0
+  for head, size in ActionSizes:
+    let t = temps[head]
+    if t <= 0'f32:
+      result[head] = argmax[head]
+      offset += size
+      continue
+    let top = float64(logits[offset+argmax[head]])
+    let inverse = 1.0 / float64(t)
+    var total = 0.0
+    for i in 0..<size:
+      if masks[head][i]: continue
+      total += exp((float64(logits[offset+i]) - top) * inverse)
+    let threshold = rng.uniform53() * total
+    inc draws
+    var cumulative = 0.0
+    var pick = -1
+    for i in 0..<size:
+      if masks[head][i]: continue
+      pick = i
+      cumulative += exp((float64(logits[offset+i]) - top) * inverse)
+      if threshold < cumulative: break
+    result[head] = pick.int32
+    offset += size
+
+# Observation contract "v2 + K user inputs" (PLAN-neural-basic-io part A): v2's 506 floats
+# unchanged, then K floats the seat's policy.bas sets with neuralInput(i, v) (fed as
+# v / 1000, one tick late). Contract id paintbot-pw.rules39.obs.v2u<K>, K = 1 .. 32; the
+# hash is the SHA-256 of the id, one per K.
+const
+  MaxUserInputs* = 32
+  UserInputLimit* = 1_000_000'i32
+  UserInputsContractHashes*: array[MaxUserInputs, string] = [
+    "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04",
+    "b064de43c261ada93a1167b4098635120b6bcc11c4643d1e771a1d237b4e9f06",
+    "a8c43d03947e654268ea4ead56e39bb44040a1bcea39b9d19d717fbec92ee6ce",
+    "43300aa2a94a47ecb229f22d4b63debfe7f762b88f448c26343718cdcc3b8884",
+    "f88a394156ad5b4028d9a1269f7bb8767a08160230d60c1fc54c9965d262ea16",
+    "a224301c5715b80494bb005ffc73c08b2e4f1eb89a781e90e4f49c09759db76b",
+    "0482b823f6983e06a2432f8d93a5d7aafffa7bca0e1bb092d52af5dfa0757047",
+    "b9d762a882962140998c84053d86c15f26fd3077411738d8b3c967039cba9ec5",
+    "4d81525b758cf22154c25f5e1539cc93f085800c3fde69b467fca3bc95faef7b",
+    "52ce5dacb236d11f886a0a5955d4dd26988de3d2b581adeb7439fe14ae87abaa",
+    "0a94bffcff438486394ea32fa116983e75e82aa4d84a51354cb4d63d1f6b298b",
+    "d462df74017a50aff2dca88a1c50a201981878feba289163650cb593dde9a504",
+    "c6a4f25511a73c3ac9bb7dff8f145e1f69a2d40b2b2a983fd18e50097d8afb71",
+    "da7c80c023075b34b9821eef3123495a052589c51eff12b397693c1c6cc8e8d4",
+    "02609eb49e93691c7aece2cf39e360afb6663dc7d15ab9dfa6ef985b957cf946",
+    "65631635da1f04338731d96c7f022faf12f0a707093297f5e5c360d0f9a79343",
+    "180c696fc827fff714c659ed7cee337f335d8faa6945113fd36c7e35989e254b",
+    "3c8bd14c556499e93236b8e849b92dc9b9dea5e446f9c487f0bb6b7c423896ea",
+    "40a31c9ebbd76707555efd4abde6636ec94cbd49e479314eeb4f4a02bde64bd8",
+    "901212508eee6ff969fa5027b42351e1554865621a99209285c91262e16d32b2",
+    "a740219cfdf633d04c82f2291305992ac0db0a34970869fef0bb0794769f5066",
+    "a9d75c0b2e0826eb189f5d0d483a21d1ae049a2f6e07af0ed01be79b3b36f956",
+    "7033d9f93e22941a29a6f01675dfc2cd178eebf4de81e450d799dcb5221b1647",
+    "7956f4c904322650d7ea5273de104ed32828cb31dcb6bcb4a930966d8366c061",
+    "71ef99882d491f19ca7e41e66d14db83232bfc90e7dceb3cfcd2a44bb3ed08e7",
+    "e3182cdd6f12fb0d463018003739667d09101da8980e5520d4db475cfcd272ae",
+    "42caf7901dd69f97e066d1d28f140f61f6234da9eed2f2a5064873f0e1da3ef7",
+    "390d35740053c8404923040fdfa06b39d843d15e5a888e68fc356acc6aa0a6f0",
+    "06f6a35f115ff03b0c298a8ef144551cf94b5998be05afc6e2656a62cfa276ca",
+    "642f23700636283703121ea5b7edbc23c4b472ad2dd4777c822c7295d2340b46",
+    "b28ddf9ffd8b637c12c5f45b6c988de208693a86552c12fd11fcf5ce123622fa",
+    "94373a1ce8a95bbcf99f8fcb1d2acc07e8fb19ab13c99591389ac2cff807e7c3"
+  ]
+proc userInputsContractId*(k: int): string = "paintbot-pw.rules39.obs.v2u" & $k
+proc userInputsFromHash*(hash: string): int =
+  ## K when `hash` names observation contract v2u<K>; 0 otherwise.
+  for i, h in UserInputsContractHashes:
+    if h == hash: return i + 1
+  0
+proc userInputFeature*(value: int32): float32 =
+  ## The float a user input value feeds the net: float32(v) / 1000 (v already clamped).
+  float32(value) / 1000'f32
+proc clampUserInput*(value: int32): int32 = clamp(value, -UserInputLimit, UserInputLimit)
+proc encodeObservationInputs*(w: World, slot: int, output: var openArray[float32],
+    bodies: array[Seats, int], inputs: openArray[int32]) =
+  ## Observation contract v2u<K>, K = inputs.len: v2's 506 floats, then the K user inputs.
+  if inputs.len notin 1..MaxUserInputs or output.len != ObservationSizeV2 + inputs.len:
+    raise newException(ValueError, "invalid neural observation dimensions or seat")
+  w.encodeObservation(slot, output.toOpenArray(0, ObservationSizeV2-1), bodies, ocV2)
+  for i, value in inputs: output[ObservationSizeV2+i] = userInputFeature(value)
+
 # Decoder strafe legs (bundle option decoder.strafe_legs, schema 2; not a contract change):
 # base.bas's footwork in contact (its planLeg), as pw-diag measured it (first-contact.md,
 # lever 2). While the seat sees an apparent enemy within range and is not in a trench,
