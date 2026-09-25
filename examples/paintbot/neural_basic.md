@@ -18,7 +18,10 @@ schema 1 rejects them at staging instead of at model load. Actor metadata must m
 both contracts, the observation contract's input count (448 for v1, 506 for v2), 82
 outputs, and categorical head sizes `[51,25,2,2,2]`. Any combination of observation and
 action contract versions is allowed, under either schema.
-The actor's binary format is documented in `neural_actor.md`.
+The actor's binary format, PWNET001 (one fixed MinGRU) or PWNET002 (a layer stack from a
+fixed menu: dense, RMS norm, stacked MinGRU, residual, entity attention, input concat), is
+documented in `neural_actor.md`; staging validates a PWNET002 model's structure and
+operation count (`neural_package.py`), and the host validates both formats at load.
 
 A schema-2 manifest may carry a `decoder` object of per-bundle decoder options. Every
 key must be one the host knows and every value the declared type; anything else is
@@ -273,7 +276,8 @@ calls. Bytecode and ordinary host work retain their existing limits. `PW_BASIC_P
 reports `peak_neural_operations` separately from bytecode work. On the hosted platform
 each seat that loaded a neural package also gets one line in its private seat log at
 match end, `neural: peak_ops=238080 budget=4000000 model=w128 ticks=1200` (peak native
-operations in any tick, the budget, the hidden width, ticks played); a package rejected
+operations in any tick, the budget, the model: `w<hidden width>` for PWNET001,
+`pwnet2-l<layers>-s<state floats>` for PWNET002, ticks played); a package rejected
 for exceeding the budget gets the same line with the rejected model's cost and `ticks=0`
 before its `BASIC error`. Plain BASIC seats log nothing. Recurrent
 state resets at initial use, match reset, death, and respawn. Training must use
@@ -292,6 +296,8 @@ Validation:
 python3 -m unittest coworld/paintbot/test_neural_package.py
 nim c -r -d:headless tests/test_paintbot_neural_host.nim
 nim c -r -d:headless tests/test_paintbot_neural_basic_io.nim
+nim c -r -d:headless tests/test_paintbot_neural_net2.nim
+nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim
 nim c -r -d:headless tests/test_paintbot_neural_contract.nim
 nim c -r -d:headless tests/test_paintbot_neural_obs_v2.nim
 nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
