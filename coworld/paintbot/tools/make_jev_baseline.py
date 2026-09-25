@@ -471,6 +471,9 @@ if jevInit = 0 then
   ' useBall and useTight - one group of eight meets its threes and fours. Against a packed enemy
   ' both stay off: the league leader's v15 ball beat every clumping arm we tried.
   kSpreadBall = 0
+  ' kWantGrenade: detour for grenade pickups (baseline 1). We pick up ~16 grenades a game and throw ~2;
+  ' the neural player picks up a sixth as many and wins anyway - the detours put cogs in the open.
+  kWantGrenade = 1
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -2105,7 +2108,7 @@ def build(base: str) -> str:
     # A spray can joins the supplies worth walking to, when useSpray says a fight calls for one.
     s = swap(s, "      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < 3) or "
                 "(kind = 3 and armorHp < 3 and selfHp = 3)\n",
-             "      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < 3) or "
+             "      wanted = (kind = 0 and not hasGrenade and kWantGrenade) or (kind = 2 and selfHp < 3) or "
              "(kind = 3 and armorHp < 3 and selfHp = 3) or (kind = 1 and wantSpray)\n")
     return s
 

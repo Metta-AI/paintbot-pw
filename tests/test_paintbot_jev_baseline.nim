@@ -221,6 +221,7 @@ suite "Jev-advised BASIC baseline":
       "lead moving targets": @[("useSteady", 1), ("kLeadMove", 6)],
       "lead a spread enemy": @[("useSteady", 1), ("kLeadSpread", 6)],
       "ball against a spread enemy": @[("useSteady", 1), ("kLeadSpread", 6), ("kSpreadBall", 1)],
+      "no grenade detours": @[("kWantGrenade", 0)],
       "champion and high ground, holding": @[("useKite", 1), ("kKiteMargin", 2), ("useRush", 1),
           ("useSmartGrenade", 1), ("useHigh", 1), ("kHighHold", 1)],
     }
