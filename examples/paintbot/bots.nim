@@ -253,6 +253,20 @@ when defined(pwTraining):
     let p=compile(source,h,limits())
     strings.bindProgram(p)
     Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural)
+  proc loadPolicyBot*(source, manifest: string, slot: int, observationHash: string): Bot =
+    ## A training policy-script seat: the bundle's policy.bas and manifest.json, built as
+    ## loadBots builds a hosted neural seat (same limits, host functions and budget), with
+    ## neural_host.policyNeuralSeat in place of the actor: the trainer feeds the logits.
+    ## Raises ValueError when the manifest is rejected, BasicError when the source does not
+    ## compile.
+    var stringLimits=defaultStringLimits()
+    stringLimits.maxStrings=1024
+    let strings=initStringPool(stringLimits)
+    let neural = policyNeuralSeat(manifest, slot, observationHash)
+    let h=host(slot,strings,neural)
+    let p=compile(source,h,limits())
+    strings.bindProgram(p)
+    Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural)
 else:
   var peakInstructions*, peakWork*, peakStrings*, peakNativeWork*: array[Seats, int64] ## per-seat BASIC peaks, for PW_BASIC_PEAKS
 proc logNeuralTelemetry*(bots: array[Seats,Bot], ticks: int,

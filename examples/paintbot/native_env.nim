@@ -1,6 +1,7 @@
 ## In-process training ABI. Build with --app:lib --mm:arc --threads:on -d:pwTraining.
 ## A handle may migrate between threads but must never be used concurrently.
 ## The caller owns flat buffers; no Nim-managed values cross the C boundary.
+import std/strutils
 import sim, neural_contract, bots
 import polyworld/rngs
 import polyworld/basic
@@ -132,6 +133,16 @@ type
     # followed by the terrain block). pw_observe/pw_observe_seats rows are
     # observationSize(obsVersion) floats apart. The world never reads it.
     obsVersion: ObservationContractVersion
+    # Neural BASIC I/O (PLAN-neural-basic-io). userInputs: the K of observation contract
+    # v2u<K> (pw_create_observation_inputs; 0 otherwise): every pw_observe row is 506 + K
+    # floats, the last K a policy seat's user inputs (zeros for any other seat). policy:
+    # the seats running a bundle's policy.bas under its manifest
+    # (pw_set_seat_policy_script), stepped only by pw_step_logits. Unused, nothing here
+    # runs and every path is byte-identical.
+    userInputs: int
+    policy: array[Seats,bool]
+    policyManifests: array[Seats,string]
+    policyCount: int
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -219,8 +230,13 @@ proc gateFire(env: ptr NativeEnv, slot: int, command: var Command) =
     env.lastHonouredShot[slot] = env.world.tick
   else:
     command.shoot = false
+proc observationHash(env: ptr NativeEnv): string =
+  ## The observation contract hash this handle encodes (v1, v2 or v2u<K>).
+  if env.userInputs > 0: UserInputsContractHashes[env.userInputs-1]
+  else: observationContractHash(env.obsVersion)
 proc installScript(env: ptr NativeEnv, slot: int) =
-  ## A fresh runtime for the seat's source, as a new match loads its bots.
+  ## A fresh runtime for the seat's source, as a new match loads its bots. A policy seat
+  ## gets a fresh neural seat from its manifest too (fresh streams, user inputs at init).
   env.scriptBots[slot] = nil
   env.scriptErrors[slot] = ""
   env.scriptOrders[slot] = Command()
@@ -228,11 +244,16 @@ proc installScript(env: ptr NativeEnv, slot: int) =
     env.scriptStatus[slot] = 0
     return
   try:
-    env.scriptBots[slot] = loadScriptBot(env.scripts[slot], slot)
+    env.scriptBots[slot] =
+      if env.policy[slot]: loadPolicyBot(env.scripts[slot], env.policyManifests[slot], slot, env.observationHash)
+      else: loadScriptBot(env.scripts[slot], slot)
     env.scriptStatus[slot] = 1
   except BasicError as e:
     env.scriptStatus[slot] = 2
     env.scriptErrors[slot] = e.msg
+  except ValueError as e:
+    env.scriptStatus[slot] = 2
+    env.scriptErrors[slot] = "policy manifest rejected: " & e.msg
 proc resetScripts(env: ptr NativeEnv) =
   env.scriptCount = 0
   env.decidedValid = false
@@ -387,7 +408,34 @@ proc pw_observation_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} 
 proc pw_handle_observation_size*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   ## Floats per seat this handle's pw_observe writes (the row stride); -1 for nil.
   if handle == nil: return -1
-  observationSize(cast[ptr NativeEnv](handle).obsVersion).cint
+  let env = cast[ptr NativeEnv](handle)
+  cint(observationSize(env.obsVersion) + env.userInputs)
+
+proc pw_create_observation_inputs*(seed, maxTicks, userInputs: int32): pointer {.exportc, cdecl, dynlib.} =
+  ## Observation contract v2u<K> (PLAN-neural-basic-io part A), K = userInputs within
+  ## 1 .. 32: every pw_observe row is v2's 506 floats followed by K user-input floats, a
+  ## policy seat's (pw_set_seat_policy_script) as its policy.bas set them, zeros for every
+  ## other seat. K = 0 is pw_create_observation(seed, maxTicks, 2). nil for a bad K or
+  ## max_ticks.
+  if userInputs notin 0'i32..MaxUserInputs.int32: return nil
+  result = createEnv(seed, maxTicks, ocV2)
+  if result != nil: cast[ptr NativeEnv](result).userInputs = userInputs.int
+
+proc pw_handle_user_inputs*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
+  ## The handle's K (0 unless created by pw_create_observation_inputs); -1 for nil.
+  if handle == nil: return -1
+  cast[ptr NativeEnv](handle).userInputs.cint
+
+proc pw_user_inputs_contract_hash*(userInputs: int32, output: ptr UncheckedArray[char],
+    capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The 64-hex SHA-256 of observation contract v2u<K> (K = userInputs, 1 .. 32), the hash
+  ## an actor and manifest with K user inputs carry, NUL-terminated (capacity >= 65).
+  ## 0, or -1 bad args.
+  if output == nil or capacity < 65 or userInputs notin 1'i32..MaxUserInputs.int32: return -1
+  let hash = UserInputsContractHashes[userInputs-1]
+  for i, c in hash: output[i] = c
+  output[hash.len] = '\0'
+  0
 
 proc pw_observation_contract_hash*(obsVersion: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
@@ -435,7 +483,21 @@ proc pw_observe_seats*(handle: pointer, seats: uint32, observations, resets: Flo
   ready()
   let env = cast[ptr NativeEnv](handle)
   try:
-    if env.obsVersion == ocV1:
+    if env.userInputs > 0:
+      # v2u<K>: the v2 row, then the seat's user inputs as its policy.bas left them (the
+      # values its next decision's observation reads); zeros for a seat without them.
+      let n = ObservationSizeV2 + env.userInputs
+      for slot in 0..<Seats:
+        if (seats and (1'u32 shl slot)) == 0: continue
+        let row = slot*n
+        encodeObservation(env.world,slot,observations.toOpenArray(row,row+ObservationSizeV2-1),
+          env.bodiesFor(slot),ocV2)
+        let bot = env.scriptBots[slot]
+        let inputs = if env.policy[slot] and bot != nil and bot.neural != nil: bot.neural.userInputs else: @[]
+        for i in 0..<env.userInputs:
+          observations[row+ObservationSizeV2+i] = if i < inputs.len: userInputFeature(inputs[i]) else: 0'f32
+        resets[slot] = env.resets[slot]
+    elif env.obsVersion == ocV1:
       for slot in 0..<Seats:
         if (seats and (1'u32 shl slot)) == 0: continue
         encodeObservation(env.world,slot,observations.toOpenArray(slot*ObservationSize,(slot+1)*ObservationSize-1),
@@ -454,14 +516,36 @@ proc pw_observe_seats*(handle: pointer, seats: uint32, observations, resets: Flo
 proc pw_observe*(handle: pointer, observations, resets: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
   pw_observe_seats(handle, 0xffff'u32, observations, resets)
 
+proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: FloatBuffer,
+    logits: FloatBuffer): cint
 proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
   ## Settled score reward only, normalized by 1000. Optional shaping belongs in
   ## the training adapter, never hidden in the game ABI. No implicit auto-reset.
   ## -3: a live seat whose actions are decoded from the caller chose a movement index
   ## its forbid mask lists (pw_set_seat_forbid_objectives); nothing is stepped.
+  ## -4: a policy seat is installed (pw_set_seat_policy_script); step with
+  ## pw_step_logits instead; nothing is stepped.
   if handle == nil or actions == nil or rewards == nil or terminals == nil: return -1
   ready()
   let env = cast[ptr NativeEnv](handle)
+  if env.policyCount > 0: return -4
+  stepEnv(env, actions, rewards, terminals, nil)
+
+proc pw_step_logits*(handle: pointer, actions: ActionBuffer, logits, rewards,
+    terminals: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
+  ## pw_step for a handle with policy seats: `logits` holds 16 x 82 floats in seat order,
+  ## and each policy seat's row is what run_neural_net yields to its policy.bas this tick
+  ## (the trainer ran the actor on the seat's pw_observe row). Sampling, every decoder
+  ## option, masks, temperatures and the command are the script's, on the seat's own
+  ## streams, exactly as the hosted seat plays; read what it executed with
+  ## pw_seat_policy_choices. Other seats' rows are ignored and every other seat steps as
+  ## under pw_step. Same return codes as pw_step.
+  if handle == nil or actions == nil or logits == nil or rewards == nil or terminals == nil: return -1
+  ready()
+  stepEnv(cast[ptr NativeEnv](handle), actions, rewards, terminals, logits)
+
+proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: FloatBuffer,
+    logits: FloatBuffer): cint =
   if env.world.winner != -1 or env.world.tick >= env.world.endTick: return -2
   for slot in 0..<Seats:
     if not env.forbidAny[slot] or env.world.cogs[slot].hp <= 0 or env.commandPending[slot] or
@@ -480,7 +564,18 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
       # what was shouted last tick), shouts are delivered for next tick, then the world
       # steps. Unscripted seats hold no bot and shout nothing. A decision already taken
       # for this tick by pw_script_decide is used as it is.
-      if not (env.decidedValid and env.decidedTick == env.world.tick): env.scriptDecide()
+      if not (env.decidedValid and env.decidedTick == env.world.tick):
+        if logits != nil:
+          for slot in 0..<Seats:
+            let bot = env.scriptBots[slot]
+            if not env.policy[slot] or bot == nil or bot.neural == nil: continue
+            for i in 0..<LogitSize: bot.neural.fedLogits[i] = logits[slot*LogitSize+i]
+            bot.neural.logitsFed = true
+        try: env.scriptDecide()
+        finally:
+          for slot in 0..<Seats:
+            let bot = env.scriptBots[slot]
+            if env.policy[slot] and bot != nil and bot.neural != nil: bot.neural.logitsFed = false
       env.decidedValid = false
       for slot in 0..<Seats:
         if env.scripts[slot].len == 0: continue
@@ -509,7 +604,8 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
         env.scriptOrders[slot] = Command()
         env.commandShown[slot] = false
     for slot in 0..<Seats:
-      if env.fireHold[slot] and env.world.holdFire(slot, commands[slot],
+      # A policy seat's fire hold is its manifest's, applied inside its decode.
+      if env.fireHold[slot] and not env.policy[slot] and env.world.holdFire(slot, commands[slot],
           if env.fireHoldRadius[slot] > 0: env.fireHoldRadius[slot] else: FireHoldRadius.int32):
         inc env.fireHeld[slot]
       env.gateFire(slot, commands[slot])
@@ -596,6 +692,10 @@ proc pw_set_seat_script*(handle: pointer, seat: cint, source: ptr UncheckedArray
   ready()
   let env = cast[ptr NativeEnv](handle)
   if env.scripts[seat].len > 0: dec env.scriptCount
+  if env.policy[seat]:
+    env.policy[seat] = false
+    env.policyManifests[seat] = ""
+    dec env.policyCount
   env.scripts[seat] = newString(length)
   if length > 0: copyMem(addr env.scripts[seat][0], source, length)
   env.scriptHeard[seat] = @[]
@@ -616,6 +716,77 @@ proc pw_seat_script_status*(handle: pointer, seat: cint, message: ptr UncheckedA
     if n > 0: copyMem(message, unsafeAddr env.scriptErrors[seat][0], n)
     message[n] = '\0'
   env.scriptStatus[seat]
+
+proc pw_set_seat_policy_script*(handle: pointer, seat: cint, source: ptr UncheckedArray[char], length: int32,
+    manifest: ptr UncheckedArray[char], manifestLength: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Drive one seat with a bundle's policy.bas under its manifest.json exactly as the
+  ## hosted neural seat plays it (PLAN-neural-basic-io part C): same interpreter, host
+  ## functions, limits and budget; the manifest's decoder options, sampling, user inputs
+  ## and action contract; the seat's own sampling and strafe streams seeded from the match
+  ## seed and slot. There is no actor: run_neural_net yields the logits the trainer passes
+  ## for the seat to pw_step_logits (pw_step returns -4 while any policy seat is
+  ## installed). The manifest's observation_contract must be this handle's (v1, v2, or
+  ## v2u<K> from pw_create_observation_inputs). The seat is rebuilt on every pw_reset;
+  ## length 0 removes it. Per-seat decoder setters (pw_set_seat_fire_hold, ...) do not
+  ## apply to a policy seat: its manifest governs. Returns 0 (running), 1 (compile
+  ## failed), 2 (manifest rejected; the seat idles, as a hosted seat whose package fails),
+  ## -1 (bad arguments); the error text is pw_seat_script_status's.
+  if handle == nil or seat notin 0..<Seats or length < 0 or (length > 0 and source == nil) or
+      manifestLength < 0 or (manifestLength > 0 and manifest == nil): return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  if env.scripts[seat].len > 0: dec env.scriptCount
+  if env.policy[seat]: dec env.policyCount
+  env.scripts[seat] = newString(length)
+  if length > 0: copyMem(addr env.scripts[seat][0], source, length)
+  env.policy[seat] = length > 0
+  env.policyManifests[seat] = if length > 0: newString(manifestLength) else: ""
+  if length > 0 and manifestLength > 0: copyMem(addr env.policyManifests[seat][0], manifest, manifestLength)
+  env.scriptHeard[seat] = @[]
+  env.installScript(seat)
+  if env.scripts[seat].len > 0:
+    inc env.scriptCount
+    inc env.policyCount
+  if env.scriptStatus[seat] == 2:
+    (if env.scriptErrors[seat].startsWith("policy manifest rejected"): 2 else: 1)
+  else: 0
+
+proc pw_seat_policy_choices*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## What a policy seat's script executed on the last pw_step_logits, 22 int32:
+  ## [decided, selected[5], final[5], temperature_milli[5], mask0_lo, mask0_hi, mask1,
+  ##  mask2, mask3, mask4]. decided = 1 when the script made its selection that step
+  ## (neuralSample, neuralDecode or paintbot_act; 0 for a dead or disabled seat, or a
+  ## script that did not select). selected = the heads drawn under the applied masks and
+  ## temperatures (before any decoder option or neuralSetChoice): the ones whose
+  ## log-probability the trainer takes under that masked, tempered distribution. final =
+  ## the heads decoded (after the decoder options and neuralSetChoice; -1 when the script
+  ## never decoded). temperature_milli: 0 = argmax, else the head's temperature x 1000
+  ## (rounded). mask bits: choice i of the head is excluded when bit i is set (head 0:
+  ## choices 0 .. 31 in mask0_lo, 32 .. 50 in mask0_hi's bits 0 .. 18). Returns 0, -1 for
+  ## bad arguments or a seat that is not a policy seat.
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  if not env.policy[seat]: return -1
+  for i in 0..<22: output[i] = 0
+  let bot = env.scriptBots[seat]
+  if bot == nil or bot.neural == nil or not bot.neural.sampled: return 0
+  let n = bot.neural
+  output[0] = 1
+  for head in 0..<ActionSizes.len:
+    output[1+head] = n.selected[head]
+    output[6+head] = if n.decoded: n.choices[head] else: -1
+    output[11+head] = n.appliedTemperatures[head]
+  proc bits(mask: openArray[bool], first: int): int32 =
+    var value = 0'u32
+    for bit in 0..31:
+      if first+bit < mask.len and mask[first+bit]: value = value or (1'u32 shl bit)
+    cast[int32](value)
+  output[16] = bits(n.appliedMasks[0].toOpenArray(0, ActionSizes[0]-1), 0)
+  output[17] = bits(n.appliedMasks[0].toOpenArray(0, ActionSizes[0]-1), 32)
+  for head in 1..<ActionSizes.len:
+    output[17+head] = bits(n.appliedMasks[head].toOpenArray(0, ActionSizes[head]-1), 0)
+  0
 
 proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## The command a scripted seat issued on the last pw_step, ten int32:
@@ -735,6 +906,7 @@ proc pw_script_decide*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   if handle == nil: return -1
   ready()
   let env = cast[ptr NativeEnv](handle)
+  if env.policyCount > 0: return -4   # a policy seat decides only with its logits (pw_step_logits)
   if env.scriptCount == 0 or env.world.winner != -1 or env.world.tick >= env.world.endTick: return 0
   if env.decidedValid and env.decidedTick == env.world.tick: return 0
   env.scriptDecide()
