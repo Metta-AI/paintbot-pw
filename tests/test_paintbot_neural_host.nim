@@ -628,4 +628,52 @@ suite "native BASIC neural host":
                               (Schema2, "{\"spray_gate\": {\"enemies\": 1}}")]:
       let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
       checkpoint schema & " " & decoder
+  test "an observation-v3 bundle reads its per-team goal from the manifest and appends it to the v2 observation":
+    const Schema2 = "paintbot-neural-basic/2"
+    proc v3Manifest(schema: string, goal: string, observation = ObservationContractV3Hash): string =
+      result = "{\"schema\": \"" & schema & "\", \"observation_contract\": \"" & observation &
+        "\", \"action_contract\": \"" & ActionContractV2Hash & "\", \"sha256\": {}"
+      if goal.len > 0: result.add ", \"goal\": " & goal
+      result.add "}"
+    let goalJson = "{\"red\": [1, 0.25, 0.1, 0.5, -0.25, 0.1, -0.5, 0], \"blue\": [1, 0, 0, 0, 0, 0, 0, 0]}"
+    let red: GoalVector = [1'f32, 0.25, 0.1, 0.5, -0.25, 0.1, -0.5, 0]
+    let blue: GoalVector = [1'f32, 0, 0, 0, 0, 0, 0, 0]
+    let players = fixture(NeuralSource, true, ActionContractV2Hash, v3Manifest(Schema2, goalJson),
+      ObservationContractV3Hash, ObservationSizeV3)
+    for slot in 0..<Seats:
+      check not players[slot].failed
+      check players[slot].neural.observationContract == ocV3
+      check players[slot].neural.goal == (if team(slot) == 0: red else: blue)
+    # The seat's observation is the v2 observation followed by its team's goal.
+    var world = newWorld(2026)
+    for tick in 0..<40:
+      let pre = world
+      let commands = players.decide(world)
+      for slot in 0..<Seats:
+        check not players[slot].failed
+        if pre.cogs[slot].hp <= 0: continue
+        var v2: array[ObservationSizeV2, float32]
+        pre.encodeObservation(slot, v2, pre.observedBodies(slot), ocV2)
+        let seat = players[slot].neural
+        for i in 0..<ObservationSizeV2: check cast[uint32](seat.observation[i]) == cast[uint32](v2[i])
+        for i in 0..<GoalSize: check seat.observation[ObservationSizeV2 + i] == seat.goal[i]
+      world.step(commands)
+    # Rejected: a v3 actor without a goal or manifest; a goal on a v1/v2 bundle; schema 1;
+    # malformed goals.
+    let noManifest = fixture(NeuralSource, true, ActionContractV2Hash, "", ObservationContractV3Hash, ObservationSizeV3)
+    check noManifest[0].failed
+    for (manifest, observation, inputs) in [
+        (v3Manifest(Schema2, ""), ObservationContractV3Hash, ObservationSizeV3),
+        (v3Manifest("paintbot-neural-basic/1", goalJson), ObservationContractV3Hash, ObservationSizeV3),
+        (v3Manifest(Schema2, goalJson, ObservationContractV2Hash), ObservationContractV2Hash, ObservationSizeV2),
+        (v3Manifest(Schema2, goalJson, ObservationContractHash), ObservationContractHash, ObservationSize),
+        (v3Manifest(Schema2, "{\"red\": [1, 0, 0, 0, 0, 0, 0, 0]}"), ObservationContractV3Hash, ObservationSizeV3),
+        (v3Manifest(Schema2, "{\"red\": [1, 0, 0, 0, 0, 0, 0, 0.5], \"blue\": [1, 0, 0, 0, 0, 0, 0, 0]}"), ObservationContractV3Hash, ObservationSizeV3),
+        (v3Manifest(Schema2, "{\"red\": [1.5, 0, 0, 0, 0, 0, 0, 0], \"blue\": [1, 0, 0, 0, 0, 0, 0, 0]}"), ObservationContractV3Hash, ObservationSizeV3),
+        (v3Manifest(Schema2, "{\"red\": [1, 0, 0, 0, 0, 0, 0], \"blue\": [1, 0, 0, 0, 0, 0, 0, 0]}"), ObservationContractV3Hash, ObservationSizeV3),
+        (v3Manifest(Schema2, "{\"red\": [true, 0, 0, 0, 0, 0, 0, 0], \"blue\": [1, 0, 0, 0, 0, 0, 0, 0]}"), ObservationContractV3Hash, ObservationSizeV3),
+        (v3Manifest(Schema2, "{\"red\": [1, 0, 0, 0, 0, 0, 0, 0], \"blue\": [1, 0, 0, 0, 0, 0, 0, 0], \"green\": [1, 0, 0, 0, 0, 0, 0, 0]}"), ObservationContractV3Hash, ObservationSizeV3),
+        (v3Manifest(Schema2, "[1, 0, 0, 0, 0, 0, 0, 0]"), ObservationContractV3Hash, ObservationSizeV3)]:
+      let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifest, observation, inputs)
+      checkpoint manifest
       check bad[0].failed

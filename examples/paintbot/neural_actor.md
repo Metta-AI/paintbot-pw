@@ -76,7 +76,7 @@ entry is additive to v1; a host that ignores the newer ones sees the same bytes.
 
 ## Observation contracts
 
-Two observation contracts exist. The actor file and the package manifest carry the
+Three observation contracts exist. The actor file and the package manifest carry the
 contract's SHA-256 (the hash of the id string); the host encodes each seat with the
 contract its actor names and requires the actor's input count to be that contract's
 width, so a v1 bundle keeps byte-identical behaviour on a host that also knows v2. An
@@ -86,6 +86,7 @@ unknown hash fails the seat, as before.
 |---|---|---|---|
 | v1 | `paintbot-pw.rules37.obs.v1.float448` | `ed5d16768e3144a04a28420ce227ff2d6a831be9f64f3633326b133a5335b7e2` | 448 |
 | v2 | `paintbot-pw.rules37.obs.v2.float506` | `e0d7b0b97975725c470ef6119ca2a6caf4aaa6f34cd15bee02bd306489c029e5` | 506 |
+| v3 | `paintbot-pw.rules39.obs.v3.float514` | `951abbdf772eee607cf5f8b051030109f96244c17886b65f0d057c9fbdf1cc9b` | 514 |
 
 v2 is v1 followed by a terrain block: columns 0..447 are the v1 observation, same order,
 same values (`encodeObservation` v1 is called unchanged on that slice), and columns
@@ -121,10 +122,21 @@ so a slot can be non-zero only when v1's visibility flag for that slot (column
 flag tells the two apart), and the counts use the apparent team v1 shows (a disguised enemy counts
 as a teammate, at the identity it wears).
 
+v3 (PLAN-gcrl-spray G1) is v2 followed by the seat's goal vector: columns 0..505 are the
+v2 observation, same order and values, and columns 506..513 are the eight goal weights
+`[w_win, w_enemy_kill, w_spray_kill, w_heart_hold, w_death, w_push_depth,
+w_friendly_fire, w_reserved]`, each within [-1, 1] with `w_reserved` 0. The goal is not
+world state and BASIC never sees it: the hosted seat takes it from the bundle manifest's
+`"goal": {"red": [...], "blue": [...]}` by the seat's team (red = team 0, even slots) and
+appends it when it builds the observation; the native ABI takes it from
+`pw_set_seat_goal(handle, seat, float[8])` (zeros until set, kept across `pw_reset`,
+`pw_seat_goal` reads it back). A goal-conditioned policy trained on sampled goals is thus
+steered per side at deployment by its manifest alone.
+
 Native ABI: `pw_create_observation(seed, max_ticks, version)` creates a handle encoding
-contract 1 or 2 (NULL otherwise; `pw_create` is contract 1); the version is kept across
+contract 1, 2 or 3 (NULL otherwise; `pw_create` is contract 1); the version is kept across
 `pw_reset`, and `pw_observe` / `pw_observe_seats` rows are that contract's width apart.
-`pw_observation_size_for(version)` (448 / 506, -1 unknown), `pw_handle_observation_size
+`pw_observation_size_for(version)` (448 / 506 / 514, -1 unknown), `pw_handle_observation_size
 (handle)`, `pw_observation_contract(handle)` and `pw_observation_contract_hash(version,
 out, 65)` report it; `pw_observation_size()` stays 448. The observation contract never
 touches the world or its hash.

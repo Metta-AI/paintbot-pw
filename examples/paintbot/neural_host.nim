@@ -28,6 +28,9 @@ type
     # The observation contract the actor was trained against (named by its embedded
     # hash): v1 (448 floats) or v2 (v1 + terrain block); selects the encoder.
     observationContract*: ObservationContractVersion
+    # Observation contract v3's goal vector for this seat: the manifest "goal" entry of the
+    # seat's team ("red" = team 0, even slots; "blue" = team 1). Zeros under v1 / v2.
+    goal*: GoalVector
     # The bundle's decoder options (manifest "decoder", schema 2): fireHoldTeammates
     # applies holdFire to every decoded command; fireHolds counts the orders it held.
     fireHoldTeammates*: bool
@@ -338,6 +341,28 @@ proc parseSprayGateOptions*(value: JsonNode): SprayGateOptions =
     else: raise newException(ValueError, "unknown decoder.spray_gate field: " & key)
   sprayGateOptions(maxTeammates, minEnemies)
 
+proc parseGoal*(value: JsonNode, slot: int): GoalVector =
+  ## manifest "goal": {"red": [8 numbers], "blue": [8 numbers]}, both required, each entry
+  ## within [-1, 1] and the last (w_reserved) 0; returns the vector of the seat's team.
+  if value.kind != JObject: raise newException(ValueError, "goal must be an object")
+  var found: array[2, bool]
+  for key, field in value:
+    let side = case key
+      of "red": 0
+      of "blue": 1
+      else: raise newException(ValueError, "unknown goal field: " & key)
+    if field.kind != JArray or field.len != GoalSize:
+      raise newException(ValueError, "goal." & key & " must be an array of " & $GoalSize & " numbers")
+    var g: GoalVector
+    for i, item in field.elems:
+      if item.kind notin {JFloat, JInt}: raise newException(ValueError, "goal." & key & " entries must be numbers")
+      g[i] = float32(item.getFloat)
+    let problem = goalVectorError(g)
+    if problem.len > 0: raise newException(ValueError, "goal." & key & " " & problem)
+    found[side] = true
+    if side == team(slot): result = g
+  if not (found[0] and found[1]): raise newException(ValueError, "goal needs both red and blue")
+
 proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
   let modelPath = sourcePath & ".model.bin"
@@ -368,6 +393,8 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
     e.hiddenSize = actor.hiddenSize
     raise e
   let manifestPath = sourcePath & ".neural.json"
+  var goal: GoalVector
+  var goalFound = false
   var fireHold = false
   var fireHoldRadius = FireHoldRadius.int32
   var sampling: SamplingOptions
@@ -419,9 +446,21 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
       # forbids index 0 asks for both, so it is rejected rather than resolved either way.
       if steadyShot and forbidden[SteadyMovement]:
         raise newException(ValueError, "decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
+    # Observation contract v3 appends a goal vector the manifest supplies per team; it is
+    # required for a v3 actor and refused for any other, so a goal is never silently
+    # ignored and a v3 actor never plays without one.
+    if manifest.hasKey("goal"):
+      if observationContract != ocV3: raise newException(ValueError, "goal needs observation contract v3")
+      if manifest{"schema"}.getStr != "paintbot-neural-basic/2":
+        raise newException(ValueError, "goal needs package schema 2")
+      goal = parseGoal(manifest["goal"], slot)
+      goalFound = true
+  if observationContract == ocV3 and not goalFound:
+    raise newException(ValueError, "observation contract v3 needs a manifest goal")
   result.actor = actor
   result.contract = contract
   result.observationContract = observationContract
+  result.goal = goal
   result.fireHoldTeammates = fireHold
   result.fireHoldRadius = fireHoldRadius
   result.sampling = sampling
@@ -489,7 +528,7 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
       if seat.observationContract == ocV1:
         encodeObservation(seat.world[], seat.slot, seat.observation, seat.bodiesFor())
       else:
-        encodeObservation(seat.world[], seat.slot, seat.observation, seat.bodiesFor(), seat.observationContract)
+        encodeObservation(seat.world[], seat.slot, seat.observation, seat.bodiesFor(), seat.observationContract, seat.goal)
     except ValueError as e:
       raise newException(BasicError, "neural observation failed: " & e.msg)
     seat.observed = true

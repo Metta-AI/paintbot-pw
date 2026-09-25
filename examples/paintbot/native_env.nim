@@ -132,6 +132,10 @@ type
     # followed by the terrain block). pw_observe/pw_observe_seats rows are
     # observationSize(obsVersion) floats apart. The world never reads it.
     obsVersion: ObservationContractVersion
+    # Observation contract v3's goal vector per seat (pw_set_seat_goal; zeros until set,
+    # kept across resets like the decoder options): appended after the v2 floats. Never
+    # part of the world or its hash, and read by nothing but the v3 encoder.
+    goal: array[Seats,GoalVector]
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -371,12 +375,12 @@ proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
 proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.exportc, cdecl, dynlib.} =
   ## pw_create with the observation contract chosen: 1 = v1 (identical to pw_create),
   ## 2 = v2 (v1 + terrain block). nil for any other version or a bad max_ticks.
-  if obsVersion notin [ocV1.int32, ocV2.int32]: return nil
+  if obsVersion notin [ocV1.int32, ocV2.int32, ocV3.int32]: return nil
   createEnv(seed, maxTicks, ObservationContractVersion(obsVersion))
 
 proc pw_observation_size_for*(obsVersion: int32): cint {.exportc, cdecl, dynlib.} =
   ## Floats per seat under observation contract `obsVersion`; -1 if unknown.
-  if obsVersion notin [ocV1.int32, ocV2.int32]: return -1
+  if obsVersion notin [ocV1.int32, ocV2.int32, ocV3.int32]: return -1
   observationSize(ObservationContractVersion(obsVersion)).cint
 
 proc pw_observation_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
@@ -393,7 +397,7 @@ proc pw_observation_contract_hash*(obsVersion: int32, output: ptr UncheckedArray
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The 64-hex SHA-256 an actor and manifest carry for observation contract
   ## `obsVersion`, NUL-terminated; capacity must be >= 65. 0, or -1 bad args.
-  if output == nil or capacity < 65 or obsVersion notin [ocV1.int32, ocV2.int32]: return -1
+  if output == nil or capacity < 65 or obsVersion notin [ocV1.int32, ocV2.int32, ocV3.int32]: return -1
   let hash = observationContractHash(ObservationContractVersion(obsVersion))
   for i, c in hash: output[i] = c
   output[hash.len] = '\0'
@@ -446,10 +450,33 @@ proc pw_observe_seats*(handle: pointer, seats: uint32, observations, resets: Flo
       for slot in 0..<Seats:
         if (seats and (1'u32 shl slot)) == 0: continue
         encodeObservation(env.world,slot,observations.toOpenArray(slot*n,(slot+1)*n-1),
-          env.bodiesFor(slot),env.obsVersion)
+          env.bodiesFor(slot),env.obsVersion,env.goal[slot])
         resets[slot] = env.resets[slot]
     return 0
   except CatchableError: return -1
+
+proc pw_set_seat_goal*(handle: pointer, seat: cint, goal: ptr UncheckedArray[cfloat]): cint {.exportc, cdecl, dynlib.} =
+  ## Observation contract v3's goal vector for one seat: GoalSize (8) float32
+  ## [w_win, w_enemy_kill, w_spray_kill, w_heart_hold, w_death, w_push_depth,
+  ## w_friendly_fire, w_reserved], each within [-1, 1] and w_reserved 0 (the hosted
+  ## manifest's "goal" rule). A v3 handle appends it to the seat's observation; v1 and v2
+  ## handles never read it. Zeros until set; kept across pw_reset. Returns 0, -1 for bad
+  ## arguments.
+  if handle == nil or seat notin 0..<Seats or goal == nil: return -1
+  var g: GoalVector
+  for i in 0..<GoalSize: g[i] = goal[i]
+  if goalVectorError(g).len > 0: return -1
+  ready()
+  cast[ptr NativeEnv](handle).goal[seat] = g
+  0
+
+proc pw_seat_goal*(handle: pointer, seat: cint, output: ptr UncheckedArray[cfloat]): cint {.exportc, cdecl, dynlib.} =
+  ## The seat's goal vector (8 float32). Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let g = cast[ptr NativeEnv](handle).goal[seat]
+  for i in 0..<GoalSize: output[i] = g[i]
+  0
 
 proc pw_observe*(handle: pointer, observations, resets: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
   pw_observe_seats(handle, 0xffff'u32, observations, resets)

@@ -169,3 +169,43 @@ suite "Observation contract v2 (terrain)":
     check o[IdentityBlock + 8*j] == 1 and o[IdentityBlock + 8*1] == 0
     check o[T+22+2*j] == 1 and o[T+22+2*1] == 0
     check o[T+54] == 0 and o[T+56] == 1'f32/8 # counted as a wet teammate, like v1's team flag
+
+suite "Observation contract v3 (goal vector)":
+  setup:
+    visionRulesVersion = 39
+  test "ids, sizes and hashes; v3's first 506 floats equal v2 bitwise on stepped worlds, then the goal":
+    check ObservationContractV3 == "paintbot-pw.rules39.obs.v3.float514" and ObservationSizeV3 == 514 and GoalSize == 8
+    check observationSize(ocV3) == 514 and observationContractHash(ocV3) == ObservationContractV3Hash
+    check observationContractVersion(ObservationContractV3Hash) == ocV3 and observationContractId(ocV3) == ObservationContractV3
+    let goal: GoalVector = [1'f32, 0.25, 0.1, 0.5, -0.25, 0.1, -0.5, 0]
+    var w = newWorld(2026, 900)
+    var compared = 0
+    while w.winner == -1 and w.tick < 600:
+      if w.tick mod 7 == 0:
+        for slot in 0..<Seats:
+          var v2: array[ObservationSizeV2, float32]
+          var v3, v3zero: array[ObservationSizeV3, float32]
+          let bodies = w.observedBodies(slot)
+          w.encodeObservation(slot, v2, bodies, ocV2)
+          w.encodeObservation(slot, v3, bodies, ocV3, goal)
+          w.encodeObservation(slot, v3zero, ocV3)   # the default goal is zeros
+          for i in 0..<ObservationSizeV2:
+            check cast[uint32](v3[i]) == cast[uint32](v2[i])
+            check cast[uint32](v3zero[i]) == cast[uint32](v2[i])
+          for i in 0..<GoalSize:
+            check v3[ObservationSizeV2 + i] == goal[i] and v3zero[ObservationSizeV2 + i] == 0
+          inc compared
+      var commands: array[Seats, Command]
+      for slot in 0..<Seats:
+        var heads: array[ActionSizes.len, int32]
+        w.trainingBotActions(slot, 2, heads)
+        commands[slot] = w.decodeActions(slot, heads)
+      w.step(commands)
+    check compared > 1000
+  test "goal vectors: within [-1, 1], finite, w_reserved 0":
+    check goalVectorError([1'f32, 0, 0, 0, 0, 0, 0, 0]) == ""
+    check goalVectorError([-1'f32, 1, -1, 1, -1, 1, -1, 0]) == ""
+    for bad in [[1.01'f32, 0, 0, 0, 0, 0, 0, 0], [0'f32, 0, 0, 0, 0, 0, -1.5, 0], [0'f32, 0, 0, 0, 0, 0, 0, 0.001],
+                [NaN.float32, 0, 0, 0, 0, 0, 0, 0], [0'f32, NegInf.float32, 0, 0, 0, 0, 0, 0]]:
+      check goalVectorError(bad) != ""
+    check goalVectorError([1'f32, 0, 0]) != ""

@@ -13,9 +13,9 @@ suite "Native observation contract v2":
     check pw_observation_size() == ObservationSize # the v1 constant stays for v1 callers
     check pw_observation_size_for(1) == 448
     check pw_observation_size_for(2) == 506
-    check pw_observation_size_for(0) == -1 and pw_observation_size_for(3) == -1
+    check pw_observation_size_for(0) == -1 and pw_observation_size_for(4) == -1   # 3 is v3 since G1
     check pw_create_observation(1, 24, 0) == nil
-    check pw_create_observation(1, 24, 3) == nil
+    check pw_create_observation(1, 24, 4) == nil
     check pw_create_observation(1, HeartMeterMatchTicks+1, 2) == nil
     check pw_observation_contract(nil) == -1 and pw_handle_observation_size(nil) == -1
     var text: array[65, char]
@@ -24,7 +24,7 @@ suite "Native observation contract v2":
     check $cast[cstring](addr text[0]) == ObservationContractV2Hash
     check pw_observation_contract_hash(1, buffer, 65) == 0
     check $cast[cstring](addr text[0]) == ObservationContractHash
-    check pw_observation_contract_hash(3, buffer, 65) == -1
+    check pw_observation_contract_hash(4, buffer, 65) == -1
     check pw_observation_contract_hash(2, buffer, 64) == -1
     let plain = pw_create(5, 24)
     let one = pw_create_observation(5, 24, 1)

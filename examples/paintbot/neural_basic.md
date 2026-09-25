@@ -9,14 +9,20 @@ exported in `neural_contract.nim`. The observation contract may be v1 (`ed5d1676
 inputs) or v2 (`e0d7b0b9…`, 506 inputs: v1's 448 unchanged followed by a 58-float terrain
 block, water and height for the seat, the hearts and the visible identities; see
 `neural_actor.md`); the actor's embedded hash must equal the manifest's, selects the
-encoder the seat runs and fixes the actor's input count. The action contract may be v1
+encoder the seat runs and fixes the actor's input count. It may also be v3 (`951abbdf…`,
+514 inputs: v2's 506 unchanged followed by an 8-float goal vector); a v3 bundle must
+carry, under schema 2, `"goal": {"red": [w_win, w_enemy_kill, w_spray_kill, w_heart_hold,
+w_death, w_push_depth, w_friendly_fire, w_reserved], "blue": [...]}`, eight numbers per
+side within [-1, 1] with `w_reserved` 0, and the host appends the seat's team's vector
+(red = even slots) to its observation. A goal on a v1/v2 bundle, or a v3 bundle without
+one, is rejected at staging and at load. The action contract may be v1
 (`55922d42…`, identity aim = body position) or v2 (`51f602ef…`, lead-compensated
 identity aim; see `neural_actor.md`); the actor's embedded hash must equal the manifest's
 and selects the decoder the seat runs, so existing v1 bundles keep byte-identical
 behaviour. Schema 2 is for bundles that may name contract v2: a host that only knows
 schema 1 rejects them at staging instead of at model load. Actor metadata must match
-both contracts, the observation contract's input count (448 for v1, 506 for v2), 82
-outputs, and categorical head sizes `[51,25,2,2,2]`. Any combination of observation and
+both contracts, the observation contract's input count (448 for v1, 506 for v2, 514 for v3), 82
+outputs, and categorical head sizes `[51,25,2,2,2]` (514 inputs for v3). Any combination of observation and
 action contract versions is allowed, under either schema.
 The actor's binary format is documented in `neural_actor.md`.
 

@@ -8,7 +8,7 @@ import unittest
 import zipfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
-from neural_package import (unpack_package, validate_aim_retarget, validate_shot_gate, validate_fire_hold, MAX_MODEL_BYTES,
+from neural_package import (unpack_package, validate_goal, OBSERVATION_CONTRACT_V3_HASH, validate_aim_retarget, validate_shot_gate, validate_fire_hold, MAX_MODEL_BYTES,
                             validate_spray_aim, validate_spray_gate, SPRAY_AIM_DEFAULTS, SPRAY_GATE_DEFAULTS, SPRAY_LIMITS,
                             AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
                             MAX_SHOT_GATE_RANGE)
@@ -256,6 +256,41 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(SPRAY_LIMITS["min_enemies"], (0, consts["MaxSprayEnemies"]))
         mech = (Path(__file__).parents[2] / "examples/paintbot/mechanics.nim").read_text()
         self.assertRegex(mech, r"(?m)^  SprayReach\* = %d$" % SPRAY_LIMITS["max_range"][1])
+
+
+    def test_observation_v3_goal(self):
+        v3 = {"schema": "paintbot-neural-basic/2", "observation_contract": OBSERVATION_CONTRACT_V3_HASH}
+        pure_win = [1, 0, 0, 0, 0, 0, 0, 0]
+        mixed = [1.0, 0.25, 0.1, 0.5, -0.25, 0.1, -0.5, 0]
+        for goal in ({"red": pure_win, "blue": pure_win}, {"red": mixed, "blue": pure_win},
+                     {"blue": [-1, -1, -1, -1, -1, -1, -1, 0], "red": [1, 1, 1, 1, 1, 1, 1, 0.0]}):
+            _, _, manifest = unpack_package(package({**v3, "goal": goal}))
+            self.assertEqual(manifest["goal"], goal)
+        with self.assertRaisesRegex(ValueError, "observation contract v3 needs a goal"):
+            unpack_package(package(v3))
+        for other in ("a" * 64, "e0d7b0b97975725c470ef6119ca2a6caf4aaa6f34cd15bee02bd306489c029e5"):
+            with self.assertRaisesRegex(ValueError, "goal needs observation contract v3"):
+                unpack_package(package({"schema": "paintbot-neural-basic/2", "observation_contract": other,
+                                        "goal": {"red": pure_win, "blue": pure_win}}))
+        with self.assertRaisesRegex(ValueError, "goal needs package schema 2"):
+            unpack_package(package({"observation_contract": OBSERVATION_CONTRACT_V3_HASH, "goal": {"red": pure_win, "blue": pure_win}}))
+        for goal, message in (({"red": pure_win}, "both red and blue"), ({"red": pure_win, "blue": pure_win, "green": pure_win}, "unknown goal field"),
+                              ({"red": pure_win[:7], "blue": pure_win}, "array of 8 numbers"), ({"red": pure_win + [0], "blue": pure_win}, "array of 8"),
+                              ({"red": [1.01, 0, 0, 0, 0, 0, 0, 0], "blue": pure_win}, "within \\[-1, 1\\]"),
+                              ({"red": [float("nan"), 0, 0, 0, 0, 0, 0, 0], "blue": pure_win}, "within"),
+                              ({"red": [1, 0, 0, 0, 0, 0, 0, 0.5], "blue": pure_win}, "w_reserved"),
+                              ({"red": [True, 0, 0, 0, 0, 0, 0, 0], "blue": pure_win}, "must be numbers"),
+                              ({"red": ["1", 0, 0, 0, 0, 0, 0, 0], "blue": pure_win}, "must be numbers"),
+                              ({"red": 1, "blue": pure_win}, "array of 8"), ([pure_win, pure_win], "must be an object")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(goal)):
+                unpack_package(package({**v3, "goal": goal}))
+
+    def test_observation_v3_hash_matches_the_engine(self):
+        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
+        consts = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        self.assertEqual(consts["ObservationContractV3"], "paintbot-pw.rules39.obs.v3.float514")
+        self.assertEqual(consts["ObservationContractV3Hash"], hashlib.sha256(consts["ObservationContractV3"].encode()).hexdigest())
+        self.assertEqual(OBSERVATION_CONTRACT_V3_HASH, consts["ObservationContractV3Hash"])
 
     def test_aim_retarget_option(self):
         schema2 = {"schema": "paintbot-neural-basic/2"}

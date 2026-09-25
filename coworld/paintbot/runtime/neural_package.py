@@ -201,6 +201,34 @@ def validate_spray_gate(value):
     return _validate_int_fields("spray_gate", value, SPRAY_GATE_DEFAULTS)
 
 
+# Observation contract v3 (PLAN-gcrl-spray G1): v2 plus an 8-float goal vector the host appends from the manifest's
+# "goal": {"red": [...], "blue": [...]} by the seat's team. Required for a v3 bundle, refused for any other.
+OBSERVATION_CONTRACT_V3_HASH = "951abbdf772eee607cf5f8b051030109f96244c17886b65f0d057c9fbdf1cc9b"
+GOAL_SIZE = 8
+
+
+def validate_goal(value):
+    """manifest goal: {"red": [8 numbers], "blue": [8 numbers]}, each within [-1, 1], the last (w_reserved) 0."""
+    if not isinstance(value, dict):
+        raise ValueError("goal must be an object")
+    for key in value:
+        if key not in ("red", "blue"):
+            raise ValueError("unknown goal field: " + str(key))
+    for key in ("red", "blue"):
+        if key not in value:
+            raise ValueError("goal needs both red and blue")
+        vector = value[key]
+        if not isinstance(vector, list) or len(vector) != GOAL_SIZE:
+            raise ValueError("goal.%s must be an array of %d numbers" % (key, GOAL_SIZE))
+        for x in vector:
+            if isinstance(x, bool) or not isinstance(x, (int, float)):
+                raise ValueError("goal.%s entries must be numbers" % key)
+            if not (-1 <= x <= 1):   # NaN fails this too
+                raise ValueError("goal.%s entries must be numbers within [-1, 1]" % key)
+        if vector[-1] != 0:
+            raise ValueError("goal.%s w_reserved (the last entry) must be 0" % key)
+
+
 def validate_sampling(value):
     """decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}."""
     if not isinstance(value, dict):
@@ -293,6 +321,14 @@ def unpack_package(data):
                 validate_spray_gate(value)
         if "steady_shot" in decoder and STEADY_MOVEMENT in decoder.get("forbid_objectives", []):
             raise ValueError("decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
+    if "goal" in manifest:
+        if manifest.get("observation_contract") != OBSERVATION_CONTRACT_V3_HASH:
+            raise ValueError("goal needs observation contract v3")
+        if manifest.get("schema") != "paintbot-neural-basic/2":
+            raise ValueError("goal needs package schema 2")
+        validate_goal(manifest["goal"])
+    elif manifest.get("observation_contract") == OBSERVATION_CONTRACT_V3_HASH:
+        raise ValueError("observation contract v3 needs a goal")
     files["policy.bas"].decode("utf-8")
     if not files["model.bin"]:
         raise ValueError("empty neural model")

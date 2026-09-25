@@ -25,6 +25,17 @@ const
   ObservationSizeV2* = ObservationSize + TerrainBlockSize
   ObservationContractV2* = "paintbot-pw.rules37.obs.v2.float506"
   ObservationContractV2Hash* = "e0d7b0b97975725c470ef6119ca2a6caf4aaa6f34cd15bee02bd306489c029e5"
+  ## Observation contract v3 (PLAN-gcrl-spray G1): the v2 observation, unchanged in order
+  ## and value, in columns 0 .. ObservationSizeV2-1, followed by GoalSize goal floats: the
+  ## seat's goal vector [w_win, w_enemy_kill, w_spray_kill, w_heart_hold, w_death,
+  ## w_push_depth, w_friendly_fire, w_reserved], each within [-1, 1] and w_reserved 0. The
+  ## goal is not world state: the hosted seat takes it from its bundle manifest ("goal":
+  ## {"red": [...], "blue": [...]}, by the seat's team) and the native ABI from
+  ## pw_set_seat_goal. BASIC never sees it.
+  GoalSize* = 8
+  ObservationSizeV3* = ObservationSizeV2 + GoalSize
+  ObservationContractV3* = "paintbot-pw.rules39.obs.v3.float514"
+  ObservationContractV3Hash* = "951abbdf772eee607cf5f8b051030109f96244c17886b65f0d057c9fbdf1cc9b"
   ## Terrain heights (w.elevation: terrain plus trench, centimetres; the playable
   ## rules-37 span measures -260 .. 551) are divided by this, so every height and height
   ## delta the block carries lies within about [-1, 1] (the river bed below a level
@@ -60,10 +71,12 @@ const
   MaxFireHoldRadius* = 2000'i32
 static: doAssert FireHoldRadius == 55
 static: doAssert ObservationSizeV2 == 506 and ObservationContractV2 == "paintbot-pw.rules37.obs.v2.float" & $ObservationSizeV2
+static: doAssert ObservationSizeV3 == 514 and ObservationContractV3 == "paintbot-pw.rules39.obs.v3.float" & $ObservationSizeV3
 
 type
   ObservationContractVersion* = enum
-    ocV1 = 1, ocV2 = 2
+    ocV1 = 1, ocV2 = 2, ocV3 = 3
+  GoalVector* = array[GoalSize, float32]
   ActionContractVersion* = enum
     acV1 = 1, acV2 = 2
   AimMemory* = object
@@ -93,19 +106,34 @@ proc observationContractHash*(version: ObservationContractVersion): string =
   case version
   of ocV1: ObservationContractHash
   of ocV2: ObservationContractV2Hash
+  of ocV3: ObservationContractV3Hash
 proc observationContractId*(version: ObservationContractVersion): string =
   case version
   of ocV1: ObservationContract
   of ocV2: ObservationContractV2
+  of ocV3: ObservationContractV3
 proc observationSize*(version: ObservationContractVersion): int =
   case version
   of ocV1: ObservationSize
   of ocV2: ObservationSizeV2
+  of ocV3: ObservationSizeV3
 proc observationContractVersion*(hash: string): ObservationContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ObservationContractHash: ocV1
   elif hash == ObservationContractV2Hash: ocV2
+  elif hash == ObservationContractV3Hash: ocV3
   else: raise newException(ValueError, "unknown neural observation contract")
+
+proc goalVectorError*(goal: openArray[float32]): string =
+  ## "" when `goal` is a usable goal vector (GoalSize finite floats within [-1, 1], the
+  ## reserved last one 0); otherwise why not. The host, the packager and the native ABI
+  ## reject the same vectors.
+  if goal.len != GoalSize: return "must have " & $GoalSize & " numbers"
+  for i, x in goal:
+    if classify(x) in {fcNan, fcInf, fcNegInf} or x < -1'f32 or x > 1'f32:
+      return "entries must be numbers within [-1, 1]"
+  if goal[GoalSize-1] != 0'f32: return "w_reserved (the last entry) must be 0"
+  ""
 
 proc observedBodies*(w: World, slot: int): array[Seats, int] =
   ## Match BASIC identity resolution, including uniforms and duplicate identities.
@@ -287,10 +315,11 @@ proc encodeTerrainBlock*(w: World, slot: int, output: var openArray[float32],
 static: doAssert 58 == TerrainBlockSize
 
 proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
-    bodies: array[Seats, int], version: ObservationContractVersion) =
+    bodies: array[Seats, int], version: ObservationContractVersion, goal: GoalVector = default(GoalVector)) =
   ## The observation of the given contract. v1 is the encoder above, called unchanged;
   ## v2 writes the same v1 floats in columns 0 .. ObservationSize-1 and the terrain
-  ## block after them.
+  ## block after them; v3 writes the v2 floats in columns 0 .. ObservationSizeV2-1 and the
+  ## seat's goal vector after them (`goal` is read only under v3).
   if slot notin 0..<Seats or output.len != observationSize(version):
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   case version
@@ -298,11 +327,15 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
   of ocV2:
     w.encodeObservation(slot, output.toOpenArray(0, ObservationSize-1), bodies)
     w.encodeTerrainBlock(slot, output.toOpenArray(ObservationSize, ObservationSizeV2-1), bodies)
+  of ocV3:
+    w.encodeObservation(slot, output.toOpenArray(0, ObservationSize-1), bodies)
+    w.encodeTerrainBlock(slot, output.toOpenArray(ObservationSize, ObservationSizeV2-1), bodies)
+    for i in 0..<GoalSize: output[ObservationSizeV2 + i] = goal[i]
 proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
-    version: ObservationContractVersion) =
+    version: ObservationContractVersion, goal: GoalVector = default(GoalVector)) =
   if slot notin 0..<Seats or output.len != observationSize(version):
     raise newException(ValueError, "invalid neural observation dimensions or seat")
-  w.encodeObservation(slot, output, w.observedBodies(slot), version)
+  w.encodeObservation(slot, output, w.observedBodies(slot), version, goal)
 
 proc resetAimMemory*(m: var AimMemory) =
   m.tick = -1

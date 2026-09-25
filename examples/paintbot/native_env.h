@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 /* v1 buffers: 16 seats, 448 floats/seat (observation contract v1; a handle from
- * pw_create_observation(..., 2) writes 506), 5 int32 actions/seat.
+ * pw_create_observation(..., 2) writes 506, (..., 3) writes 514), 5 int32 actions/seat.
  * Output reset masks are independent of match terminals. Handles are exclusive
  * to one call at a time. Caller provides correctly sized non-null buffers. */
 int pw_env_version(void);
@@ -276,10 +276,15 @@ int pw_seat_spray_stats(void *handle, int seat, int32_t *stats);
  * then a 58-float public terrain block (self wet, self height; per heart 0..9 wet and
  * height delta; per apparent identity 0..15 wet and height delta, zero when v1's slot is
  * empty; visible apparent enemies wet/dry and teammates wet/dry, each /8; heights are
- * elevation/800; see neural_actor.md). NULL for any other version or a bad max_ticks.
+ * elevation/800; see neural_actor.md), 3 = v3 "paintbot-pw.rules39.obs.v3.float514" = v2's
+ * 506 floats unchanged in columns 0..505, then the seat's 8-float goal vector
+ * [w_win, w_enemy_kill, w_spray_kill, w_heart_hold, w_death, w_push_depth,
+ * w_friendly_fire, w_reserved] set by pw_set_seat_goal (zeros until set; the hosted seat
+ * takes it from its manifest's "goal", by team). NULL for any other version or a bad
+ * max_ticks.
  * pw_observe / pw_observe_seats rows are then that many floats apart. The contract never
  * touches the world or its hash. pw_observation_size() stays 448;
- * pw_observation_size_for(version) = 448 / 506 (-1 unknown); pw_handle_observation_size
+ * pw_observation_size_for(version) = 448 / 506 / 514 (-1 unknown); pw_handle_observation_size
  * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
  * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
  * 0, or -1 bad args). */
@@ -288,6 +293,11 @@ int pw_observation_size_for(int32_t obs_version);
 int pw_handle_observation_size(void *handle);
 int pw_observation_contract(void *handle);
 int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, int32_t capacity);
+/* Observation contract v3's goal vector for one seat: 8 float32, each within [-1, 1], the
+ * last (w_reserved) 0; kept across pw_reset; read only by a v3 handle's observation.
+ * Returns 0, -1 bad args or an invalid vector. pw_seat_goal copies it out. */
+int pw_set_seat_goal(void *handle, int seat, const float *goal);
+int pw_seat_goal(void *handle, int seat, float *goal);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
 #ifdef __cplusplus
