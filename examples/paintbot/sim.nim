@@ -189,13 +189,25 @@ when defined(pwTraining):
       # Spray-can damage only (pw_seat_spray_stats): health removed from enemies and
       # teammates by this seat's spray, and the kills it made on each.
       sprayDamageEnemy*, sprayDamageTeam*, sprayKillsEnemy*, sprayKillsTeam*: int32
+      # Per-weapon enemy kills and enemy-hit locations (pw_seat_weapon_stats): kills by
+      # gun, grenade and spray; hits dealt from / to water, high ground and trenches, by
+      # the shooter's / victim's position at the damage event (classes may overlap).
+      gunKills*, grenadeKills*, weaponSprayKills*: int32
+      hitsFromWater*, hitsFromHigh*, hitsFromTrench*: int32
+      hitsToWater*, hitsToHigh*, hitsToTrench*: int32
     CombatTelemetry* = array[Seats, SeatStats]
+  const HighGroundHeight* = 216 # pw_seat_weapon_stats' "high": terrainHeight >= this
+  type DamageWeapon* = enum
+    dwNone, dwGun, dwGrenade, dwSpray
   # The host points this at its telemetry for the duration of one step; nil means
   # nobody is listening and damage pays only for the nil test.
   var combatTelemetry* {.threadvar.}: ptr CombatTelemetry
   # True only while the step deals spray-can damage (mechanics.nim), so the telemetry can
   # attribute it by weapon. Written and read only for telemetry; never part of World.
   var sprayDamagePhase* {.threadvar.}: bool
+  # The weapon whose damage the step is dealing (gun rays, a grenade blast, spray bursts),
+  # for pw_seat_weapon_stats. Telemetry only; never part of World.
+  var damageWeapon* {.threadvar.}: DamageWeapon
   # Per-attacker damage scale in permille, pointed at by the host for one step; nil or
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
   var damageScale* {.threadvar.}: ptr array[Seats, int32]

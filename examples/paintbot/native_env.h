@@ -269,6 +269,16 @@ int pw_seat_spray_aim_stats(void *handle, int seat, int32_t *stats);
 int pw_set_seat_spray_gate(void *handle, int seat, int32_t max_teammates, int32_t min_enemies);
 int pw_seat_spray_gate_stats(void *handle, int seat, int32_t *stats);
 int pw_seat_spray_stats(void *handle, int seat, int32_t *stats);
+/* pw_seat_weapon_stats (training library only): int32[9] per seat, cumulative since the last
+ * create/reset, attributed to the damage's owner, enemy victims only: {gun kills, grenade kills,
+ * spray kills, hits from water, hits from high ground, hits from a trench, hits to water, hits
+ * to high ground, hits to a trench}. A hit is every enemy damage event past the shield and life
+ * checks (pw_seat_stats' hits_enemy event), any weapon; the kill kinds sum to pw_seat_stats'
+ * kills and spray kills equal pw_seat_spray_stats[2]. "From" is the shooter's position at the
+ * damage event, "to" the victim's: water = in the river's water (rules >= 30, as the wading
+ * slowdown), high = terrainHeight >= 216, trench = inside a trench; classes may overlap. Pure
+ * telemetry, never part of the world or its hash; -1 bad args. */
+int pw_seat_weapon_stats(void *handle, int seat, int32_t *stats);
 /* Observation contract selection (additive). pw_create_observation is pw_create with the
  * observation contract chosen, kept across pw_reset: 1 = v1
  * "paintbot-pw.rules37.obs.v1.float448" (identical to pw_create), 2 = v2

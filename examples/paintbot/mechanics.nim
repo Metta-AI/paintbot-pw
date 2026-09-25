@@ -224,6 +224,23 @@ proc damage*(w: var World, victim, attacker, amount: int) =
           t[attacker].damageDealtEnemy += removed
           inc t[attacker].hitsEnemy
           if killed: inc t[attacker].kills
+          # Weapon kills and hit locations (pw_seat_weapon_stats), enemy victims only.
+          if killed:
+            case damageWeapon
+            of dwGun: inc t[attacker].gunKills
+            of dwGrenade: inc t[attacker].grenadeKills
+            of dwSpray: inc t[attacker].weaponSprayKills
+            of dwNone: discard
+          for (p, water, high, trench) in [
+              (w.cogs[attacker].pos, addr t[attacker].hitsFromWater, addr t[attacker].hitsFromHigh,
+               addr t[attacker].hitsFromTrench),
+              (w.cogs[victim].pos, addr t[attacker].hitsToWater, addr t[attacker].hitsToHigh,
+               addr t[attacker].hitsToTrench)]:
+            let height = terrainHeight(p.x.int, p.z.int)
+            if visionRulesVersion >= 30 and riverBlend(p.x.int, p.z.int) > 0 and height < RiverWaterHeight:
+              inc water[]
+            if height >= HighGroundHeight: inc high[]
+            if w.trenchAt(p) >= 0: inc trench[]
         if sprayDamagePhase:
           if team(attacker) == team(victim):
             t[attacker].sprayDamageTeam += removed
@@ -293,7 +310,11 @@ proc explode*(w: var World, p: Point, owner: int) =
     let victimTrench = w.trenchAt(w.cogs[i].pos)
     let amount = if victimTrench >= 0: (if victimTrench ==
         trench: 6 else: 1) else: 2
+    when defined(pwTraining):
+      let weapon = damageWeapon
+      damageWeapon = dwGrenade
     w.damage(i, owner, amount)
+    when defined(pwTraining): damageWeapon = weapon
 
 proc sprayTouches*(w: World, slot, victim: int): bool =
   if victim == slot or w.cogs[victim].hp <= 0: return false
@@ -515,8 +536,11 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
             w.cogs[i].pos) >= 0
         w.cogs[i].cooldown = int32(FireCooldownTicks*(if slow: 3 else: 1))
   # Targets were selected before damage, allowing simultaneous mutual kills.
+  when defined(pwTraining): damageWeapon = dwGun
   for hit in gunTargets: w.damage(hit.victim, hit.attacker, 1)
-  when defined(pwTraining): sprayDamagePhase = true
+  when defined(pwTraining):
+    damageWeapon = dwSpray
+    sprayDamagePhase = true
   for i in w.seatOrder():
     if w.equipment[i].burst > 0 and w.cogs[i].hp > 0:
       for j in 0..<Seats:
@@ -526,7 +550,9 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           w.equipment[i].sprayHits = w.equipment[i].sprayHits or bit
           w.damage(j, i, SprayDamage)
       dec w.equipment[i].burst
-  when defined(pwTraining): sprayDamagePhase = false
+  when defined(pwTraining):
+    sprayDamagePhase = false
+    damageWeapon = dwNone
   w.updateBarrage()
   var airborne: seq[Lob]
   for g in w.grenades:
