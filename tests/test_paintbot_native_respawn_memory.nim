@@ -139,7 +139,8 @@ suite "Hosted neural seats and the native ABI agree across respawns (every decod
     for x in ActionSizes: result.u32(x.uint32)
     result.add repeat('\0', n*4)
   proc neuralSeats(decoder: string): array[Seats, Bot] =
-    let path = getTempDir()/"paintbot-native-respawn-memory-test.bas"
+    # Per process: the sweep may run in several processes at once.
+    let path = getTempDir()/("paintbot-native-respawn-memory-test-" & $getCurrentProcessId() & ".bas")
     writeFile(path, "paintbot_observe(neuralObservation())\n" &
       "run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())\n" &
       "paintbot_act(neuralLogits())\n")
