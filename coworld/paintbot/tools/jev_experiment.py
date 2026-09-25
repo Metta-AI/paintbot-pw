@@ -106,6 +106,7 @@ ARMS: dict[str, tuple[str, dict[str, int]]] = {
     "a27-steady40": ("steady only for targets within 40 m", {"useSteady": 1, "kSteadyR2": 16000000}),
     "a28-tight": ("keep within 5 m of the visible squad's centre while an enemy is in view",
                   {"useTight": 1}),
+    "a29-holdw60": ("hold fire only for a teammate within 60 cm of the line", {"kHoldW": 60}),
 }
 
 

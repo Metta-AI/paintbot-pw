@@ -445,7 +445,7 @@ while i < 16
     dy = playerY(i) - selfY
     d2 = dx * dx + dy * dy
     if i mod 2 <> selfTeam then
-      cost = d2 - (3 - playerHp(i)) * 160000
+      cost = d2 - (3 - playerHp(i)) * kHpBias
       if playerCarrying(i) then
         cost = cost - 2500000
         thief = i
@@ -609,6 +609,16 @@ if jevInit = 0 then
   ' of the centre of the teammates it can see within 20 m, leaning toward its goal.
   useTight = 0
   kTightR = 500
+  ' kHoldW: the baseline holds fire while a teammate stands within 95 cm of the line to its target,
+  ' but a ray only hits bodies within 55 cm of it. The league leader fights side by side about 1 m
+  ' apart, which a 95 cm rule reads as blocked; a narrower width keeps a close line shooting.
+  kHoldW = 95
+  ' kLead: ticks of the target's last-tick motion the aim leads by. The baseline uses 6 (the windup);
+  ' the league leader's v15 leads about 1 and hits 45% to our 41%, since targets dodge mid-windup.
+  kLead = 6
+  ' kHpBias: how much closer (in cm^2) a target counts per missing heart. The league leader's v15
+  ' shoots the nearest clear enemy 96% of the time, our baseline 86%.
+  kHpBias = 160000
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -2284,8 +2294,8 @@ if best >= 0 then
   tx = playerX(best)
   ty = playerY(best)
   if lastSeen(best) = worldTick - 1 then
-    tx = tx + (tx - oldX(best)) * 6
-    ty = ty + (ty - oldY(best)) * 6
+    tx = tx + (tx - oldX(best)) * kLead
+    ty = ty + (ty - oldY(best)) * kLead
   end if
   stFar = 0
   if kSteadyR2 > 0 then
@@ -2321,7 +2331,7 @@ if best >= 0 then
         if across < 0 then
           across = 0 - across
         end if
-        if along > 0 and along < reach and across < 95 then
+        if along > 0 and along < reach and across < kHoldW then
           clear = 0
         end if
       end if
