@@ -631,3 +631,28 @@ Neural canaries, seed 2026 against the plain BASIC filler, all 16 seats exit 0 w
 - radius on: the same net with `{"fire_hold_teammates": {"radius": 150}}` ran twice, as `ereq_9b1df085` and
   `ereq_7f495314`. The two replay files are identical (2146 ticks, hash 4228959489), and every neural seat log
   carries `fire_hold_radius=150`.
+
+## Decoder options `spray_aim` and `spray_gate` — 0.3.45
+
+#101 adds two per-bundle decoder options for the spray can: `spray_aim` and
+`spray_gate {"max_teammates": t, "min_enemies": e}`. The gate drops a spray burst whose cone would reach more than `t`
+visible teammates or fewer than `e` visible enemies. Bundles without the keys decode exactly as before. The release
+also carries jev.bas parameters (#99, #100, #104), training-library spray counters, and native aim memory (#102).
+The `sim.nim`/`mechanics.nim` changes are training-only telemetry, not part of the world or its hash. Rules stay 39,
+earlier replays and hashes are unaffected, and the league was not paused.
+
+Deployed from main `86f7ec7`. build.yml run 36091657623 was green on all three OSes. One Deploy Coworld run,
+36095550714 (`Deploy Coworld 0.3.45 (upload)`). Before dispatch, the pre-dispatch check found no deploy run in
+flight or in the previous 30 minutes, and `next-version` returned 0.3.45 in the same minute. Version 0.3.45 is
+certified and canonical as `cow_3229481a-ed29-4fb1-94d4-513c1faeab12`
+(manifest `sha256:44bd1033f60b819fd0aa9dd824b471c10b4511c9e76bd8c1e6b8b23e62d14781`). Hosted smoke passed
+(`ereq_02918e4b`, `ereq_365f67a2`, `ereq_59b857fb`, `ereq_63de4156`, `ereq_c01e8f8a`). The league lock reads 0.3.45.
+
+Neural canaries, seed 2026 against the plain BASIC filler, all 16 seats exit 0 with hash-verified replays:
+
+- v1 preserved: the contract-v1 bundle ran as `ereq_4c370da3`. Its replay file is identical to 0.3.44's.
+- live champion preserved: `daveey-pw-neural:v12` ran as `ereq_610d3c83`. Its replay file is identical to its 0.3.44
+  canary (2409 ticks, hash 1353169573).
+- gate on: the same bundle with `{"spray_gate": {"max_teammates": 0, "min_enemies": 1}}` ran twice, as
+  `ereq_60720e68` and `ereq_e6bacb9e`. The two replay files are identical (1852 ticks, hash 2817409332), and every
+  neural seat log carries `spray_gate=t0,e1`.
