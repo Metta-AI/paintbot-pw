@@ -656,3 +656,32 @@ Neural canaries, seed 2026 against the plain BASIC filler, all 16 seats exit 0 w
 - gate on: the same bundle with `{"spray_gate": {"max_teammates": 0, "min_enemies": 1}}` ran twice, as
   `ereq_60720e68` and `ereq_e6bacb9e`. The two replay files are identical (1852 ticks, hash 2817409332), and every
   neural seat log carries `spray_gate=t0,e1`.
+
+## PWNET002 actors and neural ⇄ BASIC I/O — 0.3.46
+
+#106 adds the PWNET002 actor format: a layer stack chosen from a fixed menu (dense, MinGRU, entity attention, ...;
+`examples/paintbot/neural_actor.md`) under the same 4,000,000-operation budget. #109 adds generic neural ⇄ BASIC
+I/O (`examples/paintbot/neural_basic.md`): manifest `user_inputs` that feed `neuralInput`, the head-level phase
+(`neuralMask`, `neuralTemperature`, `neuralSample`, `neuralChoice`), and the command buffer (`neuralDecode`,
+`cmd*`, `neuralIssue`). The release also carries jev.bas parameters (#105, #108). Bundles that use none of this play
+byte-identically. There is no `sim.nim`, host or rules change (rules stay 39), earlier replays and hashes are
+unaffected, and the league was not paused.
+
+Deployed from main `0dd74a3`. build.yml run 36101918356 was green on all three OSes. One Deploy Coworld run,
+36105739468 (`Deploy Coworld 0.3.46 (upload)`). Before dispatch, the pre-dispatch check found no deploy run in
+flight or in the previous 30 minutes, and `next-version` returned 0.3.46 in the same minute. Version 0.3.46 is
+certified and canonical as `cow_2c1c1b7d-a2f5-4c9e-b5ca-da79e96da50d`
+(manifest `sha256:77c2d4646737e3c4723adc43a1a88fd1ee385cd5bb28bf76497571335e887566`). Hosted smoke passed
+(`ereq_0c1d3e3b`, `ereq_37f30a54`, `ereq_691ca878`, `ereq_782457c8`, `ereq_a7443db8`). The league lock reads 0.3.46.
+
+Neural canaries, seed 2026 against the plain BASIC filler, all 16 seats exit 0 with hash-verified replays:
+
+- v1 preserved: the contract-v1 bundle ran as `ereq_5f8ed8ff`. Its replay file is identical to 0.3.45's.
+- live champion preserved: `daveey-pw-neural:v15` (v12 + spray gate) ran as `ereq_44cdb54c`. Its replay file is
+  identical to its 0.3.45 canary (1852 ticks, hash 2817409332).
+- PWNET002: the documented example transformer (entity attention d_model 64, 4 heads, 2 blocks, then MinGRU 128;
+  random weights, 3,307,774 operations) ran as `ereq_d6f08a2c` (2820 ticks, hash 3369143104, the same as a local run
+  on the `0dd74a3` engine). The seat log reports `model=pwnet2-l4-s128`.
+- user inputs: a K=3 bundle (observation contract v2u3) whose script writes `neuralInput` each tick and decodes
+  through `neuralSample`/`neuralDecode`/`neuralIssue` ran as `ereq_b00a4c6f` (2972 ticks, hash 938676042, the same as
+  the local run).
