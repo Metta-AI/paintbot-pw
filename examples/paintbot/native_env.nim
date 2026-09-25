@@ -1313,6 +1313,26 @@ proc pw_seat_spray_stats*(handle: pointer, seat: cint, output: ptr UncheckedArra
   output[3] = s.sprayKillsTeam
   0
 
+proc pw_seat_weapon_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Per-weapon enemy kills and enemy-hit locations for one seat (training library only),
+  ## nine int32, cumulative since the last create/reset, attributed to the damage's owner,
+  ## enemy victims only: [gun kills, grenade kills, spray kills, hits from water, hits from
+  ## high ground, hits from a trench, hits to water, hits to high ground, hits to a
+  ## trench]. A hit is every enemy damage event past the shield and life checks (the event
+  ## pw_seat_stats' hits_enemy counts), any weapon; a kill is the one that takes the victim
+  ## to hp 0 (the three kinds sum to pw_seat_stats' kills; spray equals
+  ## pw_seat_spray_stats[2]). "From" classifies the shooter's position at the damage event,
+  ## "to" the victim's: water = in the river's water (neural_contract.inWater, rules >= 30),
+  ## high = terrainHeight >= 216, trench = inside a trench; the classes may overlap. Pure
+  ## telemetry. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let s = cast[ptr NativeEnv](handle).stats[seat]
+  for i, v in [s.gunKills, s.grenadeKills, s.weaponSprayKills, s.hitsFromWater, s.hitsFromHigh,
+      s.hitsFromTrench, s.hitsToWater, s.hitsToHigh, s.hitsToTrench]:
+    output[i] = v
+  0
+
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
   ## Diagnostic: resident 64x64 terrain blocks (16 KiB each) across all tables.
   cint(terrainCacheResidentBlocks())
