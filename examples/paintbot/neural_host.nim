@@ -11,6 +11,7 @@ type
     ## The package's model needs more native operations per tick than the budget allows.
     operations*: int64
     hiddenSize*: int
+    model*: string  # modelTag of the rejected actor
   NeuralSeat* = ref object
     actor*: Actor
     observation*, logits*, state*: seq[float32]
@@ -166,23 +167,29 @@ proc sprayAimTelemetry*(options: SprayAimOptions, aims: int): string =
 proc sprayGateTelemetry*(options: SprayGateOptions, gates: int): string =
   " spray_gate=t" & $options.maxTeammates & ",e" & $options.minEnemies & " spray_gates=" & $gates
 
-proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
+proc neuralTelemetry*(peakOperations: int64, model: string, ticks: int,
     fireHolds = -1, sampling = "", options = "", fireHoldRadius = FireHoldRadius.int32): string =
   ## One private seat-log line: peak native operations in a tick against the budget, the
-  ## model width and the ticks played; with the fire-hold decoder option on, also the
+  ## model (`modelTag`: `w<hidden>` for PWNET001, `pwnet2-l<layers>-s<state>` for PWNET002)
+  ## and the ticks played; with the fire-hold decoder option on, also the
   ## number of shoot orders it held (omitted, and the line unchanged, when it is off).
   ## Diagnostics only; it reads no simulation state.
   result = "neural: peak_ops=" & $peakOperations & " budget=" & $MaxNeuralOperations &
-    " model=w" & $hiddenSize & " ticks=" & $ticks
+    " model=" & model & " ticks=" & $ticks
   if fireHolds >= 0: result.add " fire_holds=" & $fireHolds
   if fireHoldRadius != FireHoldRadius.int32 and fireHolds >= 0: result.add " fire_hold_radius=" & $fireHoldRadius
   result.add sampling
   result.add options
 
+proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
+    fireHolds = -1, sampling = "", options = "", fireHoldRadius = FireHoldRadius.int32): string =
+  ## The PWNET001 form: model `w<hiddenSize>`.
+  neuralTelemetry(peakOperations, "w" & $hiddenSize, ticks, fireHolds, sampling, options, fireHoldRadius)
+
 proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
   ## Empty for a seat without a loaded neural model, so plain BASIC seats log nothing.
   if seat.isNil or seat.actor.isNil: ""
-  else: neuralTelemetry(peakOperations, seat.actor.hiddenSize, ticks,
+  else: neuralTelemetry(peakOperations, seat.actor.modelTag, ticks,
     if seat.fireHoldTeammates: seat.fireHolds else: -1,
     if seat.sampling.enabled: samplingTelemetry(seat.sampling, seat.samplingLogSeed, seat.sampleDraws) else: "",
     (if seat.forbidAny: forbidTelemetry(seat.forbidden, seat.forbidHits) else: "") &
@@ -507,6 +514,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
     let e = newException(NeuralBudgetError, "neural actor exceeds native operation budget")
     e.operations = actor.operationCount
     e.hiddenSize = actor.hiddenSize
+    e.model = actor.modelTag
     raise e
   let manifestPath = sourcePath & ".neural.json"
   var manifest: JsonNode = nil
@@ -521,7 +529,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result.contract = contract
   result.observationContract = observationContract
   result.observation = newSeq[float32](observationSize(observationContract) + userInputs)
-  result.state = newSeq[float32](actor.hiddenSize)
+  result.state = newSeq[float32](actor.stateSize)
 
 proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string): NeuralSeat =
   ## A training policy-script seat (native pw_set_seat_policy_script): the bundle's

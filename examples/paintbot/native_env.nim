@@ -2,7 +2,8 @@
 ## A handle may migrate between threads but must never be used concurrently.
 ## The caller owns flat buffers; no Nim-managed values cross the C boundary.
 import std/strutils
-import sim, neural_contract, bots
+import sim, neural_contract, bots, neural_actor
+from neural_host import MaxNeuralOperations
 import polyworld/rngs
 import polyworld/basic
 
@@ -1315,3 +1316,104 @@ proc pw_seat_spray_stats*(handle: pointer, seat: cint, output: ptr UncheckedArra
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
   ## Diagnostic: resident 64x64 terrain blocks (16 KiB each) across all tables.
   cint(terrainCacheResidentBlocks())
+
+# PWNET001 / PWNET002 actors in the training library: the hosted seat's own loader and
+# inference (neural_actor.nim), so a trainer or evaluator runs a bundle's model.bin
+# bit for bit as the hosted seat does. A net handle owns its scratch and buffers: one
+# call at a time per handle, like an env handle.
+type NativeNet = object
+  actor: Actor
+  state, logits: seq[float32]
+
+proc writeMessage(output: ptr UncheckedArray[char], capacity: cint, message: string) =
+  if output == nil or capacity <= 0: return
+  let n = min(message.len, capacity.int - 1)
+  for i in 0..<n: output[i] = message[i]
+  output[n] = '\0'
+
+proc pw_net_load*(data: pointer, length: int64, error: ptr UncheckedArray[char],
+    capacity: cint): pointer {.exportc, cdecl, dynlib.} =
+  ## Loads and validates a model.bin (PWNET001 or PWNET002) with the hosted loader, and
+  ## rejects a model over the 4,000,000 operations per seat per tick budget as the hosted
+  ## seat does. NULL on rejection, with the reason in `error` (NUL-terminated, truncated
+  ## to capacity; "" on success; may be NULL). Contracts and Paintbot dimensions are the
+  ## caller's to check (pw_net_info).
+  if data == nil or length < 8 or length > MaxNet2FileBytes:
+    writeMessage(error, capacity, "invalid neural actor length")
+    return nil
+  ready()
+  var bytes = newString(length.int)
+  copyMem(addr bytes[0], data, length.int)
+  try:
+    let actor = loadActor(bytes)
+    if actor.operationCount > MaxNeuralOperations:
+      raise newException(ValueError, "neural actor exceeds native operation budget: " &
+        $actor.operationCount & " > " & $MaxNeuralOperations)
+    let net = createShared(NativeNet)
+    net.actor = actor
+    net.state = newSeq[float32](actor.stateSize)
+    net.logits = newSeq[float32](actor.outputSize)
+    writeMessage(error, capacity, "")
+    net
+  except ValueError as e:
+    writeMessage(error, capacity, e.msg)
+    nil
+
+proc pw_net_destroy*(net: pointer) {.exportc, cdecl, dynlib.} =
+  if net == nil: return
+  ready()
+  let n = cast[ptr NativeNet](net)
+  `=destroy`(n[])
+  deallocShared(n)
+
+proc pw_net_info*(net: pointer, output: ptr UncheckedArray[int64]): cint {.exportc, cdecl, dynlib.} =
+  ## Eight int64: [format (1 or 2), inputs, outputs, recurrent state floats, heads, layers,
+  ## parameters, operations per inference (the published count the budget binds)].
+  if net == nil or output == nil: return -1
+  let a = cast[ptr NativeNet](net).actor
+  output[0] = a.actorFormat
+  output[1] = a.inputSize
+  output[2] = a.outputSize
+  output[3] = a.stateSize
+  output[4] = a.headSizes.len
+  output[5] = a.layerCount
+  output[6] = a.parameterCount
+  output[7] = a.operationCount
+  0
+
+proc pw_net_head_sizes*(net: pointer, output: ptr UncheckedArray[int32], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Writes the categorical head sizes; returns the head count, -1 for bad arguments or a
+  ## capacity below it.
+  if net == nil or output == nil: return -1
+  let a = cast[ptr NativeNet](net).actor
+  if capacity < a.headSizes.len: return -1
+  for i, size in a.headSizes: output[i] = size.int32
+  a.headSizes.len.cint
+
+proc pw_net_contracts*(net: pointer, output: ptr UncheckedArray[char], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The observation and action contract hashes as "<obs64> <action64>" (NUL-terminated,
+  ## capacity >= 130). 0, or -1 for bad arguments.
+  if net == nil or output == nil or capacity < 130: return -1
+  let a = cast[ptr NativeNet](net).actor
+  writeMessage(output, capacity, a.observationContract & " " & a.actionContract)
+  0
+
+proc pw_net_infer*(net: pointer, observation, state, logits: ptr UncheckedArray[float32]): cint {.exportc, cdecl, dynlib.} =
+  ## One inference, the hosted seat's run_neural_net: reads `inputs` observation floats and
+  ## the `state` floats (all MINGRU states in layer order), writes the new state in place
+  ## and `outputs` logits. Returns 0; -1 bad arguments; -2 when inference fails (a
+  ## nonfinite input, state, intermediate or output), leaving state and logits untouched,
+  ## as the hosted seat is then disabled without committing either. The reset convention is
+  ## the host's: zero the whole state at initial use, match reset, death and respawn.
+  if net == nil or observation == nil or logits == nil: return -1
+  ready()
+  let n = cast[ptr NativeNet](net)
+  if n.state.len > 0 and state == nil: return -1
+  for i in 0..<n.state.len: n.state[i] = state[i]
+  try:
+    n.actor.infer(toOpenArray(observation, 0, n.actor.inputSize-1), n.state, n.logits)
+  except ValueError:
+    return -2
+  for i in 0..<n.state.len: state[i] = n.state[i]
+  for i in 0..<n.logits.len: logits[i] = n.logits[i]
+  0

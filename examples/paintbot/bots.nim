@@ -227,7 +227,7 @@ proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
         if e of NeuralBudgetError:
           # The rejected model's cost, so the seat log says how far over budget it was.
           let budget = (ref NeuralBudgetError)(e)
-          playerLog(slot, neuralTelemetry(budget.operations, budget.hiddenSize, 0) & "\n")
+          playerLog(slot, neuralTelemetry(budget.operations, budget.model, 0) & "\n")
         playerError(slot, "Neural package failed: " & e.msg)
       else: echo "seat ", slot, " neural package failed: ", e.msg
     let h=host(slot,strings,neural)

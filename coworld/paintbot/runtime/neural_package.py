@@ -1,7 +1,11 @@
 """Bounded neural BASIC package staging. No archive paths are extracted."""
+import array
 import hashlib
 import io
 import json
+import math
+import struct
+import sys
 import zipfile
 
 MAX_MODEL_BYTES = 16 * 1024 * 1024
@@ -86,7 +90,11 @@ def validate_user_inputs(value):
 
 
 def actor_header(model):
-    """(input count, observation contract hash) from a PWNET001 actor's header; ValueError when it is not one."""
+    """(input count, observation contract hash) from a PWNET001 or PWNET002 actor's header; ValueError when it is
+    neither (a PWNET002 model is fully validated here, validate_pwnet2)."""
+    if model[:8] == PWNET2_MAGIC:
+        info = validate_pwnet2(model)
+        return info["inputs"], info["observation_contract"]
     if len(model) < 96 or model[:8] != ACTOR_MAGIC:
         raise ValueError("invalid neural actor magic")
     return int.from_bytes(model[12:16], "little"), model[32:96].decode("ascii", "replace")
@@ -274,6 +282,220 @@ def validate_sampling(value):
             raise ValueError("unknown decoder.sampling field: " + str(key))
 
 
+# PWNET002 (examples/paintbot/neural_actor.md): a layer stack from a fixed menu. Staging checks the
+# structure, the finite weights and the published operation count exactly as neural_actor.nim's loader
+# and the host's budget check do, so a malformed or over-budget model is rejected at upload instead of at
+# model load. PWNET001 models (and anything else) are left to the host's loader, as before.
+PWNET2_MAGIC = b"PWNET002"
+MAX_NEURAL_OPERATIONS = 4_000_000  # per seat per tick (neural_host.MaxNeuralOperations)
+PWNET2_LIMITS = dict(parameters=4_194_304, layers=64, width=4096, state=4096, mingru_hidden=1024, groups=8,
+                     tokens=64, d_model=256, blocks=8, ff=1024)
+TRANSCENDENTAL_OPS, MINGRU_UNIT_OPS = 8, 32
+ATTN_ALWAYS_VALID = 0xFFFFFFFF
+
+
+def rms_norm_ops(d):
+    return 4 * d + 2 * TRANSCENDENTAL_OPS
+
+
+def attention_ops(groups, d, heads, blocks, ff, pass_length):
+    """ENTITY_ATTN's published cost; groups = [(count, width), ...]."""
+    t = sum(count for count, _ in groups)
+    embed = sum(count * (2 * width * d + d) for count, width in groups)
+    block = (2 * t * rms_norm_ops(d) + t * (6 * d * d + 3 * d) + t * t * (4 * d + 13 * heads)
+             + t * heads * TRANSCENDENTAL_OPS + t * (2 * d * d + d) + t * d
+             + t * (2 * d * ff + 2 * ff) + t * (2 * ff * d + d) + t * d)
+    return embed + blocks * block + t + 2 * t * d + d + TRANSCENDENTAL_OPS + pass_length
+
+
+def validate_pwnet2(model, observation_contract=None, action_contract=None):
+    """Validate a PWNET002 model.bin; returns its summary dict (operations, state, layers, parameters).
+    Raises ValueError with the loader's reason otherwise."""
+    lim = PWNET2_LIMITS
+    pos = 0
+
+    def u32():
+        nonlocal pos
+        if pos + 4 > len(model):
+            raise ValueError("truncated neural actor")
+        value = struct.unpack_from("<I", model, pos)[0]
+        pos += 4
+        return value
+
+    def bad(message):
+        raise ValueError("invalid PWNET002 actor: " + message)
+
+    parameters = 0
+
+    def weights(n):
+        nonlocal pos, parameters
+        if parameters + n > lim["parameters"]:
+            bad("parameter count")
+        if pos + 4 * n > len(model):
+            raise ValueError("truncated neural actor")
+        values = array.array("f")
+        values.frombytes(model[pos:pos + 4 * n])
+        if sys.byteorder != "little":
+            values.byteswap()
+        if not all(map(math.isfinite, values)):
+            raise ValueError("nonfinite neural weight")
+        pos += 4 * n
+        parameters += n
+
+    def finite_f32(bits):
+        return math.isfinite(struct.unpack("<f", struct.pack("<I", bits))[0])
+
+    def positive_f32(bits):
+        value = struct.unpack("<f", struct.pack("<I", bits))[0]
+        return math.isfinite(value) and value > 0
+
+    if len(model) > MAX_MODEL_BYTES or model[:8] != PWNET2_MAGIC:
+        raise ValueError("invalid neural actor magic")
+    pos = 8
+    version, inputs, outputs, heads = u32(), u32(), u32(), u32()
+    if version != 2 or not 1 <= inputs <= 4096 or not 2 <= outputs <= 1024 or not 1 <= heads <= 32:
+        raise ValueError("unsupported neural actor dimensions/version")
+    sizes = [u32() for _ in range(heads)]
+    if any(not 2 <= size <= 1024 for size in sizes):
+        raise ValueError("invalid categorical head")
+    if sum(sizes) != outputs:
+        raise ValueError("head/output mismatch")
+    if pos + 128 > len(model):
+        raise ValueError("truncated neural actor")
+    contracts = [model[pos:pos + 64], model[pos + 64:pos + 128]]
+    pos += 128
+    for contract in contracts:
+        if any(c not in b"0123456789abcdef" for c in contract):
+            raise ValueError("invalid neural contract hash")
+    if observation_contract is not None and (contracts[0].decode() != observation_contract
+                                             or contracts[1].decode() != action_contract):
+        raise ValueError("package and actor contract mismatch")
+    count = u32()
+    if not 1 <= count <= lim["layers"]:
+        bad("layer count must be 1..%d" % lim["layers"])
+    width, state, operations, widths = inputs, 0, 0, []
+    for k in range(count):
+        code = u32()
+        q = [u32() for _ in range(8)]
+        where = "layer %d: " % k
+
+        def unused(first):
+            for j in range(first, 8):
+                if q[j] != 0:
+                    bad(where + "unused parameter %d must be 0" % j)
+
+        def flag(j):
+            if q[j] > 1:
+                bad(where + "parameter %d must be 0 or 1" % j)
+            return q[j] == 1
+
+        def epsilon(j):
+            if not positive_f32(q[j]):
+                bad(where + "eps must be finite and positive")
+
+        if code == 1:  # DENSE
+            out = q[1]
+            if q[0] != width:
+                bad(where + "DENSE input %d != width %d" % (q[0], width))
+            if not 1 <= out <= lim["width"]:
+                bad(where + "DENSE output must be 1..%d" % lim["width"])
+            bias, relu = flag(2), flag(3)
+            unused(4)
+            weights(width * out + (out if bias else 0))
+            operations += 2 * width * out + (out if bias else 0) + (out if relu else 0)
+        elif code == 2:  # RMSNORM
+            if q[0] != width:
+                bad(where + "RMSNORM dim %d != width %d" % (q[0], width))
+            epsilon(1)
+            unused(2)
+            weights(width)
+            out = width
+            operations += rms_norm_ops(width)
+        elif code == 3:  # MINGRU
+            hidden = q[1]
+            if q[0] != width:
+                bad(where + "MINGRU input %d != width %d" % (q[0], width))
+            if not 1 <= hidden <= lim["mingru_hidden"]:
+                bad(where + "MINGRU hidden must be 1..%d" % lim["mingru_hidden"])
+            highway, bias = flag(2), flag(3)
+            unused(4)
+            if highway and width != hidden:
+                bad(where + "MINGRU highway needs input == hidden")
+            gates = 3 if highway else 2
+            weights(gates * hidden * width + (gates * hidden if bias else 0))
+            state += hidden
+            if state > lim["state"]:
+                bad(where + "recurrent state exceeds %d" % lim["state"])
+            out = hidden
+            operations += 2 * width * gates * hidden + (gates * hidden if bias else 0) + MINGRU_UNIT_OPS * hidden
+        elif code == 4:  # RESIDUAL
+            unused(1)
+            if q[0] >= k:
+                bad(where + "RESIDUAL start must name an earlier layer")
+            if widths[q[0]] != width:
+                bad(where + "RESIDUAL width %d != layer %d output" % (width, q[0]))
+            out = width
+            operations += width
+        elif code == 5:  # ENTITY_ATTN
+            groups, d, heads_, blocks, ff, pass_offset, pass_length = q[:7]
+            epsilon(7)
+            if not 1 <= groups <= lim["groups"]:
+                bad(where + "ENTITY_ATTN groups must be 1..%d" % lim["groups"])
+            if not 1 <= d <= lim["d_model"]:
+                bad(where + "ENTITY_ATTN d_model must be 1..%d" % lim["d_model"])
+            if not 1 <= heads_ <= d or d % heads_:
+                bad(where + "ENTITY_ATTN heads must divide d_model")
+            if blocks > lim["blocks"]:
+                bad(where + "ENTITY_ATTN blocks must be 0..%d" % lim["blocks"])
+            if not 1 <= ff <= lim["ff"]:
+                bad(where + "ENTITY_ATTN ff must be 1..%d" % lim["ff"])
+            if pass_offset > inputs or pass_length > inputs - pass_offset:
+                bad(where + "ENTITY_ATTN passthrough outside the input")
+            shapes, tokens = [], 0
+            for g in range(groups):
+                offset, stride, n, w, valid = (u32() for _ in range(5))
+                if not 1 <= n <= lim["tokens"] or not 1 <= w <= inputs or not 1 <= stride <= inputs:
+                    bad(where + "ENTITY_ATTN group %d count/width/stride" % g)
+                if offset > inputs or (n - 1) * stride + w > inputs - offset:
+                    bad(where + "ENTITY_ATTN group %d outside the input" % g)
+                if valid != ATTN_ALWAYS_VALID and valid >= w:
+                    bad(where + "ENTITY_ATTN group %d valid index outside the token" % g)
+                tokens += n
+                if tokens > lim["tokens"]:
+                    bad(where + "ENTITY_ATTN tokens exceed %d" % lim["tokens"])
+                shapes.append((n, w))
+            for n, w in shapes:
+                weights(d * w + d)
+            for _ in range(blocks):
+                weights(d + 3 * d * d + 3 * d + d * d + d + d + ff * d + ff + d * ff + d)
+            out = 2 * d + pass_length
+            if out > lim["width"]:
+                bad(where + "ENTITY_ATTN output exceeds %d" % lim["width"])
+            operations += attention_ops(shapes, d, heads_, blocks, ff, pass_length)
+        elif code == 6:  # CONCAT_INPUT
+            offset, length = q[0], q[1]
+            unused(2)
+            if not 1 <= length <= lim["width"] or offset > inputs or length > inputs - offset:
+                bad(where + "CONCAT_INPUT slice outside the input")
+            out = width + length
+            if out > lim["width"]:
+                bad(where + "CONCAT_INPUT output exceeds %d" % lim["width"])
+            operations += length
+        else:
+            bad(where + "unknown layer type %d" % code)
+        widths.append(out)
+        width = out
+    if pos != len(model):
+        bad("length: %d trailing bytes" % (len(model) - pos))
+    if width != outputs:
+        bad("last layer width %d != outputs %d" % (width, outputs))
+    if operations > MAX_NEURAL_OPERATIONS:
+        raise ValueError("neural actor exceeds native operation budget: %d > %d" % (operations, MAX_NEURAL_OPERATIONS))
+    return dict(format=2, inputs=inputs, outputs=outputs, heads=sizes, layers=count, state=state,
+                parameters=parameters, operations=operations, observation_contract=contracts[0].decode(),
+                action_contract=contracts[1].decode())
+
+
 def unpack_package(data):
     """Return validated (source, model, manifest); only three fixed files are allowed."""
     if len(data) > MAX_MODEL_BYTES + MAX_SOURCE_BYTES + MAX_MANIFEST_BYTES + 4096:
@@ -355,6 +577,8 @@ def unpack_package(data):
     files["policy.bas"].decode("utf-8")
     if not files["model.bin"]:
         raise ValueError("empty neural model")
+    if files["model.bin"][:8] == PWNET2_MAGIC:
+        validate_pwnet2(files["model.bin"], manifest["observation_contract"], manifest["action_contract"])
     if user_inputs:
         inputs, observation = actor_header(files["model.bin"])
         if observation != manifest["observation_contract"]:

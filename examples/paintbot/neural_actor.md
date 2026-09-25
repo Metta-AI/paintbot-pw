@@ -67,6 +67,154 @@ For numerical stability, sigmoid uses `z=exp(-abs(x))` and returns
 branch `abs(gate)<0.5 ? old+gate*(candidate-old) : candidate-(candidate-old)*(1-gate)`.
 This can differ by a few FP32 rounding units from upstream's scalar CPU actor.
 
+# PWNET002 actor format (generic layer stack)
+
+PWNET002 makes the architecture data: `model.bin` lists a stack of layers from a fixed
+menu, the host runs it, and the 4,000,000 operations per seat per tick budget
+(`neural_basic.md`) still binds. A new architecture built from the menu is a new bundle,
+not a game change. PWNET001 (above) stays supported unchanged; the loader picks the format
+by the magic. The hosted seat and the native training library (`pw_net_*`, below) run the
+same Nim code (`neural_actor.nim`).
+
+## File
+
+All integers are little-endian uint32, all tensors little-endian FP32, row-major.
+
+| field | value |
+|---|---|
+| magic | ASCII `PWNET002` |
+| version | 2 |
+| I | input count, 1..4096 (the observation contract's width: 448, 506, or 506 + K for user-input contract v2u<K>) |
+| O | output count, 2..1024 (the logits; no value row) |
+| head count | 1..32 |
+| head sizes | one uint32 per head, each 2..1024, summing to O |
+| observation contract | 64 lowercase hex bytes (as PWNET001) |
+| action contract | 64 lowercase hex bytes (as PWNET001) |
+| L | layer count, 1..64 |
+| L layer records | `type`, `param[8]`, payload (below) |
+
+A PWNET002 actor may name any observation contract the host knows, including v2u<K>
+(`neural_basic.md`, manifest `user_inputs`): its input count is then 506 + K, the K user inputs are
+ordinary input columns 506.. (DENSE, CONCAT_INPUT and ENTITY_ATTN slices may read them), and the operation
+count includes them like any other input. Staging reads the input count and contract from the PWNET002
+header. The file length must be exact: no trailing bytes. The package manifest binds the SHA-256
+of the whole file, as for PWNET001. Every weight must be finite; every unused `param` word
+must be 0; every flag must be 0 or 1. The file is at most 16 MiB (the package bound).
+
+The network carries one vector from layer to layer. Before layer 0 it is the observation
+(width I). Each layer reads the current vector (its declared input width must equal the
+current width), writes its output, and that output becomes the current vector. The last
+layer's width must equal O. The recurrent state is every MINGRU layer's state,
+concatenated in layer order (at most 4096 floats); a stack without MINGRU keeps no state.
+
+| type | layer | params | payload |
+|---|---|---|---|
+| 1 | DENSE | `in, out, bias, act` | `W[out, in]`, then `b[out]` if bias |
+| 2 | RMSNORM | `dim, eps` (FP32 bits) | `g[dim]` |
+| 3 | MINGRU | `in, hidden, highway, bias` | `W[G*hidden, in]`, then `b[G*hidden]` if bias; G = 3 with highway, 2 without |
+| 4 | RESIDUAL | `start` | none |
+| 5 | ENTITY_ATTN | `groups, d, heads, blocks, ff, pass_offset, pass_len, eps` | group descriptors, then tensors (below) |
+| 6 | CONCAT_INPUT | `offset, len` | none |
+
+Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1024;
+`act` 0 = none, 1 = relu; `eps` finite and > 0.
+
+## Equations
+
+Sums run over their index in ascending order, starting from `+0.0`, one FP32
+multiply-add per term (`sum += a*b`), with no reassociation; a bias is added after the
+sum. `exp` and `sqrt` are the platform's FP32 functions (the same `exp` PWNET001's
+sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
+
+- **DENSE**: `y[o] = act(sum_i x[i]*W[o,i] (+ b[o]))`, relu(v) = `v > 0 ? v : 0`.
+- **RMSNORM**: `r = 1 / sqrt((sum_i x[i]*x[i]) / dim + eps)`, `y[i] = x[i]*r*g[i]`.
+- **MINGRU**: `combined = W x (+ b)`, split into `c, z` (and `p` with highway), each width
+  `hidden`. With `s` this layer's slice of the state:
+  `candidate = c >= 0 ? c + 0.5 : sigmoid(c)`, `s' = interp(s, candidate, sigmoid(z))`,
+  output `y = sigmoid(p)*s' + (1 - sigmoid(p))*x` with highway (which requires
+  `in == hidden`), `y = s'` without. The state slice becomes `s'`. These are PWNET001's
+  equations and expressions: PWNET001's actor is exactly
+  `DENSE(I, H, no bias, none) -> MINGRU(H, H, highway, no bias) -> DENSE(H, O, no bias, none)`,
+  bit for bit, with the same operation count.
+- **RESIDUAL**: `y = x + output(start)`, where `start` names an earlier layer (0-based,
+  `start < this layer's index`) whose output width equals the current width.
+- **CONCAT_INPUT**: `y = [x, input[offset ..< offset+len]]`, reading the raw observation
+  (`offset + len <= I`, `len` 1..4096).
+- **ENTITY_ATTN**: an entity encoder over fixed slices of the raw observation. The
+  current vector is not read; the output replaces it.
+  - After the 8 params come `groups` descriptors (1..8), five uint32 each:
+    `offset, stride, count, width, valid`. Group g has `count` tokens (1..64); token t
+    reads `input[offset + t*stride ..< offset + t*stride + width]`, which must lie inside
+    the input (`stride` and `width` 1..I). `valid` is the index within the token of its
+    presence flag (a token is valid when that float is > 0.5), or `0xFFFFFFFF` for
+    always valid. T, the total token count, is at most 64. For example, observation
+    contract v1/v2's visible identities are `(104, 8, 16, 8, 0)` and its hearts
+    `(24, 8, 10, 8, 0)`.
+  - Tensors: for each group in order `E_g[d, width]`, `e_g[d]`; then for each of `blocks`
+    (0..8) blocks in order `g1[d]`, `Wqkv[3d, d]`, `bqkv[3d]`, `Wo[d, d]`, `bo[d]`,
+    `g2[d]`, `W1[ff, d]`, `b1[ff]`, `W2[d, ff]`, `b2[d]`. `d` is 1..256, `heads` divides
+    `d` (head width `dh = d/heads`), `ff` 1..1024.
+  - Embedding: `h_n = E_g token_n + e_g`.
+  - Each block (pre-norm, both norms RMSNORM with the layer's `eps`):
+    `a_n = rmsnorm(h_n, g1)`, `[q_n, k_n, v_n] = Wqkv a_n + bqkv`; for each head and
+    query n, over the valid tokens m only, in token order:
+    `s_m = (q_n . k_m) * (1/sqrt(dh))`, `M = max_m s_m` (first valid token first),
+    `e_m = exp(s_m - M)`, `S = sum_m e_m`, `o_n = sum_m (e_m * (1/S)) v_m`
+    (a query attends to no token when none is valid: `o_n = 0`);
+    `h_n += Wo o_n + bo`; `h_n += W2 relu(W1 rmsnorm(h_n, g2) + b1) + b2`.
+    Every token is computed; masking only removes keys. There is no attention over time:
+    memory lives in MINGRU.
+  - Output (width `2d + pass_len`, at most 4096): the masked mean of `h` over valid
+    tokens (`sum * (1/count)`), the masked max (first valid token first), then
+    `input[pass_offset ..< pass_offset+pass_len]`. With no valid token both pools are 0.
+
+Inference validates the observation and state (finite) first, checks every layer's output
+and every new state value is finite, and commits the new state and the logits only when
+all are; otherwise the seat fails as PWNET001's does. Scratch for every layer output, the
+new state and the largest per-layer workspace is allocated once at load; inference does
+not allocate. Reset convention: exactly PWNET001's — the host zeroes the whole state at
+initial use, match reset, death and respawn.
+
+## Operation count (published formula)
+
+The loader computes the count once, at load, from the params alone (never from which
+tokens are valid), and the host rejects a model over 4,000,000 with the existing error
+and telemetry line. Units: a multiply-accumulate is 2 operations; an elementwise add,
+multiply, compare, max, relu or copy is 1; an `exp`, `sqrt` or division is 8; a MINGRU
+unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
+
+| layer | operations |
+|---|---|
+| DENSE | `2*in*out + out*bias + out*relu` |
+| RMSNORM | `4*dim + 16` |
+| MINGRU | `2*in*G*hidden + G*hidden*bias + 32*hidden` |
+| RESIDUAL | `width` |
+| CONCAT_INPUT | `len` |
+| ENTITY_ATTN | `embed + blocks*block + pool` |
+
+with, for ENTITY_ATTN (T tokens, h heads, F = ff, P = pass_len):
+
+```
+embed = sum over groups of count*(2*width*d + d)
+block = 2*T*(4d + 16)                  pre-norms
+      + T*(6d^2 + 3d)                  q, k, v with bias
+      + T^2*(4d + 13h) + 8*h*T         scores, scale, max, exp, sum, weights, weighted values;
+                                       one reciprocal per head and query
+      + T*(2d^2 + d) + T*d             output projection with bias, residual
+      + T*(2dF + 2F) + T*(2Fd + d)     relu MLP with biases
+      + T*d                            residual
+pool  = T + 2*T*d + d + 8 + P          valid flags, mean, max, reciprocal, passthrough
+```
+
+The model's count is the sum over its layers. PWNET001's `2*(I*H + 3H*H + O*H) + 32*H` is
+the same formula applied to its three layers. Example: ENTITY_ATTN over contract v2's 16
+identities and 10 hearts (T = 26), d = 64, 4 heads, 2 blocks, ff = 64, pass_len = 24, then
+CONCAT_INPUT(232, 274), MINGRU(426, 128, no highway, bias), DENSE(128, 82, bias) costs
+3,307,774 operations per tick, 692,226 under the budget (`neural: peak_ops=3307774`).
+
+The telemetry line's model field is `w<hidden>` for PWNET001 (unchanged) and
+`pwnet2-l<layers>-s<state floats>` for PWNET002.
+
 # Native training ABI (`native_env.nim`, `-d:pwTraining`)
 
 Version 1, declared in `native_env.h`: `pw_create/pw_reset/pw_destroy`,
@@ -287,3 +435,12 @@ to the map as `lookAt` clamps it), skips the seat's head decode and forbid check
 step, applies the fire hold and fire period only if already set, and is echoed by
 `pw_seat_orders`. A command-space opponent, or a recording's commands replayed seat by
 seat, reproduces the recorded world hash for hash. Never calling it is byte-identical.
+
+Neural actors (training library): `pw_net_load(data, length, error, capacity)` loads a
+`model.bin` (PWNET001 or PWNET002) with the hosted loader and refuses a model over the
+operation budget, as the hosted seat does; `pw_net_info` (format, inputs, outputs, state
+floats, heads, layers, parameters, operations), `pw_net_head_sizes`, `pw_net_contracts`
+read it; `pw_net_infer(net, observation, state, logits)` is the hosted seat's
+`run_neural_net` (0, -1 bad arguments, -2 failed with state and logits untouched);
+`pw_net_destroy` frees it. A trainer that zeroes a seat's state on `pw_observe`'s reset
+mask reproduces the hosted seat's recurrence exactly. Never calling them changes nothing.
