@@ -457,6 +457,10 @@ if jevInit = 0 then
   ' ticks instead of kLead. The league leader's v15 stops to shoot (a short lead wins); the neural
   ' player keeps moving and leads us by the full windup, 6 ticks.
   kLeadMove = 0
+  ' kLegA..kLegB: ticks a dodge leg lasts while not about to shoot (baseline 3-6). The neural player
+  ' leads a moving target by the full 6-tick windup, which only hits a cog still on the same leg.
+  kLegA = 3
+  kLegB = 6
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -2039,6 +2043,7 @@ def build(base: str) -> str:
              "      end if\n"
              "    end if\n"
              "    tx = tx + (tx - oldX(best)) * ldK\n    ty = ty + (ty - oldY(best)) * ldK\n")
+    s = swap(s, "        planLeg(3, 6)\n", "        planLeg(kLegA, kLegB)\n")
     s = swap(s, "  if visible(i) then\n    oldX(i) = playerX(i)\n    oldY(i) = playerY(i)\n    lastSeen(i) = worldTick\n",
              "  if visible(i) then\n    oldX2(i) = oldX(i)\n    oldY2(i) = oldY(i)\n    lastSeen2(i) = lastSeen(i)\n"
              "    oldX(i) = playerX(i)\n    oldY(i) = playerY(i)\n    lastSeen(i) = worldTick\n")
