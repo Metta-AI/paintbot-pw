@@ -218,6 +218,7 @@ suite "Jev-advised BASIC baseline":
       "steady and tight": @[("useSteady", 1), ("useTight", 1)],
       "steady within 40 m": @[("useSteady", 1), ("kSteadyR2", 16000000)],
       "prefer still targets": @[("useSteady", 1), ("kStillBias", 1440000)],
+      "lead moving targets": @[("useSteady", 1), ("kLeadMove", 6)],
       "champion and high ground, holding": @[("useKite", 1), ("kKiteMargin", 2), ("useRush", 1),
           ("useSmartGrenade", 1), ("useHigh", 1), ("kHighHold", 1)],
     }

@@ -26,6 +26,9 @@ dim lastSeen(16)
 ' Jev layer knowledge: enemy sighting map (16 x 10 cells of 5 m), heart history, candidates
 ' that outlive an ask until its answer lands, retreat points.
 dim enemyCellTick(160)
+dim oldX2(16)
+dim oldY2(16)
+dim lastSeen2(16)
 dim hiDX(8)
 dim hiDY(8)
 dim heartOwnerPrev(16)
@@ -627,6 +630,10 @@ if jevInit = 0 then
   ' kStillBias: a target that did not move last tick has most likely started a steady shot of its
   ' own and will stand for the rest of our windup. It counts kStillBias cm^2 closer.
   kStillBias = 0
+  ' kLeadMove > 0: a target that moved the same way on both of the last two ticks is led by kLeadMove
+  ' ticks instead of kLead. The league leader's v15 stops to shoot (a short lead wins); the neural
+  ' player keeps moving and leads us by the full windup, 6 ticks.
+  kLeadMove = 0
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -2302,8 +2309,14 @@ if best >= 0 then
   tx = playerX(best)
   ty = playerY(best)
   if lastSeen(best) = worldTick - 1 then
-    tx = tx + (tx - oldX(best)) * kLead
-    ty = ty + (ty - oldY(best)) * kLead
+    ldK = kLead
+    if kLeadMove > 0 and lastSeen2(best) = worldTick - 2 then
+      if (tx - oldX(best)) * (oldX(best) - oldX2(best)) + (ty - oldY(best)) * (oldY(best) - oldY2(best)) > 0 then
+        ldK = kLeadMove
+      end if
+    end if
+    tx = tx + (tx - oldX(best)) * ldK
+    ty = ty + (ty - oldY(best)) * ldK
   end if
   stFar = 0
   if kSteadyR2 > 0 then
@@ -2367,6 +2380,9 @@ end if
 i = 0
 while i < 16
   if visible(i) then
+    oldX2(i) = oldX(i)
+    oldY2(i) = oldY(i)
+    lastSeen2(i) = lastSeen(i)
     oldX(i) = playerX(i)
     oldY(i) = playerY(i)
     lastSeen(i) = worldTick
