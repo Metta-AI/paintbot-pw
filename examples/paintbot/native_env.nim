@@ -2,6 +2,7 @@
 ## A handle may migrate between threads but must never be used concurrently.
 ## The caller owns flat buffers; no Nim-managed values cross the C boundary.
 import std/strutils
+import jsony
 import sim, neural_contract, bots, neural_actor
 from neural_host import MaxNeuralOperations
 import polyworld/rngs
@@ -1332,6 +1333,23 @@ proc pw_seat_weapon_stats*(handle: pointer, seat: cint, output: ptr UncheckedArr
       s.hitsFromTrench, s.hitsToWater, s.hitsToHigh, s.hitsToTrench]:
     output[i] = v
   0
+
+proc pw_world_json*(handle: pointer, output: ptr UncheckedArray[char], capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The whole world as one JSON object (training library only): {"rulesVersion": R,
+  ## "heard": {}, then every World field}, the object the engine streamed to PW_POLICY_FD
+  ## each tick before seats stopped acting through the host (#51). For external
+  ## controllers that plan from world state and act through pw_set_seat_command. Returns
+  ## the length in bytes; the JSON (no terminating NUL) is written only when capacity >=
+  ## that length, so a call with capacity 0 sizes the buffer. A pure read: the world and
+  ## its hash are unchanged. -1 for bad arguments.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  let snapshot = env.world.toJson()
+  let doc = "{\"rulesVersion\":" & $NativeRules & ",\"heard\":{}," & snapshot[1..^1]
+  if capacity >= doc.len and doc.len > 0:
+    copyMem(output, unsafeAddr doc[0], doc.len)
+  doc.len.cint
 
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
   ## Diagnostic: resident 64x64 terrain blocks (16 KiB each) across all tables.
