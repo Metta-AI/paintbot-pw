@@ -478,7 +478,7 @@ while i < 16
 wend
 
 ' ---- How the enemy stands: share of visible enemies with another within 3 m. ----
-if (kLeadSpread > 0 or kSpreadBall) and foesSeen > 1 and worldTick mod 6 = 0 then
+if (kLeadSpread > 0 or kSpreadBall or kWantGrenade = 2) and foesSeen > 1 and worldTick mod 6 = 0 then
   i = 1 - selfTeam
   while i < 16
     if visible(i) then
@@ -500,15 +500,15 @@ if (kLeadSpread > 0 or kSpreadBall) and foesSeen > 1 and worldTick mod 6 = 0 the
     i = i + 2
   wend
 end if
-if kSpreadBall then
-  useBall = 0
-  useTight = 0
-  if clD >= 40 then
-    if clN * 1000 / clD < kClumpT then
-      useBall = 1
-      useTight = 1
-    end if
+clSpread = 0
+if clD >= 40 then
+  if clN * 1000 / clD < kClumpT then
+    clSpread = 1
   end if
+end if
+if kSpreadBall then
+  useBall = clSpread
+  useTight = clSpread
 end if
 
 ' ---- Focus fire. ----
@@ -682,6 +682,10 @@ if jevInit = 0 then
   ' useBall and useTight - one group of eight meets its threes and fours. Against a packed enemy
   ' both stay off: the league leader's v15 ball beat every clumping arm we tried.
   kSpreadBall = 0
+  ' kWantGrenade: detour for grenade pickups - 0 never, 1 always (baseline), 2 only once the enemy is
+  ' seen to fight spread out. We pick up ~16 grenades a game and throw ~2; against the league leader's
+  ' packed v15, no detours won 95/240 to 115/360, against the spread neural player they cost a little.
+  kWantGrenade = 1
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -1455,7 +1459,7 @@ if not carrying and thief < 0 then
   while j < pickupCount() and j < 32
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
       kind = pickupMemoryKind(j)
-      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3 and selfHp = 3) or (kind = 1 and wantSpray)
+      wanted = (kind = 0 and not hasGrenade and (kWantGrenade = 1 or (kWantGrenade = 2 and clSpread))) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3 and selfHp = 3) or (kind = 1 and wantSpray)
       if wanted then
         dx = pickupMemoryX(j) - selfX
         dy = pickupMemoryY(j) - selfY
