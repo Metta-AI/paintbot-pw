@@ -643,9 +643,22 @@ class OracleTests(unittest.TestCase):
             self._settle(oracle)
             row = json.loads(path.read_text().splitlines()[0])
             self.assertEqual((row["slot"], row["id"], row["tick"]), (4, 1, 7))
+            self.assertEqual(row["model"], "jev-latest")
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
             self.assertEqual(row["request"]["state"], "ping")
             self.assertEqual(row["answers"], {"q": {"type": "noul", "noul": 0.9}})
             self.assertGreaterEqual(row["latency_ms"], 0)
+
+    def test_oracle_log_repairs_existing_permissions(self):
+        from oracle import Oracle
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "oracle.jsonl"
+            path.write_text("")
+            path.chmod(0o644)
+            oracle = Oracle("https://example.invalid/", log_path=str(path))
+            oracle.close()
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_guest_cannot_pick_the_endpoint_or_send_junk(self):
         from oracle import Oracle

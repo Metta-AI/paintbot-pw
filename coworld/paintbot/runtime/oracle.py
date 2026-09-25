@@ -85,7 +85,11 @@ class Oracle:
         self._lock = threading.Lock()
         self.requests = self.failures = 0
         # Optional JSONL journal of every request and its raw answers, for offline replay and scoring.
-        self._log = open(log_path, "a", encoding="utf-8") if log_path else None
+        self._log = None
+        if log_path:
+            descriptor = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            os.fchmod(descriptor, 0o600)
+            self._log = os.fdopen(descriptor, "a", encoding="utf-8")
 
     @classmethod
     def from_env(cls, env=os.environ) -> Oracle | None:
@@ -200,6 +204,7 @@ class Oracle:
                         "slot": slot,
                         "id": request_id,
                         "tick": tick,
+                        "model": self.model,
                         "latency_ms": round((time.monotonic() - started) * 1000),
                         "request": json.loads(payload),
                         "answers": json.loads(answer) if answer is not None else None,
