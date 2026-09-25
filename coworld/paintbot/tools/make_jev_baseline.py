@@ -457,6 +457,16 @@ if jevInit = 0 then
   ' ticks instead of kLead. The league leader's v15 stops to shoot (a short lead wins); the neural
   ' player keeps moving and leads us by the full windup, 6 ticks.
   kLeadMove = 0
+  ' kLegA..kLegB: ticks a dodge leg lasts while not about to shoot (baseline 3-6). The neural player
+  ' leads a moving target by the full 6-tick windup, which only hits a cog still on the same leg.
+  kLegA = 3
+  kLegB = 6
+  ' kLeadSpread > 0: lead by kLeadSpread instead of kLead once this cog has seen that the enemy
+  ' fights spread out - fewer than kClumpT per mille of visible enemies with another within 3 m.
+  ' The league leader's v15 packs (61-85% per game), a short lead wins against it; the neural
+  ' player spreads (11-26%) and moves while we aim, so the full windup lead wins against it.
+  kLeadSpread = 0
+  kClumpT = 400
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -1146,6 +1156,32 @@ if useSteady and hasSpray = 0 then
   if worldTick < stUntil then
     walkTo(selfX, selfY)
   end if
+end if
+
+"""
+
+CLUMP = """' ---- How the enemy stands: share of visible enemies with another within 3 m. ----
+if kLeadSpread > 0 and foesSeen > 1 and worldTick mod 6 = 0 then
+  i = 1 - selfTeam
+  while i < 16
+    if visible(i) then
+      clD = clD + 1
+      e = 1 - selfTeam
+      clHit = 0
+      while e < 16
+        if e <> i and visible(e) then
+          dx = playerX(e) - playerX(i)
+          dy = playerY(e) - playerY(i)
+          if dx * dx + dy * dy <= 90000 then
+            clHit = 1
+          end if
+        end if
+        e = e + 2
+      wend
+      clN = clN + clHit
+    end if
+    i = i + 2
+  wend
 end if
 
 """
@@ -2014,6 +2050,7 @@ def build(base: str) -> str:
              HEADER + "' Baseline notes follow. Every cog runs this file on its own: no shared memory, fog-gated\n")
     s = splice(s, "dim lastSeen(16)\n", DIMS, before=False)
     s = splice(s, "if started = 0 then\n  started = 1\n", SUBS)
+    s = splice(s, "' Where we want to be. Later rules override earlier ones; one walkTo is issued at the end.\n", CLUMP)
     s = splice(s, "' Where we want to be. Later rules override earlier ones; one walkTo is issued at the end.\n", FOCUS)
     s = splice(s, "' Where we want to be. Later rules override earlier ones; one walkTo is issued at the end.\n", KNOWLEDGE)
     s = swap(s, "  otherTarget = -1\n  pass = 0\n  while pass < 2\n", TERRITORY_INIT)
@@ -2033,12 +2070,18 @@ def build(base: str) -> str:
              "      end if\n")
     s = swap(s, "    tx = tx + (tx - oldX(best)) * 6\n    ty = ty + (ty - oldY(best)) * 6\n",
              "    ldK = kLead\n"
+             "    if kLeadSpread > 0 and clD >= 40 then\n"
+             "      if clN * 1000 / clD < kClumpT then\n"
+             "        ldK = kLeadSpread\n"
+             "      end if\n"
+             "    end if\n"
              "    if kLeadMove > 0 and lastSeen2(best) = worldTick - 2 then\n"
              "      if (tx - oldX(best)) * (oldX(best) - oldX2(best)) + (ty - oldY(best)) * (oldY(best) - oldY2(best)) > 0 then\n"
              "        ldK = kLeadMove\n"
              "      end if\n"
              "    end if\n"
              "    tx = tx + (tx - oldX(best)) * ldK\n    ty = ty + (ty - oldY(best)) * ldK\n")
+    s = swap(s, "        planLeg(3, 6)\n", "        planLeg(kLegA, kLegB)\n")
     s = swap(s, "  if visible(i) then\n    oldX(i) = playerX(i)\n    oldY(i) = playerY(i)\n    lastSeen(i) = worldTick\n",
              "  if visible(i) then\n    oldX2(i) = oldX(i)\n    oldY2(i) = oldY(i)\n    lastSeen2(i) = lastSeen(i)\n"
              "    oldX(i) = playerX(i)\n    oldY(i) = playerY(i)\n    lastSeen(i) = worldTick\n")
