@@ -12,7 +12,10 @@ from neural_package import (unpack_package, validate_aim_retarget, validate_shot
                             validate_spray_aim, validate_spray_gate, SPRAY_AIM_DEFAULTS, SPRAY_GATE_DEFAULTS, SPRAY_LIMITS,
                             AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
                             MAX_SHOT_GATE_RANGE, validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS,
-                            USER_INPUT_LIMIT, OBSERVATION_V2_SIZE)
+                            USER_INPUT_LIMIT, OBSERVATION_V2_SIZE, validate_pwnet2, attention_ops,
+                            MAX_NEURAL_OPERATIONS, PWNET2_LIMITS)
+import random
+import struct
 
 
 def actor_bytes(inputs, observation_hash, hidden=64, outputs=82):
@@ -400,6 +403,142 @@ class UserInputTests(unittest.TestCase):
         # An ordinary contract hash with the model never parsed, exactly as before.
         _, model, _ = unpack_package(package({"schema": "paintbot-neural-basic/2"}))
         self.assertEqual(model, b"neutral fixture")
+OBS, ACT = "a" * 64, "b" * 64
+
+
+def pwnet2(inputs, heads, layers, obs=OBS, act=ACT):
+    """layers = [(type, [params], [extra u32], n_floats)] with deterministic small weights."""
+    out = b"PWNET002" + struct.pack("<4I", 2, inputs, sum(heads), len(heads)) + struct.pack("<%dI" % len(heads), *heads)
+    out += obs.encode() + act.encode() + struct.pack("<I", len(layers))
+    rng = random.Random(1)
+    for code, params, extra, floats in layers:
+        out += struct.pack("<9I", code, *(list(params) + [0] * (8 - len(params))))
+        out += struct.pack("<%dI" % len(extra), *extra)
+        out += struct.pack("<%df" % floats, *(rng.uniform(-0.1, 0.1) for _ in range(floats)))
+    return out
+
+
+EPS = struct.unpack("<I", struct.pack("<f", 1e-5))[0]
+
+
+def attn(groups, d, heads, blocks, ff, pass_offset, pass_length):
+    extra = [x for g in groups for x in g]
+    floats = sum(d * g[3] + d for g in groups) + blocks * (d + 3 * d * d + 3 * d + d * d + d + d + ff * d + ff + d * ff + d)
+    return (5, [len(groups), d, heads, blocks, ff, pass_offset, pass_length, EPS], extra, floats)
+
+
+class Pwnet2Tests(unittest.TestCase):
+    """PWNET002 staging validation mirrors neural_actor.nim's loader and the host's budget check."""
+
+    def example(self):
+        # The documented example transformer (neural_actor.md): 3,307,774 operations.
+        return pwnet2(506, [51, 25, 2, 2, 2], [
+            attn([(24, 8, 10, 8, 0), (104, 8, 16, 8, 0)], 64, 4, 2, 64, 0, 24),
+            (6, [232, 274], [], 0),
+            (3, [426, 128, 0, 1], [], 2 * 128 * 426 + 2 * 128),
+            (1, [128, 82, 1, 0], [], 128 * 82 + 82)])
+
+    def test_example_transformer_cost(self):
+        info = validate_pwnet2(self.example())
+        self.assertEqual(info["operations"], 3307774)
+        self.assertEqual((info["state"], info["layers"]), (128, 4))
+
+    def test_pwnet001_shape_costs_the_pwnet001_formula(self):
+        i, h, o = 448, 128, 82
+        info = validate_pwnet2(pwnet2(i, [51, 25, 2, 2, 2], [
+            (1, [i, h], [], i * h), (3, [h, h, 1, 0], [], 3 * h * h), (1, [h, o], [], o * h)]))
+        self.assertEqual(info["operations"], 2 * (i * h + 3 * h * h + o * h) + 32 * h)
+
+    def test_staging_accepts_and_rejects(self):
+        model = self.example()
+        overrides = {"sha256": {"policy.bas": hashlib.sha256(b"idle = 1\n").hexdigest(),
+                                "model.bin": hashlib.sha256(model).hexdigest()}}
+        self.assertEqual(unpack_package(package(overrides, model=model))[1], model)
+        other = {"observation_contract": "c" * 64, **overrides}
+        with self.assertRaisesRegex(ValueError, "contract mismatch"):
+            unpack_package(package(other, model=model))
+        big = pwnet2(506, [51, 25, 2, 2, 2], [
+            attn([(24, 8, 10, 8, 0), (104, 8, 16, 8, 0), (232, 5, 32, 5, 0)], 128, 4, 2, 256, 0, 24),
+            (1, [280, 82], [], 280 * 82)])
+        big_overrides = {"sha256": {"policy.bas": hashlib.sha256(b"idle = 1\n").hexdigest(),
+                                    "model.bin": hashlib.sha256(big).hexdigest()}}
+        with self.assertRaisesRegex(ValueError, "exceeds native operation budget"):
+            unpack_package(package(big_overrides, model=big))
+        # Non-PWNET002 models are left to the host loader, exactly as before.
+        self.assertEqual(unpack_package(package())[1], b"neutral fixture")
+
+    def test_structural_rejections(self):
+        heads = [2, 2, 2]
+        good = pwnet2(64, heads, [(1, [64, 16, 1], [], 64 * 16 + 16), (3, [16, 16, 1], [], 3 * 16 * 16),
+                                  (1, [16, 6], [], 96)])
+        validate_pwnet2(good)
+        cases = [
+            (good[:-1], "truncated"), (good + b"\0" * 4, "trailing"),
+            (pwnet2(64, heads, [(1, [64, 7], [], 64 * 7)]), "last layer width"),
+            (pwnet2(64, heads, [(1, [63, 6], [], 63 * 6)]), "DENSE input"),
+            (pwnet2(64, heads, []), "layer count"),
+            (pwnet2(64, heads, [(1, [64, 6, 2], [], 64 * 6)]), "must be 0 or 1"),
+            (pwnet2(64, heads, [(1, [64, 6, 0, 0, 0, 0, 0, 1], [], 64 * 6)]), "unused parameter"),
+            (pwnet2(64, heads, [(9, [], [], 0)]), "unknown layer type"),
+            (pwnet2(64, heads, [(3, [64, 32, 1], [], 3 * 32 * 64), (1, [32, 6], [], 192)]), "highway"),
+            (pwnet2(64, heads, [(1, [64, 6], [], 384), (4, [1], [], 0)]), "earlier layer"),
+            (pwnet2(64, heads, [(1, [64, 2], [], 128), (6, [60, 5], [], 0)]), "outside the input"),
+            (pwnet2(64, heads, [(2, [64, 0], [], 64), (1, [64, 6], [], 384)]), "eps"),
+            (pwnet2(64, heads, [attn([(60, 8, 1, 8, 0)], 8, 2, 1, 8, 0, 0), (1, [16, 6], [], 96)]), "outside the input"),
+            (pwnet2(64, heads, [attn([(0, 8, 8, 8, 8)], 8, 2, 1, 8, 0, 0), (1, [16, 6], [], 96)]), "valid index"),
+            (pwnet2(64, heads, [attn([(0, 8, 8, 8, 0)], 8, 3, 1, 8, 0, 0), (1, [16, 6], [], 96)]), "heads"),
+            (pwnet2(64, heads, [attn([(0, 1, 60, 4, 0), (0, 1, 10, 4, 0)], 8, 2, 1, 8, 0, 0), (1, [16, 6], [], 96)]),
+             "tokens"),
+            (pwnet2(64, heads, [(1, [64, 6], [], 384)], obs="G" * 64), "contract hash"),
+        ]
+        for model, fragment in cases:
+            with self.assertRaisesRegex(ValueError, fragment):
+                validate_pwnet2(model)
+        nonfinite = bytearray(good)
+        nonfinite[-4:] = struct.pack("<f", float("inf"))
+        with self.assertRaisesRegex(ValueError, "nonfinite"):
+            validate_pwnet2(bytes(nonfinite))
+
+    def test_pwnet002_with_user_inputs(self):
+        # A PWNET002 actor with obs contract v2u<K> (506 + K inputs): the header is read through validate_pwnet2 and
+        # the op count includes the K extra inputs.
+        k = 3
+        heads = [51, 25, 2, 2, 2]
+
+        def bundle(model, count=k, observation=None):
+            observation = observation or v2u_hash(k)
+            return package({"schema": "paintbot-neural-basic/2", "observation_contract": observation, "action_contract": ACT,
+                            "user_inputs": {"count": count, "init": [0] * count},
+                            "sha256": {"policy.bas": hashlib.sha256(b"idle = 1\n").hexdigest(),
+                                       "model.bin": hashlib.sha256(model).hexdigest()}}, model=model)
+
+        model = pwnet2(OBSERVATION_V2_SIZE + k, heads, [(6, [0, 24], [], 0), (1, [OBSERVATION_V2_SIZE + k + 24, 82], [],
+                                                         (OBSERVATION_V2_SIZE + k + 24) * 82)], obs=v2u_hash(k))
+        self.assertEqual(unpack_package(bundle(model))[1], model)
+        self.assertEqual(validate_pwnet2(model)["operations"], 24 + 2 * (OBSERVATION_V2_SIZE + k + 24) * 82)
+        short = pwnet2(OBSERVATION_V2_SIZE, heads, [(1, [OBSERVATION_V2_SIZE, 82], [], OBSERVATION_V2_SIZE * 82)],
+                       obs=v2u_hash(k))
+        with self.assertRaisesRegex(ValueError, "input count must be 509 for 3 user inputs"):
+            unpack_package(bundle(short))
+        other = pwnet2(OBSERVATION_V2_SIZE + k, heads, [(1, [OBSERVATION_V2_SIZE + k, 82], [], (OBSERVATION_V2_SIZE + k) * 82)],
+                       obs=v2u_hash(2))
+        with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
+            unpack_package(bundle(other))
+        with self.assertRaisesRegex(ValueError, "does not match observation contract v2u3"):
+            unpack_package(bundle(model, count=2))
+
+    def test_constants_match_the_engine(self):
+        source = (Path(__file__).parents[2] / "examples/paintbot/neural_actor.nim").read_text()
+        consts = {m.group(1): int(m.group(2).replace("_", ""))
+                  for m in re.finditer(r"^\s+(Max\w+|TranscendentalOps|MinGruUnitOps)\* = ([0-9_]+)", source, re.M)}
+        self.assertEqual(PWNET2_LIMITS, dict(parameters=consts["MaxNet2Parameters"], layers=consts["MaxNet2Layers"],
+                                             width=consts["MaxNet2Width"], state=consts["MaxNet2State"],
+                                             mingru_hidden=consts["MaxMinGruHidden"], groups=consts["MaxAttnGroups"],
+                                             tokens=consts["MaxAttnTokens"], d_model=consts["MaxAttnModel"],
+                                             blocks=consts["MaxAttnBlocks"], ff=consts["MaxAttnFeedForward"]))
+        self.assertEqual((consts["TranscendentalOps"], consts["MinGruUnitOps"]), (8, 32))
+        host = (Path(__file__).parents[2] / "examples/paintbot/neural_host.nim").read_text()
+        self.assertIn("MaxNeuralOperations* = %s'i64" % format(MAX_NEURAL_OPERATIONS, "_"), host)
 
 
 if __name__ == "__main__":

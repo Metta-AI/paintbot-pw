@@ -326,6 +326,25 @@ int pw_step_logits(void *handle, const int32_t *actions, const float *logits, fl
 int pw_seat_policy_choices(void *handle, int seat, int32_t *twenty_two);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
+/* Neural actors (additive): the hosted seat's own loader and inference (neural_actor.nim)
+ * for a model.bin in PWNET001 or PWNET002 format, so a trainer or evaluator runs a bundle's
+ * network bit for bit as the hosted seat does. pw_net_load validates like the host and
+ * refuses a model over the 4,000,000 operations per seat per tick budget; NULL on
+ * rejection with the reason in error (NUL-terminated, truncated to capacity; may be NULL).
+ * pw_net_info writes eight int64 {format 1|2, inputs, outputs, recurrent state floats,
+ * heads, layers, parameters, operations per inference}; pw_net_head_sizes writes the head
+ * sizes and returns their count; pw_net_contracts writes "<obs sha256> <action sha256>"
+ * (capacity >= 130). pw_net_infer reads `inputs` observation floats and the state (every
+ * MINGRU layer's state in layer order), updates the state in place and writes `outputs`
+ * logits: 0, -1 bad arguments, -2 inference failed (nonfinite), state and logits untouched.
+ * Reset convention = the hosted seat's: zero the whole state at initial use, match reset,
+ * death and respawn (pw_observe's state_resets). One call at a time per net handle. */
+void *pw_net_load(const void *data, int64_t length, char *error, int32_t capacity);
+void pw_net_destroy(void *net);
+int pw_net_info(void *net, int64_t *eight);
+int pw_net_head_sizes(void *net, int32_t *sizes, int32_t capacity);
+int pw_net_contracts(void *net, char *out, int32_t capacity);
+int pw_net_infer(void *net, const float *observation, float *state, float *logits);
 #ifdef __cplusplus
 }
 #endif
