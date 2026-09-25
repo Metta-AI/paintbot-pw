@@ -16,12 +16,14 @@ SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
 # Schema-2 decoder options: "decoder": {"fire_hold_teammates": true (or {"radius": 150}), "sampling": {...},
 # "forbid_objectives": [9, 10], "strafe_legs": {...}, "aim_snap": {"max_angle_deg": 22.5},
 # "steady_shot": {}, "aim_retarget": {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000},
-# "shot_gate": {"max_range": 5250}}.
+# "shot_gate": {"max_range": 5250}, "spray_aim": {"max_range": 850},
+# "spray_gate": {"max_teammates": 0, "min_enemies": 1}}.
 # Every key must be one the host knows and every value the declared type, so a bundle
 # asking for an option this release lacks is rejected at staging rather than played
 # without it. The rules here mirror neural_host.nim's exactly.
 DECODER_OPTIONS = {"fire_hold_teammates": (bool, dict), "sampling": dict, "forbid_objectives": list, "strafe_legs": dict,
-                   "aim_snap": dict, "steady_shot": dict, "aim_retarget": dict, "shot_gate": dict}
+                   "aim_snap": dict, "steady_shot": dict, "aim_retarget": dict, "shot_gate": dict,
+                   "spray_aim": dict, "spray_gate": dict}
 SAMPLING_HEADS = 5
 MIN_SAMPLING_TEMPERATURE, MAX_SAMPLING_TEMPERATURE = 0.01, 10.0
 OBJECTIVE_CANDIDATES = 51  # movement-head size in both action contracts
@@ -35,6 +37,11 @@ DEFAULT_FIRE_HOLD_RADIUS, MAX_FIRE_HOLD_RADIUS = 55, 2000
 AIM_RETARGET_DEFAULTS = {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000}
 MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT = 20000, 1000000000
 SHOT_GATE_DEFAULTS = {"max_range": 5250}
+# decoder.spray_aim / decoder.spray_gate (a ready spray can only): the spray reach, and a cone with at least
+# one enemy and no teammate.
+SPRAY_AIM_DEFAULTS = {"max_range": 850}
+SPRAY_GATE_DEFAULTS = {"max_teammates": 0, "min_enemies": 1}
+SPRAY_LIMITS = {"max_range": (1, 850), "max_teammates": (0, 7), "min_enemies": (0, 8)}
 MAX_SHOT_GATE_RANGE = 20000
 
 
@@ -166,6 +173,34 @@ def validate_shot_gate(value):
     return options
 
 
+def _validate_int_fields(name, value, defaults):
+    if not isinstance(value, dict):
+        raise ValueError("decoder.%s must be an object" % name)
+    options = dict(defaults)
+    for key, field in value.items():
+        if key not in defaults:
+            raise ValueError("unknown decoder.%s field: %s" % (name, key))
+        if not _is_int(field):
+            raise ValueError("decoder.%s.%s must be an integer" % (name, key))
+        options[key] = field
+    for key, field in options.items():
+        low, high = SPRAY_LIMITS[key]
+        if not low <= field <= high:
+            raise ValueError("decoder.%s.%s must be within %d .. %d" % (name, key, low, high))
+    return options
+
+
+def validate_spray_aim(value):
+    """decoder.spray_aim: {"max_range": r}, r optional (850), an integer within 1 .. 850."""
+    return _validate_int_fields("spray_aim", value, SPRAY_AIM_DEFAULTS)
+
+
+def validate_spray_gate(value):
+    """decoder.spray_gate: {"max_teammates": t, "min_enemies": e}, both optional (0, 1), integers,
+    t within 0 .. 7 and e within 0 .. 8."""
+    return _validate_int_fields("spray_gate", value, SPRAY_GATE_DEFAULTS)
+
+
 def validate_sampling(value):
     """decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}."""
     if not isinstance(value, dict):
@@ -252,6 +287,10 @@ def unpack_package(data):
                 validate_aim_retarget(value)
             elif key == "shot_gate":
                 validate_shot_gate(value)
+            elif key == "spray_aim":
+                validate_spray_aim(value)
+            elif key == "spray_gate":
+                validate_spray_gate(value)
         if "steady_shot" in decoder and STEADY_MOVEMENT in decoder.get("forbid_objectives", []):
             raise ValueError("decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
     files["policy.bas"].decode("utf-8")

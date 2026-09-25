@@ -70,6 +70,12 @@ type
     # dropped.
     shotGate*: ShotGateOptions
     shotGates*: int
+    # decoder.spray_aim / decoder.spray_gate: the options (stateless rules for a ready spray
+    # can); sprayAims counts re-aimed shoot orders, sprayGates dropped ones.
+    sprayAim*: SprayAimOptions
+    sprayAims*: int
+    sprayGate*: SprayGateOptions
+    sprayGates*: int
     # The seat's apparent identities for this tick, resolved once for the observation
     # and the action decode (both read the same pre-action world).
     bodies: array[Seats, int]
@@ -128,6 +134,12 @@ proc shotGateTelemetry*(options: ShotGateOptions, gates: int): string =
   ## The shot-gate part of the seat log line: the range and the shoot orders dropped.
   " shot_gate=r" & $options.maxRange & " shot_gates=" & $gates
 
+proc sprayAimTelemetry*(options: SprayAimOptions, aims: int): string =
+  " spray_aim=r" & $options.maxRange & " spray_aims=" & $aims
+
+proc sprayGateTelemetry*(options: SprayGateOptions, gates: int): string =
+  " spray_gate=t" & $options.maxTeammates & ",e" & $options.minEnemies & " spray_gates=" & $gates
+
 proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
     fireHolds = -1, sampling = "", options = "", fireHoldRadius = FireHoldRadius.int32): string =
   ## One private seat-log line: peak native operations in a tick against the budget, the
@@ -152,7 +164,9 @@ proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
     (if seat.aimSnap.enabled: aimSnapTelemetry(seat.aimSnap, seat.aimSnaps) else: "") &
     (if seat.steadyShot: steadyShotTelemetry(seat.steadyShots, seat.steadyTicks) else: "") &
     (if seat.aimRetarget.enabled: aimRetargetTelemetry(seat.aimRetarget, seat.aimRetargets) else: "") &
-    (if seat.shotGate.enabled: shotGateTelemetry(seat.shotGate, seat.shotGates) else: ""),
+    (if seat.shotGate.enabled: shotGateTelemetry(seat.shotGate, seat.shotGates) else: "") &
+    (if seat.sprayAim.enabled: sprayAimTelemetry(seat.sprayAim, seat.sprayAims) else: "") &
+    (if seat.sprayGate.enabled: sprayGateTelemetry(seat.sprayGate, seat.sprayGates) else: ""),
     seat.fireHoldRadius)
 
 proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
@@ -301,6 +315,29 @@ proc parseFireHold*(value: JsonNode): (bool, int32) =
       else: raise newException(ValueError, "unknown decoder.fire_hold_teammates field: " & key)
   else: raise newException(ValueError, "decoder.fire_hold_teammates must be a boolean or an object")
 
+proc parseSprayAimOptions*(value: JsonNode): SprayAimOptions =
+  ## decoder.spray_aim: {"max_range": r}; r optional (850), an integer within 1 .. 850.
+  if value.kind != JObject: raise newException(ValueError, "decoder.spray_aim must be an object")
+  var maxRange = DefaultSprayAimRange
+  for key, field in value:
+    case key
+    of "max_range": maxRange = optionInteger(field, "decoder.spray_aim.max_range")
+    else: raise newException(ValueError, "unknown decoder.spray_aim field: " & key)
+  sprayAimOptions(maxRange)
+
+proc parseSprayGateOptions*(value: JsonNode): SprayGateOptions =
+  ## decoder.spray_gate: {"max_teammates": t, "min_enemies": e}; both optional (0, 1),
+  ## integers, t within 0 .. 7 and e within 0 .. 8.
+  if value.kind != JObject: raise newException(ValueError, "decoder.spray_gate must be an object")
+  var maxTeammates = DefaultSprayMaxTeammates
+  var minEnemies = DefaultSprayMinEnemies
+  for key, field in value:
+    case key
+    of "max_teammates": maxTeammates = optionInteger(field, "decoder.spray_gate.max_teammates")
+    of "min_enemies": minEnemies = optionInteger(field, "decoder.spray_gate.min_enemies")
+    else: raise newException(ValueError, "unknown decoder.spray_gate field: " & key)
+  sprayGateOptions(maxTeammates, minEnemies)
+
 proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
   let modelPath = sourcePath & ".model.bin"
@@ -340,6 +377,8 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   var steadyShot = false
   var aimRetarget: AimRetargetOptions
   var shotGate: ShotGateOptions
+  var sprayAim: SprayAimOptions
+  var sprayGate: SprayGateOptions
   if fileExists(manifestPath):
     if getFileSize(manifestPath) > 8192: raise newException(ValueError, "oversized neural manifest")
     let manifest = parseJson(readFile(manifestPath))
@@ -371,6 +410,10 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
           aimRetarget = parseAimRetargetOptions(value)
         of "shot_gate":
           shotGate = parseShotGateOptions(value)
+        of "spray_aim":
+          sprayAim = parseSprayAimOptions(value)
+        of "spray_gate":
+          sprayGate = parseSprayGateOptions(value)
         else: raise newException(ValueError, "unknown decoder option: " & key)
       # The steady shot stands the seat still with movement index 0; a bundle that also
       # forbids index 0 asks for both, so it is rejected rather than resolved either way.
@@ -390,6 +433,8 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result.steadyShot = steadyShot
   result.aimRetarget = aimRetarget
   result.shotGate = shotGate
+  result.sprayAim = sprayAim
+  result.sprayGate = sprayGate
   result.memory.resetAimMemory()
   result.observation = newSeq[float32](observationSize(observationContract))
   result.logits = newSeq[float32](LogitSize)
@@ -466,9 +511,10 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
       let bodies = seat.bodiesFor()
       var command: Command
       if seat.forbidAny or seat.strafe.enabled or seat.aimSnap.enabled or seat.steadyShot or
-          seat.aimRetarget.enabled or seat.shotGate.enabled:
+          seat.aimRetarget.enabled or seat.shotGate.enabled or seat.sprayAim.enabled or seat.sprayGate.enabled:
         # Order: forbid (selection), sampling or argmax, aim retarget (aim), aim snap (aim),
-        # shot gate (shoot), strafe (movement), steady shot (movement), decode, hold.
+        # spray aim (aim), shot gate (shoot), spray gate (shoot), strafe (movement), steady
+        # shot (movement), decode, hold.
         var actions = if seat.sampling.enabled: sampleActions(seat.logits, seat.sampling, seat.sampleRng, seat.forbidden)
                       else: argmaxActions(seat.logits, seat.forbidden)
         if seat.sampling.enabled: inc seat.sampleDraws
@@ -478,11 +524,18 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
           inc seat.aimRetargets
         let beforeSnap = actions
         var snapped = seat.aimSnap.enabled and seat.world[].aimSnapActions(seat.slot, actions, bodies, seat.aimSnap)
+        var sprayAimed = seat.sprayAim.enabled and seat.world[].sprayAimActions(seat.slot, actions, bodies,
+          seat.contract, seat.memory, seat.sprayAim)
         if seat.shotGate.enabled and seat.world[].shotGateActions(seat.slot, actions, beforeSnap, snapped,
             bodies, seat.contract, seat.memory, seat.shotGate):
-          snapped = false   # a dropped order never shot, so it was never snapped
+          snapped = false   # a dropped order never shot, so it was never snapped or re-aimed
+          sprayAimed = false
           inc seat.shotGates
         if snapped: inc seat.aimSnaps
+        if sprayAimed: inc seat.sprayAims
+        if seat.sprayGate.enabled and seat.world[].sprayGateActions(seat.slot, actions, bodies, seat.contract,
+            seat.memory, seat.sprayGate):
+          inc seat.sprayGates
         if seat.strafe.enabled:
           discard seat.world[].strafeActions(seat.slot, actions, bodies, seat.strafe, seat.strafeState,
             seat.strafeRng, seat.forbidden)

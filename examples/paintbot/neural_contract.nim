@@ -1066,6 +1066,133 @@ proc shotGateActions*(w: World, slot: int, actions: var array[ActionSizes.len, i
   actions[2] = 0
   true
 
+# Decoder spray options (bundle options decoder.spray_aim and decoder.spray_gate, schema 2;
+# not a contract change; PLAN-gcrl-spray S1). A spray can replaces the gun: a shoot order
+# starts a five-tick burst in a cone (reach SprayReach + Radius, half width along * 3/5 +
+# Radius, clear line) that deals 3 to EVERY body in it, teammates included. The gun options
+# above (retarget, snap, shot gate) do not model that. Both spray options act only on a
+# live seat's shoot order while it holds a spray can that is ready (sprayCooldown 0: the
+# order starts a burst this step; on any other tick the order does nothing, so the options
+# leave it, and its aim, alone). They judge the cone the order would produce on the pre-step
+# world: the aim point the decode gives the heads (orderedAim), the seat's current position,
+# and the exact sprayTouches geometry (mechanics.nim) against the bodies the seat can see
+# under their apparent teams (observedBodies), like every decoder option. Stateless.
+type
+  SprayAimOptions* = object
+    enabled*: bool
+    maxRange*: int32      # 1 .. SprayReach: candidate enemies within maxRange + Radius
+  SprayGateOptions* = object
+    enabled*: bool
+    maxTeammates*: int32  # 0 .. MaxSprayTeammates teammates the cone may hold
+    minEnemies*: int32    # 0 .. MaxSprayEnemies enemies the cone must hold
+
+const
+  DefaultSprayAimRange* = 850'i32   # SprayReach
+  DefaultSprayMaxTeammates* = 0'i32
+  DefaultSprayMinEnemies* = 1'i32
+  MaxSprayTeammates* = 7'i32         # the seat's seven teammates
+  MaxSprayEnemies* = 8'i32           # the eight enemies
+static: doAssert DefaultSprayAimRange == SprayReach
+
+proc sprayAimOptionsError*(maxRange: int32): string =
+  ## "" when usable; otherwise why not (host and native ABI agree).
+  if maxRange < 1 or maxRange > SprayReach.int32: return "max_range must be within 1 .. " & $SprayReach
+  ""
+
+proc sprayAimOptions*(maxRange = DefaultSprayAimRange): SprayAimOptions =
+  let problem = sprayAimOptionsError(maxRange)
+  if problem.len > 0: raise newException(ValueError, "decoder.spray_aim." & problem)
+  SprayAimOptions(enabled: true, maxRange: maxRange)
+
+proc sprayGateOptionsError*(maxTeammates, minEnemies: int32): string =
+  if maxTeammates < 0 or maxTeammates > MaxSprayTeammates:
+    return "max_teammates must be within 0 .. " & $MaxSprayTeammates
+  if minEnemies < 0 or minEnemies > MaxSprayEnemies: return "min_enemies must be within 0 .. " & $MaxSprayEnemies
+  ""
+
+proc sprayGateOptions*(maxTeammates = DefaultSprayMaxTeammates, minEnemies = DefaultSprayMinEnemies): SprayGateOptions =
+  let problem = sprayGateOptionsError(maxTeammates, minEnemies)
+  if problem.len > 0: raise newException(ValueError, "decoder.spray_gate." & problem)
+  SprayGateOptions(enabled: true, maxTeammates: maxTeammates, minEnemies: minEnemies)
+
+proc sprayReady*(w: World, slot: int): bool =
+  ## Whether a shoot order decided on this pre-step world starts a spray burst.
+  w.cogs[slot].hp > 0 and w.equipment[slot].sprayCan and w.equipment[slot].sprayCooldown == 0
+
+proc sprayConeHolds*(w: World, origin, aim, target: Point): bool =
+  ## mechanics.nim sprayTouches' cone for a spray aimed from `origin` at `aim` (the locked
+  ## vector is direction(origin, aim, SprayReach)): whether `target` lies in it with a clear
+  ## line. The same integer geometry, restated for an order not yet given.
+  let v = direction(origin, aim, SprayReach)
+  let dx = int64(target.x)-origin.x
+  let dz = int64(target.z)-origin.z
+  let length = max(1'i64, isqrt64(int64(v.x)*v.x+int64(v.z)*v.z))
+  let along = (dx*v.x+dz*v.z) div length
+  let across = abs(dx*v.z-dz*v.x) div length
+  let halfWidth = if visionRulesVersion >= 17: along*3 div 5 else: along div 4
+  along > 0 and along <= SprayReach+Radius and across <= halfWidth+Radius and w.lineClear(origin, target)
+
+proc sprayCone*(w: World, slot: int, aim: Point, bodies: array[Seats, int]): (int, int) =
+  ## (apparent enemies, apparent teammates) among the seat's visible bodies that a spray
+  ## aimed at `aim` from the seat's position would touch.
+  let origin = w.cogs[slot].pos
+  for identity in 0..<Seats:
+    let body = bodies[identity]
+    if body < 0 or body == slot or w.cogs[body].hp <= 0: continue
+    if not w.sprayConeHolds(origin, aim, w.cogs[body].pos): continue
+    if w.observedTeam(slot, body) == team(slot): inc result[1] else: inc result[0]
+
+proc orderAim(w: World, slot: int, actions: array[ActionSizes.len, int32], bodies: array[Seats, int],
+    version: ActionContractVersion, memory: AimMemory): Point =
+  ## The aim the world holds once these heads are decoded and applied (orderedAim).
+  w.orderedAim(slot, w.decodeActions(slot, actions, bodies, version, memory))
+
+proc sprayAimActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
+    bodies: array[Seats, int], version: ActionContractVersion, memory: AimMemory,
+    options: SprayAimOptions): bool =
+  ## decoder.spray_aim: on a shoot order with a ready spray can, the aim head becomes the
+  ## visible apparent enemy identity whose resulting cone (aimed at that identity's decoded
+  ## aim point) holds the most apparent enemies; ties: the nearer body, then lower hp, then
+  ## the lower identity. Candidates lie within maxRange + Radius with a clear line. When no
+  ## candidate's cone holds an enemy the order stands. Returns whether the aim head changed.
+  if not options.enabled or actions[2] == 0 or not w.sprayReady(slot): return false
+  let me = w.cogs[slot]
+  let reach = int64(options.maxRange) + Radius
+  var best = -1
+  var bestCount, bestHp = 0
+  var bestD2 = 0'i64
+  for identity in 0..<Seats:
+    let body = bodies[identity]
+    if body < 0 or body == slot or w.cogs[body].hp <= 0: continue
+    if w.observedTeam(slot, body) == team(slot): continue
+    let d2 = distance2(me.pos, w.cogs[body].pos)
+    if d2 > reach*reach or not w.lineClear(me.pos, w.cogs[body].pos): continue
+    var heads = actions
+    heads[1] = int32(identity + 1)
+    let count = w.sprayCone(slot, w.orderAim(slot, heads, bodies, version, memory), bodies)[0]
+    if count == 0: continue
+    let hp = w.cogs[body].hp.int
+    if best < 0 or count > bestCount or (count == bestCount and (d2 < bestD2 or (d2 == bestD2 and hp < bestHp))):
+      best = identity
+      bestCount = count
+      bestD2 = d2
+      bestHp = hp
+  if best < 0 or actions[1] == int32(best + 1): return false
+  actions[1] = int32(best + 1)
+  true
+
+proc sprayGateActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
+    bodies: array[Seats, int], version: ActionContractVersion, memory: AimMemory,
+    options: SprayGateOptions): bool =
+  ## decoder.spray_gate: drop a shoot order with a ready spray can unless the cone it would
+  ## produce holds at least minEnemies apparent enemies and at most maxTeammates apparent
+  ## teammates. Only the shoot head changes. Returns whether the order was dropped.
+  if not options.enabled or actions[2] == 0 or not w.sprayReady(slot): return false
+  let (enemies, mates) = w.sprayCone(slot, w.orderAim(slot, actions, bodies, version, memory), bodies)
+  if enemies >= options.minEnemies and mates <= options.maxTeammates: return false
+  actions[2] = 0
+  true
+
 proc decodeLogits*(w: World, slot: int, logits: openArray[float32],
     bodies: array[Seats, int], version: ActionContractVersion,
     memory: AimMemory, fireHold = false): Command =

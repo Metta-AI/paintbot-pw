@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
 from neural_package import (unpack_package, validate_aim_retarget, validate_shot_gate, validate_fire_hold, MAX_MODEL_BYTES,
+                            validate_spray_aim, validate_spray_gate, SPRAY_AIM_DEFAULTS, SPRAY_GATE_DEFAULTS, SPRAY_LIMITS,
                             AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
                             MAX_SHOT_GATE_RANGE)
 
@@ -211,6 +212,50 @@ class PackageTests(unittest.TestCase):
         source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
         self.assertRegex(source, r"(?m)^  MaxFireHoldRadius\* = 2000'i32$")
         self.assertRegex(source, r"(?m)^static: doAssert FireHoldRadius == 55$")
+
+    def test_spray_options(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        # Defaults exact: the spray reach; at least one enemy and no teammate in the cone.
+        self.assertEqual(validate_spray_aim({}), {"max_range": 850})
+        self.assertEqual(validate_spray_gate({}), {"max_teammates": 0, "min_enemies": 1})
+        self.assertEqual(validate_spray_gate({"max_teammates": 2}), {"max_teammates": 2, "min_enemies": 1})
+        for name, value in (("spray_aim", {}), ("spray_aim", {"max_range": 1}), ("spray_aim", {"max_range": 850}),
+                            ("spray_gate", {}), ("spray_gate", {"max_teammates": 7, "min_enemies": 8}),
+                            ("spray_gate", {"max_teammates": 0, "min_enemies": 0})):
+            _, _, manifest = unpack_package(package({**schema2, "decoder": {name: value}}))
+            self.assertEqual(manifest["decoder"][name], value)
+        for name in ("spray_aim", "spray_gate"):
+            with self.assertRaisesRegex(ValueError, "schema 2"):
+                unpack_package(package({"decoder": {name: {}}}))
+        for name, value, message in (("spray_aim", {"max_range": 0}, "max_range must be within 1 .. 850"),
+                                     ("spray_aim", {"max_range": 851}, "within"), ("spray_aim", {"max_range": -1}, "within"),
+                                     ("spray_aim", {"max_range": 850.0}, "must be an integer"),
+                                     ("spray_aim", {"max_range": "850"}, "must be an integer"),
+                                     ("spray_aim", {"max_range": True}, "must be an integer"),
+                                     ("spray_aim", {"range": 850}, "unknown decoder.spray_aim field"),
+                                     ("spray_aim", True, "must be a dict"), ("spray_aim", [], "must be a dict"),
+                                     ("spray_gate", {"max_teammates": -1}, "max_teammates must be within 0 .. 7"),
+                                     ("spray_gate", {"max_teammates": 8}, "within"),
+                                     ("spray_gate", {"min_enemies": 9}, "min_enemies must be within 0 .. 8"),
+                                     ("spray_gate", {"min_enemies": -1}, "within"),
+                                     ("spray_gate", {"min_enemies": 1.0}, "must be an integer"),
+                                     ("spray_gate", {"max_teammates": None}, "must be an integer"),
+                                     ("spray_gate", {"teammates": 0}, "unknown decoder.spray_gate field"),
+                                     ("spray_gate", 1, "must be a dict")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr((name, value))):
+                unpack_package(package({**schema2, "decoder": {name: value}}))
+
+    def test_spray_defaults_match_the_engine(self):
+        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
+        consts = {name: int(value.replace("_", "")) for name, value in
+                  re.findall(r"^  (\w+)\* = ([0-9_]+)'i32", source, re.M)}
+        self.assertEqual(SPRAY_AIM_DEFAULTS["max_range"], consts["DefaultSprayAimRange"])
+        self.assertEqual(SPRAY_GATE_DEFAULTS, {"max_teammates": consts["DefaultSprayMaxTeammates"],
+                                               "min_enemies": consts["DefaultSprayMinEnemies"]})
+        self.assertEqual(SPRAY_LIMITS["max_teammates"], (0, consts["MaxSprayTeammates"]))
+        self.assertEqual(SPRAY_LIMITS["min_enemies"], (0, consts["MaxSprayEnemies"]))
+        mech = (Path(__file__).parents[2] / "examples/paintbot/mechanics.nim").read_text()
+        self.assertRegex(mech, r"(?m)^  SprayReach\* = %d$" % SPRAY_LIMITS["max_range"][1])
 
     def test_aim_retarget_option(self):
         schema2 = {"schema": "paintbot-neural-basic/2"}

@@ -1366,3 +1366,116 @@ suite "Aim retarget and shot gate equal pw-diag3's counterfactuals over whole ma
     checkpoint "decisions " & $decisions & " retargets " & $retargets & " gate compared " & $gateCompared &
       " drops " & $gateDrops & " disguised differ " & $disguisedDiffers
     check decisions > 5000 and retargets > 500 and gateCompared > 5000 and gateDrops > 500
+
+suite "Decoder spray options (bundle options, not a contract change)":
+  setup:
+    visionRulesVersion = 39
+  var memory: AimMemory
+  memory.resetAimMemory()
+  proc arm(w: var World, slot: int) =
+    w.equipment[slot].sprayCan = true
+    w.equipment[slot].sprayCooldown = 0
+    w.equipment[slot].windup = 0
+  test "options: defaults and validated ranges":
+    check sprayAimOptions() == SprayAimOptions(enabled: true, maxRange: 850)
+    check sprayGateOptions() == SprayGateOptions(enabled: true, maxTeammates: 0, minEnemies: 1)
+    for bad in [0'i32, -1, 851]:
+      check sprayAimOptionsError(bad) != ""
+      expect ValueError: discard sprayAimOptions(bad)
+    for (t, e) in [(-1'i32, 1'i32), (8'i32, 1'i32), (0'i32, -1'i32), (0'i32, 9'i32)]:
+      check sprayGateOptionsError(t, e) != ""
+      expect ValueError: discard sprayGateOptions(t, e)
+    check sprayGateOptionsError(7, 8) == "" and sprayGateOptionsError(0, 0) == ""
+  test "the would-be cone equals the engine's sprayTouches once the spray is locked, over whole matches":
+    var compared, touched = 0
+    for seed in [5'i32, 6]:
+      var w = newWorld(seed, 1500)
+      while w.winner == -1 and w.tick < 1200:
+        for slot in 0..<Seats:
+          if w.cogs[slot].hp <= 0: continue
+          for k in 0..2:
+            let me = w.cogs[slot].pos
+            let aim = point(me.x.int + [700, -300, 50][k] + slot*13, me.z.int + [100, 600, -800][k] - slot*7)
+            var locked = w
+            locked.equipment[slot].sprayAim = direction(me, aim, SprayReach)
+            for j in 0..<Seats:
+              if j == slot or w.cogs[j].hp <= 0: continue
+              let a = locked.sprayTouches(slot, j)
+              check a == w.sprayConeHolds(me, aim, w.cogs[j].pos)
+              inc compared
+              if a: inc touched
+        var commands: array[Seats, Command]
+        for slot in 0..<Seats:
+          var heads: array[ActionSizes.len, int32]
+          w.trainingBotActions(slot, 2, heads)
+          commands[slot] = w.decodeActions(slot, heads)
+        w.step(commands)
+    checkpoint $compared & " " & $touched
+    check compared > 100000 and touched > 500
+  test "spray gate: an enemy in the cone and no teammate lets the order through; otherwise it is dropped":
+    var w = newWorld(2026, 2400)
+    discard w.placeOpen(0, [(1, 500, 0), (2, 300, -400), (3, 1500, 1300)])
+    w.arm(0)
+    let bodies = w.observedBodies(0)
+    let enemy = int32(identityOf(bodies, 1) + 1)
+    let far = int32(identityOf(bodies, 3) + 1)
+    let gate = sprayGateOptions()
+    var a = [0'i32, enemy, 1, 0, 0]
+    check not w.sprayGateActions(0, a, bodies, acV2, memory, gate) and a[2] == 1
+    var b = [0'i32, far, 1, 0, 0]   # toward an enemy beyond the reach: no enemy in the cone
+    check w.sprayGateActions(0, b, bodies, acV2, memory, gate) and b == [0'i32, far, 0, 0, 0]
+    check w.sprayCone(0, w.cogs[1].pos, bodies) == (1, 0)
+    var e = [0'i32, far, 1, 0, 0]   # min_enemies 0: an empty cone is allowed
+    check not w.sprayGateActions(0, e, bodies, acV2, memory, sprayGateOptions(0, 0))
+    # A teammate in the cone: dropped by default, allowed with max_teammates 1.
+    w.cogs[2].pos = point(w.cogs[1].pos.x.int - 60, w.cogs[1].pos.z.int + 40)
+    require w.visible(0, 2)
+    let bodies2 = w.observedBodies(0)
+    check w.sprayCone(0, w.cogs[1].pos, bodies2) == (1, 1)
+    var c = [0'i32, enemy, 1, 0, 0]
+    check w.sprayGateActions(0, c, bodies2, acV2, memory, gate) and c[2] == 0
+    var d = [0'i32, enemy, 1, 0, 0]
+    check not w.sprayGateActions(0, d, bodies2, acV2, memory, sprayGateOptions(1, 1))
+  test "spray aim: the enemy whose cone holds the most enemies; ties nearest, then lower hp; else the order stands":
+    var w = newWorld(2026, 2400)
+    discard w.placeOpen(0, [(1, 300, 300), (3, 600, -100), (5, 660, -60), (7, 3000, 0)])
+    w.arm(0)
+    let bodies = w.observedBodies(0)
+    let opts = sprayAimOptions()
+    var a = [0'i32, 17, 1, 0, 0]
+    check w.sprayAimActions(0, a, bodies, acV2, memory, opts)
+    # 3 and 5 stand together: aiming at either holds both; 3 is nearer.
+    check a[1] == int32(identityOf(bodies, 3) + 1)
+    check w.sprayCone(0, w.cogs[3].pos, bodies)[0] == 2
+    # Equal counts: the nearer; at equal distance the lower hp.
+    var t = newWorld(2026, 2400)
+    discard t.placeOpen(0, [(1, 400, 200), (3, 400, -200)])
+    t.arm(0)
+    t.cogs[3].hp = 1
+    let tb = t.observedBodies(0)
+    var b = [0'i32, 0, 1, 0, 0]
+    check t.sprayAimActions(0, b, tb, acV2, memory, opts)
+    check b[1] == int32(identityOf(tb, 3) + 1)
+    # Range: with max_range 300 nobody qualifies (bodies ~447 away) and the order stands.
+    var c = [0'i32, 17, 1, 0, 0]
+    check not t.sprayAimActions(0, c, tb, acV2, memory, sprayAimOptions(300)) and c[1] == 17
+    # Already aimed at the pick: unchanged, not counted.
+    var d = [0'i32, int32(identityOf(tb, 3) + 1), 1, 0, 0]
+    check not t.sprayAimActions(0, d, tb, acV2, memory, opts)
+  test "both options leave everything alone without a ready spray can, without a shoot order, or disabled":
+    var w = newWorld(2026, 2400)
+    discard w.placeOpen(0, [(1, 500, 0), (2, 400, 60)])
+    let bodies = w.observedBodies(0)
+    for (can, cooldown, shoot) in [(false, 0'i32, 1'i32), (true, 3'i32, 1'i32), (true, 0'i32, 0'i32)]:
+      w.equipment[0].sprayCan = can
+      w.equipment[0].sprayCooldown = cooldown
+      var a = [0'i32, 17, shoot, 0, 0]
+      check not w.sprayAimActions(0, a, bodies, acV2, memory, sprayAimOptions())
+      check not w.sprayGateActions(0, a, bodies, acV2, memory, sprayGateOptions())
+      check a == [0'i32, 17, shoot, 0, 0]
+    w.arm(0)
+    var off = [0'i32, 17, 1, 0, 0]
+    check not w.sprayAimActions(0, off, bodies, acV2, memory, SprayAimOptions())
+    check not w.sprayGateActions(0, off, bodies, acV2, memory, SprayGateOptions())
+    w.cogs[0].hp = 0
+    check not w.sprayGateActions(0, off, bodies, acV2, memory, sprayGateOptions())

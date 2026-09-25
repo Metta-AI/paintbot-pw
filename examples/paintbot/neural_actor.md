@@ -165,6 +165,10 @@ minimising `d^2 - (3 - hp) * 160000 - carrying * 2500000` within 5250) and
 `decoder.shot_gate` drops a shoot order that is not aimed at an enemy in range after the
 retarget and the snap (`neural_basic.md`); candidates and hashes are unchanged, and the
 training ABI's `pw_set_seat_aim_retarget` / `pw_set_seat_shot_gate` are the same rules.
+`decoder.spray_aim` / `decoder.spray_gate` re-aim or drop a shoot order with a ready spray
+can by the cone it would produce (`neural_basic.md`); the training ABI's
+`pw_set_seat_spray_aim` / `pw_set_seat_spray_gate` are the same rules, and
+`pw_seat_spray_stats` (training library only) counts spray damage and kills per seat.
 
 Movement (heart, visible pickup or `pos+200*compass`), directional aim
 (`pos+5000*compass`), fire, grenade and sneak decode identically under both.

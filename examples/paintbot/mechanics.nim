@@ -224,6 +224,13 @@ proc damage*(w: var World, victim, attacker, amount: int) =
           t[attacker].damageDealtEnemy += removed
           inc t[attacker].hitsEnemy
           if killed: inc t[attacker].kills
+        if sprayDamagePhase:
+          if team(attacker) == team(victim):
+            t[attacker].sprayDamageTeam += removed
+            if killed: inc t[attacker].sprayKillsTeam
+          else:
+            t[attacker].sprayDamageEnemy += removed
+            if killed: inc t[attacker].sprayKillsEnemy
   if w.equipment[victim].armor == 0 and not w.cogs[victim].carrying and
       w.trenchAt(w.cogs[victim].pos) < 0:
     w.cogs[victim].cooldown = min(w.cogs[victim].cooldown,
@@ -509,6 +516,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         w.cogs[i].cooldown = int32(FireCooldownTicks*(if slow: 3 else: 1))
   # Targets were selected before damage, allowing simultaneous mutual kills.
   for hit in gunTargets: w.damage(hit.victim, hit.attacker, 1)
+  when defined(pwTraining): sprayDamagePhase = true
   for i in w.seatOrder():
     if w.equipment[i].burst > 0 and w.cogs[i].hp > 0:
       for j in 0..<Seats:
@@ -518,6 +526,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           w.equipment[i].sprayHits = w.equipment[i].sprayHits or bit
           w.damage(j, i, SprayDamage)
       dec w.equipment[i].burst
+  when defined(pwTraining): sprayDamagePhase = false
   w.updateBarrage()
   var airborne: seq[Lob]
   for g in w.grenades:

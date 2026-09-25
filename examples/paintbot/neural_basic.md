@@ -158,11 +158,28 @@ candidates and the contract hashes are the same with or without them.
   `pw_set_seat_shot_gate` is the same rule (`pw_seat_shot_gate_stats` reports dropped
   orders). With the option on, the telemetry line gains
   ` shot_gate=r<max_range> shot_gates=<n>`.
+- `"decoder": {"spray_aim": {"max_range": 850}}` and
+  `"decoder": {"spray_gate": {"max_teammates": 0, "min_enemies": 1}}` (default absent =
+  byte-identical; every field optional with those defaults, integers, `max_range` 1..850,
+  `max_teammates` 0..7, `min_enemies` 0..8): PLAN-gcrl-spray S1. A spray can replaces the
+  gun: a shoot order starts a five-tick burst whose cone (reach 850 + the body radius,
+  widening) deals 3 to every body in it, teammates included. Both options act only on a
+  shoot order while the seat holds a ready spray can (the order starts a burst this step)
+  and judge the cone that order would produce on the pre-step world, with the engine's own
+  cone geometry, over the bodies the seat can see under their apparent teams.
+  `spray_aim` turns the aim head to the visible enemy identity within `max_range` (+ the
+  body radius, clear line) whose cone holds the most enemies (ties: nearer, then lower hp,
+  then lower identity); with no such cone the order stands. `spray_gate` drops the order
+  unless its cone holds at least `min_enemies` enemies and at most `max_teammates`
+  teammates. The native training ABI's `pw_set_seat_spray_aim` / `pw_set_seat_spray_gate`
+  are the same rules. The telemetry line gains ` spray_aim=r<max_range> spray_aims=<n>` and
+  ` spray_gate=t<max_teammates>,e<min_enemies> spray_gates=<n>`.
 - Order of every option within one decision: forbid and sampling (or argmax) select the
-  heads; the aim retarget, then the aim snap, rewrite the aim head; the shot gate may drop
-  the shot; the strafe, then the steady shot, rewrite the movement head (a steadied
-  decision overrides the strafe's leg for that tick); the heads are decoded under the
-  contract; the fire hold gates the decoded shot.
+  heads; the aim retarget, the aim snap, then the spray aim rewrite the aim head; the shot
+  gate may drop the shot (undoing the snap and spray aim), then the spray gate may; the
+  strafe, then the steady shot, rewrite the movement head (a steadied decision overrides
+  the strafe's leg for that tick); the heads are decoded under the contract; the fire hold
+  gates the decoded shot.
 
 The archive is bounded to 16 MiB model, 64 KiB BASIC, and 8 KiB manifest.
 Duplicates, unexpected paths/files, encryption, incorrect hashes, and oversized
