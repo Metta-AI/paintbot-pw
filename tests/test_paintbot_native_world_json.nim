@@ -1,10 +1,10 @@
-## The whole-world JSON (pw_world_json) through the native training ABI: sizing call,
+## The whole-world JSON (pw_world_json) and ground heights (pw_elevation) through the native training ABI: sizing call,
 ## too-small buffer, bad arguments; the object parses with the pre-#51 bridge's shape
 ## (rulesVersion, heard, then the World fields: tick, 16 cogs and equipment, control hearts);
 ## reading it never changes the world hash; and a pw_set_seat_command walk order shows up
 ## as movement in later snapshots. Build with --mm:arc --threads:on -d:pwTraining.
 import std/[unittest, json, math]
-import ../examples/paintbot/[sim, native_env]
+import ../examples/paintbot/[sim, native_env, topography]
 
 when not defined(pwTraining): {.error: "the native ABI exists only under -d:pwTraining".}
 
@@ -75,4 +75,23 @@ suite "pw_world_json":
     let after = hypot(float(goal[0] - x1), float(goal[1] - z1))
     checkpoint "start (" & $x0 & "," & $z0 & ") end (" & $x1 & "," & $z1 & ") goal (" & $goal[0] & "," & $goal[1] & ")"
     check after < best / 2  # walked most of the way to the heart
+    pw_destroy(env)
+
+  test "pw_elevation is the world's elevation":
+    check pw_elevation(nil, 0, 0) == -1_000_000
+    let env = pw_create(31, 600)
+    let trenches = snapshot(env)["trenches"]
+    var checked = 0
+    for x in countup(-4800, 4800, 200):
+      for z in countup(-2800, 2800, 200):
+        # sim.elevation: the terrain height, 60 lower inside a trench.
+        var expected = terrainHeight(x, z)
+        for t in trenches:
+          let (tx, tz, tw, th) = (t["x"].getInt, t["z"].getInt, t["w"].getInt, t["h"].getInt)
+          if x >= tx and x < tx + tw and z >= tz and z < tz + th:
+            expected -= 60
+            break
+        check pw_elevation(env, x.int32, z.int32) == expected
+        inc checked
+    check checked > 1000
     pw_destroy(env)

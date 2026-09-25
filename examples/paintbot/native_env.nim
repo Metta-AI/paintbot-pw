@@ -1351,6 +1351,14 @@ proc pw_world_json*(handle: pointer, output: ptr UncheckedArray[char], capacity:
     copyMem(output, unsafeAddr doc[0], doc.len)
   doc.len.cint
 
+proc pw_elevation*(handle: pointer, x, z: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The ground height at (x, z) in this handle's world, sim.elevation: terrain plus world
+  ## features (training library only), for external controllers that raster line of sight
+  ## from pw_world_json. A pure read. Returns the height; -1_000_000 for a nil handle.
+  if handle == nil: return -1_000_000
+  ready()
+  elevation(cast[ptr NativeEnv](handle).world, Point(x: x, z: z)).cint
+
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
   ## Diagnostic: resident 64x64 terrain blocks (16 KiB each) across all tables.
   cint(terrainCacheResidentBlocks())
