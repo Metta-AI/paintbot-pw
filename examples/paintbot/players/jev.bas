@@ -446,6 +446,11 @@ while i < 16
     d2 = dx * dx + dy * dy
     if i mod 2 <> selfTeam then
       cost = d2 - (3 - playerHp(i)) * kHpBias
+      if kStillBias > 0 and lastSeen(i) = worldTick - 1 then
+        if playerX(i) = oldX(i) and playerY(i) = oldY(i) then
+          cost = cost - kStillBias
+        end if
+      end if
       if playerCarrying(i) then
         cost = cost - 2500000
         thief = i
@@ -619,6 +624,9 @@ if jevInit = 0 then
   ' kHpBias: how much closer (in cm^2) a target counts per missing heart. The league leader's v15
   ' shoots the nearest clear enemy 96% of the time, our baseline 86%.
   kHpBias = 160000
+  ' kStillBias: a target that did not move last tick has most likely started a steady shot of its
+  ' own and will stand for the rest of our windup. It counts kStillBias cm^2 closer.
+  kStillBias = 0
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
