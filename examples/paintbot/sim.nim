@@ -186,10 +186,16 @@ when defined(pwTraining):
       ## part of World, its hash or any decision. Layout is the native ABI's.
       damageDealtEnemy*, damageDealtTeam*, hitsEnemy*, hitsTaken*: int32
       kills*, deaths*, captures*, firstFriendlyFireTick*: int32
+      # Spray-can damage only (pw_seat_spray_stats): health removed from enemies and
+      # teammates by this seat's spray, and the kills it made on each.
+      sprayDamageEnemy*, sprayDamageTeam*, sprayKillsEnemy*, sprayKillsTeam*: int32
     CombatTelemetry* = array[Seats, SeatStats]
   # The host points this at its telemetry for the duration of one step; nil means
   # nobody is listening and damage pays only for the nil test.
   var combatTelemetry* {.threadvar.}: ptr CombatTelemetry
+  # True only while the step deals spray-can damage (mechanics.nim), so the telemetry can
+  # attribute it by weapon. Written and read only for telemetry; never part of World.
+  var sprayDamagePhase* {.threadvar.}: bool
   # Per-attacker damage scale in permille, pointed at by the host for one step; nil or
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
   var damageScale* {.threadvar.}: ptr array[Seats, int32]

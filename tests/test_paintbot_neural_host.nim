@@ -576,3 +576,56 @@ suite "native BASIC neural host":
       let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
       checkpoint schema & " " & decoder
       check bad[0].failed
+  test "the spray aim and spray gate decoder options are read from a schema-2 manifest, logged, and replay exactly":
+    const Schema1 = "paintbot-neural-basic/1"
+    const Schema2 = "paintbot-neural-basic/2"
+    let both = fixture(NeuralSource, true, ActionContractV2Hash,
+      manifestJson(Schema2, ActionContractV2Hash, "{\"spray_aim\": {}, \"spray_gate\": {}}"))
+    check not both[0].failed
+    check both[0].neural.sprayAim == sprayAimOptions(850) and both[0].neural.sprayGate == sprayGateOptions(0, 1)
+    check both[0].neural.telemetry(10, 3) ==
+      "neural: peak_ops=10 budget=4000000 model=w64 ticks=3 spray_aim=r850 spray_aims=0 spray_gate=t0,e1 spray_gates=0"
+    for (decoder, aim, gate) in [
+        ("{\"spray_aim\": {\"max_range\": 1}}", sprayAimOptions(1), SprayGateOptions()),
+        ("{\"spray_aim\": {\"max_range\": 500}}", sprayAimOptions(500), SprayGateOptions()),
+        ("{\"spray_gate\": {\"max_teammates\": 7, \"min_enemies\": 8}}", SprayAimOptions(), sprayGateOptions(7, 8)),
+        ("{\"spray_gate\": {\"min_enemies\": 0}}", SprayAimOptions(), sprayGateOptions(0, 0)),
+        ("{\"spray_gate\": {\"max_teammates\": 2}}", SprayAimOptions(), sprayGateOptions(2, 1))]:
+      let one = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(Schema2, ActionContractV2Hash, decoder))
+      checkpoint decoder
+      check not one[0].failed and one[0].neural.sprayAim == aim and one[0].neural.sprayGate == gate
+    # Replay determinism with every seat sampling and both options: the same seed twice is
+    # the same match (spray cans are rare for a zero model; the rule is exercised natively).
+    proc play(manifest: string, seed: int32, ticks: int): seq[uint32] =
+      let players = fixture(NeuralSource, true, ActionContractV2Hash, manifest)
+      var world = newWorld(seed)
+      for tick in 0..<ticks:
+        let commands = players.decide(world)
+        for slot in 0..<Seats: check not players[slot].failed
+        world.step(commands)
+        result.add world.stateHash()
+    let options = manifestJson(Schema2, ActionContractV2Hash,
+      "{\"sampling\": {\"mode\": \"categorical\"}, \"spray_aim\": {}, \"spray_gate\": {\"max_teammates\": 1}}")
+    check play(options, 2026, 300) == play(options, 2026, 300)
+    # Schema 1 and schema 2 without the fields: unchanged behaviour and log line.
+    for (schema, contract) in [(Schema1, ActionContractHash), (Schema2, ActionContractHash), (Schema2, ActionContractV2Hash)]:
+      let plain = fixture(NeuralSource, true, contract, manifestJson(schema, contract))
+      check not plain[0].failed
+      check not plain[0].neural.sprayAim.enabled and not plain[0].neural.sprayGate.enabled
+      check plain[0].neural.telemetry(10, 3) == "neural: peak_ops=10 budget=4000000 model=w64 ticks=3"
+    for (schema, decoder) in [(Schema1, "{\"spray_aim\": {}}"),
+                              (Schema1, "{\"spray_gate\": {}}"),
+                              (Schema2, "{\"spray_aim\": true}"),
+                              (Schema2, "{\"spray_aim\": {\"max_range\": 0}}"),
+                              (Schema2, "{\"spray_aim\": {\"max_range\": 851}}"),
+                              (Schema2, "{\"spray_aim\": {\"max_range\": 850.0}}"),
+                              (Schema2, "{\"spray_aim\": {\"range\": 850}}"),
+                              (Schema2, "{\"spray_gate\": 1}"),
+                              (Schema2, "{\"spray_gate\": {\"max_teammates\": -1}}"),
+                              (Schema2, "{\"spray_gate\": {\"max_teammates\": 8}}"),
+                              (Schema2, "{\"spray_gate\": {\"min_enemies\": 9}}"),
+                              (Schema2, "{\"spray_gate\": {\"min_enemies\": \"1\"}}"),
+                              (Schema2, "{\"spray_gate\": {\"enemies\": 1}}")]:
+      let bad = fixture(NeuralSource, true, ActionContractV2Hash, manifestJson(schema, ActionContractV2Hash, decoder))
+      checkpoint schema & " " & decoder
+      check bad[0].failed

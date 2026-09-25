@@ -240,6 +240,32 @@ int pw_set_seat_aim_retarget(void *handle, int seat, int32_t enabled, int32_t ma
 int pw_seat_aim_retarget_stats(void *handle, int seat, int32_t *stats);
 int pw_set_seat_shot_gate(void *handle, int seat, int32_t max_range);
 int pw_seat_shot_gate_stats(void *handle, int seat, int32_t *stats);
+/* Decoder spray options (additive; decoder.spray_aim / decoder.spray_gate). Both act only on
+ * a live caller-decoded seat's shoot order while it holds a READY spray can (sprayCooldown 0,
+ * so the order starts a burst this step), and judge the cone that order would produce on the
+ * pre-step world: the aim the decode gives the heads, the seat's position, mechanics.nim
+ * sprayTouches' geometry, over the bodies the seat can see under their apparent teams.
+ * pw_set_seat_spray_aim(handle, seat, max_range) with max_range in 1..850 (850 = default):
+ * the aim head becomes the visible apparent enemy identity (within max_range + Radius, clear
+ * line) whose cone holds the most apparent enemies (ties: nearer body, lower hp, lower
+ * identity); when no candidate's cone holds an enemy the order stands. 0 = off (default).
+ * pw_seat_spray_aim_stats: int32[3] = {orders re-aimed, aim index executed on the last step
+ * or -1, max_range or 0}. pw_set_seat_spray_gate(handle, seat, max_teammates, min_enemies)
+ * with max_teammates 0..7 and min_enemies 0..8 (0, 1 = defaults): the order is dropped unless
+ * its cone holds >= min_enemies apparent enemies and <= max_teammates apparent teammates;
+ * max_teammates -1 = off (default; min_enemies ignored). pw_seat_spray_gate_stats: int32[4] =
+ * {orders dropped, shoot head executed on the last step (0) or -1, max_teammates or -1,
+ * min_enemies or -1}. Both are kept across pw_reset; off on every seat is byte-identical;
+ * -1 bad args. Order inside pw_step: aim retarget, aim snap, spray aim, shot gate (whose drop
+ * also undoes the spray aim), spray gate, strafe, steady shot, decode, fire hold.
+ * pw_seat_spray_stats (training library only): int32[4] = {enemy damage, teammate damage,
+ * enemy kills, teammate kills} dealt by the seat's spray since the last create/reset (health
+ * removed, armor first; attribution = the damage's owner during the spray burst). */
+int pw_set_seat_spray_aim(void *handle, int seat, int32_t max_range);
+int pw_seat_spray_aim_stats(void *handle, int seat, int32_t *stats);
+int pw_set_seat_spray_gate(void *handle, int seat, int32_t max_teammates, int32_t min_enemies);
+int pw_seat_spray_gate_stats(void *handle, int seat, int32_t *stats);
+int pw_seat_spray_stats(void *handle, int seat, int32_t *stats);
 /* Observation contract selection (additive). pw_create_observation is pw_create with the
  * observation contract chosen, kept across pw_reset: 1 = v1
  * "paintbot-pw.rules37.obs.v1.float448" (identical to pw_create), 2 = v2

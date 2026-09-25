@@ -100,6 +100,16 @@ type
     shotGate: array[Seats,ShotGateOptions]
     shotGates: array[Seats,int32]
     shotGateLast: array[Seats,int32]
+    # Decoder spray aim (pw_set_seat_spray_aim) and spray gate (pw_set_seat_spray_gate):
+    # stateless rules for a seat holding a ready spray can, in the hosted order (retarget,
+    # snap, spray aim, shot gate, spray gate, strafe, steady). Counts belong to the match;
+    # *Last as above (-1 = the caller's stood).
+    sprayAim: array[Seats,SprayAimOptions]
+    sprayAims: array[Seats,int32]
+    sprayAimLast: array[Seats,int32]
+    sprayGate: array[Seats,SprayGateOptions]
+    sprayGates: array[Seats,int32]
+    sprayGateLast: array[Seats,int32]
     # Raw commands (pw_set_seat_command): a seat with a pending command executes it on the
     # next pw_step instead of its decoded heads or its script's order (no forbid check, no
     # head decode or decoder option for it); commandShown marks an unscripted seat whose
@@ -156,6 +166,10 @@ proc resetSnapSteady(env: ptr NativeEnv) =
     env.aimRetargetLast[slot] = -1
     env.shotGates[slot] = 0
     env.shotGateLast[slot] = -1
+    env.sprayAims[slot] = 0
+    env.sprayAimLast[slot] = -1
+    env.sprayGates[slot] = 0
+    env.sprayGateLast[slot] = -1
 proc resetCurriculum(env: ptr NativeEnv) =
   ## Knob values persist; the shot history belongs to the match.
   for slot in 0..<Seats:
@@ -235,13 +249,16 @@ proc decodeSeat(env: ptr NativeEnv, slot: int, actions: ActionBuffer): Command =
   ## seat does.
   let offset = slot*ActionSizes.len
   if env.strafe[slot].enabled or env.aimSnap[slot].enabled or env.steadyShot[slot] or
-      env.aimRetarget[slot].enabled or env.shotGate[slot].enabled:
+      env.aimRetarget[slot].enabled or env.shotGate[slot].enabled or env.sprayAim[slot].enabled or
+      env.sprayGate[slot].enabled:
     var heads: array[ActionSizes.len, int32]
     for head in 0..<ActionSizes.len: heads[head] = actions[offset+head]
     let bodies = env.bodiesFor(slot)
     env.aimRetargetLast[slot] = -1
     env.aimSnapLast[slot] = -1
     env.shotGateLast[slot] = -1
+    env.sprayAimLast[slot] = -1
+    env.sprayGateLast[slot] = -1
     env.strafeLast[slot] = -1
     env.steadyLast[slot] = -1
     if env.world.aimRetargetActions(slot, heads, bodies, env.contract, env.aimMemory[slot],
@@ -250,16 +267,25 @@ proc decodeSeat(env: ptr NativeEnv, slot: int, actions: ActionBuffer): Command =
       inc env.aimRetargets[slot]
     let beforeSnap = heads
     var snapped = env.world.aimSnapActions(slot, heads, bodies, env.aimSnap[slot])
+    var sprayAimed = env.world.sprayAimActions(slot, heads, bodies, env.contract, env.aimMemory[slot],
+      env.sprayAim[slot])
     if env.world.shotGateActions(slot, heads, beforeSnap, snapped, bodies, env.contract,
         env.aimMemory[slot], env.shotGate[slot]):
-      # The dropped order was never a shot: the snap (which rewrites only shoot orders)
-      # did not execute on it.
+      # The dropped order was never a shot: the snap and the spray aim (which rewrite only
+      # shoot orders) did not execute on it.
       snapped = false
+      sprayAimed = false
       env.shotGateLast[slot] = 0
       inc env.shotGates[slot]
     if snapped:
       env.aimSnapLast[slot] = heads[1]
       inc env.aimSnaps[slot]
+    if sprayAimed:
+      env.sprayAimLast[slot] = heads[1]
+      inc env.sprayAims[slot]
+    if env.world.sprayGateActions(slot, heads, bodies, env.contract, env.aimMemory[slot], env.sprayGate[slot]):
+      env.sprayGateLast[slot] = 0
+      inc env.sprayGates[slot]
     if env.world.strafeActions(slot, heads, bodies, env.strafe[slot], env.strafeState[slot],
         env.strafeRng[slot], env.forbidden[slot]):
       env.strafeLast[slot] = heads[0]
@@ -1013,6 +1039,79 @@ proc pw_seat_shot_gate_stats*(handle: pointer, seat: cint, output: ptr Unchecked
   output[0] = env.shotGates[seat]
   output[1] = env.shotGateLast[seat]
   output[2] = if env.shotGate[seat].enabled: env.shotGate[seat].maxRange else: 0
+  0
+
+proc pw_set_seat_spray_aim*(handle: pointer, seat: cint, maxRange: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Decoder spray aim for one seat (the hosted bundle option decoder.spray_aim; see
+  ## neural_contract.sprayAimActions): with maxRange in 1..850 (850 = the bundle default),
+  ## on every pw_step a live caller-decoded seat's shoot order with a ready spray can aims at
+  ## the visible apparent enemy (within maxRange + Radius, clear line) whose cone holds the
+  ## most enemies. 0 turns it off (the default; byte-identical). Kept across pw_reset.
+  ## Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats: return -1
+  var options: SprayAimOptions
+  if maxRange != 0:
+    if sprayAimOptionsError(maxRange).len > 0: return -1
+    options = sprayAimOptions(maxRange)
+  ready()
+  cast[ptr NativeEnv](handle).sprayAim[seat] = options
+  0
+
+proc pw_seat_spray_aim_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Spray-aim telemetry, three int32: [shoot orders re-aimed since the last create/reset,
+  ## the aim index it executed on the last pw_step or -1, maxRange or 0 when off].
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  output[0] = env.sprayAims[seat]
+  output[1] = env.sprayAimLast[seat]
+  output[2] = if env.sprayAim[seat].enabled: env.sprayAim[seat].maxRange else: 0
+  0
+
+proc pw_set_seat_spray_gate*(handle: pointer, seat: cint, maxTeammates, minEnemies: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Decoder spray gate for one seat (the hosted bundle option decoder.spray_gate; see
+  ## neural_contract.sprayGateActions): with maxTeammates in 0..7 and minEnemies in 0..8
+  ## (0, 1 = the bundle defaults), on every pw_step a live caller-decoded seat's shoot order
+  ## with a ready spray can is dropped unless the cone it would produce holds at least
+  ## minEnemies apparent enemies and at most maxTeammates apparent teammates the seat can
+  ## see. maxTeammates -1 turns it off (the default; byte-identical; minEnemies is then
+  ## ignored). Kept across pw_reset. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats: return -1
+  var options: SprayGateOptions
+  if maxTeammates != -1:
+    if sprayGateOptionsError(maxTeammates, minEnemies).len > 0: return -1
+    options = sprayGateOptions(maxTeammates, minEnemies)
+  ready()
+  cast[ptr NativeEnv](handle).sprayGate[seat] = options
+  0
+
+proc pw_seat_spray_gate_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Spray-gate telemetry, four int32: [shoot orders dropped since the last create/reset,
+  ## the shoot head it executed on the last pw_step (0) or -1, maxTeammates or -1 when off,
+  ## minEnemies or -1 when off].
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let env = cast[ptr NativeEnv](handle)
+  let g = env.sprayGate[seat]
+  output[0] = env.sprayGates[seat]
+  output[1] = env.sprayGateLast[seat]
+  output[2] = if g.enabled: g.maxTeammates else: -1
+  output[3] = if g.enabled: g.minEnemies else: -1
+  0
+
+proc pw_seat_spray_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Spray-can combat counters for one seat (training library only), four int32:
+  ## [enemy damage, teammate damage, enemy kills, teammate kills] dealt by the seat's spray
+  ## since the last create/reset. Damage is health removed (armor absorbs first), as in
+  ## pw_seat_stats; attribution is the damage's owner and the spray burst. Pure telemetry.
+  ## Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<Seats or output == nil: return -1
+  ready()
+  let s = cast[ptr NativeEnv](handle).stats[seat]
+  output[0] = s.sprayDamageEnemy
+  output[1] = s.sprayDamageTeam
+  output[2] = s.sprayKillsEnemy
+  output[3] = s.sprayKillsTeam
   0
 
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =

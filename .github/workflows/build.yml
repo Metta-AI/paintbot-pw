@@ -78,6 +78,7 @@ jobs:
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_river_strafe.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_snap_steady.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_retarget_gate.nim
+      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_spray.nim
       - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
       - run: nim r -d:headless tests/test_paintbot_neural_host.nim
       - run: python -m unittest discover -s coworld/paintbot -p test_neural_package.py
