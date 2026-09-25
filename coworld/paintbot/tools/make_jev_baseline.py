@@ -67,6 +67,9 @@ HEADER = """' Paintbot PW Jev baseline: the BASIC baseline steered by the host a
 DIMS = """' Jev layer knowledge: enemy sighting map (16 x 10 cells of 5 m), heart history, candidates
 ' that outlive an ask until its answer lands, retreat points.
 dim enemyCellTick(160)
+dim oldX2(16)
+dim oldY2(16)
+dim lastSeen2(16)
 dim hiDX(8)
 dim hiDY(8)
 dim heartOwnerPrev(16)
@@ -450,6 +453,10 @@ if jevInit = 0 then
   ' kStillBias: a target that did not move last tick has most likely started a steady shot of its
   ' own and will stand for the rest of our windup. It counts kStillBias cm^2 closer.
   kStillBias = 0
+  ' kLeadMove > 0: a target that moved the same way on both of the last two ticks is led by kLeadMove
+  ' ticks instead of kLead. The league leader's v15 stops to shoot (a short lead wins); the neural
+  ' player keeps moving and leads us by the full windup, 6 ticks.
+  kLeadMove = 0
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -2025,7 +2032,16 @@ def build(base: str) -> str:
              "        end if\n"
              "      end if\n")
     s = swap(s, "    tx = tx + (tx - oldX(best)) * 6\n    ty = ty + (ty - oldY(best)) * 6\n",
-             "    tx = tx + (tx - oldX(best)) * kLead\n    ty = ty + (ty - oldY(best)) * kLead\n")
+             "    ldK = kLead\n"
+             "    if kLeadMove > 0 and lastSeen2(best) = worldTick - 2 then\n"
+             "      if (tx - oldX(best)) * (oldX(best) - oldX2(best)) + (ty - oldY(best)) * (oldY(best) - oldY2(best)) > 0 then\n"
+             "        ldK = kLeadMove\n"
+             "      end if\n"
+             "    end if\n"
+             "    tx = tx + (tx - oldX(best)) * ldK\n    ty = ty + (ty - oldY(best)) * ldK\n")
+    s = swap(s, "  if visible(i) then\n    oldX(i) = playerX(i)\n    oldY(i) = playerY(i)\n    lastSeen(i) = worldTick\n",
+             "  if visible(i) then\n    oldX2(i) = oldX(i)\n    oldY2(i) = oldY(i)\n    lastSeen2(i) = lastSeen(i)\n"
+             "    oldX(i) = playerX(i)\n    oldY(i) = playerY(i)\n    lastSeen(i) = worldTick\n")
     s = swap(s, "        if along > 0 and along < reach and across < 95 then\n",
              "        if along > 0 and along < reach and across < kHoldW then\n")
     s = splice(s, "' Quiet approach to the objective when nothing is in sight but something was heard.\n", STEADY)
