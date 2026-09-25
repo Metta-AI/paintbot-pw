@@ -467,6 +467,10 @@ if jevInit = 0 then
   ' player spreads (11-26%) and moves while we aim, so the full windup lead wins against it.
   kLeadSpread = 0
   kClumpT = 400
+  ' kSpreadBall: against an enemy seen to fight spread out (the same test as kLeadSpread), turn on
+  ' useBall and useTight - one group of eight meets its threes and fours. Against a packed enemy
+  ' both stay off: the league leader's v15 ball beat every clumping arm we tried.
+  kSpreadBall = 0
   ' Exploration: with probability kExplore / 1000 the applied objective is a uniformly random
   ' option, logged beside the pick the policy would have made, so every decision carries a known
   ' propensity and a journaled run can be scored offline for another rule. It also draws from
@@ -1161,7 +1165,7 @@ end if
 """
 
 CLUMP = """' ---- How the enemy stands: share of visible enemies with another within 3 m. ----
-if kLeadSpread > 0 and foesSeen > 1 and worldTick mod 6 = 0 then
+if (kLeadSpread > 0 or kSpreadBall) and foesSeen > 1 and worldTick mod 6 = 0 then
   i = 1 - selfTeam
   while i < 16
     if visible(i) then
@@ -1182,6 +1186,16 @@ if kLeadSpread > 0 and foesSeen > 1 and worldTick mod 6 = 0 then
     end if
     i = i + 2
   wend
+end if
+if kSpreadBall then
+  useBall = 0
+  useTight = 0
+  if clD >= 40 then
+    if clN * 1000 / clD < kClumpT then
+      useBall = 1
+      useTight = 1
+    end if
+  end if
 end if
 
 """
