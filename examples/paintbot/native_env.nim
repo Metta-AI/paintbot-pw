@@ -38,6 +38,12 @@ type
     # cleared by create/reset; never part of the world or its hash).
     contract: ActionContractVersion
     aimMemory: array[Seats,AimMemory]
+    # The hosted seat's reset rule for that memory (neural_host.beginTick): it is cleared
+    # on every decided tick where the seat is dead, or alive after a tick it was dead, or
+    # the tick went backwards. memAlive / memTick are the seat's state on its last decided
+    # tick (false / -1 after create/reset).
+    memAlive: array[Seats,bool]
+    memTick: array[Seats,int32]
     # Mapping-ceiling diagnostics (pw-bc): a scripted seat with a non-zero override mask
     # still runs its script every step (its orders are reported by pw_seat_orders) but
     # executes the caller's decoded action for the masked heads: 1 walk/goal/direct,
@@ -138,7 +144,26 @@ proc ready() =
 proc invalidateBodies(env: ptr NativeEnv) =
   for slot in 0..<Seats: env.bodiesReady[slot] = false
 proc resetAimMemories(env: ptr NativeEnv) =
-  for slot in 0..<Seats: env.aimMemory[slot].resetAimMemory()
+  for slot in 0..<Seats:
+    env.aimMemory[slot].resetAimMemory()
+    env.memAlive[slot] = false
+    env.memTick[slot] = -1
+proc memoryStale(env: ptr NativeEnv, slot: int): bool =
+  ## Whether the hosted seat would have cleared its aim memory at the start of this tick
+  ## (neural_host.beginTick): dead now, dead on the last decided tick, or time went back.
+  env.world.cogs[slot].hp <= 0 or not env.memAlive[slot] or env.world.tick <= env.memTick[slot]
+proc syncAimMemory(env: ptr NativeEnv, slot: int) =
+  ## Apply that rule once per decided tick, before the seat's heads are decoded, so the
+  ## training library's contract-v2 lead after a death or respawn is the hosted seat's.
+  if env.memoryStale(slot): env.aimMemory[slot].resetAimMemory()
+  env.memAlive[slot] = env.world.cogs[slot].hp > 0
+  env.memTick[slot] = env.world.tick
+proc memoryFor(env: ptr NativeEnv, slot: int): AimMemory =
+  ## The memory the coming decode will read (pure: what syncAimMemory would leave).
+  if env.memoryStale(slot):
+    result.resetAimMemory()
+  else:
+    result = env.aimMemory[slot]
 proc resetStats(env: ptr NativeEnv) =
   for slot in 0..<Seats:
     env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
@@ -248,6 +273,7 @@ proc decodeSeat(env: ptr NativeEnv, slot: int, actions: ActionBuffer): Command =
   ## shotGateActions, strafeActions and steadyShotActions, in that order, as the hosted
   ## seat does.
   let offset = slot*ActionSizes.len
+  env.syncAimMemory(slot)
   if env.strafe[slot].enabled or env.aimSnap[slot].enabled or env.steadyShot[slot] or
       env.aimRetarget[slot].enabled or env.shotGate[slot].enabled or env.sprayAim[slot].enabled or
       env.sprayGate[slot].enabled:
@@ -695,7 +721,7 @@ proc pw_action_candidates*(handle: pointer, seat: cint, movement, sneak: int32,
                 else: Point()
   for aim in 0..<ActionSizes[1]:
     let (found, p) = if aim == 0: (true, env.world.cogs[slot].aim)
-                     else: env.world.aimCandidate(slot, aim, bodies, env.contract, env.aimMemory[slot], ownStep)
+                     else: env.world.aimCandidate(slot, aim, bodies, env.contract, env.memoryFor(slot), ownStep)
     if found:
       aims[aim*2] = p.x; aims[aim*2+1] = p.z
   0

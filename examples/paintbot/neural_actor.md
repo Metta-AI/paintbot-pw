@@ -199,7 +199,8 @@ same waypoint, speed and trench damping as `mechanics.nim`, before blocking and
 yielding; zero when the seat holds still). With a still target and a still seat the v2
 aim is the v1 aim. The memory follows the recurrent state in the hosted seat (cleared
 at initial use, match reset, death and respawn) and is cleared by `pw_create`,
-`pw_reset` and `pw_set_action_contract` in the native ABI.
+`pw_reset` and `pw_set_action_contract` in the native ABI, and there too on every decided
+tick the seat is dead or alive after a tick it was dead, so both agree after a respawn.
 
 Native ABI: `pw_set_action_contract(handle, 1|2)` selects the decoder for the caller's
 actions (default 1, kept across resets), `pw_action_contract(handle)` reads it,

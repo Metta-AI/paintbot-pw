@@ -90,7 +90,10 @@ int pw_set_seat_damage_scale(void *handle, int seat, int32_t permille);
  * or teleport) and v the move the seat's own movement/sneak heads order this tick; see
  * neural_contract.nim). Same head sizes; movement, directional aim, fire, grenade and
  * sneak decode identically. Kept across pw_reset; the per-seat one-tick aim memory v2
- * reads is cleared here and by every reset. Returns 0, -1 for a bad handle or version.
+ * reads is cleared here and by every reset, and, as the hosted seat clears it
+ * (neural_host.beginTick), on every decided tick the seat is dead or alive after a tick it
+ * was dead (so a respawned seat's first leads are the hosted seat's).
+ * Returns 0, -1 for a bad handle or version.
  * pw_action_contract returns the selected version.
  * pw_action_contract_hash writes the 64-hex SHA-256 an actor and manifest must carry to
  * be decoded under that version (NUL-terminated, capacity >= 65). */
