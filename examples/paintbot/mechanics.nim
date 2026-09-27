@@ -7,9 +7,24 @@ const
   SprayDamage* = 3
   SprayTicks* = 5
   SprayRecoveryTicks* = 20
+  # Rules 40 make both pickups worth taking: a wider, deadlier blast and a faster spray.
+  StrongGrenadeBlastRadius* = 360
+  StrongSprayRecoveryTicks* = 8
   GunWindupTicks* = 5
   GunRange* = 5250
   StartingLives* = 3
+
+proc grenadeBlastRadius*(): int =
+  if visionRulesVersion >= 40: StrongGrenadeBlastRadius else: GrenadeBlastRadius
+
+proc sprayRecoveryTicks*(): int =
+  if visionRulesVersion >= 40: StrongSprayRecoveryTicks else: SprayRecoveryTicks
+
+proc sprayHalfWidth*(along: int64): int64 =
+  ## Half width of the spray cone at distance `along`; shared with the neural decoder.
+  if visionRulesVersion >= 40: along*4 div 5
+  elif visionRulesVersion >= 17: along*3 div 5
+  else: along div 4
 
 const SoundLifetime* = TickRate
 # Clockwise octants: E, SE, S, SW, W, NW, N, NE. Integer thresholds
@@ -305,11 +320,12 @@ proc explode*(w: var World, p: Point, owner: int) =
   w.blasts.add Blast(pos: p, tick: w.tick, owner: owner.int32,
       trench: trench.int32)
   for i in 0..<Seats:
-    if w.cogs[i].hp <= 0 or distance2(w.cogs[i].pos, p) > (
-        GrenadeBlastRadius+Radius).int64*(GrenadeBlastRadius+Radius): continue
+    let reach = grenadeBlastRadius()+Radius
+    if w.cogs[i].hp <= 0 or distance2(w.cogs[i].pos, p) > reach.int64*reach: continue
     let victimTrench = w.trenchAt(w.cogs[i].pos)
+    let strong = visionRulesVersion >= 40
     let amount = if victimTrench >= 0: (if victimTrench ==
-        trench: 6 else: 1) else: 2
+        trench: 6 elif strong: 2 else: 1) elif strong: 3 else: 2
     when defined(pwTraining):
       let weapon = damageWeapon
       damageWeapon = dwGrenade
@@ -324,7 +340,7 @@ proc sprayTouches*(w: World, slot, victim: int): bool =
   let length = max(1'i64, isqrt(int64(v.x)*v.x+int64(v.z)*v.z))
   let along = (dx*v.x+dz*v.z) div length
   let across = abs(dx*v.z-dz*v.x) div length
-  let halfWidth = if visionRulesVersion >= 17: along*3 div 5 else: along div 4
+  let halfWidth = sprayHalfWidth(along)
   along > 0 and along <= SprayReach+Radius and across <= halfWidth+Radius and
     w.lineClear(c.pos, w.cogs[victim].pos)
 
@@ -482,7 +498,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         attacked[i] = true
         w.emitSound(w.cogs[i].pos, 3, i, 1800)
         w.equipment[i].burst = SprayTicks
-        w.equipment[i].sprayCooldown = SprayTicks+SprayRecoveryTicks
+        w.equipment[i].sprayCooldown = int32(SprayTicks+sprayRecoveryTicks())
         w.equipment[i].sprayHits = 0
         w.equipment[i].sprayAim = direction(w.cogs[i].pos, w.cogs[i].aim, SprayReach)
     else:

@@ -1188,7 +1188,7 @@ proc shotGateActions*(w: World, slot: int, actions: var array[ActionSizes.len, i
 
 # Decoder spray options (bundle options decoder.spray_aim and decoder.spray_gate, schema 2;
 # not a contract change; PLAN-gcrl-spray S1). A spray can replaces the gun: a shoot order
-# starts a five-tick burst in a cone (reach SprayReach + Radius, half width along * 3/5 +
+# starts a five-tick burst in a cone (reach SprayReach + Radius, half width sprayHalfWidth +
 # Radius, clear line) that deals 3 to EVERY body in it, teammates included. The gun options
 # above (retarget, snap, shot gate) do not model that. Both spray options act only on a
 # live seat's shoot order while it holds a spray can that is ready (sprayCooldown 0: the
@@ -1249,7 +1249,7 @@ proc sprayConeHolds*(w: World, origin, aim, target: Point): bool =
   let length = max(1'i64, isqrt64(int64(v.x)*v.x+int64(v.z)*v.z))
   let along = (dx*v.x+dz*v.z) div length
   let across = abs(dx*v.z-dz*v.x) div length
-  let halfWidth = if visionRulesVersion >= 17: along*3 div 5 else: along div 4
+  let halfWidth = sprayHalfWidth(along)
   along > 0 and along <= SprayReach+Radius and across <= halfWidth+Radius and w.lineClear(origin, target)
 
 proc sprayCone*(w: World, slot: int, aim: Point, bodies: array[Seats, int]): (int, int) =

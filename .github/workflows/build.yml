@@ -62,6 +62,7 @@ jobs:
       - run: nim r tests/test_paintbot_glory.nim
       - run: nim r tests/test_paintbot_glory_hearts.nim
       - run: nim r tests/test_paintbot_glory_behind.nim
+      - run: nim r tests/test_paintbot_weapon_buff.nim
       - run: nim r tests/test_paintbot_projection.nim
       - run: nim r -d:headless tests/test_paintbot_neural_contract.nim
       - run: nim r -d:headless tests/test_paintbot_neural_obs_v2.nim
