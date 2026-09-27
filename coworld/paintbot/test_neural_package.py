@@ -13,7 +13,7 @@ from neural_package import (unpack_package, validate_aim_retarget, validate_shot
                             AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
                             MAX_SHOT_GATE_RANGE, validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS,
                             USER_INPUT_LIMIT, OBSERVATION_V2_SIZE, validate_pwnet2, attention_ops,
-                            MAX_NEURAL_OPERATIONS, PWNET2_LIMITS)
+                            MAX_NEURAL_OPERATIONS, PWNET2_LIMITS, USER_INPUTS_CONTRACT_HASHES)
 import random
 import struct
 
@@ -348,13 +348,13 @@ class UserInputTests(unittest.TestCase):
         return package(overrides, model=model)
 
     def test_valid_user_inputs(self):
-        for k in (1, 3, MAX_USER_INPUTS):
+        for k in (1, 3, 32, 33, 34, MAX_USER_INPUTS):
             _, _, manifest = unpack_package(self.inputs_package(k, init=[USER_INPUT_LIMIT] + [-USER_INPUT_LIMIT] * (k - 1)))
             self.assertEqual(manifest["user_inputs"]["count"], k)
 
     def test_user_inputs_field_rules(self):
         for value, message in (([], "must be an object"), ({"init": []}, "count is required"),
-                               ({"count": 0, "init": []}, "within 1 .. 32"), ({"count": 33, "init": [0] * 33}, "within 1 .. 32"),
+                               ({"count": 0, "init": []}, "within 1 .. 64"), ({"count": 65, "init": [0] * 65}, "within 1 .. 64"),
                                ({"count": 2.0, "init": [0, 0]}, "must be an integer"), ({"count": True, "init": [0]}, "integer"),
                                ({"count": 2}, "init is required"), ({"count": 2, "init": 5}, "init must be an array"),
                                ({"count": 2, "init": [0]}, "count entries"), ({"count": 1, "init": [1000001]}, "within -1000000"),
@@ -398,6 +398,22 @@ class UserInputTests(unittest.TestCase):
         consts = {name: int(value.replace("_", "")) for name, value in
                   re.findall(r"^  (\w+)\* = ([0-9_]+)(?:'i32)?$", source, re.M)}
         self.assertEqual((MAX_USER_INPUTS, USER_INPUT_LIMIT), (consts["MaxUserInputs"], consts["UserInputLimit"]))
+
+    def test_user_input_cap_is_64_and_the_original_32_contracts_are_unchanged(self):
+        # Raising the cap from 32 to 64 appends v2u33 .. v2u64; v2u1 .. v2u32 keep their hashes (pinned here),
+        # so every existing K <= 32 bundle stages exactly as before.
+        self.assertEqual(MAX_USER_INPUTS, 64)
+        self.assertEqual(v2u_hash(1), "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04")
+        self.assertEqual(hashlib.sha256("".join(v2u_hash(k) for k in range(1, 33)).encode()).hexdigest(),
+                         "3e49fd8df675ca9c5b21ccb81e3ef3ca78767fab6de847672a3775bec03f9fda")
+        self.assertEqual(v2u_hash(64), "18a5141bf7d78fdf93524757bf261f367cfebe3b489fb6f2988936375bb8f4aa")
+        self.assertEqual(sorted(USER_INPUTS_CONTRACT_HASHES.values()), list(range(1, 65)))
+        self.assertEqual(USER_INPUTS_CONTRACT_HASHES[v2u_hash(34)], 34)
+        self.assertNotIn(hashlib.sha256(user_inputs_contract_id(65).encode()).hexdigest(), USER_INPUTS_CONTRACT_HASHES)
+        with self.assertRaisesRegex(ValueError, "within 1 .. 64"):
+            unpack_package(self.inputs_package(65))
+        with self.assertRaisesRegex(ValueError, "need observation contract v2u"):
+            unpack_package(self.inputs_package(64, observation=hashlib.sha256(user_inputs_contract_id(65).encode()).hexdigest()))
 
     def test_packages_without_user_inputs_are_unaffected(self):
         # An ordinary contract hash with the model never parsed, exactly as before.

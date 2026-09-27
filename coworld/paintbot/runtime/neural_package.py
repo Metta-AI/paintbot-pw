@@ -51,7 +51,7 @@ MAX_SHOT_GATE_RANGE = 20000
 # the net K extra inputs with neuralInput(i, v), v clamped to +-1,000,000 and fed as float32(v) / 1000 one tick
 # later. The actor's observation contract is then v2u<K> (v2's 506 floats + K), whose hash is the SHA-256 of the id
 # below, and its input count is 506 + K. neural_host.nim holds the same rules.
-MAX_USER_INPUTS, USER_INPUT_LIMIT = 32, 1000000
+MAX_USER_INPUTS, USER_INPUT_LIMIT = 64, 1000000
 OBSERVATION_V2_SIZE = 506
 ACTOR_MAGIC = b"PWNET001"
 
@@ -65,7 +65,7 @@ USER_INPUTS_CONTRACT_HASHES = {hashlib.sha256(user_inputs_contract_id(k).encode(
 
 
 def validate_user_inputs(value):
-    """user_inputs: {"count": K, "init": [K ints]}, K within 1 .. 32, init values within +-1,000,000. Returns K."""
+    """user_inputs: {"count": K, "init": [K ints]}, K within 1 .. 64, init values within +-1,000,000. Returns K."""
     if not isinstance(value, dict):
         raise ValueError("user_inputs must be an object")
     for key in value:

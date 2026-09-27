@@ -278,7 +278,7 @@ out, 65)` report it; `pw_observation_size()` stays 448. The observation contract
 touches the world or its hash.
 
 **v2u<K>: v2 + K user inputs** (PLAN-neural-basic-io part A). Id
-`paintbot-pw.rules39.obs.v2u<K>`, K = 1..32, SHA-256 of the id (all 32 listed in
+`paintbot-pw.rules39.obs.v2u<K>`, K = 1..64, SHA-256 of the id (all 64 listed in
 `neural_contract.UserInputsContractHashes`; K = 1 is `bd80f4d3…`, K = 2 `b064de43…`, K = 3
 `a8c43d03…`); 506 + K floats. Columns 0..505 are v2 unchanged; column 506 + i is
 `float32(v_i) / 1000` where v_i is the value the seat's policy.bas last set with

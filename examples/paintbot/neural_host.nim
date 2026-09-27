@@ -372,7 +372,7 @@ proc parseSprayGateOptions*(value: JsonNode): SprayGateOptions =
   sprayGateOptions(maxTeammates, minEnemies)
 
 proc parseUserInputs*(value: JsonNode): seq[int32] =
-  ## Manifest "user_inputs": {"count": K, "init": [K integers]}, K within 1 .. 32, every
+  ## Manifest "user_inputs": {"count": K, "init": [K integers]}, K within 1 .. 64, every
   ## init value within -1,000,000 .. 1,000,000; both fields required; anything else
   ## rejects the bundle. Returns the init values (K = their count).
   if value.kind != JObject: raise newException(ValueError, "user_inputs must be an object")

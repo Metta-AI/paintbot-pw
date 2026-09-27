@@ -694,10 +694,10 @@ proc sampleHeads*(logits: openArray[float32], temps: HeadTemperatures, masks: He
 
 # Observation contract "v2 + K user inputs" (PLAN-neural-basic-io part A): v2's 506 floats
 # unchanged, then K floats the seat's policy.bas sets with neuralInput(i, v) (fed as
-# v / 1000, one tick late). Contract id paintbot-pw.rules39.obs.v2u<K>, K = 1 .. 32; the
+# v / 1000, one tick late). Contract id paintbot-pw.rules39.obs.v2u<K>, K = 1 .. 64; the
 # hash is the SHA-256 of the id, one per K.
 const
-  MaxUserInputs* = 32
+  MaxUserInputs* = 64
   UserInputLimit* = 1_000_000'i32
   UserInputsContractHashes*: array[MaxUserInputs, string] = [
     "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04",
@@ -731,7 +731,39 @@ const
     "06f6a35f115ff03b0c298a8ef144551cf94b5998be05afc6e2656a62cfa276ca",
     "642f23700636283703121ea5b7edbc23c4b472ad2dd4777c822c7295d2340b46",
     "b28ddf9ffd8b637c12c5f45b6c988de208693a86552c12fd11fcf5ce123622fa",
-    "94373a1ce8a95bbcf99f8fcb1d2acc07e8fb19ab13c99591389ac2cff807e7c3"
+    "94373a1ce8a95bbcf99f8fcb1d2acc07e8fb19ab13c99591389ac2cff807e7c3",
+    "06cfb7f302ea35601752ace367eca0e3287dc6e4159353b6eb0c28ca01965b5e",
+    "6a02b9c79290882e46edf61326d90babbc83d0ec77d4df58d68039a5b33885f3",
+    "2eb7e79e679f31f62e2ca5e817da0ff0d621ae46351c087984ead85654dbcf9e",
+    "d152b200f412c295f831909618f3584df95d96fc3e17a86f3be97d0baf7d9e23",
+    "bc6c6fb0bf5b5e5664e4e8ae22ae8fb9d6b28794dcfdcee9b795d1a7b3078b11",
+    "1432e1aa7f28e246aaef7c0cf0963e00720cb1a44a0cbfcdca125eda20ef4a27",
+    "2a31af3957ed94045573f32fd303f7e57e366363013b948f2246b66809f7ad44",
+    "b7165e5c070ae3cdab349e8e7d15a110c1d1890d23284642dbe1c9ff7f3365a2",
+    "586184a1599b0335412c6d7e14b1c76f69e4aacf93e424b74922113a1bc3b89d",
+    "3c782fc7a182d8b81b202642142d53706ce594aee551fdc62d9497b1501a36b8",
+    "07ecbced8946a1695f509e28fe2d5b695940777a5384b3a760cdacce47834a83",
+    "4098089260bdd7948a2a450d6ce1e1434de581e22cd23673f95e08ebd808bf81",
+    "96c3068f78a84995ff1b502748c989b7cff5303bf17c6c64d7667afaad26a691",
+    "aeedab6461211ef5cafdb6286fa6758f431d6eea0750461738fc5e2d880052c2",
+    "996dd6dbf91cf23439f90a288152e6cc9ab4f25f89cb7e3f9b7e5e01e9223cdd",
+    "78585d56ed2391fc66815f303538461c9bf10af4e7aa1fbaa78b7128372e94a9",
+    "3b0f23bb1eb4bf0106ef2efd6f64324a28e0868d83b7c2a5313bdae7774e701d",
+    "c83ab5040e88a23a801a8538f6870fb4267c96993ce4110cabe72f8e6e46ba81",
+    "0080ce2f02f666b573fd4fec22a9798d859a3e7089d09cfaf4996ffdf29865f5",
+    "d3fc3b556d871592c207cc80aabfbc581d5c9c6eb3faa2826036d2ac0fba865b",
+    "8a0412302026890f3fdfc40579f1df4651ab2670f8494b73665df61b68df65a6",
+    "41782176f1e72ad9d2da6285c795c18eca184ab574c064dc1adc59a271d192d7",
+    "1ea3790b04861d4f9a330b2aa3a55ef0246f03ab186f4391b3aaedcf878dc99c",
+    "90936702c76afa8002417ca47cb285d13257f413aa5ba3998aef322206f68f3b",
+    "a903876802cfa263845d3cea141bbdd67cc711e5e2cbdc53c8a267a2543fcfe7",
+    "0818f6e6dab081ea6b0394f8f6abce0ec67c25753f7453d400365223f662e3d8",
+    "6110c5dce4d96f1bfb25c480f7199aa106519730d52f5853d0b8663cbc475e11",
+    "f1a2b5ba3e88f4b78ce06034496314da93c1b44c452be21b58c432e9a5e9e6ef",
+    "8b8c7d85b334af6c9b2944c015ec3e1247e73bcd1b7beb9fdf3dacf6ea3110a7",
+    "2251315296a6fb0133ce828aa99f52cf2074e69a650d973e336fc12cdea825f4",
+    "ded9592cbbceaa39e384893ccb4346c77c42e61b544b2420b2ffcc5794c7edc8",
+    "18a5141bf7d78fdf93524757bf261f367cfebe3b489fb6f2988936375bb8f4aa"
   ]
 proc userInputsContractId*(k: int): string = "paintbot-pw.rules39.obs.v2u" & $k
 proc userInputsFromHash*(hash: string): int =
