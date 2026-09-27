@@ -141,7 +141,7 @@ sub sprayGate()
         across = -across
       end if
       across = across / vl
-      if along > 0 and along <= 905 and across <= along * 3 / 5 + 55 then
+      if along > 0 and along <= 905 and across <= along * 4 / 5 + 55 then
         if playerTeam(i) = selfTeam then
           mates = mates + 1
         else

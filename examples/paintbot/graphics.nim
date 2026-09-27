@@ -995,7 +995,7 @@ proc runGraphics*() =
     for i, e in world.equipment:
       if world.cogs[i].hp <= 0 or not shown(i) or victory.active: continue
       if e.charge > 0: shapes.addCircle(position(world.grenadeTarget(i), 0.08),
-          GrenadeBlastRadius.float32/100, rgbx(229, 199, 88, 255))
+          grenadeBlastRadius().float32/100, rgbx(229, 199, 88, 255))
       if e.burst > 0:
         let spread = if replayRulesVersion >= 17: 0.6'f32 else: 0.25'f32
         shapes.sprayCloud(world, i, world.tick.float32+alpha, spread)

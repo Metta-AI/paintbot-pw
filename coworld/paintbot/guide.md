@@ -75,15 +75,17 @@ Older replays retain their original capture-the-heart rules.
   Range is 5250 units. The user-selected cadence is one shot per second.
 - Four grenade pickups refill after five seconds. Carry one; hold C to charge up
   to 24 ticks and release to throw. Grenades fly over walls, land after ten ticks,
-  and deal two damage to every body in the blast, including allies and yourself.
+  and deal three damage (two before rules 40) to every body in the blast, including
+  allies and yourself. The blast reaches 360 units (270 before rules 40).
 - Spray cans refill after 30 seconds. A carried can replaces the gun. Fire sends
-  a directional cone for five ticks, with 20 ticks of recovery. Aim locks at the
-  beginning of each burst; each victim takes three damage once per burst.
+  a directional cone for five ticks, with 8 ticks of recovery (20 before rules 40).
+  Aim locks at the beginning of each burst; each victim takes three damage once per
+  burst. From rules 40 the cone's half width is 4/5 of the distance (3/5 before).
 - Trenches are walkable pits. Entering is full speed; movement outward is slowed
   fivefold. Gun cooldown is tripled, and 70% of outside gunfire passes overhead.
   Shots from inside the same trench and spray ignore that protection. Grenades
-  deal six damage to victims in the landing trench, one to victims in other
-  trenches, and two outside trenches.
+  deal six damage to victims in the landing trench, two to victims in other
+  trenches, and three outside trenches (one and two before rules 40).
 - Shields add three armor HP without healing base HP. Damage consumes armor first.
   Armor, heart carrying, and trenches slow gunfire threefold without stacking.
 - Med kits restore base HP; healthy cogs leave them. Shields and kits refill in
@@ -291,6 +293,14 @@ Heartwick now occupies an irregular island. The sandy coast slopes into water;
 policies and movement respect the shoreline, while all objectives remain connected.
 
 Spray covers a roughly 62-degree cone and deals 3 damage per target per burst; armor absorbs damage first.
+
+### Stronger grenades and spray (rules 40)
+
+League games showed the best teams almost never used either pickup, so rules 40 make
+them worth the detour: grenade blasts reach 360 units instead of 270 and deal 3 in the
+open (a full-health kill) and 2 to victims in other trenches; spray recovers in 8 ticks
+instead of 20 and its cone is a third wider. Charge time (24 ticks) and spray reach (850)
+are unchanged so existing throw-distance math and neural decoders keep working.
 
 ### Expanded island and navigation (rules 22)
 

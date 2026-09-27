@@ -122,14 +122,21 @@ suite "Hosted PWNET002 seats and the native ABI":
           let picked = argmaxActions(logits)
           for head in 0..<ActionSizes.len: actions[slot*ActionSizes.len+head] = picked[head].int32
           if world.cogs[slot].hp <= 0: inc deaths
+        var decided: array[Seats, bool]
+        for slot in 0..<Seats: decided[slot] = world.cogs[slot].hp > 0
         let commands = players.decide(world)
         for slot in 0..<Seats: require not players[slot].failed
         world.step(commands)
         require pw_step(handle, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
         require pw_state_hash(handle) == world.stateHash()
         inc steps
-      for slot in 0..<Seats:
-        check bits(players[slot].neural.state) == bits(states[slot*144 ..< (slot+1)*144])
+        # A dead seat's state is never read: the hosted host skips the seat while it is
+        # down, pw_observe flags a reset, and both clear the state before it plays again.
+        # So compare every seat that decided this tick, on every tick, not whichever seats
+        # happen to be alive at the end.
+        for slot in 0..<Seats:
+          if decided[slot]:
+            check bits(players[slot].neural.state) == bits(states[slot*144 ..< (slot+1)*144])
       checkpoint "seed " & $seed & " steps " & $steps & " state resets " & $stateResets & " dead seat-ticks " & $deaths
       check steps > 300 and stateResets >= Seats
       allDeaths += deaths

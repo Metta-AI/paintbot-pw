@@ -54,7 +54,7 @@ proc derivedStep*(w: var World, commands: array[Seats, Command], acc: var Derive
     else:
       for b in wp[].blasts:
         if b.tick == tick and b.owner == attacker.int32 and
-            distance2(b.pos, pos) <= (GrenadeBlastRadius+Radius).int64*(GrenadeBlastRadius+Radius):
+            distance2(b.pos, pos) <= (grenadeBlastRadius()+Radius).int64*(grenadeBlastRadius()+Radius):
           weapon = 1
     lastWeapon[victim] = weapon
     let (fw, fh, ft) = wp[].classes(wp[].cogs[attacker].pos)
@@ -82,7 +82,7 @@ proc read(h: pointer): (Derived, array[Seats*8, int32], array[Seats, array[4, in
 suite "Native per-weapon kills and hit locations":
   configureRules(NativeRules)
   let ticks = parseInt(getEnv("PW_WS_TICKS", "2400"))
-  let seeds = parseInt(getEnv("PW_WS_SEEDS", "3"))
+  let seeds = parseInt(getEnv("PW_WS_SEEDS", "4"))
   let baseSource = readFile(Base)
   test "arguments and reset":
     let h = pw_create(1, 240)

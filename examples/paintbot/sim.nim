@@ -212,7 +212,7 @@ when defined(pwTraining):
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
   var damageScale* {.threadvar.}: ptr array[Seats, int32]
 else:
-  var visionRulesVersion* = 39
+  var visionRulesVersion* = 40
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
