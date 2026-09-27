@@ -392,6 +392,31 @@ neuralInput(1, -99)
 """ & Act, userInputs = 2)
     check readBack.play(31, 100).len == 100
 
+  test "user-input actors above the old 32 cap: K = 34 and K = 64 load and play, K = 65 is rejected":
+    for k in [33, 34, 64]:
+      checkpoint "K = " & $k
+      # The last input is written and read back through the observation tail.
+      let players = bundle("""
+if worldTick > 1 and neuralObs(""" & $(ObservationSizeV2 + k - 1) & """) <> 777 then
+  neuralSetChoice(9, 9)
+end if
+neuralInput(""" & $(k - 1) & """, 777)
+neuralInput(0, worldTick)
+""" & Act, userInputs = k)
+      check not players[0].failed
+      check players[0].neural.userInputs.len == k
+      check players.play(31, 100).len == 100
+    let k64 = UserInputsContractHashes[63]
+    var zeros: seq[string]
+    for i in 0..<65: zeros.add "0"
+    check bundle(Act, userInputs = 64, manifest = manifestFor(k64, userInputs =
+      "{\"count\": 65, \"init\": [" & zeros.join(", ") & "]}"))[0].failed
+    for bad in ["neuralInput(64, 1)\n", "neuralObs(" & $(ObservationSizeV2 + 64) & ")\n"]:
+      checkpoint bad
+      let outOfRange = bundle(bad & Act, userInputs = 64)
+      discard outOfRange.decide(newWorld(3))
+      check outOfRange[0].failed
+
   test "user-input bundles are validated: contract, width and manifest must agree":
     check not bundle(Act, userInputs = 2)[0].failed
     check bundle(Act, userInputs = 2, init = "1, 2, 3")[0].failed                       # init length
@@ -413,5 +438,13 @@ neuralInput(1, -99)
       check bundle(Act, userInputs = 2, manifest = manifestFor(k2, userInputs = bad))[0].failed
     check parseUserInputs(parseJson("{\"count\": 3, \"init\": [1000000, -1000000, 0]}")) == @[1000000'i32, -1000000, 0]
     for k in 1..MaxUserInputs: check userInputsFromHash(UserInputsContractHashes[k-1]) == k
+    # The cap is 64; the v2u1 .. v2u32 hashes of the original 32-input table are unchanged.
+    check MaxUserInputs == 64
+    check UserInputsContractHashes[0] == "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04"
+    check UserInputsContractHashes[31] == "94373a1ce8a95bbcf99f8fcb1d2acc07e8fb19ab13c99591389ac2cff807e7c3"
+    check UserInputsContractHashes[63] == "18a5141bf7d78fdf93524757bf261f367cfebe3b489fb6f2988936375bb8f4aa"
+    var zeros65: seq[string]
+    for i in 0..<65: zeros65.add "0"
+    expect ValueError: discard parseUserInputs(parseJson("{\"count\": 65, \"init\": [" & zeros65.join(", ") & "]}"))
     check userInputsFromHash(ObservationContractV2Hash) == 0
     check userInputsContractId(7) == "paintbot-pw.rules39.obs.v2u7"
