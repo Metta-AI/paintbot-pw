@@ -179,6 +179,12 @@ proc applyGameConfig*(text: string) =
   if ffa():
     options.maximumTicks = min(options.maximumTicks, FfaMatchTicks.int32)
     options.seconds = options.maximumTicks div TickRate
+proc newLiveWorld*(seed, maximumTicks: int32): World =
+  ## A live match's world. It draws its kinship from its own seed, never from a replay this
+  ## process loaded earlier: loadRecording leaves kinshipOverride set so replay analysis (the
+  ## viewer's index, replay_stats) can rebuild the recorded world with newWorld.
+  kinshipOverride = none(Kinship)
+  newWorld(seed, maximumTicks)
 proc setup*() =
   when defined(coworld):
     options = coworldOptions(Seats)
@@ -200,7 +206,7 @@ proc setup*() =
   else:
     # The recording header and live simulation must use the same rules.
     configureRules(replayRulesVersion)
-    world = newWorld(options.seed, options.maximumTicks); recording.seed = options.seed
+    world = newLiveWorld(options.seed, options.maximumTicks); recording.seed = options.seed
     recording.endTick = world.endTick
     players = loadBots(options.botGroups, options.playerSlot)
     for i in 0..<Seats:

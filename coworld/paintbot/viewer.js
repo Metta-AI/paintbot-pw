@@ -825,7 +825,9 @@
       b.setAttribute("aria-pressed", String(i === selected));
       b.title = `${name(i)} · ${c.hp} HP · ${c.tags} tags · ${c.captures} captures`;
       b.setAttribute("aria-label", b.title);
-      b.querySelector(".pips").textContent = c.hp > 0 ? "●".repeat(c.hp) : "↻";
+      // Teams cogs have 3 HP (pips); FFA-kin cogs have state.maxHp (10), shown as a number.
+      const maxHp = state.maxHp ?? 3;
+      b.querySelector(".pips").textContent = c.hp <= 0 ? "↻" : maxHp > 3 ? `${c.hp}●` : "●".repeat(c.hp);
     }
   }
   function renderTimeline() {
@@ -1132,7 +1134,7 @@
     if (cog) {
       $("cog-name").textContent = `${name(inspected)} · Cog ${inspected + 1}`;
       $("cog-name").style.color = seatColor(inspected);
-      $("cog-health").textContent = `${cog.hp} / 3`;
+      $("cog-health").textContent = `${cog.hp} / ${state.maxHp ?? 3}`;
       $("cog-shots").textContent = state.combat?.[inspected]?.shots ?? "—";
       $("cog-hits").textContent = state.combat?.[inspected]?.hits ?? "—";
       $("cog-lives").textContent = w.equipment?.[inspected]?.lives ?? "—";

@@ -6,7 +6,7 @@
   const pickups = {
     grenadePickup: ['Grenade', 'A throwable paint grenade. Deals 2 damage in the open, 1 into another trench, or 6 inside the blast’s trench.'],
     sprayPickup: ['Spray can', 'Adds a reusable short-range paint spray that hits in a forward cone.'],
-    medkitPickup: ['Med kit', 'Restores health to 3 HP when collected by an injured cog.'],
+    medkitPickup: ['Med kit', 'Restores full health (3 HP; 10 in FFA-kin) when collected by an injured cog.'],
     armorPickup: ['Armor', 'Grants 3 armor points that absorb damage. While armored, gun cooldown is tripled.'],
     uniformPickup: ['Uniform', 'Disguises the cog as the opposing team. Attacking ends the disguise; friendly fire still applies.'],
   };

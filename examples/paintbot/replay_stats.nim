@@ -11,11 +11,29 @@
 ## Teams are named by side (Ember = even slots, Azure = odd), never "us" and "them": a league
 ## round swaps which side a policy takes from episode to episode, so the caller must map sides
 ## from that episode's roster (`policy_version_ids`, zipped with slots) and not assume.
+##
+## FFA-kin replays (gameVersion 1040) have no teams: they report each seat's raw score, heart
+## seconds, great-heart shares and kin-weighted score instead.
 import std/[os, sets, strformat]
 import game, sim
 
+proc ffaReport(path: string, r: Recording) =
+  var w = newWorld(r.seed, r.endTick)
+  for f in r.frames: w.step(f.commands, replayRulesVersion)
+  let kinScores = w.scores()
+  var standing = 0
+  for c in w.cogs:
+    if c.hp > 0: inc standing
+  echo &"{path.extractFilename}: FFA-kin, {w.tick} of {w.endTick} ticks, {standing} standing"
+  for i in 0..<Seats:
+    echo &"  seat {i:2}  {(if w.cogs[i].hp > 0: \"alive\" else: \"out  \")}  raw {w.seatScore[i].float / 10.0:6.1f}  " &
+         &"heart-seconds {w.heartSeconds[i]:4}  great {w.greatShare[i].float / 10.0:5.1f}  kin-weighted {kinScores[i]:7.1f}"
+
 proc report(path: string) =
   let r = loadRecording(path)
+  if ffa():
+    ffaReport(path, r)
+    return
   var w = newWorld(r.seed)
   var heartTicks, ahead, ffHits, ffGlory, quietHits, quietGlory: array[2, int]
   var seen: HashSet[string]
