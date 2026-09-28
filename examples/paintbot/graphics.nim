@@ -121,6 +121,9 @@ proc issueOrder(x, y: cfloat, kind, seat: cint) {.exportc: "pw_order", cdecl,
 proc selectSeat(value: cint) {.exportc: "pw_select", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = selected = clamp(value.int,
     -1, Seats-1)
+var kinFocus = 0 ## FFA-kin: seats of the families picked in the header (bit i = seat i).
+proc setKinFocus(mask: cint) {.exportc: "pw_kin_focus", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} = kinFocus = mask.int and 0xFFFF
 proc inspectObject(kind, id: cint) {.exportc: "pw_inspect", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   inspectedKind = kind.int
@@ -163,6 +166,18 @@ proc seatColor(seat: int): ColorRGBX =
 proc kinPercent(a, b: int): int32 =
   ## round(100 r) between two seats in FFA-kin; 0 in the teams game.
   if ffa() and a in 0..<Seats and b in 0..<Seats: activeKinship.rPercent(a, b) else: 0
+proc kinEmphasis(i: int): tuple[dim: bool, halo: int] =
+  ## FFA-kin cog emphasis, as kinhud.js cogEmphasis. Kin view (a selected cog) wins: kin get a
+  ## halo as bright as r and the unrelated dim. Otherwise, with families picked in the header,
+  ## their cogs get a halo and every other cog dims. Halo is an alpha, 0 for none.
+  if selected >= 0:
+    let r = kinPercent(selected, i)
+    result.dim = i != selected and r == 0
+    result.halo = if i != selected and r > 0: 40+r*2 else: 0
+  elif kinFocus != 0:
+    let on = (kinFocus shr i and 1) == 1
+    result.dim = not on
+    result.halo = if on: 110 else: 0
 proc position(p: Point, y = 0'f32): Vec3 = vec3(p.x.float32/100-32, y+(
     if replayRulesVersion >= 9: world.elevation(p).float32/100 else: 0'f32),
 
@@ -894,8 +909,8 @@ proc runGraphics*() =
         let lowered = if replayRulesVersion < 9 and world.trenchAt(c.pos) >=
             0: 0.55'f32 else: 0'f32
         if ffa():
-          # Kin view: with a cog selected, cogs unrelated to it fade to 40%.
-          let dim = selected >= 0 and i != selected and kinPercent(selected, i) == 0
+          # Kin view or picked families: the rest fade to 40%.
+          let dim = kinEmphasis(i).dim
           # tint.a < 1 takes the blended pass (characters.nim:207); visually verified for the dim.
           drawCharacter(scene, neutralModel, poses[i]-vec3(0, lowered, 0), facing, 0, rolling,
             tint = (if dim: color(1, 1, 1, 0.4) else: color(1, 1, 1, 1)))
@@ -1145,12 +1160,11 @@ proc runGraphics*() =
       if c.hp <= 0 or not shown(i): continue
       let p = poses[i]
       if ffa():
-        # Kin view: kin of the selected cog get a halo as bright as their relatedness; the
-        # unrelated fade to 40%.
-        let r = kinPercent(selected, i)
-        let dim = selected >= 0 and i != selected and r == 0
-        if selected >= 0 and i != selected and r > 0:
-          shapes.addCircle(p+vec3(0, 0.02, 0), 1.3, rgbx(255, 240, 170, uint8(40+r*2)))
+        # Kin view: kin of the selected cog get a halo as bright as their relatedness; with
+        # families picked in the header, their cogs get the halo. Everyone else fades to 40%.
+        let (dim, halo) = kinEmphasis(i)
+        if halo > 0:
+          shapes.addCircle(p+vec3(0, 0.02, 0), 1.3, rgbx(255, 240, 170, uint8(halo)))
         shapes.addCircle(p+vec3(0, 0.04, 0), 0.65, kinColor(i, if dim: 102'u8 else: 255'u8))
         shapes.addCircle(p+vec3(0, 0.05, 0), 0.48, rgbx(43, 68, 55, if dim: 102'u8 else: 255'u8))
       else:
