@@ -21,13 +21,16 @@ SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
 # "forbid_objectives": [9, 10], "strafe_legs": {...}, "aim_snap": {"max_angle_deg": 22.5},
 # "steady_shot": {}, "aim_retarget": {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000},
 # "shot_gate": {"max_range": 5250}, "spray_aim": {"max_range": 850},
-# "spray_gate": {"max_teammates": 0, "min_enemies": 1}}.
+# "spray_gate": {"max_teammates": 0, "min_enemies": 1},
+# "joint_sampling": {"when": {"head": 2, "value": 1}, "head": 0, "offsets": [51 numbers]}}.
 # Every key must be one the host knows and every value the declared type, so a bundle
 # asking for an option this release lacks is rejected at staging rather than played
 # without it. The rules here mirror neural_host.nim's exactly.
 DECODER_OPTIONS = {"fire_hold_teammates": (bool, dict), "sampling": dict, "forbid_objectives": list, "strafe_legs": dict,
                    "aim_snap": dict, "steady_shot": dict, "aim_retarget": dict, "shot_gate": dict,
-                   "spray_aim": dict, "spray_gate": dict}
+                   "spray_aim": dict, "spray_gate": dict, "joint_sampling": dict}
+ACTION_SIZES = (51, 25, 2, 2, 2)  # both action contracts
+MAX_JOINT_OFFSET = 1000
 SAMPLING_HEADS = 5
 MIN_SAMPLING_TEMPERATURE, MAX_SAMPLING_TEMPERATURE = 0.01, 10.0
 OBJECTIVE_CANDIDATES = 51  # movement-head size in both action contracts
@@ -254,6 +257,44 @@ def validate_spray_gate(value):
     """decoder.spray_gate: {"max_teammates": t, "min_enemies": e}, both optional (0, 1), integers,
     t within 0 .. 7 and e within 0 .. 8."""
     return _validate_int_fields("spray_gate", value, SPRAY_GATE_DEFAULTS)
+
+
+def validate_joint_sampling(value):
+    """decoder.joint_sampling: {"when": {"head": h, "value": v}, "head": g, "offsets": [...]} (neural_host.nim
+    parseJointSampling): h != g head indices, v a choice of head h, ACTION_SIZES[g] finite numbers in [-1000, 1000]."""
+    def head_index(x, name):
+        if isinstance(x, bool) or not isinstance(x, int) or not 0 <= x < len(ACTION_SIZES):
+            raise ValueError("decoder.joint_sampling.%s must be a head index 0 .. %d" % (name, len(ACTION_SIZES) - 1))
+        return x
+    for key in value:
+        if key not in ("when", "head", "offsets"):
+            raise ValueError("unknown decoder.joint_sampling field: " + str(key))
+    if not all(k in value for k in ("when", "head", "offsets")):
+        raise ValueError("decoder.joint_sampling needs when, head and offsets")
+    when = value["when"]
+    if not isinstance(when, dict):
+        raise ValueError("decoder.joint_sampling.when must be an object")
+    for key in when:
+        if key not in ("head", "value"):
+            raise ValueError("unknown decoder.joint_sampling.when field: " + str(key))
+    if "head" not in when or "value" not in when:
+        raise ValueError("decoder.joint_sampling.when needs head and value")
+    when_head = head_index(when["head"], "when.head")
+    if isinstance(when["value"], bool) or not isinstance(when["value"], int):
+        raise ValueError("decoder.joint_sampling.when.value must be an integer")
+    head = head_index(value["head"], "head")
+    if head == when_head:
+        raise ValueError("decoder.joint_sampling.head must differ from when.head")
+    if not 0 <= when["value"] < ACTION_SIZES[when_head]:
+        raise ValueError("decoder.joint_sampling.when.value must be a choice of head %d" % when_head)
+    offsets = value["offsets"]
+    if not isinstance(offsets, list) or len(offsets) != ACTION_SIZES[head]:
+        raise ValueError("decoder.joint_sampling.offsets must list %d numbers" % ACTION_SIZES[head])
+    for x in offsets:
+        if isinstance(x, bool) or not isinstance(x, (int, float)):
+            raise ValueError("decoder.joint_sampling.offsets must be numbers")
+        if not (-MAX_JOINT_OFFSET <= x <= MAX_JOINT_OFFSET):
+            raise ValueError("decoder.joint_sampling.offsets must be within [-1000, 1000]")
 
 
 def validate_sampling(value):
@@ -560,6 +601,8 @@ def unpack_package(data):
                 validate_spray_aim(value)
             elif key == "spray_gate":
                 validate_spray_gate(value)
+            elif key == "joint_sampling":
+                validate_joint_sampling(value)
         if "steady_shot" in decoder and STEADY_MOVEMENT in decoder.get("forbid_objectives", []):
             raise ValueError("decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
     user_inputs = 0
