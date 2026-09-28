@@ -109,8 +109,9 @@ jobs:
             echo "$sha is already deployed as $last."
             echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          # Paths that never reach the paintbot-pw image or its manifest. Anything else deploys.
-          ignore='^(tests/|\.github/|coworld/paintbot/DEPLOYMENT\.md$|examples/(call_to_adventure|gods_of_the_arena|heartleaf|light_vs_dark)/|coworld/(cta|gota|lvd)/)'
+          # Paths that never reach the paintbot-pw image or its manifest (tools/slurm/ holds cluster
+          # job scripts). Anything else deploys.
+          ignore='^(tests/|\.github/|coworld/paintbot/DEPLOYMENT\.md$|examples/(call_to_adventure|gods_of_the_arena|heartleaf|light_vs_dark)/|coworld/(cta|gota|lvd)/|tools/slurm/)'
           shipped="$(git diff --name-only "$base" "$sha" | grep -Ev "$ignore" || true)"
           if [ -z "$shipped" ]; then
             echo "Nothing shipped changed since $last ($base); not deploying."
