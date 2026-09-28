@@ -178,6 +178,13 @@
       "type": "player",
       "file": "players/jev.bas",
       "description": "The BASIC baseline steered by the host advisor oracle (Jev): one cog per squad has Jev pick the squad objective from code-ranked capture candidates and relays it by shout; plays exactly like the baseline where no oracle is configured."
+    },
+    {
+      "id": "ffa-baseline",
+      "name": "BASIC FFA-kin Baseline",
+      "type": "player",
+      "file": "players/ffa.bas",
+      "description": "Heartland baseline: never shoots siblings (kin >= 50), targets strangers that threaten it or its kin, captures hearts no relative holds or is taking, and joins great hearts when others gather."
     }
   ],
   "variants": [
@@ -506,6 +513,66 @@
         ],
         "seed": 2026,
         "max_ticks": 14400
+      }
+    },
+    {
+      "id": "heartland",
+      "name": "Heartland (FFA-kin)",
+      "description": "Sixteen separate players in hidden families: one life each, lone-cog heart captures, two great hearts that need three cogs, and a kin-weighted score (sum of r times each cog's points). Baseline: players/ffa.bas.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 8640,
+        "mode": "ffa_kin"
       }
     }
   ],
