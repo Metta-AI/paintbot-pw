@@ -87,6 +87,23 @@
             },
             "additionalProperties": false
           }
+        },
+        "map": {
+          "type": "string",
+          "enum": [
+            "",
+            "twin-mesas",
+            "archipelago",
+            "serpent-river",
+            "crater",
+            "terraces",
+            "deep-forest",
+            "badlands",
+            "atoll",
+            "highlands",
+            "delta"
+          ],
+          "description": "Rules 41: a generated map (coworld/paintbot/tools/mapgen); \"\" or absent is Heartwick island."
         }
       }
     },
@@ -499,6 +516,1106 @@
         ],
         "seed": 2026,
         "max_ticks": 14400
+      }
+    },
+    {
+      "id": "map-twin-mesas",
+      "name": "Twin Mesas",
+      "description": "Two ramped mesas overlook a central pond; high ground is the prize. Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 14400,
+        "map": "twin-mesas"
+      }
+    },
+    {
+      "id": "map-archipelago",
+      "name": "Archipelago",
+      "description": "Five islands joined by slow wading sandbars. Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 14400,
+        "map": "archipelago"
+      }
+    },
+    {
+      "id": "map-serpent-river",
+      "name": "Serpent River",
+      "description": "An S-bend river splits the field; three dry fords. Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 14400,
+        "map": "serpent-river"
+      }
+    },
+    {
+      "id": "map-crater",
+      "name": "Crater",
+      "description": "A ringed caldera with four breaches around a central pond. Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 14400,
+        "map": "crater"
+      }
+    },
+    {
+      "id": "map-terraces",
+      "name": "Terraces",
+      "description": "Three stepped terraces climb to a king-of-the-hill crown. Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 14400,
+        "map": "terraces"
+      }
+    },
+    {
+      "id": "map-deep-forest",
+      "name": "Deep Forest",
+      "description": "Dense woodland with trails and a diagonal brook. Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 14400,
+        "map": "deep-forest"
+      }
+    },
+    {
+      "id": "map-badlands",
+      "name": "Badlands",
+      "description": "Cliff walls carve corridors; rocks for cover. Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 14400,
+        "map": "badlands"
+      }
+    },
+    {
+      "id": "map-atoll",
+      "name": "Atoll",
+      "description": "A ring island around a wadeable lagoon with a central spit. Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 14400,
+        "map": "atoll"
+      }
+    },
+    {
+      "id": "map-highlands",
+      "name": "Highlands",
+      "description": "Rolling hills with many contested hilltops. Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 14400,
+        "map": "highlands"
+      }
+    },
+    {
+      "id": "map-delta",
+      "name": "Delta",
+      "description": "Four channels cut the map into bands; fords are chokepoints. Sixteen cogs in two interleaved teams.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player 0"
+          },
+          {
+            "name": "Player 1"
+          },
+          {
+            "name": "Player 2"
+          },
+          {
+            "name": "Player 3"
+          },
+          {
+            "name": "Player 4"
+          },
+          {
+            "name": "Player 5"
+          },
+          {
+            "name": "Player 6"
+          },
+          {
+            "name": "Player 7"
+          },
+          {
+            "name": "Player 8"
+          },
+          {
+            "name": "Player 9"
+          },
+          {
+            "name": "Player 10"
+          },
+          {
+            "name": "Player 11"
+          },
+          {
+            "name": "Player 12"
+          },
+          {
+            "name": "Player 13"
+          },
+          {
+            "name": "Player 14"
+          },
+          {
+            "name": "Player 15"
+          }
+        ],
+        "slots": [
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          },
+          {
+            "team": "red"
+          },
+          {
+            "team": "blue"
+          }
+        ],
+        "seed": 2026,
+        "max_ticks": 14400,
+        "map": "delta"
       }
     }
   ],

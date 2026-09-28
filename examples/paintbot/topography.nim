@@ -1,5 +1,7 @@
 ## Centimetre terrain heights, shared by simulation and the Polyworld layers.
 import std/math
+import maps
+export maps
 const TerraceHeight* = 250
 when defined(pwTraining):
   var wideRamps* {.threadvar.}: bool
@@ -45,6 +47,7 @@ proc riverCenter*(z: int): int =
 
 proc riverBlend*(x, z: int): int =
   ## GOTA's cubic bank profile, using centimetres and integer arithmetic.
+  if activeMap() >= 0: return (if mapHeight(x, z) < -100: 1000 else: 0) # a map's wet ground
   if not riverTerrain: return 0
   if lakeTerrain:
     # A closed, irregular basin with a broad wading shore, entirely inland.
@@ -86,6 +89,7 @@ proc riverBlend*(x, z: int): int =
     (RiverBankWidth.int64*RiverBankWidth.int64*RiverBankWidth.int64))
 
 proc islandMarginDirect*(x,z:int):int =
+  if activeMap() >= 0: return mapMargin(x, z)
   # Rounded headlands with asymmetric coves, in normalized coast units.
   let nx=abs(x-3200).int64*1000 div (if expandedIsland:7733 else:5800)
   let nz=abs(z-2000).int64*1000 div (if expandedIsland:4575 else:3050)
@@ -101,7 +105,7 @@ proc landShift(x,z:int):tuple[x,z:int] =
   (landWave(z+350,2900,360)+landWave(x+z,1700,70),
    landWave(x+600,3200,230)+landWave(z-x,1900,55))
 proc landCoordinates*(x,z:int):tuple[x,z:int] =
-  if not organicTerrain:return (x,z)
+  if not organicTerrain or activeMap() >= 0:return (x,z)
   let s=landShift(x,z)
   if symmetricTerrain:
     # Odd under the half turn, so mirrored points land on mirrored ground: the terraces,
@@ -150,6 +154,7 @@ proc forestHeight*(x,z:int):int =
   height*min(edge,500) div 500
 proc islandMargin*(x,z:int):int
 proc forestLots*():seq[tuple[x,z,radius:int]] =
+  if activeMap() >= 0: return # a map carries its own cover
   # Jittered groves, not a wall: trails and objective clearings stay open.
   for z in countup((if expandedIsland: -2700 else: -1000),(if expandedIsland:6700 else:4800),400):
     for x in countup((if expandedIsland: -4600 else: -2500),(if expandedIsland:11000 else:8900),400):
@@ -188,9 +193,11 @@ proc baseTerrainHeight(x, z: int): int =
   int(-150'i64*along.int64*across.int64*crossing.int64 div (400*250*240))
 
 proc raisedHeight*(x,z:int):int =
+  if activeMap() >= 0: return 0 # a map's high ground is terrain, not terrace decks
   let p=landCoordinates(x,z)
   baseRaisedHeight(p.x,p.z)
 proc terrainHeightDirect*(x,z:int):int =
+  if activeMap() >= 0: return mapHeight(x, z)
   let p=landCoordinates(x,z)
   result=baseTerrainHeight(p.x,p.z)
   if riverTerrain:
@@ -224,16 +231,19 @@ when defined(pwTraining):
     TerrainTable = object
       key: int
       blocks: array[TerrainCacheBlocksX*TerrainCacheBlocksZ, Atomic[ptr TerrainBlock]]
-  var terrainTables: array[2048, Atomic[ptr TerrainTable]] # one per flag combination
+  # One per flag combination and map (the island's own terrain is map slot 0).
+  var terrainTables: array[2048*(MapNames.len+1), Atomic[ptr TerrainTable]]
   var terrainCurrent {.threadvar.}: ptr TerrainTable
   proc terrainFlagsKey(): int =
     for i, flag in [wideRamps, wilderness, deepWilderness, organicTerrain, islandTerrain,
         expandedIsland, riverTerrain, curvedRiver, fractalRiver, lakeTerrain, symmetricTerrain]:
       if flag: result = result or (1 shl i)
+    result = result or ((activeMap()+1) shl 11)
   proc refreshTerrainTable*() =
     ## Binds this thread's lookups to the table for its current flags. configureRules
     ## calls it; a training build that sets terrain flags by hand must call it too,
-    ## because the lookup itself reads one thread variable, never the eleven flags.
+    ## because the lookup itself reads one thread variable, never the eleven flags. The same
+    ## holds for setActiveMap.
     let key = terrainFlagsKey()
     if terrainCurrent != nil and terrainCurrent.key == key: return
     var table = terrainTables[key].load(moAcquire)

@@ -19,6 +19,7 @@ type
     seed*: int32 = 2026
     maxTicks*: int32 = DefaultDurationTicks
     spawnIntervalTicks*: int32 = 240
+    map*: string ## optional game-specific map name; "" is the game's default
   CoworldSeat* = object
     slot*: int
     fileUri*, contentHash*: string
