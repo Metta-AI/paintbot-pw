@@ -14,7 +14,10 @@
 '      takes the one at its own rank among its living, idle siblings: no two siblings stand on
 '      the same heart, which would pause the capture for both.
 '   4. Guard: with two hearts held (or nothing left to take), stand on our nearest heart; an
-'      owner inside the ring blocks any capture.
+'      owner inside the ring blocks any capture. After 10 s with no stranger near, walk the
+'      rounds of our hearts instead. When a stranger starts taking one of ours, go back to it.
+'   5. Late game (no neutral heart left): go to a ready great heart and wait there while three
+'      or more cogs live; otherwise walk into the nearest stranger-owned heart to steal it.
 ' Movement, aim lead, dodge legs and the dry-route detour are base.bas's. Every loop is bounded by
 ' the 16 seats, the heart count or a fixed count; the heaviest tick stays far under the budget.
 dim oldX(16)
@@ -22,9 +25,11 @@ dim oldY(16)
 dim oldHp(16)
 dim lastSeen(16)
 dim hurtUntil(16)
+dim spokeX(16)
+dim spokeY(16)
+dim spokeTick(16)
 dim capBy(16)
 dim taken(16)
-dim held(16)
 dim avoidUntil(16)
 dim pickupMemoryX(32)
 dim pickupMemoryY(32)
@@ -107,8 +112,28 @@ sub planLeg(minTicks, maxTicks)
   end if
 end sub
 
-' Is a visible relative (kin >= 25) standing within 95 units of the segment from us to (ex, ey)?
-' Into blocked.
+' Would our shot at (ex, ey) touch a relative (kin >= 25) we can see or hear? A gun ray: one
+' within 130 units of the segment (a little past the target too, and a little behind us, since
+' the ray leaves five ticks after the order). A spray can: one inside the whole cone, which
+' reaches 850 (+ a body radius) and is along * 4/5 + a body radius wide on each side, plus a
+' 40-unit margin for movement during the burst. Into blocked.
+sub kinAt(ox, oy)
+  along = (ox * sx + oy * sy) / reach
+  across = (ox * sy - oy * sx) / reach
+  if across < 0 then
+    across = 0 - across
+  end if
+  if hasSpray then
+    if along > -40 and along <= 945 and across <= along * 4 / 5 + 95 then
+      blocked = 1
+    end if
+  else
+    if along > -40 and along < reach + 120 and across < 130 then
+      blocked = 1
+    end if
+  end if
+end sub
+
 sub kinInLine(ex, ey)
   blocked = 0
   sx = ex - selfX
@@ -119,16 +144,16 @@ sub kinInLine(ex, ey)
     k = 0
     while k < 16
       if k <> selfId and kin(k) >= 25 and visible(k) then
-        ox = playerX(k) - selfX
-        oy = playerY(k) - selfY
-        along = (ox * sx + oy * sy) / reach
-        across = (ox * sy - oy * sx) / reach
-        if across < 0 then
-          across = 0 - across
-        end if
-        if along > 0 and along < reach + 120 and across < 95 then
-          blocked = 1
-        end if
+        kinAt(playerX(k) - selfX, playerY(k) - selfY)
+      end if
+      k = k + 1
+    wend
+    ' Relatives beside or behind us are outside the vision cone; where they last spoke from, in
+    ' the past six ticks, stands in for where they are.
+    k = 0
+    while k < 16
+      if k <> selfId and worldTick - spokeTick(k) <= 6 and kin(k) >= 25 and not visible(k) then
+        kinAt(spokeX(k) - selfX, spokeY(k) - selfY)
       end if
       k = k + 1
     wend
@@ -158,6 +183,11 @@ if started = 0 then
   lastX = selfX
   lastY = selfY
   lastHp = selfHp + armorHp
+  i = 0
+  while i < 16
+    spokeTick(i) = -100
+    i = i + 1
+  wend
 end if
 myVX = selfX - lastX
 myVY = selfY - lastY
@@ -165,15 +195,17 @@ if gunWait > 0 then
   gunWait = gunWait - 1
 end if
 
-' Drop an unreachable heart after three seconds without meaningful progress toward it.
+' Drop an unreachable heart for a minute after three seconds without meaningful progress while
+' still outside its 140-unit ring. (Some shore hearts cannot be reached from every side: a cog
+' can stall 300 units short of one in the lake.)
 if worldTick mod 72 = 0 then
   dx = selfX - progressX
   dy = selfY - progressY
   if dx * dx + dy * dy < 40000 and objective >= 0 and objective < 16 then
     ex = controlX(objective) - selfX
     ey = controlY(objective) - selfY
-    if ex * ex + ey * ey > 160000 then
-      avoidUntil(objective) = worldTick + 360
+    if ex * ex + ey * ey > 22500 then
+      avoidUntil(objective) = worldTick + 1440
     end if
   end if
   progressX = selfX
@@ -193,10 +225,18 @@ if selfHp + armorHp < lastHp then
   end if
 end if
 lastHp = selfHp + armorHp
+' In a fight, say where we stand every fourth tick, so relatives who cannot see us do not shoot
+' through us. Everyone we hear is remembered by where they spoke from.
+if worldTick - lastThreat < 48 and (worldTick + selfId) mod 4 = 0 then
+  shout(strNew("at"))
+end if
 i = 0
-while i < heardCount() and i < 8
+while i < heardCount() and i < 24
   s = heardSlot(i)
   if s >= 0 and s < 16 then
+    spokeX(s) = heardX(i)
+    spokeY(s) = heardY(i)
+    spokeTick(s) = worldTick
     if kin(s) >= 25 and strEq(heardText(i), strNew("hurt")) then
       hurtX = heardX(i)
       hurtY = heardY(i)
@@ -215,6 +255,7 @@ while i < 16
   i = i + 1
 wend
 if hurtX >= 0 then
+  lastThreat = worldTick
   culprit = -1
   culpritD = 36000000
   i = 0
@@ -235,13 +276,11 @@ if hurtX >= 0 then
   end if
 end if
 
-' Hearts. capBy(m) = 1 while seat m is capturing something, held(m) = hearts seat m owns, and
-' mine = hearts we own.
+' Hearts. capBy(m) = 1 while seat m is capturing something; mine = hearts we own.
 i = 0
 while i < 16
   capBy(i) = 0
   taken(i) = 0
-  held(i) = 0
   i = i + 1
 wend
 mine = 0
@@ -260,9 +299,6 @@ while j < heartCount() and j < 16
     objective = j
   end if
   owner = heartOwner(j)
-  if owner >= 0 then
-    held(owner) = held(owner) + 1
-  end if
   if owner = selfId then
     mine = mine + 1
     dx = controlX(j) - selfX
@@ -283,13 +319,14 @@ while j < heartCount() and j < 16
   j = j + 1
 wend
 
-' Our rank among living siblings that are still taking hearts (lower seats first: not already
-' capturing, fewer than two held), then the heart at that rank.
+' Our rank among living siblings that are still taking hearts (lower seats first, not already
+' capturing), then the heart at that rank. A cog holding two hearts stops taking more and
+' guards them (taking more whenever it was quiet led to more deaths and matches ending early).
 if objective < 0 and mine < 2 then
   rank = 0
   i = 0
   while i < selfId
-    if kin(i) >= 50 and seatAlive(i) and capBy(i) = 0 and held(i) < 2 then
+    if kin(i) >= 50 and seatAlive(i) and capBy(i) = 0 then
       rank = rank + 1
     end if
     i = i + 1
@@ -302,7 +339,7 @@ if objective < 0 and mine < 2 then
     while j < heartCount() and j < 16
       owner = heartOwner(j)
       c = controlCaptureTeam(j)
-      ok = taken(j) = 0 and owner <> selfId
+      ok = taken(j) = 0 and owner <> selfId and avoidUntil(j) <= worldTick
       if ok and owner >= 0 then
         ok = kin(owner) < 50
       end if
@@ -313,9 +350,6 @@ if objective < 0 and mine < 2 then
         dx = (controlX(j) - homeX) / 8
         dy = (controlY(j) - homeY) / 8
         cost = dx * dx + dy * dy
-        if avoidUntil(j) > worldTick then
-          cost = cost + 4000000
-        end if
         if cost < choiceCost then
           choice = j
           choiceCost = cost
@@ -335,16 +369,76 @@ if objective < 0 and mine < 2 then
   wend
 end if
 
+' Late game: no neutral heart is left, so holding still would freeze the match. While three or
+' more cogs are alive and a great heart is ready, go to it and wait (a cog waiting there invites
+' the others); give up for 20 s after 20 s of waiting in the zone with no capture. Otherwise
+' walk into the nearest heart a stranger (kin < 25) owns and hold the ring: that pauses or
+' steals it, and its owner, at the heart we want, is a target.
+neutral = 0
+j = 0
+while j < heartCount() and j < 16
+  if heartOwner(j) < 0 and avoidUntil(j) <= worldTick then
+    neutral = 1
+  end if
+  j = j + 1
+wend
+living = 0
+i = 0
+while i < 16
+  if seatAlive(i) then
+    living = living + 1
+  end if
+  i = i + 1
+wend
+lateGreat = 0
+if neutral = 0 then
+  g = 0
+  while g < greatHeartCount()
+    if greatHeartDormant(g) = 0 and living >= 3 and worldTick >= greatSkipUntil then
+      lateGreat = 1
+    end if
+    g = g + 1
+  wend
+  if lateGreat = 0 and capBy(selfId) = 0 then
+    steal = -1
+    stealD = 2147483647
+    j = 0
+    while j < heartCount() and j < 16
+      owner = heartOwner(j)
+      c = controlCaptureTeam(j)
+      ok = owner >= 0 and owner <> selfId and avoidUntil(j) <= worldTick
+      if ok then
+        ok = kin(owner) < 25
+      end if
+      if ok and c >= 0 and c <> selfId then
+        ok = kin(c) < 50
+      end if
+      if ok then
+        dx = (controlX(j) - selfX) / 8
+        dy = (controlY(j) - selfY) / 8
+        if dx * dx + dy * dy < stealD then
+          steal = j
+          stealD = dx * dx + dy * dy
+        end if
+      end if
+      j = j + 1
+    wend
+    if steal >= 0 then
+      objective = steal
+    end if
+  end if
+end if
+
 ' Great hearts: the nearest ready one with two or more other cogs in its zone or within 600.
-' A cog with no heart to take or hold waits at the nearest ready one instead, so a third cog
-' passing by finds two already there.
-idle = objective < 0 and nearestMine < 0 and defend < 0
+' A cog with no heart to take or hold (or in the late game, above) waits at the nearest ready
+' one instead, so a third cog passing by finds two already there.
+idle = (objective < 0 and nearestMine < 0 and defend < 0) or lateGreat
 greatGoal = -1
 greatX = 0
 greatY = 0
 g = 0
 while g < greatHeartCount()
-  if greatHeartDormant(g) = 0 then
+  if greatHeartDormant(g) = 0 and living >= 3 and worldTick >= greatSkipUntil then
     gx = greatHeartX(g)
     gy = greatHeartY(g)
     dx = gx - selfX
@@ -385,6 +479,18 @@ while g < greatHeartCount()
   g = g + 1
 wend
 
+' Waiting in a great-heart zone that never fills: after 20 s, leave great hearts alone for 20 s.
+' (With fewer than three cogs alive none can ever be captured, so none is chosen at all.)
+if greatGoal >= 0 and greatD2 <= 40000 then
+  greatWait = greatWait + 1
+  if greatWait > 480 then
+    greatSkipUntil = worldTick + 480
+    greatWait = 0
+  end if
+else
+  greatWait = 0
+end if
+
 goalX = homeX
 goalY = homeY
 holding = 0
@@ -395,8 +501,23 @@ if objective >= 0 then
   mode = 3
 else
   if nearestMine >= 0 then
-    goalX = controlX(nearestMine)
-    goalY = controlY(nearestMine)
+    post = nearestMine
+    if worldTick - lastThreat > 240 and mine >= 2 then
+      ' Quiet: walk the rounds of our hearts, one post every 20 s, rather than parking.
+      want = (worldTick / 480 + selfId) mod mine
+      j = 0
+      while j < heartCount() and j < 16
+        if heartOwner(j) = selfId then
+          if want = 0 then
+            post = j
+          end if
+          want = want - 1
+        end if
+        j = j + 1
+      wend
+    end if
+    goalX = controlX(post)
+    goalY = controlY(post)
     mode = 4
   end if
 end if
@@ -435,6 +556,7 @@ while i < 16
       d2 = dx * dx + dy * dy
       if d2 < 4000000 then
         threatsNear = threatsNear + 1
+        lastThreat = worldTick
       end if
       spare = 0
       if greatGoal >= 0 and hurtUntil(i) <= worldTick then

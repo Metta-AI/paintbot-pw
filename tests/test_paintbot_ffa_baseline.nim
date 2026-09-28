@@ -1,5 +1,5 @@
 ## The FFA-kin baseline players/ffa.bas: sixteen copies finish a match with points on the board,
-## and they hit relatives (r >= 1/2) less, per pair, than strangers (r = 0). Hits are counted
+## and they hit relatives (r >= 1/2) under a quarter as often, per pair, as strangers (r = 0). Hits are counted
 ## through sim's observeHit hook, which the engine calls on every damage event; nothing here
 ## changes the rules.
 import std/[unittest, os, strformat]
@@ -70,7 +70,8 @@ suite "FFA-kin baseline ffa.bas":
     kinRate /= seeds.float
     strangerRate /= seeds.float
     echo &"mean hits per kin pair {kinRate:.3f}, per stranger pair {strangerRate:.3f}"
-    check kinRate < strangerRate
+    # Siblings are never targeted; what remains is crossfire and splash.
+    check kinRate < strangerRate / 4
 
   test "a seed-drawn match finishes with points on the board":
     let stats = play(2026)
