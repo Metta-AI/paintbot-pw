@@ -1,0 +1,85 @@
+# CI test manifest. To add a new CI test, add it to tests/ci_tests.txt (this file).
+#
+# .github/workflows/build.yml runs these on every push and PR, on ubuntu-latest and
+# macos-latest (and on windows-latest through windows.yml), split across parallel shards by
+# tests/run_ci_shard.py. Each line is one command, run from the repository root with no shell,
+# so write it the same way on every OS (no pipes, redirects, globs or env assignments).
+#
+# Optional tags go in square brackets before the command:
+#   cwd=<dir>    run in <dir> (relative to the repository root) instead of the root
+#   posix-only   skip on Windows
+#
+# Shards are balanced with the per-command seconds in tests/ci_durations.json. A new command
+# without an entry there counts as 60 s; add its measured time when you know it. Each command
+# must be self-contained: shards run on separate machines, so a command cannot rely on files
+# another command wrote. Check the plan with: python tests/run_ci_shard.py --check --of 5
+
+nim r tests/tests.nim
+nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2 tests/test_profiles.nim
+nim r -d:mapProfileTracePath=tmp/map-profile-test.json -d:profileFrames=2 tests/test_profiles.nim
+nim r tests/test_gota_sim.nim -- --bot:examples/gods_of_the_arena/players/base.bas:10
+nim r -d:headless tests/test_recordings.nim --bot examples/call_to_adventure/players/base.bas:4
+nim r -d:headless -d:recordGota tests/test_recordings.nim --bot examples/gods_of_the_arena/players/base.bas:10
+nim r -d:headless -d:recordHlf tests/test_recordings.nim --bot examples/heartleaf/players/base.bas:9
+nim r -d:headless -d:recordLvd tests/test_recordings.nim --bot examples/light_vs_dark/players/base.bas:2
+nim c -d:headless examples/gods_of_the_arena/gota.nim
+nim c -d:headless examples/call_to_adventure/cta.nim
+nim c -d:headless examples/light_vs_dark/lvd.nim
+nim c -d:headless examples/heartleaf/heartleaf.nim
+nim r tests/test_paintbot_river.nim
+nim r tests/test_paintbot_respawns.nim
+nim r tests/test_paintbot_barrage.nim
+nim r tests/test_paintbot_scoring.nim
+nim r tests/test_paintbot_heart_meter.nim
+nim r tests/test_paintbot_elimination.nim
+nim r tests/test_paintbot_celebration.nim
+nim r tests/test_paintbot_capture.nim
+nim r tests/test_paintbot_big_hearts.nim
+nim r tests/test_paintbot_sound.nim
+nim r tests/test_paintbot_heart_spawns.nim
+nim r tests/test_paintbot_uniform.nim
+nim r tests/test_paintbot_human.nim
+nim r tests/test_paintbot_replay.nim
+nim r -d:headless tests/test_paintbot_live_rules.nim --bot:examples/paintbot/players/base.bas:16
+nim r tests/test_paintbot_oracle.nim
+nim r tests/test_paintbot_glory.nim
+nim r tests/test_paintbot_glory_hearts.nim
+nim r tests/test_paintbot_glory_behind.nim
+nim r tests/test_paintbot_weapon_buff.nim
+nim r tests/test_paintbot_projection.nim
+nim r -d:headless tests/test_paintbot_neural_contract.nim
+nim r -d:headless tests/test_paintbot_neural_obs_v2.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_seat_stats.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_scripts.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_command.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_curriculum.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_contract_v2.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_respawn_memory.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold_radius.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_sampling.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_river_strafe.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_snap_steady.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_retarget_gate.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_spray.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_weapon_stats.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
+nim r -d:headless tests/test_paintbot_neural_host.nim
+nim r -d:headless tests/test_paintbot_neural_basic_io.nim
+nim r -d:headless tests/test_paintbot_neural_net2.nim
+nim r -d:headless tests/test_paintbot_neural_joint.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim
+python -m unittest discover -s coworld/paintbot -p test_neural_package.py
+nim r tests/test_paintbot_jev_baseline.nim
+node tests/test_paintbot_inspector.js
+node tests/test_paintbot_webinputs.js
+python coworld/paintbot/tools/make_jev_baseline.py --check
+
+# The hosted runtime is Linux-only; its file-URI handling is POSIX, so skip Windows here.
+[posix-only cwd=coworld/paintbot] python -m unittest test_runtime
+[posix-only cwd=coworld/paintbot] python -m unittest test_semantic_trajectory
+[posix-only] python coworld/paintbot/test_training_bridge.py
