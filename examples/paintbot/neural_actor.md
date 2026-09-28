@@ -95,7 +95,7 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 
 A PWNET002 actor may name any observation contract the host knows, including v2u<K>
 (`neural_basic.md`, manifest `user_inputs`): its input count is then 506 + K, the K user inputs are
-ordinary input columns 506.. (DENSE, CONCAT_INPUT, ENTITY_ATTN and TOKEN_MLP slices may read them), and the operation
+ordinary input columns 506.. (DENSE, CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP and SEGMENT_NEAR slices may read them), and the operation
 count includes them like any other input. Staging reads the input count and contract from the PWNET002
 header. The file length must be exact: no trailing bytes. The package manifest binds the SHA-256
 of the whole file, as for PWNET001. Every weight must be finite; every unused `param` word
@@ -106,6 +106,8 @@ The network carries one vector from layer to layer. Before layer 0 it is the obs
 current width), writes its output, and that output becomes the current vector. The last
 layer's width must equal O. The recurrent state is every MINGRU layer's state,
 concatenated in layer order (at most 4096 floats); a stack without MINGRU keeps no state.
+Layers that read "the input" (CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP) read the raw observation, or,
+when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 
 | type | layer | params | payload |
 |---|---|---|---|
@@ -118,10 +120,12 @@ concatenated in layer order (at most 4096 floats); a stack without MINGRU keeps 
 | 7 | TOKEN_MLP | `tokens, segments, valid_segment, valid_index, layers` | segment descriptors, widths, then tensors (below) |
 | 8 | TOKEN_MIX | `source, z` | `Ue[z, d]`, `b[z]`, `Uy[z, width]` (d = the source's token width) |
 | 9 | POINTER | `source, offset` | `v[z]`, `c` (z = the source TOKEN_MIX's width) |
+| 10 | SEGMENT_NEAR | `tokens, base, stride, x, z, valid, exclude, candidate` | `scale_x, scale_z, radius` (FP32 bits), `dst, dst_stride`; no weights |
 
 Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1024;
 `act` 0 = none, 1 = relu; `eps` finite and > 0; TOKEN_MLP tokens 1..64, segments 1..8, layers
-1..4, at most 1024 gathered floats per token, TOKEN_MLP widths and TOKEN_MIX `z` 1..256.
+1..4, at most 1024 gathered floats per token, TOKEN_MLP widths and TOKEN_MIX `z` 1..256;
+SEGMENT_NEAR only as layer 0, tokens 1..64.
 
 ## Equations
 
@@ -196,6 +200,34 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
   the same tokens. `y = x`, then for each valid token n: `y[offset + n] = x[offset + n] +
   (sum_i z_n[i]*v[i] + c)`; invalid tokens add nothing. `offset + tokens` must not exceed the
   width. E.g. the 16 identity aim logits of contract v1/v2 are outputs 52..67 (`offset` 52).
+- **SEGMENT_NEAR** (the input view; parameter-free geometry over tokens already in the input):
+  allowed only as layer 0. Its output (width I) is a copy of the observation with one strided
+  slice overwritten by per-token 0/1 flags, and every later layer that reads the input
+  (CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP) reads this output instead of the raw observation. A
+  stack without it is unchanged.
+  - Params: `tokens` T (1..64); token n's floats start at `t_n = base + n*stride` (`stride` >= 1,
+    the whole block `base + T*stride <= I`); `x, z, valid, exclude, candidate` are column
+    indices within a token (each `< stride`; `exclude` 0xFFFFFFFF = none). After the 8 params
+    come five uint32: `scale_x`, `scale_z` (FP32 bits, finite and > 0), `radius` (FP32 bits,
+    finite and >= 0), `dst`, `dst_stride` (>= 1 unless T = 1); every flag index
+    `dst + n*dst_stride` must be < I.
+  - Computed in **float64** (FP32 values widened exactly), in this operation order, so a
+    float64 mirror agrees exactly. With `in` the observation:
+    `valid_n = in[t_n+valid] > 0.5` and not (`exclude` set and `in[t_n+exclude] > 0.5`);
+    `cand_m = valid_m and in[t_m+candidate] > 0.5`;
+    `vx_n = f64(in[t_n+x]) * f64(scale_x)`, `vz_n = f64(in[t_n+z]) * f64(scale_z)`,
+    `L2 = vx_n*vx_n + vz_n*vz_n`. Token n's flag is 1 when `valid_n`, `L2 > 0`, and some
+    `cand_m` (m in 0..T-1 in order, m = n allowed) with `d = vx_m*vx_n + vz_m*vz_n` has
+    `0 <= d <= L2` and `(vx_m*vx_m + vz_m*vz_m) - d*d/L2 <= radius*radius`; else 0.
+    That is: some candidate token lies within `radius` of the segment from the origin to
+    token n, measured perpendicular to it, and not behind the origin or beyond token n.
+  - `y = in`, then `y[dst + n*dst_stride] = flag_n` (1.0 or 0.0). The flags are computed
+    from `in` alone, so `dst` may overlap the token block.
+  - Example (documentation only): over contract v2u32 (I = 538) with T = 16, base 104,
+    stride 8, x 1, z 2, valid 0, exclude 6, candidate 3, scale_x 16000, scale_z 9600,
+    radius 150, dst 522, dst_stride 1, user inputs 522..537 become, for each observed
+    identity (the fog-gated identity block), "an observed teammate is within 150 units of
+    the segment from me to this identity".
 
 Inference validates the observation and state (finite) first, checks every layer's output
 and every new state value is finite, and commits the new state and the logits only when
@@ -222,6 +254,7 @@ unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 | TOKEN_MLP | `T*d_0 + T*sum_l(2*d_(l-1)*d_l + 2*d_l) + pool(d_L)` |
 | TOKEN_MIX | `2*W*z + W + T*(2*d*z + 3*z) + pool(z)` |
 | POINTER | `W + T*(2*z + 2)` |
+| SEGMENT_NEAR | `I + 12*T*T + 8*T` |
 | ENTITY_ATTN | `embed + blocks*block + pool` |
 
 with, for ENTITY_ATTN (T tokens, h heads, F = ff, P = pass_len):
@@ -244,7 +277,9 @@ contract v2u32): TOKEN_MLP over the 16 identities with segments (104, 8, 8), (47
 (0, 0, 24), (448, 0, 2), (506, 1, 1), (522, 1, 1) (identity j's block, its terrain floats,
 the seat's own features for every token, two user inputs of its own), widths 128, 128; then
 CONCAT_INPUT(0, 538), DENSE(794, 128), MINGRU(128, 128, highway), TOKEN_MIX(0, 64),
-DENSE(256, 82, bias), POINTER(4, 52) costs 1,327,278 operations per tick.
+DENSE(256, 82, bias), POINTER(4, 52) costs 1,327,278 operations per tick. SEGMENT_NEAR costs
+`I + 12*T*T + 8*T` (the copy, 12 per token pair, 8 per token): the example above (I = 538,
+T = 16) costs 3,738, so the same actor behind it (sources shifted by one) costs 1,331,016.
 
 The model's count is the sum over its layers. PWNET001's `2*(I*H + 3H*H + O*H) + 32*H` is
 the same formula applied to its three layers. Example: ENTITY_ATTN over contract v2's 16

@@ -100,6 +100,28 @@ proc pointerHead*(r: var Rand, source, offset, z: int): Spec =
   result.tensors = r.weights(z, 1.0/sqrt(z.float))
   result.tensors.add r.weights(1, 0.1)
 
+const NoExclude* = 0xFFFF_FFFF'u32
+
+proc segmentNear*(tokens, base, stride, x, z, valid: int, exclude: uint32, candidate: int,
+    scaleX, scaleZ, radius: float32, dst, dstStride: int): Spec =
+  ## SEGMENT_NEAR (parameter-free): the 8 params, then scale_x, scale_z, radius (FP32 bits), dst, dst_stride.
+  result = Spec(code: 10, params: [tokens.uint32, base.uint32, stride.uint32, x.uint32, z.uint32, valid.uint32,
+    exclude, candidate.uint32])
+  result.extra = @[cast[uint32](scaleX), cast[uint32](scaleZ), cast[uint32](radius), dst.uint32, dstStride.uint32]
+
+proc identityNear*(dst: int, radius = 150'f32): Spec =
+  ## The identity block of contract v1/v2 (16 tokens of 8 at 104; x 1, z 2, flag 0, "is self" 6, relative team 3),
+  ## "an observed teammate within `radius` of the segment to this identity", flags at dst ..< dst+16.
+  segmentNear(16, 104, 8, 1, 2, 0, 6, 3, 16000, 9600, radius, dst, 1)
+
+proc shifted*(specs: seq[Spec], first: Spec): seq[Spec] =
+  ## `first` as layer 0 in front of specs, with the TOKEN_MIX / POINTER sources renumbered.
+  result = @[first]
+  for s in specs:
+    var t = s
+    if t.code in [4'u32, 8, 9]: t.params[0] += 1
+    result.add t
+
 const
   ## The per-identity token of an entity-factored actor over contract v2u32: identity j's 8 floats, its 2 terrain
   ## floats, the seat's own 24 + 2 (shared: stride 0) and two user inputs of its own (506+j, 522+j).
@@ -138,3 +160,49 @@ proc observation*(r: var Rand, n: int): seq[float32] =
   for i in 0..<n:
     # Mostly features in [-1, 1] with 0/1 flags, as the contract encodes them.
     result[i] = if r.rand(1.0) < 0.3: float32(r.rand(1)) else: float32(r.rand(2.0) - 1.0)
+
+proc nearScene*(r: var Rand, obs: var seq[float32], tokens = 16, base = 104, stride = 8, grid = 32.0) =
+  ## Contract v1/v2 identity-block geometry for SEGMENT_NEAR tests: per token a 0/1 presence flag (+0), x and z
+  ## on a 1/grid lattice so exact ties (d = 0, d = L2, distance = radius) occur (+1, +2), a relative team of +1 / -1
+  ## (+3), and "is self" on token 0 (+6).
+  for n in 0..<tokens:
+    let at = base + n*stride
+    obs[at] = float32(r.rand(9) < 7)
+    obs[at+1] = float32(float(r.rand(16) - 8) / grid)
+    obs[at+2] = float32(float(r.rand(16) - 8) / grid)
+    obs[at+3] = if r.rand(1) == 0: 1'f32 else: -1'f32
+    obs[at+6] = float32(n == 0)
+
+proc nearFlagsReference*(spec: Spec, obs: openArray[float32]): seq[float32] =
+  ## An independent float64 SEGMENT_NEAR (neural_actor.md), straight from the spec's words: the flags, in order.
+  let p = spec.params
+  let t = p[0].int
+  let scaleX = cast[float32](spec.extra[0]).float64
+  let scaleZ = cast[float32](spec.extra[1]).float64
+  let radius = cast[float32](spec.extra[2]).float64
+  var valid, cand: seq[bool]
+  var vx, vz: seq[float64]
+  for n in 0..<t:
+    let at = p[1].int + n*p[2].int
+    let ok = obs[at + p[5].int] > 0.5 and not (p[6] != NoExclude and obs[at + p[6].int] > 0.5)
+    valid.add ok
+    cand.add(ok and obs[at + p[7].int] > 0.5)
+    vx.add obs[at + p[3].int].float64 * scaleX
+    vz.add obs[at + p[4].int].float64 * scaleZ
+  for n in 0..<t:
+    var flag = false
+    let l2 = vx[n]*vx[n] + vz[n]*vz[n]
+    if valid[n] and l2 > 0:
+      for m in 0..<t:
+        if not cand[m]: continue
+        let d = vx[m]*vx[n] + vz[m]*vz[n]
+        if 0 <= d and d <= l2 and (vx[m]*vx[m] + vz[m]*vz[m]) - d*d/l2 <= radius*radius:
+          flag = true
+          break
+    result.add float32(flag)
+
+proc withNearFlags*(spec: Spec, obs: seq[float32]): seq[float32] =
+  ## The observation as SEGMENT_NEAR's view: the reference flags written at dst + n*dst_stride.
+  result = obs
+  let flags = nearFlagsReference(spec, obs)
+  for n, f in flags: result[spec.extra[3].int + n*spec.extra[4].int] = f

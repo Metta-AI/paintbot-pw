@@ -13,7 +13,7 @@ from neural_package import (unpack_package, validate_aim_retarget, validate_shot
                             AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
                             MAX_SHOT_GATE_RANGE, validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS,
                             USER_INPUT_LIMIT, OBSERVATION_V2_SIZE, validate_pwnet2, attention_ops,
-                            MAX_NEURAL_OPERATIONS, PWNET2_LIMITS, USER_INPUTS_CONTRACT_HASHES)
+                            MAX_NEURAL_OPERATIONS, PWNET2_LIMITS, USER_INPUTS_CONTRACT_HASHES, segment_near_ops)
 import random
 import struct
 
@@ -546,17 +546,20 @@ class Pwnet2Tests(unittest.TestCase):
         return (7, [tokens, len(segments), valid[0], valid[1], len(widths)],
                 [x for seg in segments for x in seg] + list(widths), floats)
 
-    def entity_factored(self, inputs=538):
-        # neural_actor.md's entity-factored example over v2u32: 1,327,278 operations (test_paintbot_neural_net2).
+    def entity_factored_layers(self, inputs=538):
         segments = [(104, 8, 8), (470, 2, 2), (0, 0, 24), (448, 0, 2), (506, 1, 1), (522, 1, 1)]
-        return pwnet2(inputs, [51, 25, 2, 2, 2], [
+        return [
             self.token_mlp(16, segments, (0, 0), [128, 128]),
             (6, [0, inputs], [], 0),
             (1, [256 + inputs, 128], [], (256 + inputs) * 128),
             (3, [128, 128, 1, 0], [], 3 * 128 * 128),
             (8, [0, 64], [], 64 * 128 + 64 + 64 * 128),
             (1, [256, 82, 1, 0], [], 256 * 82 + 82),
-            (9, [4, 52], [], 65)])
+            (9, [4, 52], [], 65)]
+
+    def entity_factored(self, inputs=538):
+        # neural_actor.md's entity-factored example over v2u32: 1,327,278 operations (test_paintbot_neural_net2).
+        return pwnet2(inputs, [51, 25, 2, 2, 2], self.entity_factored_layers(inputs))
 
     def test_token_layers_cost_and_structure(self):
         info = validate_pwnet2(self.entity_factored())
@@ -587,6 +590,67 @@ class Pwnet2Tests(unittest.TestCase):
         wide = [self.token_mlp(1, [(0, 0, 200)] * 6, (0, 0), [4]), (1, [8, 9], [], 72)]
         with self.assertRaisesRegex(ValueError, "token input"):
             validate_pwnet2(pwnet2(200, heads, wide))
+
+    @staticmethod
+    def near(tokens=4, base=0, stride=8, xi=1, zi=2, vi=0, ei=6, ci=3, scale_x=2.0, scale_z=4.0, radius=1.0, dst=32,
+             dst_stride=2):
+        f = lambda v: struct.unpack("<I", struct.pack("<f", v))[0]  # noqa: E731
+        return (10, [tokens, base, stride, xi, zi, vi, ei, ci], [f(scale_x), f(scale_z), f(radius), dst, dst_stride], 0)
+
+    def test_segment_near_cost_and_structure(self):
+        # SEGMENT_NEAR costs I + 12*T*T + 8*T: in front of the entity-factored example, 1,327,278 + 3,738.
+        model = self.entity_factored()
+        layers = [self.near(16, 104, 8, 1, 2, 0, 6, 3, 16000.0, 9600.0, 150.0, 522, 1)]
+        for code, params, extra, floats in self.entity_factored_layers():
+            if code in (4, 8, 9):
+                params = [params[0] + 1] + params[1:]
+            layers.append((code, params, extra, floats))
+        info = validate_pwnet2(pwnet2(538, [51, 25, 2, 2, 2], layers))
+        self.assertEqual(info["operations"], 1331016)
+        self.assertEqual(info["operations"] - validate_pwnet2(model)["operations"], 538 + 12 * 16 * 16 + 8 * 16)
+        self.assertEqual((info["state"], info["layers"]), (128, 8))
+        heads = [20, 20]
+        self.assertEqual(validate_pwnet2(pwnet2(40, heads, [self.near()]))["operations"], 40 + 12 * 16 + 8 * 4)
+        accepted = [self.near(base=8, dst=0, dst_stride=1), self.near(dst=33), self.near(radius=0.0),
+                    self.near(radius=-0.0), self.near(ei=0xFFFFFFFF), self.near(1, base=8, dst=39, dst_stride=0)]
+        for layer in accepted:
+            validate_pwnet2(pwnet2(40, heads, [layer]))
+        nan, inf = float("nan"), float("inf")
+        cases = [
+            ([(1, [40, 40], [], 1600), self.near()], "layer 1: SEGMENT_NEAR must be layer 0"),
+            ([self.near(), self.near()], "layer 1: SEGMENT_NEAR must be layer 0"),
+            ([self.near(0)], "SEGMENT_NEAR tokens must be 1..64"),
+            ([self.near(stride=0)], "SEGMENT_NEAR stride"),
+            ([self.near(base=9)], "SEGMENT_NEAR tokens outside the input"),
+            ([self.near(base=41)], "outside the input"),
+            ([self.near(stride=11)], "outside the input"),
+            ([self.near(xi=8)], "SEGMENT_NEAR index outside the token"),
+            ([self.near(zi=8)], "index outside the token"),
+            ([self.near(vi=8)], "index outside the token"),
+            ([self.near(ei=8)], "index outside the token"),
+            ([self.near(ei=0xFFFFFFFE)], "index outside the token"),
+            ([self.near(ci=8)], "index outside the token"),
+            ([self.near(dst=34)], "SEGMENT_NEAR flags outside the input"),
+            ([self.near(dst=40)], "flags outside the input"),
+            ([self.near(dst_stride=0)], "flags outside the input"),
+            ([self.near(dst_stride=41)], "flags outside the input"),
+            ([self.near(1, dst=40, dst_stride=0)], "flags outside the input"),
+        ]
+        for bad in (0.0, -1.0, nan, inf, -inf, -0.0):
+            cases += [([self.near(scale_x=bad)], "SEGMENT_NEAR scales must be finite and positive"),
+                      ([self.near(scale_z=bad)], "SEGMENT_NEAR scales must be finite and positive")]
+        for bad in (-1.0, nan, inf, -inf, -1e-30):
+            cases.append(([self.near(radius=bad)], "SEGMENT_NEAR radius must be finite and >= 0"))
+        for layers, fragment in cases:
+            with self.assertRaisesRegex(ValueError, fragment):
+                validate_pwnet2(pwnet2(40, heads, layers))
+        with self.assertRaisesRegex(ValueError, "tokens must be"):
+            validate_pwnet2(pwnet2(600, [300, 300], [self.near(65)]))
+        good = pwnet2(40, heads, [self.near()])
+        with self.assertRaisesRegex(ValueError, "truncated"):
+            validate_pwnet2(good[:-4])
+        with self.assertRaisesRegex(ValueError, "trailing bytes"):
+            validate_pwnet2(good + bytes(4))
 
     def test_pwnet002_with_user_inputs(self):
         # A PWNET002 actor with obs contract v2u<K> (506 + K inputs): the header is read through validate_pwnet2 and
@@ -629,6 +693,11 @@ class Pwnet2Tests(unittest.TestCase):
                                              token_input=consts["MaxTokenInput"], token_model=consts["MaxTokenModel"],
                                              token_mlp_layers=consts["MaxTokenMlpLayers"]))
         self.assertEqual((consts["TranscendentalOps"], consts["MinGruUnitOps"]), (8, 32))
+        # SEGMENT_NEAR's published count: one formula in the loader, staging and neural_actor.md.
+        self.assertIn("int64(inputs) + int64(tokens)*int64(tokens)*12 + int64(tokens)*8", source)
+        self.assertIn("| SEGMENT_NEAR | `I + 12*T*T + 8*T` |",
+                      (Path(__file__).parents[2] / "examples/paintbot/neural_actor.md").read_text())
+        self.assertEqual(segment_near_ops(538, 16), 538 + 12 * 16 * 16 + 8 * 16)
         host = (Path(__file__).parents[2] / "examples/paintbot/neural_host.nim").read_text()
         self.assertIn("MaxNeuralOperations* = %s'i64" % format(MAX_NEURAL_OPERATIONS, "_"), host)
 

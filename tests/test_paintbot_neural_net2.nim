@@ -379,6 +379,201 @@ suite "PWNET002 token layers (TOKEN_MLP, TOKEN_MIX, POINTER)":
         except ValueError: discard
       except ValueError: discard
 
+suite "PWNET002 SEGMENT_NEAR (the input view)":
+  # A 40-input stack whose only layer is SEGMENT_NEAR: the logits are the view itself. Four tokens of 8 floats at 0
+  # (valid +0, x +1, z +2, candidate +3, exclude +6), scale_x 2, scale_z 4 (vx = 2x, vz = 4z, exact), radius 1,
+  # flags at 32, 34, 36, 38.
+  proc near40(radius = 1'f32, tokens = 4, dst = 32, dstStride = 2): Spec =
+    segmentNear(tokens, 0, 8, 1, 2, 0, 6, 3, 2, 4, radius, dst, dstStride)
+  type Tok = tuple[valid, x, z, cand, excl: float32]
+  proc scene(tokens: openArray[Tok]): seq[float32] =
+    result = newSeq[float32](40)
+    for i in 0..<40: result[i] = 0.375                     # every other float, dst included
+    for n, t in tokens:
+      result[8*n] = t.valid; result[8*n+1] = t.x; result[8*n+2] = t.z
+      result[8*n+3] = t.cand; result[8*n+6] = t.excl
+  proc view(spec: Spec, obs: seq[float32]): seq[float32] =
+    let actor = loadActor(encode2(40, [20, 20], [spec]))
+    var state: seq[float32]
+    result = newSeq[float32](40)
+    actor.infer(obs, state, result)
+  proc flags(spec: Spec, obs: seq[float32]): seq[float32] =
+    let y = view(spec, obs)
+    for i in 0..<40:
+      if i notin [32, 34, 36, 38]: doAssert cast[uint32](y[i]) == cast[uint32](obs[i]), "copy at " & $i
+    @[y[32], y[34], y[36], y[38]]
+  const
+    Off: Tok = (0'f32, 0'f32, 0'f32, 0'f32, 0'f32)
+    Target: Tok = (1'f32, 4'f32, 0'f32, 0'f32, 0'f32)     # vx 8, vz 0: L2 = 64
+
+  test "the published operation count: I + 12*T*T + 8*T":
+    check loadActor(encode2(40, [20, 20], [near40()])).operationCount == 40 + 12*16 + 8*4
+    check segmentNearOps(538, 16) == 3738
+    var r = initRand(81)
+    let base = r.entityFactored()
+    let a = loadActor(encode2(538, ActionSizes, base, UserInputsContractHashes[31], ActionContractV2Hash))
+    let b = loadActor(encode2(538, ActionSizes, base.shifted(identityNear(522)), UserInputsContractHashes[31],
+      ActionContractV2Hash))
+    check a.operationCount == 1_327_278
+    check b.operationCount == 1_331_016 and b.operationCount - a.operationCount == 538 + 12*16*16 + 8*16
+    check b.layerCount == 8 and b.stateSize == 128 and b.modelTag == "pwnet2-l8-s128"
+
+  test "hand-computed geometry: d = 0, d = L2, distance = radius, behind, beyond":
+    let s = near40()
+    # A candidate beside the origin (d = 0) at exactly the radius; a candidate's own flag is 1 (m = n).
+    check flags(s, scene([Target, (1'f32, 0'f32, 0.25'f32, 1'f32, 0'f32), Off, Off])) == @[1'f32, 1, 0, 0]
+    # Beside the target (d = L2) at exactly the radius, and halfway along at exactly the radius.
+    check flags(s, scene([Target, (1'f32, 4'f32, 0.25'f32, 1'f32, 0'f32), Off, Off])) == @[1'f32, 1, 0, 0]
+    check flags(s, scene([Target, (1'f32, 2'f32, 0.25'f32, 1'f32, 0'f32), Off, Off])) == @[1'f32, 1, 0, 0]
+    # Just past the radius, beyond the target (d > L2), behind the origin (d < 0).
+    check flags(s, scene([Target, (1'f32, 2'f32, 0.3125'f32, 1'f32, 0'f32), Off, Off])) == @[0'f32, 1, 0, 0]
+    check flags(s, scene([Target, (1'f32, 4.25'f32, 0'f32, 1'f32, 0'f32), Off, Off])) == @[0'f32, 1, 0, 0]
+    check flags(s, scene([Target, (1'f32, -0.25'f32, 0'f32, 1'f32, 0'f32), Off, Off])) == @[0'f32, 1, 0, 0]
+    # A candidate at the origin is on every segment; the negative quadrant; the last candidate decides.
+    check flags(s, scene([Target, (1'f32, 0'f32, 0'f32, 1'f32, 0'f32), Off, Off])) == @[1'f32, 0, 0, 0]
+    check flags(s, scene([(1'f32, -3'f32, -1.5'f32, 0'f32, 0'f32), (1'f32, -1.5'f32, -0.75'f32, 1'f32, 0'f32), Off,
+      Off])) == @[1'f32, 1, 0, 0]
+    check flags(s, scene([Target, (1'f32, 0'f32, 2'f32, 1'f32, 0'f32), (1'f32, 3'f32, -0.25'f32, 1'f32, 0'f32),
+      (1'f32, 1'f32, 1'f32, 0'f32, 0'f32)])) == @[1'f32, 1, 1, 0]
+
+  test "invalid and excluded tokens, a target at the origin, radius 0":
+    let s = near40()
+    let onSegment: Tok = (1'f32, 2'f32, 0'f32, 1'f32, 0'f32)
+    check flags(s, scene([Target, (1'f32, 2'f32, 0'f32, 0'f32, 0'f32), Off, Off])) == @[0'f32, 0, 0, 0]  # not a candidate
+    check flags(s, scene([Target, (0'f32, 2'f32, 0'f32, 1'f32, 0'f32), Off, Off])) == @[0'f32, 0, 0, 0]  # invalid candidate
+    check flags(s, scene([Target, (1'f32, 2'f32, 0'f32, 1'f32, 1'f32), Off, Off])) == @[0'f32, 0, 0, 0]  # excluded candidate
+    check flags(s, scene([(1'f32, 4'f32, 0'f32, 0'f32, 1'f32), onSegment, Off, Off])) == @[0'f32, 1, 0, 0]  # excluded target
+    check flags(s, scene([(0'f32, 4'f32, 0'f32, 0'f32, 0'f32), onSegment, Off, Off])) == @[0'f32, 1, 0, 0]  # invalid target
+    check flags(s, scene([(1'f32, 0'f32, 0'f32, 1'f32, 0'f32), (1'f32, 0'f32, 0'f32, 1'f32, 0'f32), Off, Off])) ==
+      @[0'f32, 0, 0, 0]                                   # L2 = 0: never flagged
+    check flags(s, scene([Target, onSegment, Off, Off])) == @[1'f32, 1, 0, 0]
+    let exact = near40(radius = 0)
+    check flags(exact, scene([Target, onSegment, Off, Off])) == @[1'f32, 1, 0, 0]
+    check flags(exact, scene([Target, (1'f32, 2'f32, 0.0078125'f32, 1'f32, 0'f32), Off, Off])) == @[0'f32, 1, 0, 0]
+    # exclude = none: the "exclude" column is an ordinary float.
+    let noExclude = segmentNear(4, 0, 8, 1, 2, 0, NoExclude, 3, 2, 4, 1, 32, 2)
+    check flags(noExclude, scene([(1'f32, 4'f32, 0'f32, 0'f32, 1'f32), onSegment, Off, Off])) == @[1'f32, 1, 0, 0]
+    # One token with dst_stride 0.
+    let one = segmentNear(1, 8, 8, 1, 2, 0, 6, 3, 2, 4, 1, 39, 0)
+    let y = view(one, scene([Off, (1'f32, 2'f32, 0'f32, 1'f32, 0'f32), Off, Off]))
+    check y[39] == 1 and y[32] == 0.375
+
+  test "equals a float64 reference on lattice scenes (exact ties included)":
+    var r = initRand(82)
+    var positives = 0
+    for trial in 0..<3000:
+      let radius = [0'f32, 0.5, 1, 2, 3, 8][trial mod 6]
+      let s = segmentNear(4, 0, 8, 1, 2, 0, 6, 3, 2, 4, radius, 32, 2)
+      var obs = r.observation(40)
+      for n in 0..<4:
+        obs[8*n] = float32(r.rand(9) < 7)
+        obs[8*n+1] = float32(r.rand(16) - 8) / 4
+        obs[8*n+2] = float32(r.rand(16) - 8) / 8
+        obs[8*n+3] = float32(r.rand(1))
+        obs[8*n+6] = float32(r.rand(9) == 0)
+      let got = flags(s, obs)
+      check got == nearFlagsReference(s, obs)
+      for f in got: positives += int(f)
+    check positives > 1000 and positives < 3*4000
+
+  test "every later layer reads the view: TOKEN_MLP, CONCAT_INPUT, ENTITY_ATTN, and the current vector":
+    var r = initRand(83)
+    let near = identityNear(392, radius = 2000)
+    let stacks = @[
+      @[r.tokenMlp(16, [[104'u32, 8, 8], [392'u32, 1, 1]], 0, 0, [8]), concat(392, 16), r.dense(32, LogitSize)],
+      @[r.attention([[104'u32, 8, 16, 8, 0], [392'u32, 1, 16, 1, AttnAlwaysValid]], 8, 2, 1, 8, 390, 20),
+        r.dense(36, LogitSize, bias = true)],
+      @[r.dense(ObservationSize, LogitSize)]]
+    for specs in stacks:
+      let withView = loadActor(encode2(ObservationSize, ActionSizes, specs.shifted(near)))
+      let raw = loadActor(encode2(ObservationSize, ActionSizes, specs))
+      check withView.operationCount == raw.operationCount + segmentNearOps(ObservationSize, 16)
+      var state: seq[float32]
+      var a, b, c = newSeq[float32](LogitSize)
+      var differs, positives = 0
+      for trial in 0..<200:
+        var obs = r.observation(ObservationSize)
+        r.nearScene(obs)
+        let viewed = near.withNearFlags(obs)
+        for n in 0..<16: positives += int(viewed[392+n])
+        withView.infer(obs, state, a)
+        raw.infer(viewed, state, b)
+        check bits(a) == bits(b)                          # the view is exactly the reference-flagged observation
+        raw.infer(obs, state, c)
+        if bits(a) != bits(c): inc differs
+      checkpoint "differs " & $differs & " positives " & $positives
+      check differs > 150 and positives > 200 and positives < 200*16
+
+  test "loader accepts the edges and rejects malformed SEGMENT_NEAR":
+    var r = initRand(84)
+    proc net(s: Spec): string = encode2(40, [20, 20], [s])
+    proc with(change: proc (s: var Spec)): string =
+      var s = near40()
+      change(s)
+      net(s)
+    discard loadActor(net(near40()))
+    discard loadActor(net(segmentNear(4, 8, 8, 1, 2, 0, 6, 3, 2, 4, 1, 0, 1)))           # the block ends at I
+    discard loadActor(net(near40(dst = 33)))                                            # the last flag at 39
+    discard loadActor(net(near40(radius = 0)))
+    discard loadActor(with(proc (s: var Spec) = s.params[6] = NoExclude))
+    check rejects(encode2(40, [20, 20], [r.dense(40, 40), near40()]), "SEGMENT_NEAR must be layer 0")
+    check rejects(encode2(40, [20, 20], [near40(), near40()]), "layer 1: SEGMENT_NEAR must be layer 0")
+    check rejects(with(proc (s: var Spec) = s.params[0] = 0), "SEGMENT_NEAR tokens must be 1..64")
+    check rejects(encode2(600, [300, 300], [segmentNear(65, 0, 8, 1, 2, 0, 6, 3, 2, 4, 1, 0, 1)]), "tokens must be")
+    check rejects(with(proc (s: var Spec) = s.params[2] = 0), "SEGMENT_NEAR stride")
+    check rejects(with(proc (s: var Spec) = s.params[1] = 9), "SEGMENT_NEAR tokens outside the input")
+    check rejects(with(proc (s: var Spec) = s.params[1] = 41), "outside the input")
+    check rejects(with(proc (s: var Spec) = s.params[2] = 11), "outside the input")
+    for j in 3..7:
+      var s = near40()
+      s.params[j] = 8
+      check rejects(net(s), "SEGMENT_NEAR index outside the token")
+    check rejects(with(proc (s: var Spec) = s.params[6] = 0xFFFF_FFFE'u32), "index outside the token")
+    for bad in [0'f32, -1, NaN, Inf, -Inf, -0'f32]:
+      for j in 0..1:
+        var s = near40()
+        s.extra[j] = cast[uint32](bad)
+        check rejects(net(s), "SEGMENT_NEAR scales must be finite and positive")
+    for bad in [-1'f32, NaN, Inf, -Inf, -1e-30]:
+      var s = near40()
+      s.extra[2] = cast[uint32](bad)
+      check rejects(net(s), "SEGMENT_NEAR radius must be finite and >= 0")
+    discard loadActor(with(proc (s: var Spec) = s.extra[2] = cast[uint32](-0'f32)))   # -0 >= 0
+    check rejects(net(near40(dst = 34)), "SEGMENT_NEAR flags outside the input")
+    check rejects(net(near40(dst = 40)), "flags outside the input")
+    check rejects(net(near40(dstStride = 0)), "flags outside the input")
+    check rejects(net(near40(dstStride = 41)), "flags outside the input")
+    check rejects(net(segmentNear(1, 0, 8, 1, 2, 0, 6, 3, 2, 4, 1, 40, 0)), "flags outside the input")
+    let data = net(near40())
+    check rejects(data[0..^5], "truncated")
+    check rejects(data & "\0\0\0\0", "trailing bytes")
+    # Fuzz: corrupted SEGMENT_NEAR files load or raise ValueError, never crash.
+    for trial in 0..<2000:
+      var d = data
+      if trial mod 2 == 0: d = d[0..<r.rand(d.len-1)]
+      else:
+        let at = d.len - 56 + 4*r.rand(13)
+        for i in 0..3: d[at+i] = char(r.rand(255))
+      try:
+        let a = loadActor(d)
+        var state = newSeq[float32](a.stateSize)
+        var logits = newSeq[float32](a.outputSize)
+        a.infer(r.observation(a.inputSize), state, logits)
+      except ValueError: discard
+
+  test "SEGMENT_NEAR in front of an entity-factored actor does not allocate":
+    var r = initRand(85)
+    let actor = loadActor(encode2(538, ActionSizes, r.entityFactored().shifted(identityNear(522)),
+      UserInputsContractHashes[31], ActionContractV2Hash))
+    var state = newSeq[float32](128)
+    var logits = newSeq[float32](LogitSize)
+    var obs = r.observation(538)
+    r.nearScene(obs)
+    actor.infer(obs, state, logits)
+    let before = getOccupiedMem()
+    for i in 0..<20: actor.infer(obs, state, logits)
+    check getOccupiedMem() == before
+
 const NeuralSource = """
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
@@ -427,6 +622,21 @@ suite "PWNET002 hosted seat":
     check players[0].neural.state.len == 128
     check players[0].neural.telemetry(actor.operationCount, 40) ==
       "neural: peak_ops=" & $actor.operationCount & " budget=4000000 model=pwnet2-l7-s128 ticks=40"
+
+  test "SEGMENT_NEAR in front of an entity-factored actor plays on the hosted seat":
+    var r = initRand(45)
+    let model = encode2(ObservationSize, ActionSizes, r.entityFactored(inputs = ObservationSize,
+      segments = [[104'u32, 8, 8], [392'u32, 1, 1], [0'u32, 0, 24]]).shifted(identityNear(392)))
+    let players = seatFixture(model)
+    var w = newWorld(2028)
+    for tick in 0..<40:
+      discard players.decide(w)
+      check not players[0].failed
+      w.step(default(array[Seats, Command]))
+    let actor = loadActor(model)
+    check players[0].neural.state.len == 128
+    check players[0].neural.telemetry(actor.operationCount, 40) ==
+      "neural: peak_ops=" & $actor.operationCount & " budget=4000000 model=pwnet2-l8-s128 ticks=40"
 
   test "an over-budget PWNET002 model is rejected at load with its cost":
     var r = initRand(43)

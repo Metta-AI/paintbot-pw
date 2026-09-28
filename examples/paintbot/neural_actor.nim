@@ -6,12 +6,18 @@ type
   LayerKind* = enum
     ## PWNET002 layer type codes (the u32 `type` of a layer record).
     lkDense = 1, lkRmsNorm = 2, lkMinGru = 3, lkResidual = 4, lkEntityAttn = 5, lkConcatInput = 6,
-    lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9
+    lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9, lkSegmentNear = 10
   AttnGroup = object
     offset, stride, count, width, valid: int  # valid = -1: every token of the group is valid
     weight: int                               # E_g [d, width] then e_g [d], offsets into weights
   TokenSegment = object
     offset, stride, length: int               # token n reads input[offset + n*stride ..< +length]; stride 0 = shared
+  SegmentNearSpec = object
+    ## SEGMENT_NEAR: token n's floats start at input[base + n*stride]; column indices within the token (exclude -1 =
+    ## none); the flags go to input[dstOffset + n*dstStride] of the view. Scales and radius are the record's FP32
+    ## values widened to float64 (the layer computes in float64).
+    base, stride, xIndex, zIndex, validIndex, excludeIndex, candidateIndex, dstOffset, dstStride: int
+    scaleX, scaleZ, radius: float64
   NetLayer {.byref.} = object
     kind: LayerKind
     inWidth, outWidth: int
@@ -33,6 +39,7 @@ type
     tokenWidth: int        # TOKEN_MLP / TOKEN_MIX: floats per token in this layer's token buffer
     tokenBuffer: int       # TOKEN_MLP / TOKEN_MIX: scratch offset of the per-token outputs (tokens*tokenWidth)
     validBuffer: int       # TOKEN_*/POINTER: scratch offset of the tokens' valid flags (1 / 0), written by TOKEN_MLP
+    near: SegmentNearSpec  # SEGMENT_NEAR (tokens = its token count)
     operations: int64
   Net2Object = object
     layers: seq[NetLayer]
@@ -118,11 +125,11 @@ proc interpolate(a, b, weight: float32): float32 =
 
 # ---------------------------------------------------------------------------------------
 # PWNET002: the architecture is data. A layer stack from a fixed menu (DENSE, RMSNORM,
-# MINGRU, RESIDUAL, ENTITY_ATTN, CONCAT_INPUT, TOKEN_MLP, TOKEN_MIX, POINTER), FP32, fixed
-# summation order, loaded and validated once, run with bounded per-model scratch sized at load (no inference
-# allocation). The format, equations and the published operation-count formula are in
-# neural_actor.md ("PWNET002"). The hosted seat and the native training library
-# (pw_net_*) run this same code.
+# MINGRU, RESIDUAL, ENTITY_ATTN, CONCAT_INPUT, TOKEN_MLP, TOKEN_MIX, POINTER, SEGMENT_NEAR), FP32
+# (SEGMENT_NEAR's geometry: float64), fixed summation order, loaded and validated once, run
+# with bounded per-model scratch sized at load (no inference allocation). The format,
+# equations and the published operation-count formula are in neural_actor.md ("PWNET002").
+# The hosted seat and the native training library (pw_net_*) run this same code.
 
 const
   Net2Magic* = "PWNET002"
@@ -191,6 +198,10 @@ proc tokenMixOps*(tokens, tokenIn, width, z: int): int64 =
 proc pointerOps*(tokens, z, width: int): int64 =
   ## POINTER's published cost: the copy, per token a dot product, its bias and the add.
   int64(width) + int64(tokens)*int64(2*z + 2)
+
+proc segmentNearOps*(inputs, tokens: int): int64 =
+  ## SEGMENT_NEAR's published cost: the copy of the input, per token pair 12, per token 8.
+  int64(inputs) + int64(tokens)*int64(tokens)*12 + int64(tokens)*8
 
 proc readWeights(net: Net2, data: string, p: var int, n: int) =
   if n < 0 or net.weights.len + n > MaxNet2Parameters: net2Error("parameter count")
@@ -433,6 +444,36 @@ proc loadActor2(data: string): Actor =
       net.readWeights(data, p, src.tokenWidth + 1)
       layer.outWidth = width
       layer.operations = pointerOps(layer.tokens, src.tokenWidth, width)
+    of lkSegmentNear.uint32:
+      layer.kind = lkSegmentNear
+      let t = int(q[0])
+      var near = SegmentNearSpec(base: int(q[1]), stride: int(q[2]), xIndex: int(q[3]), zIndex: int(q[4]),
+        validIndex: int(q[5]), excludeIndex: (if q[6] == AttnAlwaysValid: -1 else: int(q[6])),
+        candidateIndex: int(q[7]))
+      let scaleX = cast[float32](readU32(data, p))
+      let scaleZ = cast[float32](readU32(data, p))
+      let radius = cast[float32](readU32(data, p))
+      near.dstOffset = int(readU32(data, p)); near.dstStride = int(readU32(data, p))
+      if k != 0: net2Error(where & "SEGMENT_NEAR must be layer 0")
+      if t notin 1..MaxAttnTokens: net2Error(where & "SEGMENT_NEAR tokens must be 1.." & $MaxAttnTokens)
+      if near.stride notin 1..inputs: net2Error(where & "SEGMENT_NEAR stride must be 1.." & $inputs)
+      if near.base > inputs or t*near.stride > inputs - near.base:
+        net2Error(where & "SEGMENT_NEAR tokens outside the input")
+      if near.xIndex >= near.stride or near.zIndex >= near.stride or near.validIndex >= near.stride or
+          near.excludeIndex >= near.stride or near.candidateIndex >= near.stride:
+        net2Error(where & "SEGMENT_NEAR index outside the token")
+      if not finite(scaleX) or not (scaleX > 0'f32) or not finite(scaleZ) or not (scaleZ > 0'f32):
+        net2Error(where & "SEGMENT_NEAR scales must be finite and positive")
+      if not finite(radius) or not (radius >= 0'f32):
+        net2Error(where & "SEGMENT_NEAR radius must be finite and >= 0")
+      if near.dstStride notin (if t == 1: 0 else: 1)..inputs or near.dstOffset >= inputs or
+          (t-1)*near.dstStride >= inputs - near.dstOffset:
+        net2Error(where & "SEGMENT_NEAR flags outside the input")
+      near.scaleX = float64(scaleX); near.scaleZ = float64(scaleZ); near.radius = float64(radius)
+      layer.near = near
+      layer.tokens = t
+      layer.outWidth = inputs
+      layer.operations = segmentNearOps(inputs, t)
     else:
       net2Error(where & "unknown layer type " & $code)
     if tokenSpace > 0:
@@ -732,6 +773,47 @@ proc pointerHead(layer: NetLayer, source: NetLayer, x, w, scratch, y: F32s) =
     for i in 0..<z: sum += buffer[n*z+i]*v[i]
     y[layer.length+n] = y[layer.length+n] + (sum + c)
 
+proc segmentNear(layer: NetLayer, input, y: F32s) =
+  ## The input view: y = input, then token n's flag at y[dstOffset + n*dstStride]. Geometry in float64, operation
+  ## by operation as neural_actor.md writes it (one product or sum per statement, so no contraction).
+  let s = layer.near
+  let t = layer.tokens
+  for i in 0..<layer.inWidth: y[i] = input[i]
+  var valid, candidate: array[MaxAttnTokens, bool]
+  var vx, vz: array[MaxAttnTokens, float64]
+  for n in 0..<t:
+    let at = s.base + n*s.stride
+    var ok = input[at + s.validIndex] > 0.5'f32
+    if ok and s.excludeIndex >= 0 and input[at + s.excludeIndex] > 0.5'f32: ok = false
+    valid[n] = ok
+    candidate[n] = ok and input[at + s.candidateIndex] > 0.5'f32
+    vx[n] = float64(input[at + s.xIndex]) * s.scaleX
+    vz[n] = float64(input[at + s.zIndex]) * s.scaleZ
+  let r2 = s.radius * s.radius
+  for n in 0..<t:
+    var flag = false
+    if valid[n]:
+      let xx = vx[n] * vx[n]
+      let zz = vz[n] * vz[n]
+      let l2 = xx + zz
+      if l2 > 0.0:
+        for m in 0..<t:
+          if not candidate[m]: continue
+          let px = vx[m] * vx[n]
+          let pz = vz[m] * vz[n]
+          let d = px + pz
+          if d < 0.0 or d > l2: continue
+          let ex2 = vx[m] * vx[m]
+          let ez2 = vz[m] * vz[m]
+          let e2 = ex2 + ez2
+          let dd = d * d
+          let q = dd / l2
+          let perp = e2 - q
+          if perp <= r2:
+            flag = true
+            break
+    y[s.dstOffset + n*s.dstStride] = if flag: 1'f32 else: 0'f32
+
 proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
     logits: var seq[float32]) =
   let net = actor.net
@@ -742,7 +824,7 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
     if not finite(x): raise newException(ValueError, "nonfinite neural input")
   for x in state:
     if not finite(x): raise newException(ValueError, "nonfinite neural state")
-  let input = cast[F32s](unsafeAddr obs[0])
+  var input = cast[F32s](unsafeAddr obs[0])  # the observation, or SEGMENT_NEAR's view once layer 0 ran
   let w = if net.weights.len == 0: nil else: cast[F32s](addr net.weights[0])
   let scratch = cast[F32s](addr net.scratch[0])
   let oldState = if state.len == 0: nil else: cast[F32s](addr state[0])
@@ -774,8 +856,11 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
       tokenMix(layer[], net.layers[layer.source], x, w, scratch, scratch.at(net.work), y)
     of lkPointer:
       pointerHead(layer[], net.layers[layer.source], x, w, scratch, y)
+    of lkSegmentNear:
+      segmentNear(layer[], input, y)
     checkFinite(y, layer.outWidth)
     x = y
+    if layer.kind == lkSegmentNear: input = y  # every later layer that reads "the input" reads the view
   # Every result is validated before state or logits are committed.
   for i in 0..<actor.outputSize:
     if not finite(x[i]): raise newException(ValueError, "nonfinite neural output")

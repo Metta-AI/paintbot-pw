@@ -96,6 +96,23 @@ suite "pw_net ABI":
       check pw_net_infer(tnet, fbuf(oc), fbuf(ts), fbuf(tl)) == 0
       check bits(ts) == bits(hs) and bits(tl) == bits(hl)
     pw_net_destroy(tnet)
+    # SEGMENT_NEAR (the input view) in front of them: the same, bit for bit, on identity-block geometry.
+    let near = encode2(ObservationSize, ActionSizes, r.entityFactored(inputs = ObservationSize,
+      segments = [[104'u32, 8, 8], [392'u32, 1, 1], [0'u32, 0, 24]]).shifted(identityNear(392, radius = 2000)))
+    let nnet = load(near, message)
+    require nnet != nil
+    let nactor = loadActor(near)
+    check pw_net_info(nnet, i64buf(info)) == 0
+    check info[5] == 8 and info[7] == nactor.operationCount
+    for i in 0..<128:
+      ts[i] = 0; hs[i] = 0
+    for step in 0..<100:
+      var o = r.observation(ObservationSize)
+      r.nearScene(o)
+      nactor.infer(o, hs, hl)
+      check pw_net_infer(nnet, fbuf(o), fbuf(ts), fbuf(tl)) == 0
+      check bits(ts) == bits(hs) and bits(tl) == bits(hl)
+    pw_net_destroy(nnet)
 
 const NeuralSource = """
 paintbot_observe(neuralObservation())
@@ -168,3 +185,8 @@ suite "Hosted PWNET002 seats and the native ABI":
     playsHashForHash(proc (r: var Rand): string =
       encode2(ObservationSize, ActionSizes,
         r.entityFactored(inputs = ObservationSize, segments = [[104'u32, 8, 8], [0'u32, 0, 24]])), 128)
+
+  test "the same with SEGMENT_NEAR (the input view) in front: hash for hash":
+    playsHashForHash(proc (r: var Rand): string =
+      encode2(ObservationSize, ActionSizes, r.entityFactored(inputs = ObservationSize,
+        segments = [[104'u32, 8, 8], [392'u32, 1, 1], [0'u32, 0, 24]]).shifted(identityNear(392))), 128)
