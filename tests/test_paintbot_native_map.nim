@@ -42,9 +42,9 @@ const
   # Recorded from the library before pw_set_map existed (Metta-AI/paintbot-pw main 1512438)
   # with -d:pwMapGoldenRecord: {seed, FNV-1a of the 600 per-tick state hashes, last hash}.
   DefaultGolden: array[3, (int32, uint64, uint32)] = [
-    (7'i32, 0'u64, 0'u32),
-    (1001'i32, 0'u64, 0'u32),
-    (424242'i32, 0'u64, 0'u32)]
+    (7'i32, 11266663677668710009'u64, 352507994'u32),
+    (1001'i32, 6868282711088312779'u64, 2626221708'u32),
+    (424242'i32, 2418612431003963041'u64, 3271808267'u32)]
 
 proc defaultRun(seed: int32): (uint64, uint32) =
   ## A default handle (no map call): the odd seats run base.bas, the even seats the action
