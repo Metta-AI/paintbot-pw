@@ -20,6 +20,7 @@ build.yml was verified; it needs PyYAML.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import shlex
@@ -150,6 +151,18 @@ def check(commands, shards, durations, workflow):
     return ok
 
 
+def command_env(c, args):
+    """The environment for one command. With CI_NIMCACHE_ROOT set (POSIX only), a `nim` command
+    gets its own XDG_CACHE_HOME under it, so Nim keeps that command's nimcache in a directory no
+    other command (or flag set) shares, and CI can cache the whole root between runs. The
+    command's text and flags are unchanged."""
+    root = os.environ.get("CI_NIMCACHE_ROOT")
+    if not root or os.name == "nt" or args[0] != "nim":
+        return None
+    key = hashlib.sha1(f"{c.cwd}\0{c.command}".encode()).hexdigest()[:16]
+    return {**os.environ, "XDG_CACHE_HOME": str(Path(root) / key)}
+
+
 def group(title):
     print(f"::group::{title}" if IN_ACTIONS else f"\n=== {title}", flush=True)
 
@@ -176,7 +189,8 @@ def run_shard(commands, shard, shards, durations):
         exe = shutil.which(args[0])
         start = time.monotonic()
         try:
-            code = subprocess.run([exe or args[0], *args[1:]], cwd=ROOT / c.cwd).returncode
+            code = subprocess.run([exe or args[0], *args[1:]], cwd=ROOT / c.cwd,
+                                  env=command_env(c, args)).returncode
         except OSError as error:
             print(f"could not start: {error}", flush=True)
             code = -1
