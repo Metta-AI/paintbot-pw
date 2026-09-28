@@ -291,6 +291,8 @@
       "grenade blast": "grenade exploded",
       spray: "sprayed paint",
       heal: "used a med kit",
+      "great heart": `shared great heart ${e.victim + 1} (60 points split in the zone)`,
+      "great heart charge": `started charging great heart ${e.victim + 1}`,
     })[e.kind];
   function ready() {
     return (
@@ -461,7 +463,7 @@
       $("kin-chips").innerHTML = chips.map((c) => {
         const who = c.members.map((i) => i + 1).join(", ");
         const label = c.family >= 0 ? `Family: cogs ${who}` : `Loner: cog ${who}`;
-        return `<span class="kin-chip${c.alive ? "" : " out"}" style="--kin:${kin.kinColor(c.hue)}" title="${label} · ${c.alive}/${c.members.length} alive · raw score ${c.score.toFixed(1)}"><span class="dot">${c.family >= 0 ? c.members.length : c.seat + 1}</span>${c.score.toFixed(1)}</span>`;
+        return `<span class="kin-chip${c.alive ? "" : " out"}" style="--kin:${kin.kinColor(c.hue)}" title="${label} · ${c.alive}/${c.members.length} alive · ${c.hearts} hearts held · raw score ${c.score.toFixed(1)}"><span class="dot">${c.family >= 0 ? c.members.length : c.seat + 1}</span><span class="hearts">♥${c.hearts}</span> · ${Math.round(c.score)}</span>`;
       }).join("");
     }
     const great = kin.greatStatus(data);
@@ -673,7 +675,7 @@
     );
     show(
       "The match, moment by moment",
-      `<div class="toolbar"><select id="eventfilter" aria-label="Event type">${["all", "territory", "capture", "pickup", "drop", "return", "tag", "down", "grenade throw", "grenade blast", "spray", "grenade pickup", "spray pickup", "shield pickup", "heal"].map((x) => `<option ${x === eventFilter ? "selected" : ""}>${x}</option>`).join("")}</select><span class="hint">${list.length} events · ${spoilers ? "Future events visible" : "Future events hidden"}</span></div><div class="eventlist">${list.map((e) => `<button data-tick="${e.tick}"><span class="${e.side ? "blue" : "red"}">${clock(e.tick)} · ${escape(e.slot < 0 ? (e.side ? "Azure" : "Ember") : name(e.slot))}</span> ${eventTitle(e)}</button>`).join("") || '<p class="hint">No matching events at this point in the replay.</p>'}</div>`,
+      `<div class="toolbar"><select id="eventfilter" aria-label="Event type">${["all", "territory", "capture", "pickup", "drop", "return", "tag", "down", "grenade throw", "grenade blast", "spray", "grenade pickup", "spray pickup", "shield pickup", "heal", ...(ffaOn() ? ["great heart", "great heart charge"] : [])].map((x) => `<option ${x === eventFilter ? "selected" : ""}>${x}</option>`).join("")}</select><span class="hint">${list.length} events · ${spoilers ? "Future events visible" : "Future events hidden"}</span></div><div class="eventlist">${list.map((e) => `<button data-tick="${e.tick}">${ffaOn() ? `<span style="color:${e.slot >= 0 ? seatColor(e.slot) : e.kind === "territory" ? seatColor(e.side) : "#f4e7c4"}">${clock(e.tick)} · ${escape(e.slot >= 0 ? name(e.slot) : e.kind === "territory" ? name(e.side) : "Heart")}</span>` : `<span class="${e.side ? "blue" : "red"}">${clock(e.tick)} · ${escape(e.slot < 0 ? (e.side ? "Azure" : "Ember") : name(e.slot))}</span>`} ${eventTitle(e)}</button>`).join("") || '<p class="hint">No matching events at this point in the replay.</p>'}</div>`,
     );
     $("eventfilter").onchange = (e) => {
       eventFilter = e.target.value;
@@ -1714,6 +1716,10 @@
       if (next && next.tick - t > 120) {
         $("skipping").textContent = "SKIPPING LULL";
         seek(next.tick - 48);
+      } else if (!next && state.total - t > 120) {
+        // Nothing left to watch: jump to just before the end card.
+        $("skipping").textContent = "SKIPPING LULL";
+        seek(state.total - 48);
       } else $("skipping").textContent = "";
     } else $("skipping").textContent = "";
     $("victory-banner").hidden = !data.celebrating;

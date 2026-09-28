@@ -42,18 +42,20 @@
     }
     return rows.sort((a, b) => b.R - a.R || b.s - a.s || a.seat - b.seat);
   }
-  // One chip per family with its summed raw score; each loner is its own chip.
+  // One chip per family with its summed raw score and control hearts held now; each loner is
+  // its own chip.
   function familyChips(state) {
     const w = state.world;
     const chips = new Map();
     for (let seat = 0; seat < 16; seat++) {
       const family = state.family?.[seat] ?? -1;
       const key = family >= 0 ? `f${family}` : `l${seat}`;
-      if (!chips.has(key)) chips.set(key, { family, seat: family >= 0 ? null : seat, hue: hueOf(state, seat), score: 0, members: [], alive: 0 });
+      if (!chips.has(key)) chips.set(key, { family, seat: family >= 0 ? null : seat, hue: hueOf(state, seat), score: 0, hearts: 0, members: [], alive: 0 });
       const chip = chips.get(key);
       chip.members.push(seat);
       chip.score += w.seatScore?.[seat] ?? 0;
       if (w.cogs?.[seat]?.hp > 0) chip.alive++;
+      chip.hearts += (w.controlHearts || []).filter((h) => h.owner === seat).length;
     }
     return [...chips.values()]
       .map((c) => ({ ...c, score: points(c.score) }))

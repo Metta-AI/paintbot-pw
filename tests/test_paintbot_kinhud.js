@@ -56,6 +56,9 @@ assert.deepEqual(tied, [...tied].sort((a, b) => a - b));
 const chips = kin.familyChips(state);
 assert.equal(chips.length, 4); // three families + one loner
 assert.deepEqual(chips.map(c => [c.family, c.score]), [[-1, 50], [0, 40], [1, 4], [2, 2]]);
+// Hearts held now: loner 4 holds two, family 0 one (seat 0), the rest none; a family with a
+// dead member still counts the living members' hearts.
+assert.deepEqual(chips.map(c => c.hearts), [2, 1, 0, 0]);
 assert.equal(chips[0].seat, 4);
 assert.deepEqual(chips[1].members, [0, 1]);
 assert.equal(chips[1].alive, 1);

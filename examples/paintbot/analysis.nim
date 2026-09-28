@@ -120,7 +120,23 @@ proc indexReplay*(progress: proc(tick, total: int) = nil): ReplayIndex =
     let hearts = world.hearts
     var owners:seq[int32]
     for h in world.controlHearts:owners.add h.owner
+    let greats = world.greatHearts
     result.advanceIndexed()
+    if ffa():
+      # FFA-kin great hearts: a charge starting and a capture are events (slot = the first cog
+      # in the zone, victim = the heart), so the feed and lull skipping see stag hunts.
+      for n, g in world.greatHearts:
+        let captured = g.dormantUntil > greats[n].dormantUntil
+        let charging = greats[n].progress == 0 and g.progress > 0
+        if not captured and not charging: continue
+        var first = -1
+        for i, c in world.cogs:
+          if c.hp > 0 and distance2(c.pos, g.pos) <= GreatHeartRadius.int64*GreatHeartRadius:
+            first = i
+            break
+        result.events.add Moment(tick: world.tick, slot: first, side: max(first, 0),
+          kind: (if captured: "great heart" else: "great heart charge"), victim: n,
+          x: g.pos.x, z: g.pos.z)
     for i,h in world.controlHearts:
       if h.owner!=owners[i] and h.owner>=0:
         result.events.add Moment(tick:world.tick,slot: -1,side:h.owner.int,
