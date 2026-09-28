@@ -74,11 +74,11 @@ suite "FFA-kin replay payload":
     advance() # past the last frame: a no-op, not "frames after victory"
     check world.tick == 240
 
-  test "a teams recording still saves under the live rules (44) with the teams type":
+  test "a teams recording still saves under the live rules (45) with the teams type":
     let path = getTempDir() / "paintbot-teams-replay-test.replay"
     defer: removeFile(path)
-    visionRulesVersion = 44
-    replayRulesVersion = 44
+    visionRulesVersion = 45
+    replayRulesVersion = 45
     gameMode = gmTeams
     world = newWorld(2026, 14400)
     recording = Recording(seed: 2026, endTick: world.endTick)
@@ -87,8 +87,8 @@ suite "FFA-kin replay payload":
       world.step(commands)
       recording.frames.add Frame(commands: commands, hash: world.stateHash())
     saveRecording(path, recording)
-    check loadReplayFileHeader(path).gameVersion == 44
-    check loadReplayFile(path, "paintbot_pw", 44, Recording).frames == recording.frames
+    check loadReplayFileHeader(path).gameVersion == 45
+    check loadReplayFile(path, "paintbot_pw", 45, Recording).frames == recording.frames
     kinshipOverride = some(kinshipFor(klClones, 1))
     gameMode = gmFfaKin
     check loadRecording(path).frames == recording.frames

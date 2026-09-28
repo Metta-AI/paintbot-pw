@@ -268,13 +268,14 @@ when defined(pwTraining):
     killed: bool) {.nimcall, gcsafe.}
   var damageObserver* {.threadvar.}: DamageObserver
 else:
-  var visionRulesVersion* = 44
+  var visionRulesVersion* = 45
   var gameMode* = gmTeams
 proc ffa*(): bool = gameMode == gmFfaKin
 proc wadesToWetGoals*(): bool =
-  ## Rules 44, FFA-kin only: a cog on dry land whose goal lies in the lake may route into the
-  ## water (see waypoint). The teams game and FFA rules 40-43 keep the rules-38 dry anchors.
-  ffa() and visionRulesVersion >= 44
+  ## Whether a cog on dry land whose goal lies in the lake may route into the water (see
+  ## waypoint): FFA-kin from rules 44, every mode from rules 45. Teams games at rules 44 and
+  ## older, and FFA at 43 and older, keep the rules-38 dry anchors.
+  visionRulesVersion >= 45 or (ffa() and visionRulesVersion >= 44)
 proc maxHp*(): int32 =
   ## Base HP a cog spawns with and a medkit restores: FfaMaxHp in FFA-kin, 3 otherwise.
   if ffa(): FfaMaxHp.int32 else: TeamsMaxHp.int32
@@ -1183,10 +1184,10 @@ proc waypoint*(w:World,start,goal:Point):Point =
     if nav.targets.len>=NavTargetLimit:nav.targets.clear()
     nav.targets[goal]=target
   if target<0:return start
-  # Rules 44 (FFA only): when the goal's own cell is in the lake, every route to it ends in
-  # the water, so dry anchors and dry string pulls can only lead to the shore cell nearest it,
-  # where the cog then stood still for as long as it kept the goal (Heartland's two lake
-  # hearts and their medkits, ~300 units short of the capture ring). Such a cog takes anchors
+  # Rules 44 (FFA) and 45 (every mode): when the goal's own cell is in the lake, every route
+  # to it ends in the water, so dry anchors and dry string pulls can only lead to the shore
+  # cell nearest it, where the cog then stood still for as long as it kept the goal (the two
+  # lake hearts and their medkits, ~300 units short of the capture ring). Such a cog takes anchors
   # and pulls as a wading cog does; the time-weighted field keeps it on dry land for as long
   # as that is faster. The straight dry shortcut above is unchanged: it never ends in water.
   let dryAnchors=dryOnly and not (wadesToWetGoals() and nav.water[target])
