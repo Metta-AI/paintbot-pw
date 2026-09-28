@@ -3,7 +3,7 @@ import std/[math, times, algorithm, strutils]
 when defined(emscripten) and defined(workerReplayIndex): import flatty
 import windy, opengl, vmath, chroma, jsony, gltf
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam, selectionoutlines]
-import game, sim, analysis, scenery, villagegraphics, controls, celebration, projection, kinhue
+import game, sim, analysis, camdirector, scenery, villagegraphics, controls, celebration, projection, kinhue
 from kinship import activeKinship, rPercent
 import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
@@ -79,9 +79,7 @@ var
   lens = -1
   follow = false
   autoCamera = true
-  director = initActionCam(minDistance = 26, maxDistance = 150, tight = 0.6,
-    followRate = 1.0, zoomRate = 0.7, holdSeconds = 2.8, mapSpan = 160)
-  directorTick = -1
+  director = newDirector(160)
   directorLens = -2
   camY = 0'f32
   firstPerson = false
@@ -152,10 +150,7 @@ proc setActionCamera(value: cint) {.exportc: "pw_action_camera", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   autoCamera = value != 0
   if autoCamera: follow = false
-  director = initActionCam(minDistance = 26, maxDistance = 150, tight = 0.6,
-    followRate = 1.0, zoomRate = 0.7, holdSeconds = 2.8,
-    mapSpan = (maxX()-minX()).float32/100)
-  directorTick = -1
+  director = newDirector(mapSpan())
   directorLens = lens
 proc setTerritory(value:cint) {.exportc:"pw_territory",cdecl,
     codegenDecl:"EMSCRIPTEN_KEEPALIVE $# $#$#".} = territoryOverlay=value!=0
@@ -911,67 +906,12 @@ proc runGraphics*() =
     if autoCamera and not cameraFinished:
       if directorLens != lens: setActionCamera(1)
       # Rebuild visible interests each simulation tick, including after lens changes.
-      let cameraTickChanged = directorTick != world.tick
+      let cameraTickChanged = director.tick != world.tick
       if cameraTickChanged:
-        director.beginFrame(world.tick)
-        for i, c in world.cogs:
-          if c.hp <= 0 or not seen(i): continue
-          director.noteInterest(int32(i+1), poses[i], 15, 5, world.tick, 1)
-          when Seats <= 16:
-            for j in i+1..<Seats:
-              if (not ffa() and team(i) == team(j)) or world.cogs[j].hp <= 0 or not seen(j): continue
-              let gap = length(poses[i]-poses[j])
-              if gap < 40:
-                director.noteInterest(int32(100+i*Seats+j), (poses[i]+poses[j])*0.5,
-                  100-gap, gap*0.5+3, world.tick, 1)
-          else:
-            # Crowds: every pair within 40 m is thousands of interests a tick. Each cog adds
-            # only its nearest opponent (unrelated, in FFA-kin), in an id range of its own.
-            var nearest = -1
-            var nearestGap = 40'f32
-            for j in 0..<Seats:
-              if j == i or world.cogs[j].hp <= 0 or not seen(j): continue
-              if (not ffa() and team(i) == team(j)) or (ffa() and kinPercent(i, j) > 0): continue
-              let gap = length(poses[i]-poses[j])
-              if gap < nearestGap: nearest = j; nearestGap = gap
-            if nearest >= 0:
-              director.noteInterest(int32(1_500_000_000+i), (poses[i]+poses[nearest])*0.5,
-                100-nearestGap, nearestGap*0.5+3, world.tick, 1)
-        for n, h in world.controlHearts:
-          var nearby: array[2, int]
-          var total = 0
-          for i, c in world.cogs:
-            if c.hp > 0 and seen(i) and distance2(c.pos,h.pos) < 1000000:
-              inc nearby[team(i)]
-              inc total
-          if total > 0:
-            let contested = if ffa(): total > 1 else: nearby[0] > 0 and nearby[1] > 0
-            director.noteInterest(int32(1000+n), position(h.pos, 2),
-              (if contested: 125'f32 else: 45'f32), 9, world.tick, 1)
-        # Events are recorded in tick order: start at the first one from the last 36 ticks.
-        var first = 0
-        var hi = index.events.len
-        while first < hi:
-          let mid = (first+hi) div 2
-          if index.events[mid].tick < world.tick-36: first = mid+1 else: hi = mid
-        for n in first..<index.events.len:
-          let event = index.events[n]
-          if event.tick > world.tick: break
-          if world.tick-event.tick > 36: continue
-          if event.slot >= 0 and not seen(event.slot): continue
-          let weight = case event.kind
-            of "grenade blast": 165'f32
-            of "down": 145'f32
-            of "tag", "spray": 100'f32
-            of "territory": 130'f32
-            else: 0'f32
-          if weight > 0 and (lens < 0 or event.slot >= 0):
-            director.noteInterest(int32(10000+n), position(point(event.x,event.z),1),
-              weight, 9, world.tick, 1)
-        directorTick = world.tick
+        director.noteInterests(world, index, poses, seen, lens)
       if not paused or cameraTickChanged:
-        director.chooseShot(dt.float32, max(1, playbackRate.int32))
-      director.follow(target, distance, dt.float32, max(1, playbackRate.int32))
+        director.cam.chooseShot(dt.float32, max(1, playbackRate.int32))
+      director.cam.follow(target, distance, dt.float32, max(1, playbackRate.int32))
       camX = target.x; camY = target.y; camZ = target.z
 
     let (eye, view, projection) = spectatorCamera(target, distance, yaw, tilt,
