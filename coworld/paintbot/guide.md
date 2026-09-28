@@ -319,6 +319,24 @@ open (a full-health kill) and 2 to victims in other trenches; spray recovers in 
 instead of 20 and its cone is a third wider. Charge time (24 ticks) and spray reach (850)
 are unchanged so existing throw-distance math and neural decoders keep working.
 
+### Configurable glory awards (rules 43)
+
+Rules 43 move the glory awards into the game config, so a variant can retune glory without an
+engine change. The optional `"glory"` object (teams game only) overrides any of these keys;
+absent keys keep the defaults in the glory table below:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `quiet_supplies` | 10 | glory for each quiet stretch with no supply collected |
+| `quiet_supplies_seconds` | 30 | length of that stretch, in seconds |
+| `behind_lives` | 1 | glory per life a team trails the enemy by |
+| `behind_lives_seconds` | 5 | how often the behind-in-lives award pays, in seconds |
+| `heart` | 20 | glory for picking up a glory heart |
+
+Awards are 0 to 1000 and periods 1 to 600 seconds. Every teams variant sets
+`"glory": {"behind_lives": 5}`, so a team behind in lives earns 5 per life it trails by every
+five seconds. Replays record the awards they were played with.
+
 ### Team vision (rules 42, opt-in)
 
 Rules 42 add an optional vision mode for large games. With `"vision": "team"` in the game config
@@ -526,7 +544,8 @@ scores nothing however it played. Glory is a self-imposed handicap: it never pay
 that makes a team more likely to win (captures, tags, meter points), only for restraint and
 for hardship a team takes on. Each team's glory starts at the match length in seconds (600 for
 the ten-minute limit, `endTick div TickRate`) and loses one per second, so a five-minute win
-keeps about 300 before events. The events, all constants in `sim.nim`:
+keeps about 300 before events. The events below list the engine defaults from `sim.nim`; from
+rules 43 a variant's `"glory"` config can change them (every teams variant pays 5 per life behind):
 
 | Event | Glory | Credited to |
 | --- | --- | --- |

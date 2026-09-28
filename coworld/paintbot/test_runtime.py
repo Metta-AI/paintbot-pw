@@ -892,6 +892,23 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(_schema_errors(schema, certification), [])
         self.assertNotIn("mode", self.manifest["certification"]["game_config"])
 
+    def test_teams_variants_pay_five_glory_per_life_behind(self):
+        schema = self.manifest["game"]["config_schema"]
+        for variant in self.manifest["variants"]:
+            with self.subTest(variant["id"]):
+                config = self._config(variant["id"])
+                if config.get("mode") == "ffa_kin":
+                    self.assertNotIn("glory", config)
+                else:
+                    self.assertEqual(config["glory"], {"behind_lives": 5})
+        competition = self._config("competition")
+        self.assertEqual(_schema_errors(schema, dict(competition, glory={
+            "quiet_supplies": 0, "quiet_supplies_seconds": 600, "behind_lives": 1000,
+            "behind_lives_seconds": 1, "heart": 20})), [])
+        for bad in ({"behind": 5}, {"behind_lives": -1}, {"behind_lives": 1001},
+                    {"behind_lives_seconds": 0}, {"behind_lives": 1.5}, []):
+            self.assertTrue(_schema_errors(schema, dict(competition, glory=bad)), bad)
+
     def test_heartland_is_competition_in_ffa_kin_mode(self):
         heartland = self._config("heartland")
         competition = self._config("competition")
@@ -901,7 +918,7 @@ class ManifestTests(unittest.TestCase):
         self.assertNotIn("slots", heartland)
         self.assertEqual(
             {k: v for k, v in heartland.items() if k not in ("mode", "max_ticks", "kin_layout")},
-            {k: v for k, v in competition.items() if k not in ("slots", "max_ticks")},
+            {k: v for k, v in competition.items() if k not in ("slots", "max_ticks", "glory")},
         )
         # The validator refuses what the schema refuses.
         schema = self.manifest["game"]["config_schema"]
