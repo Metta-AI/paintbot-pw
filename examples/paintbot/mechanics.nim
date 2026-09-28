@@ -230,7 +230,8 @@ proc updateFfaTerritory(w: var World) =
     var touching = 0
     var seat = -1'i32
     for i, c in w.cogs:
-      if c.hp > 0 and distance2(c.pos, heart.pos) <= 140*140 and w.traversable(c.pos, heart.pos):
+      if c.hp > 0 and distance2(c.pos, heart.pos) <= ControlHeartRadius*ControlHeartRadius and
+          w.traversable(c.pos, heart.pos):
         inc touching
         seat = i.int32
     w.heartCaptures[index].contested = touching >= 2

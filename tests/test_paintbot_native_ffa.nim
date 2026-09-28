@@ -59,14 +59,14 @@ proc stats(h: pointer): seq[int32] =
   doAssert pw_pair_stats(h, ip(result)) == 0
 proc stat(s: seq[int32], i, j: int, p: PairStat): int32 = s[(i*Seats+j)*PairStatCount+p.ord]
 
-proc isolate(h: pointer, placed: openArray[(int, Point)]) =
+proc isolate(h: pointer, placed: openArray[(int, Point)], hp = FfaMaxHp.int32) =
   ## Every seat out of the match except the placed ones, standing still with full hp.
   let env = envOf(h)
   for i in 0..<Seats:
     env.world.cogs[i].hp = 0
     env.world.equipment[i].lives = 0
   for (slot, p) in placed:
-    env.world.cogs[slot].hp = 3
+    env.world.cogs[slot].hp = hp
     env.world.cogs[slot].shield = 0
     env.world.cogs[slot].respawn = 0
     env.world.cogs[slot].pos = p
@@ -86,7 +86,7 @@ proc idleStep(h: pointer): array[Seats, float32] =
   var terminals: array[Seats, float32]
   doAssert pw_step(h, ip(actions), fp(result), fp(terminals)) == 0
 
-proc lane(h: pointer, length: int): Point =
+proc lane(h: pointer, length: int, flat = 20): Point =
   ## A dry, flat, unobstructed east-west stretch of `length` units, away from every heart.
   let w = envOf(h).world
   var z = minZ() + 800
@@ -96,7 +96,7 @@ proc lane(h: pointer, length: int): Point =
       let a = point(x, z)
       let b = point(x + length, z)
       var ok = w.lineClear(a, b) and w.lineClear(b, a) and
-        abs(terrainHeight(a.x.int, a.z.int) - terrainHeight(b.x.int, b.z.int)) < 20
+        abs(terrainHeight(a.x.int, a.z.int) - terrainHeight(b.x.int, b.z.int)) < flat
       var k = 0
       while ok and k <= length:
         let q = point(x + k, z)
@@ -197,13 +197,13 @@ suite "Native FFA-kin ABI":
     let p = lane(h, 300)
     h.isolate([(0, p), (1, p.near(300)), (2, open(h, 1400))])
     var ticks = 0
-    while envOf(h).world.cogs[1].hp > 0 and ticks < 400:
+    while envOf(h).world.cogs[1].hp > 0 and ticks < 800:
       h.command(0, true, envOf(h).world.cogs[1].pos)
       discard h.idleStep()
       inc ticks
     let s = h.stats()
     check envOf(h).world.cogs[1].hp == 0
-    check s.stat(0, 1, psDamage) == 3 and s.stat(0, 1, psKills) == 1
+    check s.stat(0, 1, psDamage) == FfaMaxHp and s.stat(0, 1, psKills) == 1
     check s.stat(1, 0, psDamage) == 0 and s.stat(1, 0, psKills) == 0 # negative control
     check s.stat(0, 1, psVisible) > 0 and s.stat(0, 1, psInRange) == s.stat(0, 1, psVisible)
     check s.stat(0, 1, psNear) > 0 and s.stat(1, 0, psNear) == s.stat(0, 1, psNear)
@@ -241,6 +241,74 @@ suite "Native FFA-kin ABI":
       check s.stat(0, j, psDeathAfterDefend) == 0
     check s.stat(3, 2, psDefendOpp) == 0 # 3 stands far off
     pw_destroy(h)
+
+  test "in range means within FfaGunRange: 1900 counts, 2100 does not":
+    let h = ffaHandle(25, 0, 1)
+    let p = lane(h, 2100, 200)
+    h.isolate([(0, p), (1, p.near(1900, 40)), (2, p.near(2100, -40))])
+    envOf(h).world.cogs[0].aim = p.near(3000)
+    for tick in 0..<24: discard h.idleStep()
+    let s = h.stats()
+    check FfaGunRange == 2000 and ShotRange < 1900 # the 1800..2000 band is FFA's alone
+    check s.stat(0, 1, psVisible) > 0 and s.stat(0, 1, psInRange) == s.stat(0, 1, psVisible)
+    check s.stat(0, 2, psVisible) > 0 and s.stat(0, 2, psInRange) == 0 # beyond range: negative control
+    pw_destroy(h)
+
+  test "a costly defence, then death within the window: costly_defend and death_after_defend":
+    let h = ffaHandle(26, 0, 1)
+    let p = lane(h, 600)
+    h.isolate([(2, p), (1, p.near(300)), (0, p.near(600)), (3, open(h, 1400))])
+    envOf(h).world.cogs[0].hp = 3 # 3 * 3 <= 10: the last third of health
+    envOf(h).world.cogs[0].aim = p
+    var ticks = 0
+    while h.stats().stat(1, 2, psDamage) == 0 and ticks < 200:
+      h.command(1, true, envOf(h).world.cogs[2].pos)
+      discard h.idleStep()
+      inc ticks
+    require h.stats().stat(1, 2, psDamage) > 0
+    ticks = 0
+    while h.stats().stat(0, 1, psDamage) == 0 and ticks < 60:
+      h.command(0, true, envOf(h).world.cogs[1].pos)
+      discard h.idleStep()
+      inc ticks
+    var s = h.stats()
+    check s.stat(0, 2, psDefend) > 0 and s.stat(0, 2, psCostlyDefend) == s.stat(0, 2, psDefend)
+    check s.stat(0, 2, psDeathAfterDefend) == 0
+    # 1 turns on 0 and finishes it within 72 ticks of the defence.
+    envOf(h).world.cogs[0].hp = 1
+    ticks = 0
+    while envOf(h).world.cogs[0].hp > 0 and ticks < 60:
+      h.command(1, true, envOf(h).world.cogs[0].pos)
+      discard h.idleStep()
+      inc ticks
+    s = h.stats()
+    check envOf(h).world.cogs[0].hp == 0
+    check s.stat(0, 2, psDeathAfterDefend) == 1
+    check s.stat(0, 1, psDeathAfterDefend) == 0 and s.stat(1, 2, psDeathAfterDefend) == 0
+    pw_destroy(h)
+
+  test "pair stats can be switched off; reward, split and hashes are unchanged":
+    let on = ffaHandle(27, 600, 1)
+    let off = pw_create(27, 24)
+    doAssert pw_set_game_mode(off, 1) == 0 and pw_set_kin_layout(off, 1) == 0
+    check pw_set_pair_stats_enabled(off, 2) == -1 and pw_set_pair_stats_enabled(off, 0) == 0
+    doAssert pw_reset(off, 27, 600) == 0
+    var r1, r2, t1, t2: array[Seats, float32]
+    var s1, s2: array[2*Seats, float32]
+    for tick in 0..<600:
+      var a1 = heartActions(on, tick)
+      var a2 = a1
+      if pw_step(on, ip(a1), fp(r1), fp(t1)) != 0: break
+      check pw_step(off, ip(a2), fp(r2), fp(t2)) == 0
+      check pw_state_hash(on) == pw_state_hash(off) and r1 == r2
+      check pw_reward_split(on, fp(s1)) == 0 and pw_reward_split(off, fp(s2)) == 0 and s1 == s2
+    var busy = 0
+    for v in on.stats(): busy += v
+    check busy > 0
+    for v in off.stats(): check v == 0
+    var d1, d2 = newSeq[float32](Seats*3)
+    check pw_kin_seat_stats(on, fp(d1)) == 0 and pw_kin_seat_stats(off, fp(d2)) == 0 and d1 == d2
+    pw_destroy(on); pw_destroy(off)
 
   test "a contest and a yield opportunity at a heart, then a heart pass":
     let h = ffaHandle(23, 0, 1)

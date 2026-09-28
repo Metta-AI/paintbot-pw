@@ -396,24 +396,30 @@ int pw_net_infer(void *net, const float *observation, float *state, float *logit
  * pw_pair_stats int32[16*16*PW_PAIR_STAT_COUNT], cumulative since create/reset, at
  * [(16i + j) * 13 + stat] = i's count about j; telemetry outside the world, never hashed,
  * zero in teams. KinWindow = 72 ticks, near = 400 units:
- *   0 visible: ticks i could see j (both alive)      1 in_range: ... and within ShotRange
+ *   0 visible: ticks i could see j (both alive)      1 in_range: ... and within gun range (2000 in FFA)
  *   2 damage: health i removed from j                3 kills: kills of j by i
  *   4 defend: health i removed from a cog that removed health from j in the last 72 ticks
+ *     (every "last 72 ticks" window is exclusive: 0 <= now - then < 72)
  *   5 defend_opp: ticks such an attacker of j (alive, not i) was visible to i (j alive)
  *   6 yield_opp: ticks j was capturing a heart uncontested and i was within 400 of it
- *   7 contest: ticks i stood in the capture zone of a heart j was capturing
+ *   7 contest: ticks i stood in the capture zone (140) of a heart j was capturing (a
+ *     capture paused by i's presence still names j as capturer)
  *   8 near: ticks the pair was within 400 (both alive)
  *   9 co_capture: great-heart captures i and j shared
- *  10 costly_defend: the part of defend dealt while i's hp <= 1
+ *  10 costly_defend: the part of defend dealt while i was in its last third of health
+ *     (hp * 3 <= max hp, max hp 10 in FFA)
  *  11 death_after_defend: i died within 72 ticks of a defend event for j
  *  12 heart_pass: hearts whose ownership went directly from j to i
  * Eval-only overrides (training library only; hosted play cannot reach them):
  * pw_set_spawn_grouping int8[16] spawn groups (0..15, -1 alone) independent of the
  * kinship, NULL clears; pw_set_kin_override an exact kinship: family int8[16] (-1..15),
  * genes uint32[16], ibd int8[256] (0..32, symmetric, 32 on the diagonal; r = ibd/32),
- * family NULL clears, wins over the layout. Both apply at the NEXT pw_reset and stay until
+ * family NULL clears, wins over the layout (the override's layout is a label only). Both apply at the NEXT pw_reset and stay until
  * cleared. pw_set_obs_mask: bit 0 zeroes every r-to-me column of ffa.v1 (the genes-only
- * ablation), read by the next pw_observe, kept across resets; other bits rejected.
+ * ablation; the own row reads 0 too), read by the next pw_observe, kept across resets;
+ * other bits rejected. pw_set_pair_stats_enabled(h, 0/1): pair counters off/on (default
+ * on; off skips their per-tick work, from the next pw_step, kept across resets); the
+ * reward, its split, the returns and death ticks are always kept.
  * All return 0, or -1 bad args. */
 #define PW_PAIR_STAT_COUNT 13
 int pw_set_game_mode(void *handle, int32_t mode);
@@ -429,6 +435,7 @@ int pw_set_spawn_grouping(void *handle, const int8_t *sixteen);
 int pw_set_kin_override(void *handle, const int8_t *family_sixteen, const uint32_t *genes_sixteen,
                         const int8_t *ibd_two_fifty_six);
 int pw_set_obs_mask(void *handle, uint32_t flags);
+int pw_set_pair_stats_enabled(void *handle, int32_t enabled);
 #ifdef __cplusplus
 }
 #endif

@@ -344,7 +344,8 @@ There is no map flip, for observations or for the compass heads of either action
 
 Positions and hp of other seats are fog-gated; alive, genes, r, score and hearts held are
 public. hp and armor are divided by `maxHp()` (FfaMaxHp = 10 in FFA, 3 otherwise).
-Scores are raw scores s_j in points. Identity rows are indexed by seat, and the
+Scores are raw scores s_j in points / 1000, the only columns that can exceed 1. Under
+the training-only mask bit 0 every r column reads 0, the seat's own row included. Identity rows are indexed by seat, and the
 aim head's identity index 1..16 aims at that seat. Outside FFA the kin, score and
 seat-ownership columns are zero.
 

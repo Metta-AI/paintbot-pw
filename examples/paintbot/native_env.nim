@@ -14,16 +14,18 @@ type
   PairStat* = enum
     ## FFA-kin pair counters (pw_pair_stats), [i][j] = i's side of the pair, per match:
     psVisible          ## ticks i could see j (both alive)
-    psInRange          ## ticks j was visible to i and within ShotRange
+    psInRange          ## ticks j was visible to i and within gun range (FfaGunRange = 2000 in FFA)
     psDamage           ## health i removed from j
     psKills            ## kills of j by i
     psDefend           ## health i removed from a cog that removed health from j in the last KinWindow ticks
+                       ## ("in the last KinWindow ticks" is always exclusive: 0 <= now - then < 72)
     psDefendOpp        ## ticks some such attacker of j (alive, not i) was visible to i (j alive)
     psYieldOpp         ## ticks j was capturing a heart uncontested and i was within KinNearRange of it
-    psContest          ## ticks i stood in the capture zone of a heart j was capturing
+    psContest          ## ticks i stood in the capture zone (ControlHeartRadius) of a heart j was capturing;
+                       ## a capture i's presence has paused still names j, so j stays credited as capturer
     psNear             ## ticks the pair was within KinNearRange (both alive)
     psCoCapture        ## great-heart captures i and j shared
-    psCostlyDefend     ## the part of psDefend dealt while i's hp <= 1
+    psCostlyDefend     ## the part of psDefend dealt while i was in its last third of health (hp*3 <= maxHp)
     psDeathAfterDefend ## i died within KinWindow ticks of a defend event for j
     psHeartPass        ## hearts whose ownership went directly from j to i
   KinCounters = object
@@ -184,16 +186,20 @@ type
     spawnGrouping: Option[array[Seats, int8]]
     obsMask: uint32
     kin: KinCounters
+    # pw_set_pair_stats_enabled(h, 0) sets this (zeroed = counters on): the per-tick pair
+    # counters and the damage hook are skipped; the reward, its split and death ticks stay.
+    pairStatsOff: bool
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
 const
   NativeRules* = 40
   PairStatCount* = PairStat.high.ord + 1
-  KinWindow* = 3*TickRate # 72 ticks: how recent a hit counts for defend and death-after-defend
+  KinWindow* = 3*TickRate # 72 ticks: a hit or defend counts while now - then < KinWindow
   KinNearRange* = 400
   FfaRewardScale* = 4320.0 # pw_step pays delta R_i (points) / this each tick in FFA
   NoTick = low(int32) div 2
+  KinHeartSlots = 16 # control hearts tracked for psHeartPass (rules 40 has 10)
 static: doAssert PairStatCount == 13 and KinWindow == 72
 
 proc ready(handle: pointer = nil) =
@@ -234,6 +240,10 @@ proc resetStats(env: ptr NativeEnv) =
   for slot in 0..<Seats:
     env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
     env.fireHeld[slot] = 0
+proc recent(now, then: int32): bool =
+  ## "In the last KinWindow ticks", exclusive: then happened within the 72 ticks before now,
+  ## now's own tick included (now - then in 0 ..< KinWindow).
+  now - then < KinWindow
 proc resetKin(env: ptr NativeEnv) =
   ## The match's FFA-kin telemetry starts empty (settings and overrides persist).
   env.kin = KinCounters()
@@ -274,21 +284,21 @@ proc observeKinDamage(w: World, victim, attacker: int, removed: int32,
   if killed:
     if env.kin.deathTick[victim] < 0: env.kin.deathTick[victim] = t
     for j in 0..<Seats:
-      if j != victim and t - env.kin.lastDefend[victim][j] <= KinWindow:
+      if j != victim and recent(t, env.kin.lastDefend[victim][j]):
         inc env.kin.pair[victim][j][psDeathAfterDefend]
   if attacker notin 0..<Seats or attacker == victim: return
   env.kin.pair[attacker][victim][psDamage] += removed
   if killed: inc env.kin.pair[attacker][victim][psKills]
   if removed <= 0: return
   for j in 0..<Seats:
-    if j == attacker or j == victim or t - env.kin.lastHit[victim][j] > KinWindow: continue
+    if j == attacker or j == victim or not recent(t, env.kin.lastHit[victim][j]): continue
     env.kin.pair[attacker][j][psDefend] += removed
-    if w.cogs[attacker].hp <= 1: env.kin.pair[attacker][j][psCostlyDefend] += removed
+    if w.cogs[attacker].hp*3 <= maxHp(): env.kin.pair[attacker][j][psCostlyDefend] += removed
     env.kin.lastDefend[attacker][j] = t
   env.kin.lastHit[attacker][victim] = t
 
 proc kinAfterStep(env: ptr NativeEnv, preScore, preGreat: array[Seats, int32],
-    preOwners: seq[int32], preDormant: array[2, int32], wasDead: array[Seats, bool],
+    preOwners: array[KinHeartSlots, int32], preDormant: array[2, int32], wasDead: array[Seats, bool],
     rewards: FloatBuffer) =
   ## After an FFA step: the dense kin-weighted reward and its split, then the per-tick pair
   ## counters on the post-step world (events happened on tick w.tick - 1).
@@ -309,13 +319,15 @@ proc kinAfterStep(env: ptr NativeEnv, preScore, preGreat: array[Seats, int32],
   for i in 0..<Seats:
     alive[i] = w.cogs[i].hp > 0
     if not wasDead[i] and not alive[i] and env.kin.deathTick[i] < 0: env.kin.deathTick[i] = now
+  if env.pairStatsOff: return # the trainer opted out of pair counters (pw_set_pair_stats_enabled)
   var vis: array[Seats, array[Seats, bool]]
   for i in 0..<Seats:
     if not alive[i]: continue
     for j in 0..<Seats:
       if j != i and alive[j]: vis[i][j] = w.visible(i, j)
   const near2 = KinNearRange.int64 * KinNearRange
-  const shot2 = ShotRange.int64 * ShotRange
+  let gunRange = (if ffa(): FfaGunRange else: ShotRange).int64
+  let shot2 = gunRange * gunRange
   for i in 0..<Seats:
     if not alive[i]: continue
     for j in 0..<Seats:
@@ -326,7 +338,7 @@ proc kinAfterStep(env: ptr NativeEnv, preScore, preGreat: array[Seats, int32],
         if d2 <= shot2: inc env.kin.pair[i][j][psInRange]
       if d2 <= near2: inc env.kin.pair[i][j][psNear]
       for k in 0..<Seats:
-        if k != i and k != j and vis[i][k] and now - env.kin.lastHit[k][j] <= KinWindow:
+        if k != i and k != j and vis[i][k] and recent(now, env.kin.lastHit[k][j]):
           inc env.kin.pair[i][j][psDefendOpp]
           break
   var yielded, contested: array[Seats, array[Seats, bool]]
@@ -339,12 +351,13 @@ proc kinAfterStep(env: ptr NativeEnv, preScore, preGreat: array[Seats, int32],
       if i == j or not alive[i]: continue
       let d2 = distance2(w.cogs[i].pos, spot)
       if not capture.contested and d2 <= near2: yielded[i][j] = true
-      if d2 <= 140*140 and w.traversable(w.cogs[i].pos, spot): contested[i][j] = true
+      if d2 <= ControlHeartRadius*ControlHeartRadius and w.traversable(w.cogs[i].pos, spot):
+        contested[i][j] = true
   for i in 0..<Seats:
     for j in 0..<Seats:
       if yielded[i][j]: inc env.kin.pair[i][j][psYieldOpp]
       if contested[i][j]: inc env.kin.pair[i][j][psContest]
-  for h in 0..<min(w.controlHearts.len, preOwners.len):
+  for h in 0..<min(w.controlHearts.len, KinHeartSlots):
     let before = preOwners[h]
     let after = w.controlHearts[h].owner
     if before >= 0 and after >= 0 and before != after:
@@ -811,15 +824,16 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       env.gateFire(slot, commands[slot])
     let kinStep = env.mode == gmFfaKin
     var preScore, preGreat: array[Seats, int32]
-    var preOwners: seq[int32]
+    var preOwners: array[KinHeartSlots, int32]
     var preDormant: array[2, int32]
     if kinStep:
       preScore = env.world.seatScore
       preGreat = env.world.greatShare
-      for heart in env.world.controlHearts: preOwners.add heart.owner
+      for h in 0..<min(env.world.controlHearts.len, KinHeartSlots): preOwners[h] = env.world.controlHearts[h].owner
       for g in 0..<2: preDormant[g] = env.world.greatHearts[g].dormantUntil
-      kinEnv = env
-      damageObserver = observeKinDamage
+      if not env.pairStatsOff:
+        kinEnv = env
+        damageObserver = observeKinDamage
     combatTelemetry = addr env.stats
     damageScale = addr env.damagePermille
     try: env.world.step(commands)
@@ -1021,7 +1035,8 @@ proc pw_set_spawn_grouping*(handle: pointer, groups: ptr UncheckedArray[int8]): 
 
 proc pw_set_kin_override*(handle: pointer, family: ptr UncheckedArray[int8],
     genes: ptr UncheckedArray[uint32], ibd: ptr UncheckedArray[int8]): cint {.exportc, cdecl, dynlib.} =
-  ## Eval only: an exact FFA kinship for the next resets (the r sweep, label swaps):
+  ## Eval only: an exact FFA kinship for the next resets (the r sweep, label swaps); its
+  ## layout field is only a label (pw_set_kin_layout's value, else fours) and changes nothing:
   ## family int8[16] (-1..15; spawn groups unless pw_set_spawn_grouping is set), genes
   ## uint32[16], ibd int8[256] row-major loci shared by descent (0..32, symmetric, 32 on the
   ## diagonal; r = ibd / 32). family NULL clears. Applied at the next pw_reset, kept until
@@ -1044,10 +1059,20 @@ proc pw_set_kin_override*(handle: pointer, family: ptr UncheckedArray[int8],
   env.kinOverride = some(k)
   0
 
+proc pw_set_pair_stats_enabled*(handle: pointer, enabled: int32): cint {.exportc, cdecl, dynlib.} =
+  ## FFA pair counters on (1, the default) or off (0): off skips pw_pair_stats' per-tick
+  ## work and the damage hook (the counters then stop growing; nothing is cleared). The
+  ## reward, pw_reward_split, the returns and the death ticks are always kept. Takes effect
+  ## on the next pw_step; kept across resets. 0, or -1 bad args.
+  if handle == nil or enabled notin 0'i32..1'i32: return -1
+  cast[ptr NativeEnv](handle).pairStatsOff = enabled == 0
+  0
+
 proc pw_set_obs_mask*(handle: pointer, flags: uint32): cint {.exportc, cdecl, dynlib.} =
   ## Eval only: ffa.v1 observation ablations, read by the next pw_observe (kept across
-  ## resets). Bit 0 zeroes every r-to-me column (identity column 37; a heart owned by
-  ## another seat reads 0): the genes-only ablation. Other bits are rejected. 0, or -1.
+  ## resets). Bit 0 zeroes every r-to-me column (identity column 37, the seat's own row
+  ## included, which then reads 0 instead of 1; a heart owned by another seat reads 0): the
+  ## genes-only ablation. Other bits are rejected. 0, or -1.
   if handle == nil or (flags and not FfaObsMaskKin) != 0: return -1
   cast[ptr NativeEnv](handle).obsMask = flags
   0

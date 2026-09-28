@@ -60,6 +60,7 @@ const
   # 20 m instead of GunRange, so fights last long enough to leave and to come to a relative's aid.
   FfaMaxHp* = 10
   FfaGunRange* = 2000
+  ControlHeartRadius* = 140 # A cog within this (and a traversable line) touches a control heart.
   TeamsMaxHp = 3
   # Compile-time exponential table keeps native/WASM sampling integer-only.
   # Scores are quantized to 10 world units (1% of the temperature).

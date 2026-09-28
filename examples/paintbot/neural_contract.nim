@@ -333,7 +333,11 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   ## (FfaMaxHp = 10 in FFA-kin, 3 in the teams game); alive, genes, r, score and hearts held are
   ## public. Outside FFA the kin, score and seat-ownership columns and the great-heart rows
   ## are zero (the teams game has no kinship). mask bit 0 (FfaObsMaskKin) zeroes every
-  ## r-to-me column: identity column 37, and a heart owned by another seat reads 0.
+  ## r-to-me column: identity column 37 (the own row too, which then reads 0, not 1), and a
+  ## heart owned by another seat reads 0. Normalisations that can exceed 1: the score
+  ## columns (raw score / 1000; a strong seat passes 1000 points over a match). Every other
+  ## column stays within [-1, 1] (armor is at most 3, cooldown at most 72, dx/dz within the
+  ## map span).
   ##   0..7      self: centred x, centred z, hp/maxHp, armor/maxHp, cooldown/72, own score/1000,
   ##             alive, ticks left/8640
   ##   8+42j     identity row j (seat j, 0..15), columns:
