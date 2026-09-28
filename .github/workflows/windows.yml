@@ -3,18 +3,6 @@
 # Windows run never delays a release. A red Windows run still shows on the commit and the PR.
 name: Windows build
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-    # PRs that change only *.md files (outside .github/) skip CI: no code or test reads a .md
-    # file. Pushes to main are NOT filtered: deploy.yml runs after this workflow passes on main,
-    # and its plan expects every main commit to get a build. `paths` with `!` rather than
-    # paths-ignore, so the later .github/** entry re-includes workflow docs.
-    paths:
-      - '**'
-      - '!**/*.md'
-      - '.github/**'
   workflow_dispatch:
 jobs:
   windows:

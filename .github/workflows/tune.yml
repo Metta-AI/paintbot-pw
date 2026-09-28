@@ -1,0 +1,58 @@
+# THROWAWAY (tuning PR only, never merged): ubuntu shard count x --jobs, each config with its own
+# PR-scoped nimcache (saved on this branch only, so main never reads it). Run once cold, re-run
+# for warm timings.
+name: CI tune
+on:
+  pull_request:
+    branches: [ main ]
+jobs:
+  tune:
+    name: tune (${{ matrix.config }}, shard ${{ matrix.shard }})
+    strategy:
+      fail-fast: false
+      matrix:
+        config: ["4x3", "6x2", "6x3", "8x2", "8x3"]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        exclude:
+          - {config: "4x3", shard: 4}
+          - {config: "4x3", shard: 5}
+          - {config: "4x3", shard: 6}
+          - {config: "4x3", shard: 7}
+          - {config: "6x2", shard: 6}
+          - {config: "6x2", shard: 7}
+          - {config: "6x3", shard: 6}
+          - {config: "6x3", shard: 7}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: polyworld
+    env:
+      PYTHONUNBUFFERED: "1"
+      N: ${{ startsWith(matrix.config, '4') && 4 || startsWith(matrix.config, '6') && 6 || 8 }}
+      J: ${{ endsWith(matrix.config, 'x2') && 2 || 3 }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: polyworld
+      - uses: treeform/setup-nim-action@v6
+      - name: Install dependencies
+        shell: bash
+        run: |
+          cd ..
+          nimby create
+          nimby install "polyworld/polyworld.nimble"
+          nimby sync "polyworld/nimby.lock"
+      - uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/nimcache
+          key: tune-v1-${{ matrix.config }}-s${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: tune-v1-${{ matrix.config }}-s${{ matrix.shard }}-
+      - name: Run shard
+        run: python tests/run_ci_shard.py --shard ${{ matrix.shard }} --of $N --jobs $J
+        env:
+          CI_NIMCACHE_ROOT: ${{ github.workspace }}/nimcache
+      - uses: actions/cache/save@v4
+        if: ${{ !cancelled() }}
+        with:
+          path: ${{ github.workspace }}/nimcache
+          key: tune-v1-${{ matrix.config }}-s${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
