@@ -119,10 +119,10 @@ proc convertFrames(frames: seq[PreSoundFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
         goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
     result.add next
-var replayRulesVersion* = 43
+var replayRulesVersion* = 44
 const
-  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1041 today).
-  FfaRulesVersions = [40, 41, 42, 43]
+  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1044 today).
+  FfaRulesVersions = [40, 41, 42, 43, 44]
 proc replayGameVersion*(): uint16 =
   ## The header version a recording made now is saved with.
   uint16((if ffa(): FfaReplayVersionBase else: 0) + replayRulesVersion)
@@ -254,7 +254,7 @@ proc loadRecording*(path: string): Recording =
       communications: old.communications, endTick: old.endTick, map: old.map, vision: old.vision)
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
-  elif replayRulesVersion == 43:
+  elif replayRulesVersion in [43, 44]: # 44 changed FFA routing only; the teams format is 43's
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
