@@ -438,6 +438,19 @@ int pw_set_kin_override(void *handle, const int8_t *family_sixteen, const uint32
                         const int8_t *ibd_two_fifty_six);
 int pw_set_obs_mask(void *handle, uint32_t flags);
 int pw_set_pair_stats_enabled(void *handle, int32_t enabled);
+/* Maps (additive; training library only). With pw_set_map never called a handle plays the
+ * rules' own island byte for byte as before. pw_map_count: the number of maps; pw_map_name
+ * writes map `index`'s name NUL-terminated ("" for -1, the island; capacity 32 always holds
+ * one): 0, or -1 bad args. pw_set_map: -1 the rules' own island (default), 0 ..
+ * pw_map_count()-1 a map; kept across pw_reset and applied at the NEXT pw_reset (the current
+ * world keeps its map), 0 or -1 bad args. pw_map: the current world's map (-1 the island, -2
+ * NULL). Each handle carries its own map, so handles on one thread may play different maps;
+ * every call on a handle installs that handle's map for the calling thread. A handle on map
+ * m plays exactly the world the hosted game builds with map m under the library's rules. */
+int pw_map_count(void);
+int pw_map_name(int32_t index, char *out, int32_t capacity);
+int pw_set_map(void *handle, int32_t index);
+int pw_map(void *handle);
 #ifdef __cplusplus
 }
 #endif
