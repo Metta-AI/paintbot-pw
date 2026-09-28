@@ -675,7 +675,7 @@
         : "Match scoreboard",
       ffaOn()
         ? `<p class="hint">${w.winner === -3 ? `<b>${escape(kin.matchResult(state, name).text)}</b><br>` : ""}${clock(w.tick)} · Seed ${index.seed}<br>Heartland: every cog plays for itself with one life. A control heart pays its owner 1 point/s; a dead cog's hearts go neutral. A great heart needs 3 living cogs in its zone for 5 s, then splits 60 points among them and sleeps 60 s. Raw score s = heart points + great-heart shares; the match score is R = Σ r·s over kin (r = 1 self, ½ sibling, ¼ cousin). Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`
-        : `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}${state.rulesVersion >= 37 ? `<br>Glory: Ember <b>${w.glory?.[0] ?? 0}</b> — <b>${w.glory?.[1] ?? 0}</b> Azure. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10${state.rulesVersion >= 39 ? ", each glory heart picked up 20, and every five seconds a team behind in lives 1 per life it trails by" : state.rulesVersion >= 38 ? ", friendly fire taken in the opening thirty seconds 30 per hit, and each glory heart picked up 20" : ", friendly fire taken in the opening thirty seconds 30 per hit"}. Nothing that helps you win pays glory. The loser's glory drops to zero; the winner's is the match score.` : ""}<br>${state.rulesVersion >= 34 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; an eliminated team loses immediately and the survivor's meter fills. At 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 28 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; at 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
+        : `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}${state.rulesVersion >= 37 ? `<br>Glory: Ember <b>${w.glory?.[0] ?? 0}</b> — <b>${w.glory?.[1] ?? 0}</b> Azure. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; ${gloryEventsText(state, state.rulesVersion)}. Nothing that helps you win pays glory. The loser's glory drops to zero; the winner's is the match score.` : ""}<br>${state.rulesVersion >= 34 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; an eliminated team loses immediately and the survivor's meter fills. At 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 28 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; at 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
     $("dialogbody")
       .querySelectorAll("[data-seat]")
@@ -994,6 +994,18 @@
     gloryBehindLives: "behind in lives",
   };
   const GLORY_TOAST_TICKS = 72;
+  // Rules 43: the match's glory awards (the game config's "glory"); earlier rules paid these.
+  const DEFAULT_GLORY = {quietSupplies: 10, quietSupplySeconds: 30, behindLives: 1, behindLivesSeconds: 5, heart: 20};
+  const gloryAwards = data => (data && data.rulesVersion >= 43 && data.glory) || DEFAULT_GLORY;
+  const gloryPeriod = seconds => seconds === 30 ? "thirty seconds" : seconds === 5 ? "five seconds" : `${seconds} seconds`;
+  function gloryReason(kind) {
+    return kind === "gloryQuietSupplies" ? `${gloryPeriod(gloryAwards(state).quietSupplySeconds)} without supplies` : GLORY_REASONS[kind];
+  }
+  // The scoreboard's list of glory events for rules 37 and later.
+  function gloryEventsText(data, rules) {
+    const g = gloryAwards(data);
+    return `${gloryPeriod(g.quietSupplySeconds)} without supplies adds ${g.quietSupplies}${rules >= 39 ? `, each glory heart picked up ${g.heart}, and every ${gloryPeriod(g.behindLivesSeconds)} a team behind in lives ${g.behindLives} per life it trails by` : rules >= 38 ? ", friendly fire taken in the opening thirty seconds 30 per hit, and each glory heart picked up 20" : ", friendly fire taken in the opening thirty seconds 30 per hit"}`;
+  }
   // Rules 37: the engine keeps each glory award for a few seconds; show the recent ones,
   // in team color, at the very top. Same-tick awards of one kind merge into a line.
   function updateGloryToast(w, rulesVersion) {
@@ -1011,7 +1023,7 @@
       lines.set(key, line);
     }
     toast.innerHTML = [...lines.values()].sort((a, b) => a.tick - b.tick).map(l =>
-      `<div class="${l.team ? "blue" : "red"}">${l.team ? "Azure" : "Ember"} <b>+${l.amount}</b> glory · ${GLORY_REASONS[l.kind] || escape(String(l.kind))}</div>`).join("");
+      `<div class="${l.team ? "blue" : "red"}">${l.team ? "Azure" : "Ember"} <b>+${l.amount}</b> glory · ${gloryReason(l.kind) || escape(String(l.kind))}</div>`).join("");
   }
   // Rules 38: a "+20" rises over the cog that took a glory heart. Each pop is keyed by
   // tick and seat, starts its CSS animation already `age` ticks in (so seeking lands
@@ -1651,7 +1663,7 @@
       const scoreLine = $(`score${s}`).parentElement;
       const bigOwned = data.rulesVersion >= 25 && w.bigHeart >= 0 && w.controlHearts[w.bigHeart].owner === s;
       scoreLine.title = glory !== null
-        ? `Glory ${glory} · ${owned} hearts held. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10${data.rulesVersion >= 39 ? ", each glory heart picked up 20, every five seconds behind in lives 1 per life trailed" : data.rulesVersion >= 38 ? ", friendly fire taken in the opening thirty seconds 30 per hit, each glory heart picked up 20" : ", friendly fire taken in the opening thirty seconds 30 per hit"}. Only the winner keeps it.`
+        ? `Glory ${glory} · ${owned} hearts held. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; ${gloryEventsText(data, data.rulesVersion)}. Only the winner keeps it.`
         : `${owned} hearts held${bigOwned ? " · Big heart: 5 points/s" : ""}`;
       scoreLine.querySelector('small').textContent = glory !== null ? ` GLORY` : data.rulesVersion >= 28 ? ` / ${w.controlHearts.length * 90} · ${owned} ♥` : data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
       w.cogs.forEach((c, i) => {
