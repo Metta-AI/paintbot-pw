@@ -11,6 +11,9 @@ root = Path(__file__).resolve().parents[3]
 
 
 TEAM_COLORS = {"red": [0.87, 0.19, 0.12, 1], "blue": [0.10, 0.48, 0.86, 1]}
+# FFA-kin: one neutral body for every seat; the family colour is drawn on the ground disc.
+NEUTRAL_COLORS = {"grey": [0.62, 0.64, 0.66, 1]}
+BODY_COLORS = {**TEAM_COLORS, **NEUTRAL_COLORS}
 
 
 def build(team, uniform):
@@ -20,14 +23,14 @@ def build(team, uniform):
     meshes = []
     nodes = []
     colors = [
-        TEAM_COLORS[team],
+        BODY_COLORS[team],
         [0.065, 0.085, 0.09, 1],
         [0.24, 0.28, 0.28, 1],
         [0.54, 0.48, 0.32, 1],
         [0.025, 0.12, 0.15, 1],
         [0.15, 0.96, 1, 1],
         [0.88, 0.84, 0.67, 1],
-        TEAM_COLORS[uniform],
+        BODY_COLORS[uniform],
     ]
     materials = [
         {
@@ -228,3 +231,4 @@ def build(team, uniform):
 for team in TEAM_COLORS:
     for uniform in TEAM_COLORS:
         build(team, uniform)
+build("grey", "grey")

@@ -139,6 +139,18 @@ proc setActionCamera(value: cint) {.exportc: "pw_action_camera", cdecl,
 proc setTerritory(value:cint) {.exportc:"pw_territory",cdecl,
     codegenDecl:"EMSCRIPTEN_KEEPALIVE $# $#$#".} = territoryOverlay=value!=0
 const teamColors = [rgbx(255, 103, 81, 255), rgbx(74, 192, 255, 255)]
+const lonerColor = rgbx(150, 155, 160, 255)
+proc kinColor(seat: int, alpha = 255'u8): ColorRGBX =
+  ## FFA-kin: the seat's family hue; loners are grey.
+  let c = if seat notin 0..<Seats or kinHues[seat] < 0: lonerColor
+    else: hsl(kinHues[seat], KinSaturation, KinLightness).color.asRgbx
+  rgbx(c.r, c.g, c.b, alpha)
+proc seatColor(seat: int): ColorRGBX =
+  ## Paint colour of a seat: its team in the teams game, its family in FFA-kin.
+  if ffa(): kinColor(seat) else: teamColors[team(seat)]
+proc kinPercent(a, b: int): int32 =
+  ## round(100 r) between two seats in FFA-kin; 0 in the teams game.
+  if ffa() and a in 0..<Seats and b in 0..<Seats: activeKinship.rPercent(a, b) else: 0
 proc position(p: Point, y = 0'f32): Vec3 = vec3(p.x.float32/100-32, y+(
     if replayRulesVersion >= 9: world.elevation(p).float32/100 else: 0'f32),
 
@@ -699,6 +711,12 @@ proc runGraphics*() =
         "paintbot-cog-" & name & ".glb"
       models[side][apparent] = loadCharacterModel(path, 1.9)
       models[side][apparent].unlitParts = @["eye", "smile"]
+  # FFA-kin cogs share one neutral body; the family colour lives on the ground disc.
+  var neutralModel: CharacterModel
+  if ffa():
+    neutralModel = loadCharacterModel((when defined(emscripten): "/" else: "tmp/") &
+      "paintbot-cog-grey.glb", 1.9)
+    neutralModel.unlitParts = @["eye", "smile"]
   var occlusionOutline = initSelectionOutline(OccludedOutline)
   var shapes = initShapeRenderer()
   var last = epochTime()
@@ -782,18 +800,20 @@ proc runGraphics*() =
           if c.hp <= 0 or not seen(i): continue
           director.noteInterest(int32(i+1), poses[i], 15, 5, world.tick, 1)
           for j in i+1..<Seats:
-            if team(i) == team(j) or world.cogs[j].hp <= 0 or not seen(j): continue
+            if (not ffa() and team(i) == team(j)) or world.cogs[j].hp <= 0 or not seen(j): continue
             let gap = length(poses[i]-poses[j])
             if gap < 40:
               director.noteInterest(int32(100+i*Seats+j), (poses[i]+poses[j])*0.5,
                 100-gap, gap*0.5+3, world.tick, 1)
         for n, h in world.controlHearts:
           var nearby: array[2, int]
+          var total = 0
           for i, c in world.cogs:
             if c.hp > 0 and seen(i) and distance2(c.pos,h.pos) < 1000000:
               inc nearby[team(i)]
-          if nearby[0]+nearby[1] > 0:
-            let contested = nearby[0] > 0 and nearby[1] > 0
+              inc total
+          if total > 0:
+            let contested = if ffa(): total > 1 else: nearby[0] > 0 and nearby[1] > 0
             director.noteInterest(int32(1000+n), position(h.pos, 2),
               (if contested: 125'f32 else: 45'f32), 9, world.tick, 1)
         for n, event in index.events:
@@ -846,8 +866,14 @@ proc runGraphics*() =
             world.tick.float32+alpha)/24 else: 0)
         let lowered = if replayRulesVersion < 9 and world.trenchAt(c.pos) >=
             0: 0.55'f32 else: 0'f32
-        drawCharacter(scene, models[team(i)][if victory.active: team(i) else: world.apparentTeam(i)], poses[i]-vec3(0, lowered, 0),
-            facing, 0, rolling)
+        if ffa():
+          # Kin view: with a cog selected, cogs unrelated to it fade to 40%.
+          let dim = selected >= 0 and i != selected and kinPercent(selected, i) == 0
+          drawCharacter(scene, neutralModel, poses[i]-vec3(0, lowered, 0), facing, 0, rolling,
+            tint = (if dim: color(1, 1, 1, 0.4) else: color(1, 1, 1, 1)))
+        else:
+          drawCharacter(scene, models[team(i)][if victory.active: team(i) else: world.apparentTeam(i)], poses[i]-vec3(0, lowered, 0),
+              facing, 0, rolling)
     # Terrain is public in a live match. Keep actor/target visibility exact;
     # thousands of terrain rays per tick otherwise stall human input.
     let terrainLens = if not replayMode: -1 else: lens
@@ -885,10 +911,9 @@ proc runGraphics*() =
     for trench in world.trenches: shapes.trenchCover(trench)
     # Low stone courses exactly match collision bounds; capstones and stripes read at a glance.
     # Paint splashes and short bursts follow recorded tags, so seeking reconstructs them.
-    proc paintOut(p: Vec3, side: int, age, seed: float32) =
+    proc paintOut(p: Vec3, color: ColorRGBX, age, seed: float32) =
       if age < 0 or age >= 48: return
       let fade = 1-age/48
-      let color = teamColors[side]
       shapes.addCircle(p, 0.6, rgbx(color.r, color.g, color.b, uint8(110*fade)))
       for n in 0..4:
         let a = n.float32*1.256+seed
@@ -902,11 +927,12 @@ proc runGraphics*() =
       let age = world.tick.float32+alpha-event.tick.float32 +
         (if victory.active: victory.elapsed*TickRate.float32 else: 0)
       if event.kind != "tag" or (lens >= 0 and not seen(event.victim)): continue
-      paintOut(position(point(event.x, event.z), 0.035), event.side, age, event.slot.float32)
+      paintOut(position(point(event.x, event.z), 0.035),
+        (if ffa(): kinColor(event.slot) else: teamColors[event.side]), age, event.slot.float32)
     if victory.active and world.winner >= 0:
       for i, c in world.cogs:
         if c.hp > 0 and seen(i) and victory.removed(world.winner.int, team(i)):
-          paintOut(position(c.pos, 0.035), world.winner.int, victory.elapsed*TickRate.float32, i.float32)
+          paintOut(position(c.pos, 0.035), teamColors[world.winner], victory.elapsed*TickRate.float32, i.float32)
     # Every damaging hit splashes the victim, including armor hits and survivors.
     for hit in index.hits:
       let age=world.tick.float32+alpha-hit.tick.float32 +
@@ -916,7 +942,7 @@ proc runGraphics*() =
       let center=(if world.cogs[hit.victim].hp>0:poses[hit.victim]
           else:position(point(hit.x,hit.z)))+vec3(0,1.3,0)
       let front=center+normalize(eye-center)*0.5
-      let color=if hit.side==0:rgbx(255,103,112,255) else:rgbx(83,218,255,255)
+      let color=if ffa():kinColor(hit.slot) elif hit.side==0:rgbx(255,103,112,255) else:rgbx(83,218,255,255)
       shapes.paintball(front,0.36*fade,color)
       for drop in 0..<7:
         let angle=drop.float32*0.8976+hit.slot.float32
@@ -979,7 +1005,11 @@ proc runGraphics*() =
       let age=clamp((world.tick.float32+alpha-b.tick.float32)/24,0'f32,1'f32)
       let bloom=min(age/0.18,1'f32)
       let settle=clamp((age-0.18)/0.72,0'f32,1'f32)
-      let palette=if team(b.owner.int)==0:
+      let kin=kinColor(b.owner.int)
+      let palette=if ffa():
+        [kin,rgbx(uint8(min(255,kin.r.int+50)),uint8(min(255,kin.g.int+50)),uint8(min(255,kin.b.int+50)),255),
+          rgbx(uint8(kin.r.int*3 div 4),uint8(kin.g.int*3 div 4),uint8(kin.b.int*3 div 4),255)]
+      elif team(b.owner.int)==0:
         [rgbx(255,91,93,255),rgbx(255,168,57,255),rgbx(245,74,155,255)]
       else:
         [rgbx(67,203,255,255),rgbx(72,231,193,255),rgbx(164,127,255,255)]
@@ -1025,14 +1055,16 @@ proc runGraphics*() =
             for i,h in world.controlHearts:
               if distance2(center,h.pos)<distance2(center,world.controlHearts[nearest].pos):nearest=i
             let owner=world.controlHearts[nearest].owner
-            # FFA-kin owners are seats; until the viewer colours kin, they draw neutral here.
-            let color=if owner notin 0..1:rgbx(150,155,160,55) else:rgbx(teamColors[owner].r,teamColors[owner].g,teamColors[owner].b,85)
+            # FFA-kin owners are seats, coloured by family.
+            let color=if owner<0:rgbx(150,155,160,55) elif ffa():kinColor(owner.int,85)
+              elif owner notin 0..1:rgbx(150,155,160,55) else:rgbx(teamColors[owner].r,teamColors[owner].g,teamColors[owner].b,85)
             shapes.addQuad(position(point(x,z),0.09),position(point(x,z+200),0.09),
               position(point(x+200,z+200),0.09),position(point(x+200,z),0.09),color)
       for index, heart in world.controlHearts:
         if inspectedKind == 1 and inspectedId == index:
           shapes.addCircle(position(heart.pos, 0.025), 1.8, rgbx(250,226,140,180))
         let color=if heart.owner<0:rgbx(220,229,238,255)
+          elif ffa():kinColor(heart.owner.int)
           elif heart.owner==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)
         let big = world.heartPoints(index) == BigHeartPoints
         shapes.heartTower(position(heart.pos),eye,color,heartAnimationTime,big)
@@ -1045,7 +1077,8 @@ proc runGraphics*() =
             let finish = center+right*1.4
             shapes.addLine(start, finish, rgbx(28,35,43,255), halfWidth=0.18)
             if capture.ticks > 0:
-              let progressColor = if capture.team == 0: rgbx(255,75,99,255)
+              let progressColor = if ffa(): kinColor(capture.team.int)
+                elif capture.team == 0: rgbx(255,75,99,255)
                 else: rgbx(65,221,255,255)
               shapes.addLine(start, start+right*(2.8*capture.ticks.float32/HeartCaptureTicks.float32),
                 progressColor, halfWidth=0.12)
@@ -1059,11 +1092,42 @@ proc runGraphics*() =
           let p = position(heart.pos, if heart.carrier < 0: 1.8+sin(
               world.tick.float32/12)*0.12 else: 3.1)
           shapes.heartSculpture(p,eye,(if side==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)),heartAnimationTime*2*PI.float32/6)
+    if ffa():
+      # FFA-kin great hearts: a big gold heart over its capture zone; the ring fills with the
+      # charge while a quorum stands in it, and a spent heart sits grey until it wakes.
+      for g in world.greatHearts:
+        if not pointSeen(g.pos): continue
+        let dormant = world.tick < g.dormantUntil
+        let base = position(g.pos)
+        let radius = GreatHeartRadius.float32/100
+        proc ring(fraction: float32, color: ColorRGBX, width: float32, y: float32) =
+          let segments = max(1, int(ceil(64*fraction)))
+          for n in 0..<segments:
+            let a = -PI.float32/2+2*PI.float32*fraction*n.float32/segments.float32
+            let b = -PI.float32/2+2*PI.float32*fraction*(n+1).float32/segments.float32
+            shapes.addLine(base+vec3(cos(a)*radius, y, sin(a)*radius),
+              base+vec3(cos(b)*radius, y, sin(b)*radius), color, halfWidth = width)
+        ring(1, (if dormant: rgbx(120, 125, 130, 200) else: rgbx(255, 214, 92, 170)), 0.05, 0.07)
+        if not dormant and g.progress > 0:
+          ring(clamp(g.progress.float32/GreatHeartCaptureTicks.float32, 0, 1),
+            rgbx(255, 244, 190, 255), 0.13, 0.09)
+        shapes.heartTower(base, eye, (if dormant: rgbx(128, 132, 138, 255) else: rgbx(255, 196, 60, 255)),
+          heartAnimationTime, big = true)
     for i, c in world.cogs:
       if c.hp <= 0 or not shown(i): continue
       let p = poses[i]
-      shapes.addCircle(p+vec3(0, 0.04, 0), 0.65, teamColors[world.apparentTeam(i)])
-      shapes.addCircle(p+vec3(0, 0.05, 0), 0.48, rgbx(43, 68, 55, 255))
+      if ffa():
+        # Kin view: kin of the selected cog get a halo as bright as their relatedness; the
+        # unrelated fade to 40%.
+        let r = kinPercent(selected, i)
+        let dim = selected >= 0 and i != selected and r == 0
+        if selected >= 0 and i != selected and r > 0:
+          shapes.addCircle(p+vec3(0, 0.02, 0), 1.3, rgbx(255, 240, 170, uint8(40+r*2)))
+        shapes.addCircle(p+vec3(0, 0.04, 0), 0.65, kinColor(i, if dim: 102'u8 else: 255'u8))
+        shapes.addCircle(p+vec3(0, 0.05, 0), 0.48, rgbx(43, 68, 55, if dim: 102'u8 else: 255'u8))
+      else:
+        shapes.addCircle(p+vec3(0, 0.04, 0), 0.65, teamColors[world.apparentTeam(i)])
+        shapes.addCircle(p+vec3(0, 0.05, 0), 0.48, rgbx(43, 68, 55, 255))
       if i == selected: shapes.addCircle(p+vec3(0, 0.03, 0), 0.9, rgbx(250, 226,
           140, 180))
       if victory.active: continue
@@ -1075,10 +1139,10 @@ proc runGraphics*() =
           1.05, d.z.float32/100), 0.23, rgbx(255, 239, 177, 255))
       if c.shield > 0:
         let spawnProgress = clamp((36-c.shield.float32+alpha)/36,0'f32,1'f32)
-        shapes.spawnBeam(p,teamColors[world.apparentTeam(i)],spawnProgress,i)
+        shapes.spawnBeam(p,(if ffa(): kinColor(i) else: teamColors[world.apparentTeam(i)]),spawnProgress,i)
       if trails:
-        shapes.addLine(p+vec3(0, 0.08, 0), position(c.goal, 0.08), teamColors[
-            team(i)], halfWidth = 0.035)
+        shapes.addLine(p+vec3(0, 0.08, 0), position(c.goal, 0.08), seatColor(i),
+            halfWidth = 0.035)
       if bars:
         for hp in 0..<c.hp: shapes.box(p.x-0.35+hp.float32*0.28, p.y+2.5, p.z,
             0.1, 0.09, 0.09, rgbx(221, 253, 180, 255))
@@ -1093,7 +1157,7 @@ proc runGraphics*() =
         let travel=f-bead.float32*0.055
         if travel<0:continue
         let ball=mix(position(start,1.05),position(b.pos,1.05),travel)
-        let color=if team(b.owner.int)==0:rgbx(255,108,74,255) else:rgbx(89,220,255,255)
+        let color=if ffa():kinColor(b.owner.int) elif team(b.owner.int)==0:rgbx(255,108,74,255) else:rgbx(89,220,255,255)
         shapes.paintball(ball,0.32-bead.float32*0.035,color)
         shapes.paintball(ball+vec3(-0.07,0.12,-0.04),0.085,rgbx(255,250,214,255))
     if islandTerrain: drawWater(vp, eye, (world.tick.float32+alpha)/24)

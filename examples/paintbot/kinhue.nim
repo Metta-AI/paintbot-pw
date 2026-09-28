@@ -11,7 +11,7 @@ const
   # Fixed ±1 projection axes over the 32 loci (bits of two constants).
   ProjX = 0x9E3779B9'u32
   ProjY = 0x7F4A7C15'u32
-  ClanSpread = 0.4 ## Families in one clan spread over this fraction of the clan's hue slot.
+  ClanSpread = 0.5 ## Families in one clan spread over this fraction of the clan's hue slot.
 
 proc axis(mask: uint32, locus: int): float = (if (mask shr locus and 1) == 1: 1.0 else: -1.0)
 
