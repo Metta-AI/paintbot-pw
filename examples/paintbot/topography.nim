@@ -213,7 +213,8 @@ proc terrainHeightDirect*(x,z:int):int =
 # in 64x64 blocks shared by every world and thread whose flags agree: a block is
 # allocated on first touch, and each cell is computed by the direct functions above the
 # first time that point is asked for, so no point ever costs more than it did before.
-# A point outside the tabled span falls through to the direct code.
+# A point outside the tabled span, and every point of a generated map, falls through to the
+# direct code.
 when defined(pwTraining):
   import std/atomics
   const
@@ -279,7 +280,10 @@ when defined(pwTraining):
   template terrainCellAt(x, z: int, found: untyped, missing: untyped): untyped =
     let cx = x-TerrainCacheMinX
     let cz = z-TerrainCacheMinZ
-    if cx < 0 or cz < 0 or cx >= TerrainCacheBlocksX*TerrainCacheBlock or
+    # A map's terrain is already a table (maps.nim's grid, one bilinear sample per point), so
+    # it is read directly: tabling it too would pin about 0.6 GB of blocks per map for the life
+    # of the process, and every map a process ever plays would add its own.
+    if activeMap() >= 0 or cx < 0 or cz < 0 or cx >= TerrainCacheBlocksX*TerrainCacheBlock or
         cz >= TerrainCacheBlocksZ*TerrainCacheBlock:
       missing
     else:

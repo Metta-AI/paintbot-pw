@@ -71,6 +71,7 @@
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim": 16.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map.nim": 20.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_config.nim": 40.0,
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map_memory.nim": 40.0,
     "nim r -d:headless tests/test_paintbot_neural_host.nim": 28.9,
     "nim r -d:headless tests/test_paintbot_neural_basic_io.nim \"neuralDecode + neuralIssue*\"": 62.0,
     "nim r -d:headless tests/test_paintbot_neural_basic_io.nim \"neuralMask forbids*\" \"the grenade mask in BASIC*\"": 48.3,
