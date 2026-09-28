@@ -10,6 +10,14 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+    # PRs that change only *.md files (outside .github/) skip CI: no code or test reads a .md
+    # file. Pushes to main are NOT filtered: deploy.yml runs after this workflow passes on main,
+    # and its plan expects every main commit to get a build. `paths` with `!` rather than
+    # paths-ignore, so the later .github/** entry re-includes workflow docs.
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '.github/**'
   workflow_dispatch:
   # windows.yml reuses these steps for Windows. Windows runs separately so that deploy.yml,
   # which triggers when this workflow ("Github Actions") passes on main, waits only for the
