@@ -33,6 +33,12 @@ type
   Totals* = object
     kinds*: OrderedTable[string, Tally]
     frames*, cuts*, retargets*: int
+    insetFrames*, eitherCovered*: int
+      ## Frames showing the inset; key events on screen in the main view or the inset.
+    highlights*, missedHighlights*: int
+    replays*: int
+      ## Instant replays that would start (counted, not played: the harness never seeks).
+      ## Instant-replay candidates, and those neither the main view nor the inset showed.
     panSamples*: seq[float32]
     distanceSum*: float
 
@@ -81,6 +87,7 @@ proc evaluate*(path: string, speed: float32, totals: var Totals) =
     nextEvent = 0
   # Events whose early check is pending, by index into index.events.
   var early: Table[int, bool]
+  var instant: InstantReplay
   let dt = 1'f32/Fps
   while true:
     let finished = world.winner >= 0 or world.tick >= recording.frames.len
@@ -97,6 +104,16 @@ proc evaluate*(path: string, speed: float32, totals: var Totals) =
     director.cam.chooseShot(dt, max(1, speed.int32))
     let before = target
     director.cam.follow(target, distance, dt, max(1, speed.int32))
+    let inset = director.insetShot(dt)
+    if speed <= 2:
+      let calm = director.cam.interestScore(director.cam.lockId) < CalmScore
+      if instant.update(world.tick, dt, calm) >= 0:
+        inc totals.replays
+        if existsEnv("CAMERA_EVAL_VERBOSE"):
+          echo &"  instant replay at {world.tick div TickRate div 60}:{world.tick div TickRate mod 60:02}"
+        instant.cancel()
+        instant.cooldown = ReplayCooldownSeconds
+    if inset.show: inc totals.insetFrames
     inc totals.frames
     totals.distanceSum += distance
     let moved = length(vec2(target.x-before.x, target.z-before.z))
@@ -122,7 +139,17 @@ proc evaluate*(path: string, speed: float32, totals: var Totals) =
       if keyKind(e.kind) and e.tick > 0:
         var t = totals.kinds.mgetOrPut(e.kind, Tally())
         inc t.events
-        if onScreen(target, distance, world.worldPoint(point(e.x, e.z), 1)): inc t.covered
+        let
+          at = world.worldPoint(point(e.x, e.z), 1)
+          main = onScreen(target, distance, at)
+        if main: inc t.covered
+        let shown = main or inset.show and onScreen(inset.target, inset.distance, at)
+        if shown: inc totals.eitherCovered
+        if world.isHighlight(e):
+          inc totals.highlights
+          if not shown:
+            inc totals.missedHighlights
+            instant.noteMissed(e.tick.int32, at)
         if early.getOrDefault(nextEvent, false): inc t.early
         totals.kinds[e.kind] = t
       inc nextEvent
@@ -165,5 +192,8 @@ when isMainModule:
   for v in totals.panSamples: mean += v
   mean /= max(1, totals.panSamples.len).float32
   echo &"  {\"all\":<14} {all.events:5} events  coverage {100*all.covered/max(1, all.events):5.1f}%  early {100*all.early/max(1, all.events):5.1f}%"
+  echo &"  with inset {100*totals.eitherCovered/max(1, all.events):5.1f}%  inset shown {100*totals.insetFrames/max(1, totals.frames):5.1f}% of frames  " &
+    &"highlights {totals.highlights} (missed {totals.missedHighlights}, {totals.missedHighlights.float/minutes:.2f}/min)  " &
+    &"instant replays {totals.replays} ({totals.replays.float/minutes:.2f}/min)"
   echo &"  cuts/min {totals.cuts.float/minutes:.2f}  retargets/min {totals.retargets.float/minutes:.2f}  " &
     &"pan mean {mean:.2f} m/s  p90 {percentile(totals.panSamples, 0.9):.2f} m/s  mean distance {totals.distanceSum/max(1, totals.frames).float:.1f}"

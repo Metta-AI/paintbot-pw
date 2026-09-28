@@ -29,6 +29,22 @@ const
   LeadMaxMeters = 6'f32
   CoverageSeconds = 40'f32
     ## A cog unseen this long reaches the full coverage bonus.
+  InsetScore = 110'f32
+    ## An interest this strong outside the main shot earns the inset.
+  InsetKeepScore = 60'f32
+  InsetHoldSeconds = 3'f32
+  InsetGapSeconds = 3'f32
+    ## After the inset hides it stays down this long unless something urgent appears.
+  InsetUrgentScore = 150'f32
+  ReplayLeadTicks = 2*TickRate
+    ## An instant replay starts this long before the missed highlight.
+  ReplayTailTicks = TickRate*3 div 2
+  ReplayMaxAgeTicks = 8*TickRate
+    ## A missed highlight older than this is no longer worth rewinding for.
+  ReplayCooldownSeconds* = 45'f32
+  ReplayFocusId* = 1_700_000_000'i32
+  CalmScore* = 100'f32
+    ## An instant replay waits until the held shot scores below this.
 
 type
   Director* = ref object
@@ -43,6 +59,22 @@ type
     velocity: array[Seats, Vec3]
       ## Smoothed metres per tick.
     lastInShot: array[Seats, int32]
+    insetId: int32
+    insetTarget: Vec3
+    insetDistance: float32
+    insetHold: float32
+      ## Wall-clock seconds the inset keeps its subject before it may hide or change.
+    insetGap: float32
+      ## Wall-clock seconds before a hidden inset may show a new subject.
+  InsetShot* = tuple[show: bool, target: Vec3, distance: float32]
+  InstantReplay* = object
+    ## Rewinds to a highlight the main camera missed, then returns.
+    active*: bool
+    resumeTick*, endTick*: int32
+    focus*: Vec3
+    cooldown*: float32
+      ## Wall-clock seconds until another replay may start.
+    missed: seq[tuple[tick: int32, position: Vec3]]
 
 proc newDirector*(mapSpan: float32, lookahead = false): Director =
   ## Creates a director tuned for Paintbot's arena scale.
@@ -155,7 +187,7 @@ proc noteInterests*(d: Director, w: World, index: ReplayIndex,
   for n in firstFrom(index.hits, tick-HitTicks)..<index.hits.len:
     let hit = index.hits[n]
     if hit.tick > tick+(if d.lookahead: HitTicks else: 0): break
-    hitAge.add (hit.slot, hit.victim, tick-hit.tick)
+    hitAge.add (hit.slot, hit.victim, int(tick-hit.tick))
   proc recentHit(a, b: int): bool =
     for h in hitAge:
       if (h.attacker == a and h.victim == b) or (h.attacker == b and h.victim == a):
@@ -253,3 +285,86 @@ proc noteInterests*(d: Director, w: World, index: ReplayIndex,
       cam.noteInterest(int32(10000+n), w.worldPoint(point(event.x, event.z), 1),
         weight*timing*w.impact(event)*stakes, 9, tick, 1, replace = true)
   d.tick = tick
+
+proc insetShot*(d: Director, dt: float32): InsetShot =
+  ## A second view on the strongest action outside the main shot, held for a
+  ## few seconds so it does not flicker.
+  let cam = d.cam
+  d.insetHold = max(0, d.insetHold-max(dt, 0))
+  d.insetGap = max(0, d.insetGap-max(dt, 0))
+  if not cam.locked: return
+  proc outside(p: Vec3): bool =
+    length(vec2(p.x-cam.lockTarget.x, p.z-cam.lockTarget.z)) > cam.lockDistance*0.7
+  var bestId = 0'i32
+  var best = -1'f32
+  for interest in cam.liveInterests:
+    if not outside(interest.position): continue
+    if interest.id == d.insetId and interest.score >= InsetKeepScore:
+      d.insetTarget = interest.position
+      d.insetDistance = 26+interest.radius*2
+      bestId = interest.id
+      break
+    let bar = if d.insetId == 0 and d.insetGap > 0: InsetUrgentScore else: InsetScore
+    if interest.score >= bar and interest.score > best:
+      best = interest.score
+      bestId = interest.id
+      d.insetTarget = interest.position
+      d.insetDistance = 26+interest.radius*2
+  if bestId != 0:
+    if bestId != d.insetId: d.insetHold = InsetHoldSeconds
+    d.insetId = bestId
+  elif d.insetHold <= 0 or not outside(d.insetTarget):
+    if d.insetId != 0: d.insetGap = InsetGapSeconds
+    d.insetId = 0
+  if d.insetId != 0 or d.insetHold > 0 and outside(d.insetTarget):
+    result = (true, d.insetTarget, d.insetDistance)
+
+proc isHighlight*(w: World, event: Moment): bool =
+  ## Whether an event deserves an instant replay if the camera missed it: a cog out
+  ## of lives or one of the last two standing goes down, a heart flip that takes or
+  ## ties the heart lead, or a great heart falls.
+  case event.kind
+  of "down": w.impact(event) >= 1.2
+  of "territory": w.impact(event) > 1
+  of "great heart": true
+  else: false
+
+proc noteMissed*(r: var InstantReplay, tick: int32, position: Vec3) =
+  ## Remembers a highlight the main camera did not have on screen.
+  if not r.active: r.missed.add (tick, position)
+
+proc update*(r: var InstantReplay, tick: int32, dt: float32, calm: bool): int32 =
+  ## Advances the replay state. Returns a tick to seek to, or -1.
+  result = -1
+  if r.active:
+    if tick >= r.endTick:
+      r.active = false
+      r.cooldown = ReplayCooldownSeconds
+      return r.resumeTick
+    return
+  r.cooldown = max(0, r.cooldown-max(dt, 0))
+  var n = 0
+  for m in r.missed:
+    if tick-m.tick <= ReplayMaxAgeTicks and m.tick <= tick:
+      r.missed[n] = m
+      inc n
+  r.missed.setLen(n)
+  if r.missed.len == 0 or r.cooldown > 0 or not calm: return
+  let m = r.missed[^1]
+  r.missed.setLen(0)
+  r.active = true
+  r.resumeTick = tick
+  r.endTick = m.tick+ReplayTailTicks
+  r.focus = m.position
+  result = max(0, m.tick-ReplayLeadTicks)
+
+proc cancel*(r: var InstantReplay) =
+  ## Drops a running replay and anything queued, as after a manual seek.
+  r.active = false
+  r.missed.setLen(0)
+
+iterator eventsBetween*(index: ReplayIndex, after, upTo: int): Moment =
+  ## Yields the index events with after < tick <= upTo.
+  for n in firstFrom(index.events, after+1)..<index.events.len:
+    if index.events[n].tick > upTo: break
+    yield index.events[n]

@@ -191,6 +191,13 @@ proc interestScore*(cam: ActionCam, id: int32): float32 =
     if interest.id == id:
       return interest.score
 
+iterator liveInterests*(cam: ActionCam): tuple[id: int32, position: Vec3,
+    score, radius: float32] =
+  ## Yields every live interest.
+  for interest in cam.interests:
+    yield (interest.id, vec3(interest.x, interest.y, interest.z),
+      interest.score, interest.radius)
+
 proc interestIndex(cam: ActionCam, id: int32): int =
   ## Returns the slot of one live interest, or -1.
   result = -1

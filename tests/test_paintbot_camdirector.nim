@@ -59,3 +59,40 @@ suite "camera director":
     evaluate(Root / "tests/data/paintbot_ffa_1040.replay", 1, totals)
     check totals.frames > 0
     check totals.coverage >= 0.5
+
+suite "inset and instant replay":
+  test "the inset frames strong action outside the main shot and holds it":
+    let d = newDirector(200)
+    var cam = d.cam
+    cam.beginFrame(0)
+    cam.noteInterest(1, vec3(0, 0, 0), 150, 4, 0, 1000)
+    cam.chooseShot(0)
+    check d.insetShot(0).show == false
+    cam.noteInterest(2, vec3(120, 0, 0), 130, 4, 0, 1000)
+    let shot = d.insetShot(1/60)
+    check shot.show
+    check abs(shot.target.x-120) < 1
+    # The runner-up cools below the keep bar: the inset holds a moment, then hides.
+    cam.noteInterest(2, vec3(120, 0, 0), 20, 4, 0, 1000, replace = true)
+    check d.insetShot(1).show
+    check not d.insetShot(3).show
+
+  test "an instant replay waits for calm, rewinds, and returns":
+    var r: InstantReplay
+    r.noteMissed(100, vec3(5, 0, 5))
+    check r.update(110, 1/60, calm = false) == -1
+    let back = r.update(120, 1/60, calm = true)
+    check back == 100-2*TickRate
+    check r.active
+    check r.update(110, 1/60, calm = true) == -1
+    check r.update(100+TickRate*3 div 2, 1/60, calm = true) == 120
+    check not r.active
+    # Cooldown: a fresh miss right away must wait.
+    r.noteMissed(130, vec3(0, 0, 0))
+    check r.update(131, 1/60, calm = true) == -1
+
+  test "a stale miss is dropped":
+    var r: InstantReplay
+    r.noteMissed(100, vec3(0, 0, 0))
+    check r.update(100+9*TickRate, 1/60, calm = true) == -1
+    check not r.active

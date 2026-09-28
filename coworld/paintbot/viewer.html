@@ -497,10 +497,12 @@
     font-size: 10px;
     pointer-events: none;
   }
-  body.pov #fpvcap {
+  body.pov #fpvcap,
+  body.pip #fpvcap {
     display: block;
   }
-  body.pov #feed {
+  body.pov #feed,
+  body.pip #feed {
     top: 38%;
   }
   #feed[hidden],
@@ -783,8 +785,13 @@
     border: 1px solid #dbc48e88;
     z-index: 2;
   }
-  body.pov #povframe {
+  body.pov #povframe,
+  body.pip #povframe {
     display: block;
+  }
+  body.pip:not(.pov) #povsight,
+  body.pip:not(.pov) #povstatic {
+    display: none;
   }
   #povstatic[hidden] {
     display: none;
@@ -1231,6 +1238,8 @@
   .match-graph .graph-note { padding: 12px; font-size: 12px; color: #becac2; }
   #viewbar.collapsed > :not(#viewbar-toggle) { display:none !important; }
   #viewbar:not(.collapsed) #viewbar-toggle svg { transform:rotate(180deg); }
+  #instant-replay { position:fixed; top:64px; left:50%; transform:translateX(-50%); z-index:20; padding:6px 14px; border-radius:10px; background:#142920e8; color:#f1dfac; font-size:13px; letter-spacing:.2em; pointer-events:none; }
+  #instant-replay[hidden] { display:none; }
   #victory-banner { position:fixed; bottom:100px; left:50%; transform:translateX(-50%); z-index:20; padding:10px 18px; border-radius:12px; background:#142920e8; color:#f1dfac; font-size:18px; pointer-events:none; }
   #glory-toast { position:fixed; top:0; left:50%; transform:translateX(-50%); z-index:30; display:flex; flex-direction:column; align-items:center; gap:2px; padding:5px 16px 7px; border-radius:0 0 12px 12px; background:#0b1a14e6; font-size:16px; font-weight:600; letter-spacing:.2px; text-shadow:0 1px 2px #0008; pointer-events:none; }
   #glory-toast[hidden] { display:none; }
@@ -1511,6 +1520,7 @@
 </section>
 
 <div id="victory-banner" role="status" hidden></div>
+<div id="instant-replay" role="status" hidden>INSTANT REPLAY</div>
 
 <script src="inspector.js"></script>
 <script src="kinhud.js"></script>
