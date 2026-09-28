@@ -52,6 +52,15 @@ type
     communications: seq[Communication]
     endTick: int32
     map: string
+  PreGloryRecording = object
+    ## Teams recordings at rules 42: Recording without the glory awards.
+    seed: int32
+    frames: seq[Frame]
+    names: array[Seats, string]
+    communications: seq[Communication]
+    endTick: int32
+    map: string
+    vision: string
   Recording* = object
     seed*: int32
     frames*: seq[Frame]
@@ -60,6 +69,7 @@ type
     endTick*: int32
     map*: string ## rules 41: a MapNames entry, or "" for the rules' own island
     vision*: string ## rules 42 teams games: "" per-cog sight lines, or "team" shared vision
+    glory*: GloryConfig = DefaultGloryConfig ## rules 43 teams games: the glory awards the match paid
   PreMapRecordingFfa = object
     ## FFA-kin recordings at gameVersion 1040: RecordingFfa without the map.
     seed: int32
@@ -109,10 +119,10 @@ proc convertFrames(frames: seq[PreSoundFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
         goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
     result.add next
-var replayRulesVersion* = 42
+var replayRulesVersion* = 43
 const
   FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1041 today).
-  FfaRulesVersions = [40, 41, 42]
+  FfaRulesVersions = [40, 41, 42, 43]
 proc replayGameVersion*(): uint16 =
   ## The header version a recording made now is saved with.
   uint16((if ffa(): FfaReplayVersionBase else: 0) + replayRulesVersion)
@@ -132,7 +142,11 @@ proc saveRecording*(path: string, r: Recording) =
     else:
       saveReplayFile(path, "paintbot_pw", replayGameVersion(),
         r.toPreMapFfaRecording(activeKinship))
-  elif replayRulesVersion >= 42: saveReplayFile(path, "paintbot_pw", replayGameVersion(), r)
+  elif replayRulesVersion >= 43: saveReplayFile(path, "paintbot_pw", replayGameVersion(), r)
+  elif replayRulesVersion == 42:
+    saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreGloryRecording(seed: r.seed,
+      frames: r.frames, names: r.names, communications: r.communications, endTick: r.endTick,
+      map: r.map, vision: r.vision))
   elif replayRulesVersion == 41:
     # Each version is written in the shape its loader reads.
     saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreVisionRecording(seed: r.seed,
@@ -140,6 +154,38 @@ proc saveRecording*(path: string, r: Recording) =
   else:
     saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreMapRecording(seed: r.seed,
       frames: r.frames, names: r.names, communications: r.communications, endTick: r.endTick))
+const
+  GloryAwardLimit* = 1000 ## the most one glory award may pay
+  GloryPeriodLimit* = 600 ## the longest glory period, in seconds
+  GloryConfigKeys = ["quiet_supplies", "quiet_supplies_seconds", "behind_lives",
+    "behind_lives_seconds", "heart"]
+proc validGloryConfig*(g: GloryConfig): bool =
+  g.quietSupplies in 0..GloryAwardLimit and g.behindLives in 0..GloryAwardLimit and
+    g.heart in 0..GloryAwardLimit and g.quietSupplySeconds in 1..GloryPeriodLimit and
+    g.behindLivesSeconds in 1..GloryPeriodLimit
+proc parseGloryConfig*(node: JsonNode): GloryConfig =
+  ## The Coworld config's optional "glory" object (rules 43, teams game). Each key overrides
+  ## one default award; absent keys keep the default. Keys: quiet_supplies (glory per quiet
+  ## stretch), quiet_supplies_seconds (its length), behind_lives (glory per life behind),
+  ## behind_lives_seconds (its period), heart (a glory heart's award).
+  result = DefaultGloryConfig
+  if node.isNil or node.kind == JNull: return
+  if node.kind != JObject: raise newException(ValueError, "Paintbot glory must be an object")
+  for key, value in node.pairs:
+    if key notin GloryConfigKeys: raise newException(ValueError, "Unknown Paintbot glory key: " & key)
+    if value.kind != JInt: raise newException(ValueError, "Paintbot glory " & key & " must be an integer")
+    let n = value.getBiggestInt
+    if n notin 0'i64..int64(GloryAwardLimit+GloryPeriodLimit):
+      raise newException(ValueError, "Paintbot glory " & key & " is out of range")
+    case key
+    of "quiet_supplies": result.quietSupplies = n.int32
+    of "quiet_supplies_seconds": result.quietSupplySeconds = n.int32
+    of "behind_lives": result.behindLives = n.int32
+    of "behind_lives_seconds": result.behindLivesSeconds = n.int32
+    of "heart": result.heart = n.int32
+  if not validGloryConfig(result):
+    raise newException(ValueError, "Paintbot glory awards must be 0.." & $GloryAwardLimit &
+      " and periods 1.." & $GloryPeriodLimit & " seconds")
 proc loadFfaRecording(path: string, version: int): Recording =
   let rules = version - FfaReplayVersionBase
   if rules notin FfaRulesVersions:
@@ -203,11 +249,20 @@ proc loadRecording*(path: string): Recording =
       communications: old.communications, endTick: old.endTick, map: old.map)
     discard mapIndex(result.map) # an unknown map is an invalid replay
   elif replayRulesVersion == 42:
+    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreGloryRecording)
+    result = Recording(seed: old.seed, frames: old.frames, names: old.names,
+      communications: old.communications, endTick: old.endTick, map: old.map, vision: old.vision)
+    discard mapIndex(result.map) # an unknown map is an invalid replay
+    if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
+  elif replayRulesVersion == 43:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
+    if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
+  # Recordings before rules 43, and every FFA recording, paid the default awards.
+  if replayRulesVersion < 43 or ffa(): result.glory = DefaultGloryConfig
   if replayRulesVersion < 23: result.endTick = MatchTicks
   elif result.endTick <= 0 or result.endTick > 28800:
     raise newException(ReplayError, "Invalid match duration")
@@ -226,6 +281,7 @@ proc loadRecording*(path: string): Recording =
   # (replay_stats, the viewer's index, kin_replay_counters) plays on the recorded ground.
   configureMap(result.map)
   configureVision(result.vision)
+  configureGlory(result.glory)
 var
   world*: World
   recording*: Recording
@@ -235,6 +291,7 @@ var
   bridge: File
   mapChoice*: string ## live games: --map:<name>, or the Coworld config's "map"
   visionChoice*: string ## live teams games: --vision:team, or the Coworld config's "vision"
+  gloryChoice* = DefaultGloryConfig ## live teams games: --glory:<json>, or the Coworld config's "glory"
 proc parseGameMode*(config: JsonNode): GameMode =
   ## The coworld config's optional "mode": absent or "teams" is the two-team game.
   let mode = config{"mode"}
@@ -266,6 +323,10 @@ proc applyGameConfig*(text: string) =
   let config = parseJson(text)
   gameMode = parseGameMode(config)
   kinLayoutPin = parseKinLayout(config, gameMode)
+  let glory = config{"glory"}
+  if not glory.isNil and glory.kind != JNull and ffa():
+    raise newException(ValueError, "Paintbot glory awards apply to the teams game only")
+  gloryChoice = parseGloryConfig(glory)
   if ffa():
     options.maximumTicks = min(options.maximumTicks, FfaMatchTicks.int32)
     options.seconds = options.maximumTicks div TickRate
@@ -287,6 +348,8 @@ proc setup*() =
         mapChoice = args[i]["--map:".len..^1]; discard mapIndex(mapChoice); inc i; continue
       if args[i].startsWith("--vision:"):
         visionChoice = args[i]["--vision:".len..^1]; configureVision(visionChoice); inc i; continue
+      if args[i].startsWith("--glory:"):
+        gloryChoice = parseGloryConfig(parseJson(args[i]["--glory:".len..^1])); inc i; continue
       if not options.takeCommonFlag(args, i, args[i]): raise newException(
           ValueError, "Unknown argument: "&args[i])
       inc i
@@ -298,6 +361,7 @@ proc setup*() =
     if recording.frames.len > 28800: raise newException(ValueError, "Replay tick limit exceeded")
     configureMap(recording.map)
     configureVision(recording.vision)
+    configureGlory(recording.glory)
     world = newWorld(recording.seed, recording.endTick)
   else:
     # The recording header and live simulation must use the same rules.
@@ -308,6 +372,7 @@ proc setup*() =
     if visionChoice.len > 0 and ffa():
       raise newException(ValueError, "Team vision applies to the teams game only")
     configureVision(visionChoice); recording.vision = visionMode()
+    configureGlory(gloryChoice); recording.glory = gloryChoice
     world = newLiveWorld(options.seed, options.maximumTicks); recording.seed = options.seed
     recording.endTick = world.endTick
     players = loadBots(options.botGroups, options.playerSlot)

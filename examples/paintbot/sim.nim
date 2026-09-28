@@ -268,7 +268,7 @@ when defined(pwTraining):
     killed: bool) {.nimcall, gcsafe.}
   var damageObserver* {.threadvar.}: DamageObserver
 else:
-  var visionRulesVersion* = 42
+  var visionRulesVersion* = 43
   var gameMode* = gmTeams
 proc ffa*(): bool = gameMode == gmFfaKin
 proc maxHp*(): int32 =
@@ -565,6 +565,25 @@ proc configureVision*(mode: string) =
   if mode notin ["", "team"]: raise newException(ValueError, "Unknown Paintbot vision mode: " & mode)
   teamVision = mode == "team"
 proc visionMode*(): string = (if teamVision: "team" else: "")
+type GloryConfig* = object
+  ## Rules 43: the glory awards a match pays, from the Coworld config's "glory" (see
+  ## parseGloryConfig in game.nim). Periods are whole seconds; teams recordings carry it.
+  quietSupplies*, quietSupplySeconds*, behindLives*, behindLivesSeconds*, heart*: int32
+const DefaultGloryConfig* = GloryConfig(quietSupplies: GloryQuietSupplies,
+  quietSupplySeconds: GloryQuietSupplyTicks div TickRate, behindLives: GloryBehindLives,
+  behindLivesSeconds: GloryBehindLivesTicks div TickRate, heart: GloryHeartAward)
+when defined(pwTraining):
+  var gloryConfigured {.threadvar.}: bool
+  var gloryOverride {.threadvar.}: GloryConfig
+else:
+  var gloryConfigured = false
+  var gloryOverride: GloryConfig
+proc configureGlory*(g: GloryConfig) =
+  ## Like configureVision, it binds the calling thread; set it before newWorld.
+  gloryOverride = g; gloryConfigured = true
+proc gloryRules*(): GloryConfig =
+  ## The awards in force: the configured ones, or the rules' defaults.
+  if gloryConfigured: gloryOverride else: DefaultGloryConfig
 proc sightCell(g: ptr SightGrid, p: Point): int =
   let x = clamp((p.x.int-g.originX) div SightCell, 0, g.nx-1)
   let z = clamp((p.z.int-g.originZ) div SightCell, 0, g.nz-1)
@@ -847,16 +866,17 @@ proc updateGlory*(w: var World) =
   w.gloryEvents = recent
   if w.tick mod TickRate == 0:
     for side in 0..1: w.glory[side] = max(0'i32, w.glory[side]-1)
+  let rules = gloryRules()
   for side in 0..1:
-    if w.tick-w.lastSupplyTick[side] >= GloryQuietSupplyTicks:
+    if w.tick-w.lastSupplyTick[side] >= rules.quietSupplySeconds*TickRate:
       w.lastSupplyTick[side] = w.tick
-      w.earnGlory(side, gloryQuietSupplies, GloryQuietSupplies)
-  if visionRulesVersion >= 39 and w.tick mod GloryBehindLivesTicks == 0:
+      w.earnGlory(side, gloryQuietSupplies, rules.quietSupplies)
+  if visionRulesVersion >= 39 and w.tick mod (rules.behindLivesSeconds*TickRate) == 0:
     var lives: array[2, int32]
     for i in 0..<Seats: lives[team(i)] += w.equipment[i].lives
     for side in 0..1:
       let behind = lives[1-side]-lives[side]
-      if behind > 0: w.earnGlory(side, gloryBehindLives, behind*GloryBehindLives)
+      if behind > 0: w.earnGlory(side, gloryBehindLives, behind*rules.behindLives)
 
 proc gloryHeartSpot(w: var World): (bool, Point) =
   ## A random open spot on dry land whose mirror is open too; false after 32 misses.
@@ -892,8 +912,9 @@ proc updateGloryHearts*(w: var World) =
     if taker < 0:
       remaining.add heart
       continue
-    w.earnGlory(team(taker), gloryHeart, GloryHeartAward)
-    w.gloryPickups.add GloryPickup(tick: w.tick, seat: taker.int32, amount: GloryHeartAward, pos: heart.pos)
+    let award = gloryRules().heart
+    w.earnGlory(team(taker), gloryHeart, award)
+    w.gloryPickups.add GloryPickup(tick: w.tick, seat: taker.int32, amount: award, pos: heart.pos)
   w.gloryHearts = remaining
   if w.tick >= w.nextGloryHeart:
     let (found, p) = w.gloryHeartSpot()

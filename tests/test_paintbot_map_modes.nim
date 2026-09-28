@@ -55,8 +55,8 @@ proc replays(original: Recording, name: string) =
 
 suite "Paintbot modes on small and big maps":
   setup:
-    visionRulesVersion = 42
-    replayRulesVersion = 42
+    visionRulesVersion = 43
+    replayRulesVersion = 43
     replayMode = false
     kinshipOverride = none(Kinship)
   teardown:

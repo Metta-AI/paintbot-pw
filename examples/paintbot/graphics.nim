@@ -29,6 +29,7 @@ type
     heartValues: seq[int32]
     combat: array[Seats, CombatStats]
     rulesVersion: int
+    glory: GloryConfig # rules 43: the match's glory awards, for the scoreboard's explanation
     maxHp: int32 # 3, or FfaMaxHp in FFA-kin: the HUD's "hp / max".
     world: World
     bounds: array[4,int]
@@ -1312,7 +1313,7 @@ proc runGraphics*() =
             var row: array[Seats, int32]
             for j in 0..<Seats: row[j] = activeKinship.rPercent(i, j)
             rPct.add row
-        let payload = ViewerState(mode: mode, family: family, genes: genes, rPct: rPct, kinHue: kinHue, terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, maxHp: maxHp(), world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
+        let payload = ViewerState(mode: mode, family: family, genes: genes, rPct: rPct, kinHue: kinHue, terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, glory: gloryRules(), maxHp: maxHp(), world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
             paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint, map: mapName(), land: landMask()).toJson()
         let data = payload.cstring
