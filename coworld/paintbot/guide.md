@@ -539,7 +539,7 @@ wade and rules 38 go round without touching water and arrive sooner
 (`tests/test_paintbot_dry_navigation.nim`). Every earlier replay keeps its original routes: 160
 hosted rules-37 games re-simulate hash for hash under the new engine.
 
-### Lake hearts are reachable in Heartland (rules 44)
+### Lake hearts are reachable (rules 44 in Heartland, rules 45 everywhere)
 
 Heartwick's two lake hearts, (3200, 1250) and (3200, 2750), stand in the water, and so do the
 medkits 83 units off them. Under the rules-38 routes a cog on dry land with a goal in the lake
@@ -552,8 +552,12 @@ From rules 44, in FFA-kin mode, a cog on dry land whose goal's own cell is wet r
 cog does: it still keeps to dry land for as long as that is faster (the lake costs four), and it
 still never takes a straight shortcut that ends in water, but it now wades the last stretch. Over
 six local `ffa.bas` Heartland matches the shore stalls went from 49 to 0 and lake-heart captures
-from 5 to 43 (`tests/test_paintbot_ffa_lake_hearts.nim`). The teams game and FFA recordings at
-rules 40-43 keep their routes and replay hash for hash.
+from 5 to 43 (`tests/test_paintbot_ffa_lake_hearts.nim`).
+
+Rules 45 apply the same routing to the teams game. In eight local teams matches of sixteen
+`base.bas` cogs, cogs stood on the shore beside a lake heart 37 times (489 s in all) under rules
+44 and never under rules 45, and lake-heart captures went from 9 to 29. Teams recordings at rules 44 and older, and FFA recordings at rules
+40-43, keep their routes and replay hash for hash.
 
 ### Glory (rules 37)
 
