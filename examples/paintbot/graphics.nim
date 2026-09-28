@@ -150,7 +150,7 @@ proc setActionCamera(value: cint) {.exportc: "pw_action_camera", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   autoCamera = value != 0
   if autoCamera: follow = false
-  director = newDirector(mapSpan())
+  director = newDirector(mapSpan(), lookahead = replayMode)
   directorLens = lens
 proc setTerritory(value:cint) {.exportc:"pw_territory",cdecl,
     codegenDecl:"EMSCRIPTEN_KEEPALIVE $# $#$#".} = territoryOverlay=value!=0

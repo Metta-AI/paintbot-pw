@@ -1,27 +1,69 @@
 ## Paintbot's action-camera director: scores what is worth watching each
 ## simulation tick and feeds the shared ActionCam. It has no graphics
 ## dependencies, so camera_eval can run it headless over replays.
+##
+## Scores are rebuilt every tick and replace the previous tick's, so they can
+## fall as well as rise: a past event decays, a separating pair cools off.
+## With `lookahead` (replays, where the whole event index is known), events up
+## to LeadTicks ahead are scored too, so the camera is already there when a
+## cog goes down or a heart flips.
+import std/math
 import vmath
 import polyworld/actioncam
 import game, sim, analysis
 from kinship import activeKinship, rPercent
+
+const
+  PastTicks = 36
+    ## How long a past event stays interesting.
+  HalfLifeTicks = 12'f32
+    ## A past event's score halves every half second.
+  LeadTicks = 48
+    ## With lookahead, events this many ticks ahead are scored.
+  LeadFloor = 0.6'f32
+    ## Share of its score an event has at the far edge of the lead window.
+  HitTicks = 24
+    ## A hit links shooter and victim for one second either side.
+  LeadSeconds = 0.5'f32
+    ## Shots are framed where a moving subject will be this soon.
+  LeadMaxMeters = 6'f32
+  CoverageSeconds = 40'f32
+    ## A cog unseen this long reaches the full coverage bonus.
 
 type
   Director* = ref object
     cam*: ActionCam
     tick*: int32
       ## Simulation tick the interests were last rebuilt for, or -1.
+    lookahead*: bool
+      ## Score future events from the index (replays only).
+    coverageBonus*: float32
+      ## Extra score for a cog the camera has not shown in CoverageSeconds.
+    lastPoses: array[Seats, Vec3]
+    velocity: array[Seats, Vec3]
+      ## Smoothed metres per tick.
+    lastInShot: array[Seats, int32]
 
-proc newDirector*(mapSpan: float32): Director =
+proc newDirector*(mapSpan: float32, lookahead = false): Director =
   ## Creates a director tuned for Paintbot's arena scale.
-  Director(
+  result = Director(
     cam: initActionCam(minDistance = 26, maxDistance = 150, tight = 0.6,
-      followRate = 1.0, zoomRate = 0.7, holdSeconds = 2.8, mapSpan = mapSpan),
-    tick: -1)
+      followRate = 1.0, zoomRate = 0.7, holdSeconds = 4, mapSpan = mapSpan),
+    tick: -1,
+    lookahead: lookahead,
+    coverageBonus: 20)
+  result.cam.clusterShare = 0.35
+  result.cam.fatigueSeconds = 14
+  result.cam.jumpDistance = 90
+  result.cam.sameShotMargin = 1.3
 
 proc related(a, b: int): bool =
   ## Whether two FFA-kin seats share any kinship.
   ffa() and activeKinship.rPercent(a, b) > 0
+
+proc opponents(a, b: int): bool =
+  ## Whether two seats fight: other team, or unrelated in FFA-kin.
+  if ffa(): not related(a, b) else: team(a) != team(b)
 
 proc mapSpan*(): float32 =
   ## Ground width of the current map in metres.
@@ -33,34 +75,145 @@ proc worldPoint*(w: World, p: Point, y = 0'f32): Vec3 =
     if replayRulesVersion >= 9: w.elevation(p).float32/100 else: 0'f32),
     p.z.float32/100-20)
 
+proc firstFrom(moments: seq[Moment], tick: int): int =
+  ## Index of the first moment at or after `tick`; moments are in tick order.
+  var hi = moments.len
+  while result < hi:
+    let mid = (result+hi) div 2
+    if moments[mid].tick < tick: result = mid+1 else: hi = mid
+
+proc timeWeight(d: Director, age: int): float32 =
+  ## Multiplier for an event `age` ticks old; negative ages are still to come.
+  if age >= 0:
+    if age > PastTicks: 0'f32 else: pow(0.5'f32, age.float32/HalfLifeTicks)
+  elif not d.lookahead or -age > LeadTicks: 0'f32
+  else: LeadFloor+(1-LeadFloor)*(1-(-age).float32/LeadTicks)
+
+proc closeness(w: World): float32 =
+  ## One when the teams are level on cogs standing plus lives, falling
+  ## toward zero in a blowout. FFA-kin is always close.
+  if ffa(): return 1
+  var strength: array[2, int]
+  for i, c in w.cogs:
+    strength[team(i)] += w.equipment[i].lives + (if c.hp > 0: 1 else: 0)
+  let total = strength[0]+strength[1]
+  if total == 0: 1'f32 else: 1-abs(strength[0]-strength[1]).float32/total.float32
+
+proc impact(w: World, event: Moment): float32 =
+  ## How much an event matters to the match beyond its kind.
+  result = 1
+  case event.kind
+  of "down":
+    if event.slot in 0..<Seats:
+      if w.equipment[event.slot].lives <= 0: result *= 1.2
+      if not ffa():
+        var standing = 0
+        for i, c in w.cogs:
+          if team(i) == team(event.slot) and c.hp > 0: inc standing
+        if standing <= 1: result *= 1.5
+        elif standing <= 2: result *= 1.25
+  of "territory":
+    if not ffa() and event.side in 0..1:
+      var owned: array[2, int]
+      for h in w.controlHearts:
+        if h.owner in 0..1: inc owned[h.owner]
+      # A flip that takes or ties the heart lead matters more.
+      if abs(owned[0]-owned[1]) <= 1: result *= 1.3
+  else: discard
+
 proc noteInterests*(d: Director, w: World, index: ReplayIndex,
     poses: array[Seats, Vec3], seen: proc(i: int): bool, lens: int) =
   ## Rebuilds the scored interests for the current simulation tick.
   var cam = d.cam
   cam.beginFrame(w.tick)
+  let
+    tick = w.tick
+    stakes = 0.8'f32+0.4'f32*w.closeness()
+  # Motion: a smoothed velocity per cog, reset across respawns and seeks.
+  let elapsed = if d.tick >= 0 and tick > d.tick: tick-d.tick else: 0
+  for i in 0..<Seats:
+    if elapsed in 1..4 and length(poses[i]-d.lastPoses[i]) < 4:
+      d.velocity[i] = mix(d.velocity[i], (poses[i]-d.lastPoses[i])/elapsed.float32, 0.25)
+    else:
+      d.velocity[i] = vec3(0, 0, 0)
+    d.lastPoses[i] = poses[i]
+  proc led(p, v: Vec3): Vec3 =
+    ## Leads a shot in the direction of travel.
+    var ahead = v*(LeadSeconds*TickRate.float32)
+    ahead.y = 0
+    let n = length(ahead)
+    if n > LeadMaxMeters: ahead = ahead*(LeadMaxMeters/n)
+    p+ahead
+  # Coverage: which cogs the current shot holds.
+  if cam.locked:
+    for i in 0..<Seats:
+      if length(vec2(poses[i].x-cam.lockTarget.x, poses[i].z-cam.lockTarget.z)) <=
+          cam.lockDistance*0.5:
+        d.lastInShot[i] = tick
+  # Hits in the last and next second, by shooter and victim.
+  var hitAge: seq[tuple[attacker, victim, age: int]]
+  for n in firstFrom(index.hits, tick-HitTicks)..<index.hits.len:
+    let hit = index.hits[n]
+    if hit.tick > tick+(if d.lookahead: HitTicks else: 0): break
+    hitAge.add (hit.slot, hit.victim, tick-hit.tick)
+  proc recentHit(a, b: int): bool =
+    for h in hitAge:
+      if (h.attacker == a and h.victim == b) or (h.attacker == b and h.victim == a):
+        return true
   for i, c in w.cogs:
     if c.hp <= 0 or not seen(i): continue
-    cam.noteInterest(int32(i+1), poses[i], 15, 5, w.tick, 1)
+    # The bonus reaches only as far as a pan, so it widens the shot rather
+    # than cutting across the map to an idle cog.
+    let unseen =
+      if cam.locked and length(vec2(poses[i].x-cam.lockTarget.x,
+          poses[i].z-cam.lockTarget.z)) > cam.jumpRange()*0.5: 0'f32
+      else: max(0, tick-d.lastInShot[i]).float32/TickRate.float32
+    cam.noteInterest(int32(i+1), led(poses[i], d.velocity[i]),
+      15+d.coverageBonus*min(1, unseen/CoverageSeconds), 5, tick, 1, replace = true)
+    # Danger: a cog one hit from going down with an opponent in sight.
+    if c.hp == 1 and maxHp() > 1:
+      for j, o in w.cogs:
+        if o.hp > 0 and opponents(i, j) and seen(j) and w.visible(j, i) and
+            length(poses[i]-poses[j]) < 25:
+          cam.noteInterest(int32(1_600_000_000+i), led(poses[i], d.velocity[i]),
+            70*stakes, 6, tick, 1, replace = true)
+          break
+    proc duel(id: int32, j: int, gap: float32) =
+      ## Two opponents close together: hot when they can see or are hitting
+      ## each other, lukewarm across a wall.
+      let
+        sighted = w.visible(i, j) or w.visible(j, i)
+        base = (100-gap)*(if sighted: 1'f32 else: 0.35'f32)
+        score = (base+(if recentHit(i, j): 30'f32 else: 0'f32))*stakes
+      cam.noteInterest(id, led((poses[i]+poses[j])*0.5, (d.velocity[i]+d.velocity[j])*0.5),
+        score, gap*0.5+3, tick, 1, replace = true)
     when Seats <= 16:
       for j in i+1..<Seats:
-        if (not ffa() and team(i) == team(j)) or w.cogs[j].hp <= 0 or not seen(j): continue
+        if not opponents(i, j) or w.cogs[j].hp <= 0 or not seen(j): continue
         let gap = length(poses[i]-poses[j])
-        if gap < 40:
-          cam.noteInterest(int32(100+i*Seats+j), (poses[i]+poses[j])*0.5,
-            100-gap, gap*0.5+3, w.tick, 1)
+        if gap < 40: duel(int32(100+i*Seats+j), j, gap)
     else:
       # Crowds: every pair within 40 m is thousands of interests a tick. Each cog adds
       # only its nearest opponent (unrelated, in FFA-kin), in an id range of its own.
       var nearest = -1
       var nearestGap = 40'f32
       for j in 0..<Seats:
-        if j == i or w.cogs[j].hp <= 0 or not seen(j): continue
-        if (not ffa() and team(i) == team(j)) or related(i, j): continue
+        if j == i or w.cogs[j].hp <= 0 or not seen(j) or not opponents(i, j): continue
         let gap = length(poses[i]-poses[j])
         if gap < nearestGap: nearest = j; nearestGap = gap
-      if nearest >= 0:
-        cam.noteInterest(int32(1_500_000_000+i), (poses[i]+poses[nearest])*0.5,
-          100-nearestGap, nearestGap*0.5+3, w.tick, 1)
+      if nearest >= 0: duel(int32(1_500_000_000+i), nearest, nearestGap)
+  # Shooter and victim framed together while a hit is fresh or coming.
+  for n in firstFrom(index.hits, tick-HitTicks)..<index.hits.len:
+    let hit = index.hits[n]
+    let weight = d.timeWeight(tick-hit.tick)
+    if hit.tick > tick+LeadTicks: break
+    if weight <= 0 or hit.slot notin 0..<Seats or hit.victim notin 0..<Seats: continue
+    if not seen(hit.slot) and not seen(hit.victim): continue
+    let
+      a = poses[hit.slot]
+      b = poses[hit.victim]
+    cam.noteInterest(int32(700_000_000+n), (a+b)*0.5, 70*weight*stakes,
+      length(a-b)*0.5+3, tick, 1, replace = true)
   for n, h in w.controlHearts:
     var nearby: array[2, int]
     var total = 0
@@ -70,26 +223,33 @@ proc noteInterests*(d: Director, w: World, index: ReplayIndex,
         inc total
     if total > 0:
       let contested = if ffa(): total > 1 else: nearby[0] > 0 and nearby[1] > 0
-      cam.noteInterest(int32(1000+n), w.worldPoint(h.pos, 2),
-        (if contested: 125'f32 else: 45'f32), 9, w.tick, 1)
-  # Events are recorded in tick order: start at the first one from the last 36 ticks.
-  var first = 0
-  var hi = index.events.len
-  while first < hi:
-    let mid = (first+hi) div 2
-    if index.events[mid].tick < w.tick-36: first = mid+1 else: hi = mid
-  for n in first..<index.events.len:
+      var score = if contested: 125'f32 else: 45'f32
+      # A capture under way heats up as it nears the flip.
+      if n < w.heartCaptures.len and w.heartCaptures[n].team >= 0:
+        score = max(score, 45+90*min(1, w.heartCaptures[n].ticks.float32/HeartCaptureTicks.float32))
+      cam.noteInterest(int32(1000+n), w.worldPoint(h.pos, 2), score*stakes, 9, tick, 1,
+        replace = true)
+  if ffa():
+    for n, g in w.greatHearts:
+      if g.progress > 0 and g.dormantUntil <= tick:
+        cam.noteInterest(int32(5000+n), w.worldPoint(g.pos, 2),
+          60+80*min(1, g.progress.float32/GreatHeartCaptureTicks.float32), 12, tick, 1,
+          replace = true)
+  for n in firstFrom(index.events, tick-PastTicks)..<index.events.len:
     let event = index.events[n]
-    if event.tick > w.tick: break
-    if w.tick-event.tick > 36: continue
+    if event.tick > tick+LeadTicks: break
+    let timing = d.timeWeight(tick-event.tick)
+    if timing <= 0: continue
     if event.slot >= 0 and not seen(event.slot): continue
     let weight = case event.kind
       of "grenade blast": 165'f32
       of "down": 145'f32
-      of "tag", "spray": 100'f32
+      of "great heart": 150'f32
       of "territory": 130'f32
+      of "great heart charge": 100'f32
+      of "tag", "spray": 100'f32
       else: 0'f32
     if weight > 0 and (lens < 0 or event.slot >= 0):
       cam.noteInterest(int32(10000+n), w.worldPoint(point(event.x, event.z), 1),
-        weight, 9, w.tick, 1)
-  d.tick = w.tick
+        weight*timing*w.impact(event)*stakes, 9, tick, 1, replace = true)
+  d.tick = tick

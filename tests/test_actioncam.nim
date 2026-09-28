@@ -286,4 +286,78 @@ block:
   cam.chooseShot(1.0, 2)
   doAssert cam.lockId == 2, "after hold, follow the living shot elsewhere"
 
+
+echo "Testing replace lets a score fall"
+block:
+  var cam = initActionCam()
+  cam.beginFrame(0)
+  cam.noteInterest(1, vec3(0, 0, 0), 80, 4, 0, 1)
+  cam.beginFrame(1)
+  cam.noteInterest(1, vec3(0, 0, 0), 30, 4, 1, 1)
+  doAssert cam.interestScore(1) == 80
+  cam.noteInterest(1, vec3(0, 0, 0), 30, 4, 1, 1, replace = true)
+  doAssert cam.interestScore(1) == 30
+  doAssert cam.interestScore(2) == -1
+
+echo "Testing cluster share lets a crowd beat a lone spike"
+block:
+  var
+    alone = initActionCam(minDistance = 20, maxDistance = 200, tight = 0.4)
+    crowd = initActionCam(minDistance = 20, maxDistance = 200, tight = 0.4)
+  crowd.clusterShare = 0.35
+  for cam in [alone, crowd]:
+    var c = cam
+    c.beginFrame(0)
+    c.noteInterest(1, vec3(0, 0, 0), 90, 4, 0, 24)
+    c.noteInterest(2, vec3(4, 0, 0), 60, 4, 0, 24)
+    c.noteInterest(3, vec3(-4, 0, 0), 60, 4, 0, 24)
+    c.noteInterest(4, vec3(180, 0, 0), 110, 4, 0, 24)
+    c.chooseShot(0)
+  doAssert alone.lockId == 4
+  doAssert crowd.lockId == 1
+
+echo "Testing fatigue moves a long-held shot to a rival"
+block:
+  var cam = initActionCam(holdSeconds = 2.5)
+  cam.fatigueSeconds = 5
+  cam.beginFrame(0)
+  cam.noteInterest(1, vec3(0, 0, 0), 100, 4, 0, 1000)
+  cam.noteInterest(2, vec3(180, 0, 0), 90, 4, 0, 1000)
+  cam.chooseShot(0)
+  doAssert cam.lockId == 1
+  var switched = false
+  for step in 1 .. 40:
+    cam.chooseShot(0.25)
+    switched = switched or cam.lockId == 2
+  doAssert switched
+
+echo "Testing same-shot margin keeps the subject through small gains"
+block:
+  var cam = initActionCam(holdSeconds = 2.5)
+  cam.sameShotMargin = 1.3
+  cam.beginFrame(0)
+  cam.noteInterest(1, vec3(0, 0, 0), 50, 4, 0, 24)
+  cam.chooseShot(0)
+  cam.noteInterest(2, vec3(3, 0, 0), 60, 4, 0, 24)
+  cam.chooseShot(1 / 60)
+  doAssert cam.lockId == 1
+  cam.noteInterest(2, vec3(3, 0, 0), 70, 4, 0, 24)
+  cam.chooseShot(1 / 60)
+  doAssert cam.lockId == 2
+
+echo "Testing jump distance caps the pan on a big map"
+block:
+  var
+    cam = initActionCam(mapSpan = 1000)
+    target = vec3(0, 0, 0)
+    distance = 80.0'f32
+  doAssert cam.jumpRange == 400
+  cam.jumpDistance = 90
+  doAssert cam.jumpRange == 90
+  cam.beginFrame(0)
+  cam.noteInterest(1, vec3(120, 0, 0), 50, 4, 0, 24)
+  cam.chooseShot(0)
+  cam.follow(target, distance, 1 / 60)
+  doAssert abs(target.x - 120) < 1
+
 echo "Action cam tests passed"

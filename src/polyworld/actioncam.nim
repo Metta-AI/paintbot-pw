@@ -23,6 +23,8 @@ const
     ## Fixed. A shot farther than this fraction of the map jumps.
   IgnoreGrow = 0.10'f32
     ## Ignore bubble growth per wall-clock second.
+  FatigueFloor = 0.55'f32
+    ## Lowest multiplier fatigue applies to a long-watched place.
 
 type
   Interest = object
@@ -47,7 +49,23 @@ type
       ## Ground width used to size jumps and the ignore bubble.
     closeScale*: float32
       ## Multiplier on framed distance. Lower is closer.
+    clusterShare*: float32
+      ## Share of each neighbour's score a subject gains from interests in
+      ## its gather radius. Zero ranks subjects alone.
+    fatigueSeconds*: float32
+      ## Wall-clock time one place may be watched before its interests lose
+      ## score. Zero never tires.
+    jumpDistance*: float32
+      ## Ground distance past which a new shot jumps instead of panning.
+      ## Zero uses a fixed fraction of mapSpan.
+    sameShotMargin*: float32
+      ## How much better a neighbour must rank to take over the subject of
+      ## the current shot. One swaps on any gain.
     interests: seq[Interest]
+    effective: seq[float32]
+      ## Ranking score per interest this frame: cluster share and fatigue.
+    dwell: float32
+    dwellCenter: Vec3
     locked*: bool
     lockId*: int32
     lockTarget*: Vec3
@@ -99,6 +117,7 @@ proc initActionCam*(
   result.holdSeconds = max(holdSeconds, 0.1'f32)
   result.mapSpan = max(mapSpan, 8.0'f32)
   result.closeScale = clamp(closeScale, 0.2'f32, 1.0'f32)
+  result.sameShotMargin = 1.0'f32
 
 proc takeManual*(cam: var ActionCam) =
   ## Drops action cam so a pan, zoom, or selection owns the view.
@@ -131,9 +150,11 @@ proc noteInterest*(
     score,
     radius: float32,
     tick,
-    lastTicks: int32
+    lastTicks: int32,
+    replace = false
 ) =
   ## Upserts one scored situation. Lifetime is in simulation ticks.
+  ## An existing interest keeps its highest score unless `replace` is set.
   if id == 0 or score <= 0:
     return
   let expire = tick + max(lastTicks, 1)
@@ -144,7 +165,7 @@ proc noteInterest*(
     cam.interests[i].y = position.y
     cam.interests[i].z = position.z
     cam.interests[i].radius = max(radius, 1.0'f32)
-    if score > cam.interests[i].score:
+    if replace or score > cam.interests[i].score:
       cam.interests[i].score = score
     if expire > cam.interests[i].expireTick:
       cam.interests[i].expireTick = expire
@@ -162,6 +183,13 @@ proc noteInterest*(
 proc interestCount*(cam: ActionCam): int =
   ## Returns how many scored situations are still live.
   result = cam.interests.len
+
+proc interestScore*(cam: ActionCam, id: int32): float32 =
+  ## Returns the score of one live interest, or -1 when it is not live.
+  result = -1
+  for interest in cam.interests:
+    if interest.id == id:
+      return interest.score
 
 proc interestIndex(cam: ActionCam, id: int32): int =
   ## Returns the slot of one live interest, or -1.
@@ -181,15 +209,33 @@ proc ignored(cam: ActionCam, interest: Interest): bool =
     cam.jumpOrigin.z
   ) <= cam.ignoreRadius
 
+proc rank(cam: var ActionCam, gather: float32) =
+  ## Scores each interest for ranking: its own score, a share of its
+  ## neighbours', and the fatigue of a place watched too long.
+  cam.effective.setLen(cam.interests.len)
+  for i, subject in cam.interests:
+    var score = subject.score
+    if cam.clusterShare > 0:
+      var extra = 0.0'f32
+      for j, other in cam.interests:
+        if j != i and xzDist(subject.x, subject.z, other.x, other.z) <= gather:
+          extra += other.score * cam.clusterShare
+      score += min(extra, subject.score)
+    if cam.fatigueSeconds > 0 and cam.dwell > cam.fatigueSeconds and
+        xzDist(subject.x, subject.z, cam.dwellCenter.x, cam.dwellCenter.z) <= gather:
+      score *= max(FatigueFloor,
+        1.0'f32 - (cam.dwell - cam.fatigueSeconds) / (2.0'f32 * cam.fatigueSeconds))
+    cam.effective[i] = score
+
 proc bestIndex(cam: ActionCam): int =
-  ## Returns the highest scoring live interest, or -1.
+  ## Returns the highest ranked live interest, or -1.
   result = -1
   var best = -1.0'f32
   for i, interest in cam.interests:
     if interest.id != cam.lockId and cam.ignored(interest):
       continue
-    if result < 0 or interest.score > best:
-      best = interest.score
+    if result < 0 or cam.effective[i] > best:
+      best = cam.effective[i]
       result = i
 
 proc shotOf(
@@ -263,6 +309,15 @@ proc chooseShot*(
       if speed >= 16: 0.0'f32
       else: cam.tight
     gather = cam.gatherRadius(tight)
+  if cam.locked:
+    if xzDist(cam.lockTarget.x, cam.lockTarget.z,
+        cam.dwellCenter.x, cam.dwellCenter.z) <= gather:
+      cam.dwell += max(dt, 0)
+    else:
+      cam.dwell = 0
+      cam.dwellCenter = cam.lockTarget
+  cam.rank(gather)
+  let
     best = cam.bestIndex()
     locked = cam.interestIndex(cam.lockId)
   if best < 0:
@@ -270,7 +325,7 @@ proc chooseShot*(
   let shot = cam.shotOf(best, tight)
   var takeBest = false
   if not cam.locked or locked < 0:
-    takeBest = cam.interests[best].score >= IdleThreshold
+    takeBest = cam.effective[best] >= IdleThreshold
   else:
     let
       samePlace =
@@ -281,14 +336,13 @@ proc chooseShot*(
           cam.interests[locked].z
         ) <= gather
       better =
-        cam.interests[best].score >= SwitchThreshold and
-        cam.interests[best].score >=
-          cam.interests[locked].score * SwitchMargin
+        cam.effective[best] >= SwitchThreshold and
+        cam.effective[best] >= cam.effective[locked] * SwitchMargin
       urgent =
-        better and cam.interests[best].score >= InterruptScore
+        better and cam.effective[best] >= InterruptScore
       expired = cam.holdRemaining <= 0
     if samePlace:
-      if cam.interests[best].score >= cam.interests[locked].score:
+      if cam.effective[best] >= cam.effective[locked] * cam.sameShotMargin:
         cam.lockId = cam.interests[best].id
       let stay = cam.shotOf(cam.interestIndex(cam.lockId), tight)
       cam.lockTarget = stay.target
@@ -298,8 +352,7 @@ proc chooseShot*(
       return
     elif urgent or
         (expired and better) or
-        (expired and
-          cam.interests[best].score >= SwitchThreshold):
+        (expired and cam.effective[best] >= SwitchThreshold):
       takeBest = true
     else:
       let stay = cam.shotOf(locked, tight)
@@ -315,6 +368,11 @@ proc chooseShot*(
   cam.lockDistance = shot.distance
   cam.lockScore = cam.interests[best].score
   cam.holdRemaining = cam.holdFor(speed)
+
+proc jumpRange*(cam: ActionCam): float32 =
+  ## Ground distance past which a new shot jumps instead of panning.
+  if cam.jumpDistance > 0: min(cam.jumpDistance, cam.mapSpan * JumpSpan)
+  else: cam.mapSpan * JumpSpan
 
 proc approach(current, dest, halves, dt: float32): float32 =
   ## Closes `halves` half-distances toward dest each second.
@@ -344,7 +402,7 @@ proc follow*(
       else:
         cam.lockDistance
     dist = xzDist(target.x, target.z, cam.lockTarget.x, cam.lockTarget.z)
-    jumpAt = cam.mapSpan * JumpSpan
+    jumpAt = cam.jumpRange()
   if dist > jumpAt:
     target = cam.lockTarget
     distance = clamp(

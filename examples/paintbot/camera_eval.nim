@@ -1,6 +1,6 @@
 ## Headless action-camera evaluation over Paintbot replays.
 ##
-##     nim r -d:release examples/paintbot/camera_eval.nim [--speed:4] a.replay [b.replay ...]
+##     nim r -d:release examples/paintbot/camera_eval.nim [--speed:4] [--cam:jump=90] a.replay [b.replay ...]
 ##
 ## Plays each replay through the viewer's camera director at 60 frames a
 ## second and the given playback speed, with no lens, then reports:
@@ -28,13 +28,13 @@ const
   Margin = 0.03'f32
 
 type
-  Tally = object
-    events, covered, early: int
-  Totals = object
-    kinds: OrderedTable[string, Tally]
-    frames, cuts, retargets: int
-    panSamples: seq[float32]
-    distanceSum: float
+  Tally* = object
+    events*, covered*, early*: int
+  Totals* = object
+    kinds*: OrderedTable[string, Tally]
+    frames*, cuts*, retargets*: int
+    panSamples*: seq[float32]
+    distanceSum*: float
 
 proc keyKind(kind: string): bool =
   kind in ["down", "grenade blast", "territory", "great heart"]
@@ -47,13 +47,31 @@ proc onScreen(target: Vec3, distance: float32, p: Vec3): bool =
 
 proc allSeen(i: int): bool = true
 
-proc evaluate(path: string, speed: float32, totals: var Totals) =
+var overrides: seq[(string, float32)]
+  ## --cam:<field>=<value> tuning overrides applied to each new director.
+
+proc tune(cam: ActionCam) =
+  for (field, value) in overrides:
+    case field
+    of "cluster": cam.clusterShare = value
+    of "fatigue": cam.fatigueSeconds = value
+    of "jump": cam.jumpDistance = value
+    of "margin": cam.sameShotMargin = value
+    of "hold": cam.holdSeconds = value
+    of "coverage", "lookahead": discard
+    else: quit "unknown --cam field: " & field
+
+proc evaluate*(path: string, speed: float32, totals: var Totals) =
   recording = loadRecording(path)
   replayMode = true
   world = newWorld(recording.seed, recording.endTick)
   let index = indexReplay()
   world = newWorld(recording.seed, recording.endTick)
-  let director = newDirector(mapSpan())
+  let director = newDirector(mapSpan(), lookahead = true)
+  director.cam.tune()
+  for (field, value) in overrides:
+    if field == "coverage": director.coverageBonus = value
+    if field == "lookahead": director.lookahead = value != 0
   var
     target = vec3(0, 0, 0)
     distance = 60'f32
@@ -109,6 +127,17 @@ proc evaluate(path: string, speed: float32, totals: var Totals) =
         totals.kinds[e.kind] = t
       inc nextEvent
 
+proc coverage*(totals: Totals): float =
+  ## Share of key events on screen when they happened.
+  var events, covered = 0
+  for t in totals.kinds.values:
+    events += t.events
+    covered += t.covered
+  covered / max(1, events)
+
+proc cutsPerMinute*(totals: Totals): float =
+  totals.cuts.float / max(1e-9, totals.frames / Fps / 60)
+
 proc percentile(values: seq[float32], p: float): float32 =
   if values.len == 0: return 0
   let sorted = values.sorted()
@@ -119,6 +148,9 @@ when isMainModule:
   var paths: seq[string]
   for arg in commandLineParams():
     if arg.startsWith("--speed:"): speed = parseFloat(arg["--speed:".len..^1]).float32
+    elif arg.startsWith("--cam:"):
+      let kv = arg["--cam:".len..^1].split('=')
+      overrides.add (kv[0], parseFloat(kv[1]).float32)
     else: paths.add arg
   if paths.len == 0: quit "usage: camera_eval [--speed:N] <replay> [...]"
   var totals: Totals

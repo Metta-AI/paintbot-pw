@@ -70,6 +70,8 @@ nim r tests/test_paintbot_kinhue.nim
 nim r tests/test_paintbot_ffa_basic.nim
 nim r tests/test_paintbot_ffa_baseline.nim
 nim r tests/test_paintbot_projection.nim
+nim r tests/test_actioncam.nim
+nim r tests/test_paintbot_camdirector.nim
 nim r -d:headless tests/test_paintbot_neural_contract.nim
 nim r -d:headless tests/test_paintbot_neural_obs_v2.nim
 nim r -d:headless tests/test_paintbot_neural_obs_ffa.nim
