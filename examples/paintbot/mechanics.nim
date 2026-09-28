@@ -669,7 +669,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
         w.emitSound(w.cogs[i].pos, 3, i, 1800)
         w.equipment[i].burst = SprayTicks
         w.equipment[i].sprayCooldown = int32(SprayTicks+sprayRecoveryTicks())
-        w.equipment[i].sprayHits = 0
+        w.equipment[i].sprayHits = default(SeatMask)
         w.equipment[i].sprayAim = direction(w.cogs[i].pos, w.cogs[i].aim, SprayReach)
     else:
       if w.equipment[i].windup > 0:
@@ -691,7 +691,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           aim = Point(x: aim.x-int32(int64(aim.z)*jitter div GunRange),
               z: aim.z+int32(int64(aim.x)*jitter div GunRange))
           let ray = direction(Point(), aim, GunRange)
-          var checked: uint32 = 0
+          var checked: SeatMask
           var endPoint = origin
           # FFA-kin rays stop at FfaGunRange: the same samples along the same ray, fewer of them.
           let samples = (if ffa(): FfaGunRange else: GunRange) div 20
@@ -702,11 +702,11 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
               if w.blocked(p, 0): break
               endPoint = p
               for j in 0..<Seats:
-                if j == i or w.cogs[j].hp <= 0 or (checked and (1'u32 shl j)) != 0: continue
+                if j == i or w.cogs[j].hp <= 0 or checked.hasSeat(j): continue
                 if distance2(p, w.cogs[j].pos) > Radius.int64*Radius: continue
                 if visionRulesVersion >= 9 and not w.lineClear(origin, w.cogs[
                     j].pos): continue
-                checked = checked or (1'u32 shl j)
+                checked.addSeat(j)
                 let trench = w.trenchAt(w.cogs[j].pos)
                 if trench >= 0 and trench != w.trenchAt(origin) and
                     w.rng.between(0, 99) < 70: continue
@@ -734,10 +734,9 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
   for i in w.seatOrder():
     if w.equipment[i].burst > 0 and w.cogs[i].hp > 0:
       for j in 0..<Seats:
-        let bit = 1'u32 shl j
         if visionRulesVersion >= 18 and w.cogs[j].shield > 0: continue
-        if (w.equipment[i].sprayHits and bit) == 0 and w.sprayTouches(i, j):
-          w.equipment[i].sprayHits = w.equipment[i].sprayHits or bit
+        if not w.equipment[i].sprayHits.hasSeat(j) and w.sprayTouches(i, j):
+          w.equipment[i].sprayHits.addSeat(j)
           w.damage(j, i, SprayDamage)
       dec w.equipment[i].burst
   when defined(pwTraining):
