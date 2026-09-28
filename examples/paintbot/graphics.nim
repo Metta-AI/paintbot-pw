@@ -51,6 +51,7 @@ type
     kinHue: seq[float32] # family hue in degrees, -1 = loner (grey)
 var
   kinHues: array[Seats, float32] # FFA-kin family hue per seat; set once the match is loaded.
+  kinRgb: array[Seats, ColorRGBX] # kinHues as colours, cached with them (hues are fixed per match).
   transport: Player
   victory: Celebration
   playbackRate = 1'f32
@@ -142,8 +143,7 @@ const teamColors = [rgbx(255, 103, 81, 255), rgbx(74, 192, 255, 255)]
 const lonerColor = rgbx(150, 155, 160, 255)
 proc kinColor(seat: int, alpha = 255'u8): ColorRGBX =
   ## FFA-kin: the seat's family hue; loners are grey.
-  let c = if seat notin 0..<Seats or kinHues[seat] < 0: lonerColor
-    else: hsl(kinHues[seat], KinSaturation, KinLightness).color.asRgbx
+  let c = if seat in 0..<Seats: kinRgb[seat] else: lonerColor
   rgbx(c.r, c.g, c.b, alpha)
 proc seatColor(seat: int): ColorRGBX =
   ## Paint colour of a seat: its team in the teams game, its family in FFA-kin.
@@ -518,7 +518,11 @@ proc startupPhase(label: string) =
 proc runGraphics*() =
   startupPhase("Preparing replay")
   setup()
-  if ffa(): kinHues = familyHues(activeKinship)
+  if ffa():
+    kinHues = familyHues(activeKinship)
+    for i in 0..<Seats:
+      kinRgb[i] = if kinHues[i] < 0: lonerColor
+        else: hsl(kinHues[i], KinSaturation, KinLightness).color.asRgbx
   var index: ReplayIndex
   if replayMode:
     when defined(emscripten) and defined(workerReplayIndex):
@@ -869,6 +873,7 @@ proc runGraphics*() =
         if ffa():
           # Kin view: with a cog selected, cogs unrelated to it fade to 40%.
           let dim = selected >= 0 and i != selected and kinPercent(selected, i) == 0
+          # tint.a < 1 takes the blended pass (characters.nim:207); visually verified for the dim.
           drawCharacter(scene, neutralModel, poses[i]-vec3(0, lowered, 0), facing, 0, rolling,
             tint = (if dim: color(1, 1, 1, 0.4) else: color(1, 1, 1, 1)))
         else:

@@ -439,7 +439,7 @@
   }
   $("kin-score").addEventListener("click", () => setKinExpanded(!kinExpanded));
   $("kin-score").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
+    if (e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation();
       setKinExpanded(!kinExpanded);
@@ -449,7 +449,7 @@
     const row = e.target.closest("tr[data-seat]");
     if (row) select(Number(row.dataset.seat));
   });
-  let kinTableKey = "", kinChipsKey = "";
+  let kinTableKey = "", kinChipsKey = "", kinGreatKey = "";
   function renderKin(data) {
     if (!data || !kin.isFfa(data)) return;
     const w = data.world;
@@ -464,8 +464,13 @@
         return `<span class="kin-chip${c.alive ? "" : " out"}" style="--kin:${kin.kinColor(c.hue)}" title="${label} · ${c.alive}/${c.members.length} alive · raw score ${c.score.toFixed(1)}"><span class="dot">${c.family >= 0 ? c.members.length : c.seat + 1}</span>${c.score.toFixed(1)}</span>`;
       }).join("");
     }
-    $("kin-great").innerHTML = kin.greatStatus(data).map((g) =>
-      `<span class="kin-great ${g.state}" title="Great heart ${g.index + 1}: needs ${g.quorum} living cogs in its zone for 5 s; pays 60 points split among them, then sleeps 60 s"><span class="heart">♥</span><span class="label">${kin.greatText(g)}</span></span>`).join("");
+    const great = kin.greatStatus(data);
+    const greatKey = JSON.stringify(great);
+    if (greatKey !== kinGreatKey) {
+      kinGreatKey = greatKey;
+      $("kin-great").innerHTML = great.map((g) =>
+        `<span class="kin-great ${g.state}" title="Great heart ${g.index + 1}: needs ${g.quorum} living cogs in its zone for 5 s; pays 60 points split among them, then sleeps 60 s"><span class="heart">♥</span><span class="label">${kin.greatText(g)}</span></span>`).join("");
+    }
     if (kinExpanded) {
       const rows = kin.cogRows(data);
       const key = JSON.stringify(rows) + ":" + selected;
@@ -642,8 +647,9 @@
           ? "Match drawn"
           : `${w.winner ? "Azure" : "Ember"} wins`
         : "Match scoreboard",
-      (w.winner === -3 ? `<p class="hint"><b>${escape(kin.matchResult(state, name).text)}</b></p>` : "") +
-      `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}${state.rulesVersion >= 37 ? `<br>Glory: Ember <b>${w.glory?.[0] ?? 0}</b> — <b>${w.glory?.[1] ?? 0}</b> Azure. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10${state.rulesVersion >= 39 ? ", each glory heart picked up 20, and every five seconds a team behind in lives 1 per life it trails by" : state.rulesVersion >= 38 ? ", friendly fire taken in the opening thirty seconds 30 per hit, and each glory heart picked up 20" : ", friendly fire taken in the opening thirty seconds 30 per hit"}. Nothing that helps you win pays glory. The loser's glory drops to zero; the winner's is the match score.` : ""}<br>${state.rulesVersion >= 34 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; an eliminated team loses immediately and the survivor's meter fills. At 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 28 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; at 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
+      ffaOn()
+        ? `<p class="hint">${w.winner === -3 ? `<b>${escape(kin.matchResult(state, name).text)}</b><br>` : ""}${clock(w.tick)} · Seed ${index.seed}<br>Heartland: every cog plays for itself with one life. A control heart pays its owner 1 point/s; a dead cog's hearts go neutral. A great heart needs 3 living cogs in its zone for 5 s, then splits 60 points among them and sleeps 60 s. Raw score s = heart points + great-heart shares; the match score is R = Σ r·s over kin (r = 1 self, ½ sibling, ¼ cousin). Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`
+        : `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}${state.rulesVersion >= 37 ? `<br>Glory: Ember <b>${w.glory?.[0] ?? 0}</b> — <b>${w.glory?.[1] ?? 0}</b> Azure. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10${state.rulesVersion >= 39 ? ", each glory heart picked up 20, and every five seconds a team behind in lives 1 per life it trails by" : state.rulesVersion >= 38 ? ", friendly fire taken in the opening thirty seconds 30 per hit, and each glory heart picked up 20" : ", friendly fire taken in the opening thirty seconds 30 per hit"}. Nothing that helps you win pays glory. The loser's glory drops to zero; the winner's is the match score.` : ""}<br>${state.rulesVersion >= 34 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; an eliminated team loses immediately and the survivor's meter fills. At 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 28 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; at 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
     $("dialogbody")
       .querySelectorAll("[data-seat]")
