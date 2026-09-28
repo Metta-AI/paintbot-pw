@@ -233,6 +233,7 @@
   });
   window.addEventListener("resize", hideControlTip);
   let started = false;
+  let landMask = null; // rules 41 maps: the coastline, sent once by the engine
   let state = null,
     index = null,
     selected = -1,
@@ -988,7 +989,10 @@
     if ((w.controlHearts || []).length) {
       for (let z = bounds[1]; z < bounds[3]; z += 100)
         for (let x = bounds[0]; x < bounds[2]; x += 100) {
-          if (w.rulesVersion >= 16 && islandMargin(x + 50, z + 50) < 40)
+          if (landMask) {
+            const cols = (bounds[2] - bounds[0]) / 100;
+            if (landMask[((z - bounds[1]) / 100) * cols + (x - bounds[0]) / 100] !== "1") continue;
+          } else if (w.rulesVersion >= 16 && islandMargin(x + 50, z + 50) < 40)
             continue;
           let nearest = w.controlHearts[0],
             distance = Infinity;
@@ -1437,6 +1441,7 @@
   };
   Module.paintbotState = (data) => {
     state = data;
+    if (data && data.land) landMask = data.land;
     if (!index) return;
     if (!started) {
       started = true;

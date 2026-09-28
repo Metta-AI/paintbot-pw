@@ -4,6 +4,41 @@ import vmath
 import polyworld/[common, quadterrain]
 import sim, village
 
+proc placeMapScenery*() =
+  ## Rules 41 maps: every round cover lot gets the prop its kind names, sized to its
+  ## footprint; a mirrored pair faces opposite ways.
+  let pack = loadPropPack(when defined(emscripten): "/round-village.glb" else: "tmp/round-village.glb",
+      unitHeight = false, textured = false)
+  let grove = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/vegetation.glb",
+      unitHeight = true, textured = true, maxTextureSize = 512, only = @["tree_01a","tree_02a","tree_03a","tree_04a","tree_05a","tree_06a","bush_01a","bush_02a","flower_bush_01a","flower_bush_02a","flowers_patch_01a","flowers_patch_02a","flowers_patch_03a"])
+  let rocks = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/rocks.glb",
+      unitHeight = true, textured = true, maxTextureSize = 512, only = @["rock_medium_01a","rock_medium_02a","rock_medium_03a"])
+  let trees = ["tree_01a", "tree_02a", "tree_03a", "tree_04a", "tree_05a", "tree_06a"]
+  let bushes = ["bush_01a", "bush_02a", "flower_bush_01a", "flower_bush_02a"]
+  let houses = ["round-cottage", "mushroom-house", "stump-house", "spiral-house"]
+  for i, c in currentMap().cover:
+    let k = i div 2
+    let r = c.w.float32/200
+    let x = c.x.float32+c.w.float32/2
+    let z = c.z.float32+c.w.float32/2
+    let p = vec3(x/100-32, terrainHeight(x.int, z.int).float32/100, z/100-20)
+    let turn = k.float32*0.7+(if i mod 2 == 1: PI.float32 else: 0'f32)
+    case c.kind
+    of mapTree:
+      if k mod 5 == 0:
+        grove.placeProp(bushes[k mod bushes.len], p, turn, r*2.2)
+      else:
+        grove.placeProp(trees[k mod trees.len], p, turn, 3.5+(k mod 5).float32*0.55)
+      if k mod 3 == 0:
+        grove.placeProp("flowers_patch_0" & $(1+k mod 3) & "a", p+vec3(0.8, 0, 0.5), turn, 0.8)
+    of mapHouse:
+      pack.placeProp(houses[k mod houses.len], p, turn, r)
+    of mapProp:
+      if k mod 2 == 0: pack.placeProp("round-garden", p, turn, r)
+      else: grove.placeProp(bushes[k mod bushes.len], p, turn, r*2.2)
+    of mapRock:
+      rocks.placeProp("rock_medium_0" & $(1+k mod 3) & "a", p, turn, r*1.9)
+
 proc placeRoundVillage*() =
   let pack = loadPropPack(when defined(emscripten): "/round-village.glb" else: "tmp/round-village.glb",
       unitHeight = false, textured = false)

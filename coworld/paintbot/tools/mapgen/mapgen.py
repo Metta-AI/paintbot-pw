@@ -710,6 +710,26 @@ def to_json(m: Map):
     }
 
 
+PICKUP_KINDS = ["grenade", "spray", "medkit", "armor", "uniform"]  # sim.nim PickupKind order
+COVER_KINDS = ["tree", "house", "prop", "rock"]
+
+
+def to_binary(m: Map) -> bytes:
+    """The engine's embedded form (examples/paintbot/maps.nim): little-endian int32 header and
+    records around two int16 grids."""
+    head = [NX, NZ, MIN_X, MIN_Z, STEP, m.home[0], m.home[1],
+            len(m.hearts), len(m.pickups), len(m.trenches), len(m.cover)]
+    margin = np.clip(np.rint(m.land * 1000), -32000, 32000).astype("<i2")
+    out = [b"PBMAP001", np.array(head, "<i4").tobytes(), m.height.astype("<i2").tobytes(), margin.tobytes()]
+    rec = []
+    rec += [(x, z, o) for x, z, o, _ in m.hearts]
+    rec += [(x, z, PICKUP_KINDS.index(k)) for x, z, k, _ in m.pickups]
+    rec += [(x - TRENCH // 2, z - TRENCH // 2, TRENCH, TRENCH) for x, z in m.trenches]
+    rec += [(int(c.x - c.r), int(c.z - c.r), int(2 * c.r), COVER_KINDS.index(c.kind)) for c in m.cover]
+    out += [np.array(r, "<i4").tobytes() for r in rec]
+    return b"".join(out)
+
+
 def render(m: Map, path: Path, scale=10):
     from PIL import Image, ImageDraw
     h = m.height.astype(float)
@@ -760,6 +780,7 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--only")
     ap.add_argument("--no-png", action="store_true")
+    ap.add_argument("--engine", help="also write <name>.pbmap files here (examples/paintbot/maps)")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -772,6 +793,9 @@ def main():
         (out / f"{name}.json").write_text(json.dumps(doc, separators=(",", ":")))
         if not args.no_png:
             render(m, out / f"{name}.png")
+        if args.engine:
+            Path(args.engine).mkdir(parents=True, exist_ok=True)
+            (Path(args.engine) / f"{name}.pbmap").write_bytes(to_binary(m))
         index.append({k: doc[k] for k in ("name", "title", "archetype", "description", "seed", "stats")})
         print(f"{name}: {doc['stats']}")
     if not args.only:

@@ -212,7 +212,7 @@ when defined(pwTraining):
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
   var damageScale* {.threadvar.}: ptr array[Seats, int32]
 else:
-  var visionRulesVersion* = 40
+  var visionRulesVersion* = 41
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
@@ -224,8 +224,11 @@ proc observedSeat*(w: World, observer, slot: int): int =
     # A disguise must never overwrite the observer's own body.
     if result == observer: result = (result+2) mod Seats
   else: result = slot
-proc home*(side: int): Point = point(if side ==
-    0: Width*15 div 100 else: Width*85 div 100, Height div 2)
+proc home*(side: int): Point =
+  if activeMap() >= 0:
+    let h = currentMap().home
+    return if side == 0: point(h.x, h.z) else: point(Width-h.x, Height-h.z)
+  point(if side == 0: Width*15 div 100 else: Width*85 div 100, Height div 2)
 proc distance2*(a, b: Point): int64 =
   let x = int64(a.x)-b.x; let z = int64(a.z)-b.z
   x*x+z*z
@@ -573,6 +576,15 @@ proc configureRules*(version: int) =
   symmetricTerrain = visionRulesVersion >= 35
   refreshTerrainTable()
 
+proc configureMap*(name: string) =
+  ## Rules 41: "" keeps the rules' own island; a MapNames entry replaces its terrain and
+  ## layout. Like configureRules, it binds the calling thread; set it before newWorld.
+  setActiveMap(mapIndex(name))
+  refreshTerrainTable()
+
+proc mapName*(): string =
+  if activeMap() >= 0: MapNames[activeMap()] else: ""
+
 proc newWorld*(seed: int32, endTick: int32 = 0): World =
   configureRules(visionRulesVersion)
   result.endTick = if visionRulesVersion >= 28:
@@ -583,7 +595,10 @@ proc newWorld*(seed: int32, endTick: int32 = 0): World =
     let seconds = result.endTick div TickRate
     result.glory = [seconds, seconds]
   if visionRulesVersion >= 38: result.nextGloryHeart = GloryHeartFirstTick
-  if visionRulesVersion >= 8:
+  if activeMap() >= 0:
+    for c in currentMap().cover:
+      result.cover.add Cover(x: c.x.int32, z: c.z.int32, w: c.w.int32, h: 0)
+  elif visionRulesVersion >= 8:
     for lot in roundVillage():
       result.cover.add Cover(x: (lot.x-lot.radius).int32,
           z: (lot.z-lot.radius).int32, w: (lot.radius*2).int32, h: 0)
@@ -606,7 +621,7 @@ proc newWorld*(seed: int32, endTick: int32 = 0): World =
   for side in 0..1: result.resetHeart(side)
   if visionRulesVersion < 24:
     for i in 0..<Seats: result.spawn(i)
-  if wilderness:
+  if wilderness and activeMap() < 0:
     for p in [point(-620,300),point(-620,1700),point(-620,3500),point(1200,-320),point(3100,-320),point(5400,-320)]:
       for q in [p,point(6400-p.x.int,4000-p.z.int)]:
         result.cover.add Cover(x:q.x-65,z:q.z-65,w:130,h:0)

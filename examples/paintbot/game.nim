@@ -38,12 +38,19 @@ type
     names: array[Seats, string]
     communications: seq[Communication]
     endTick: int32
+  PreMapRecording = object
+    seed: int32
+    frames: seq[Frame]
+    names: array[Seats, string]
+    communications: seq[Communication]
+    endTick: int32
   Recording* = object
     seed*: int32
     frames*: seq[Frame]
     names*: array[Seats, string]
     communications*: seq[Communication]
     endTick*: int32
+    map*: string ## rules 41: a MapNames entry, or "" for the rules' own island
   BridgeReply = object
     ## The host's answer to one bridge line: settled advisor-oracle requests, nothing else.
     oracle: seq[OracleReply]
@@ -66,7 +73,7 @@ proc convertFrames(frames: seq[PreSoundFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
         goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
     result.add next
-var replayRulesVersion* = 40
+var replayRulesVersion* = 41
 proc loadRecording*(path: string): Recording =
   replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
   visionRulesVersion = replayRulesVersion
@@ -86,7 +93,12 @@ proc loadRecording*(path: string): Recording =
     result = Recording(seed:old.seed,frames:convertFrames(old.frames),names:old.names,
       communications:old.communications,endTick:old.endTick)
   elif replayRulesVersion in [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]:
+    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreMapRecording)
+    result = Recording(seed: old.seed, frames: old.frames, names: old.names,
+      communications: old.communications, endTick: old.endTick)
+  elif replayRulesVersion == 41:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
+    discard mapIndex(result.map) # an unknown map is an invalid replay
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
   if replayRulesVersion < 23: result.endTick = MatchTicks
@@ -109,12 +121,15 @@ var
   options*: GameOptions
   players: array[Seats, Bot]
   bridge: File
+  mapChoice*: string ## live games: --map:<name>, or the Coworld config's "map"
 proc setup*() =
   when defined(coworld): options = coworldOptions(Seats)
   else:
     options = GameOptions(seed: 2026, maximumTicks: HeartMeterMatchTicks, speed: 1)
     let args = commandLineParams(); var i = 0
     while i < args.len:
+      if args[i].startsWith("--map:"):
+        mapChoice = args[i]["--map:".len..^1]; discard mapIndex(mapChoice); inc i; continue
       if not options.takeCommonFlag(args, i, args[i]): raise newException(
           ValueError, "Unknown argument: "&args[i])
       inc i
@@ -124,10 +139,13 @@ proc setup*() =
   if replayMode:
     recording = loadRecording(options.replayPath)
     if recording.frames.len > 28800: raise newException(ValueError, "Replay tick limit exceeded")
+    configureMap(recording.map)
     world = newWorld(recording.seed, recording.endTick)
   else:
     # The recording header and live simulation must use the same rules.
     configureRules(replayRulesVersion)
+    when defined(coworld): mapChoice = config.map
+    configureMap(mapChoice); recording.map = mapName()
     world = newWorld(options.seed, options.maximumTicks); recording.seed = options.seed
     recording.endTick = world.endTick
     players = loadBots(options.botGroups, options.playerSlot)

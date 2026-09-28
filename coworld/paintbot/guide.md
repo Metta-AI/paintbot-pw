@@ -302,6 +302,24 @@ open (a full-health kill) and 2 to victims in other trenches; spray recovers in 
 instead of 20 and its cone is a third wider. Charge time (24 ticks) and spray reach (850)
 are unchanged so existing throw-distance math and neural decoders keep working.
 
+### Generated maps (rules 41)
+
+Rules 41 add ten generated maps beside Heartwick island. Each map has its own variant,
+`map-<name>`, and sets `"map": "<name>"` in the game config: `twin-mesas`, `archipelago`,
+`serpent-river`, `crater`, `terraces`, `deep-forest`, `badlands`, `atoll`, `highlands`,
+`delta`. A config with no map (every existing variant) still plays on Heartwick. Replays
+record the map name, and the viewer draws each map's terrain, scenery and coastline.
+
+A map keeps the rules you already play under: 16 cogs, 10 control hearts (two homes, then
+four neutral pairs), 4 grenades, 2 sprays, 2 armors, 4 medkits, 2 uniforms and 6 trenches.
+Everything is mirrored under the same half turn about (3200, 2000). What changes is the
+ground and where things sit, so a policy should read positions from the host API
+(`controlX`/`controlY`, `pickupX`/`pickupY`, `terrainHeight`, `waterAt`, `trenchAt`)
+instead of assuming Heartwick coordinates. The generator places items by role: grenades
+behind your lines, spray in the thickest cover, armor on exposed high ground, medkits at
+the centre and on a flank, and trenches on open approaches.
+The generator and previews are in `tools/mapgen/`.
+
 ### Expanded island and navigation (rules 22)
 
 The island spans 160 × 96 metres, exactly twice the previous map area.

@@ -86,7 +86,25 @@ proc pairSpots(w: World, p: Point): (Point, Point) =
   if visionRulesVersion >= 35: (q, mirrorPoint(q))
   else: (q, w.freePickup(mirrorPoint(p)))
 
+proc initializeMapEquipment(w: var World) =
+  ## A map's items are placed and mirrored by its generator; they go in exactly as given.
+  for i in 0..<Seats:
+    w.equipment[i].lives = 4
+    w.cogs[i].aim = home(1-team(i))
+  let m = currentMap()
+  for p in m.pickups:
+    w.pickups.add Pickup(pos: point(p.x, p.z), kind: PickupKind(p.kind))
+  for t in m.trenches:
+    w.trenches.add Cover(x: t.x.int32, z: t.z.int32, w: t.w.int32, h: t.h.int32)
+  for h in m.hearts:
+    w.controlHearts.add ControlHeart(pos: point(h.x, h.z), owner: h.owner.int32)
+  w.captures = [1'i32, 1'i32]
+  for heart in w.controlHearts:
+    w.heartCaptures.add HeartCapture(team: -1)
+
 proc initializeEquipment(w: var World) =
+  if activeMap() >= 0:
+    w.initializeMapEquipment(); return
   if visionRulesVersion >= 27:
     let spots = w.pairSpots(point(2000, 1000))
     for q in [spots[0], spots[1]]:
