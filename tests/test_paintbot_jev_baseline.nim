@@ -11,6 +11,17 @@ const Ticks = 720   # thirty seconds: the layer's first asks, shouts and heart f
 const Root = currentSourcePath().parentDir.parentDir
 const Base = Root / "coworld/paintbot/players/base.bas"
 const Jev = Root / "coworld/paintbot/players/jev.bas"
+# CI splits the switch-combination arms (most of this file's time) across parallel commands:
+# `-d:jevArmShards=N -d:jevArmShard=I` runs arm i only when i mod N == I, and runs the other
+# tests only in part 0, so the N commands together run every test and every arm exactly once.
+# With no defines the file runs everything, as before.
+const jevArmShards {.intdefine.} = 1
+const jevArmShard {.intdefine.} = 0
+static: doAssert jevArmShards >= 1 and jevArmShard in 0..<jevArmShards
+
+template firstPartTest(name: string, body: untyped) =
+  when jevArmShard == 0:
+    test name: body
 
 proc play(path: string, seed: int32, advised = false): (seq[uint32], array[Seats, Bot]) =
   resetOracle()
@@ -29,10 +40,10 @@ proc play(path: string, seed: int32, advised = false): (seq[uint32], array[Seats
   (hashes, players)
 
 suite "Jev-advised BASIC baseline":
-  test "the shipped copies are the same file":
+  firstPartTest "the shipped copies are the same file":
     check readFile(Jev) == readFile(Root / "examples/paintbot/players/jev.bas")
 
-  test "without an oracle jev.bas plays exactly like base.bas":
+  firstPartTest "without an oracle jev.bas plays exactly like base.bas":
     for seed in [4'i32, 5, 8]:
       let (baseHashes, _) = play(Base, seed)
       let (jevHashes, players) = play(Jev, seed)
@@ -42,7 +53,7 @@ suite "Jev-advised BASIC baseline":
         check not players[slot].failed
       check drainOracleAsks().len == 0
 
-  test "drafting the oracle request stays inside the BASIC budget":
+  firstPartTest "drafting the oracle request stays inside the BASIC budget":
     # With the oracle on and no replies the askers draft and ship requests every ask interval.
     # Limits are 50,000 instructions, 125,000 work units and 1,024 string handles per decision;
     # measured peaks are about 10,100 / 22,200 / 91, and about 10,900 / 25,500 / 101 with every
@@ -55,7 +66,7 @@ suite "Jev-advised BASIC baseline":
       check peakWork[slot] < 93_750
       check peakStrings[slot] < 768
 
-  test "Jev's pick is relayed as a squad callout that squadmates decode":
+  firstPartTest "Jev's pick is relayed as a squad callout that squadmates decode":
     # An answered ask makes the asker shout "<Squad>, push <Heart>." (or hold / carry on) every
     # two seconds; the heart's name starts with A + its index. Squadmates within earshot adopt
     # it and log "relay ... obj=<heart> kind=<kind>". Nothing shouts the old "jev 0 5 0" form.
@@ -138,7 +149,7 @@ suite "Jev-advised BASIC baseline":
       check firstAnswer[c.slot] >= 0
       check c.tick >= firstAnswer[c.slot]
 
-  test "the drafted request is structured state, not sentences":
+  firstPartTest "the drafted request is structured state, not sentences":
     # Facts go out as fields under path keys and the criteria point at them, so Jev reads
     # structure rather than prose and the options are not restated in the state.
     resetOracle()
@@ -228,7 +239,10 @@ suite "Jev-advised BASIC baseline":
     }
     # Git may check the file out with CRLF, so normalise before matching on line boundaries.
     let shipped = readFile(Jev).replace("\r\n", "\n")
-    for (name, flips) in Arms:
+    var ran = 0
+    for arm, (name, flips) in Arms:
+      if arm mod jevArmShards != jevArmShard: continue
+      inc ran
       var source = shipped
       for (switch, value) in flips:
         let want = "\n  " & switch & " = " & $value & "\n"
@@ -271,8 +285,9 @@ suite "Jev-advised BASIC baseline":
         check peakInstructions[slot] < 37_500
         check peakWork[slot] < 93_750
         check peakStrings[slot] < 768
+    check ran > 0
 
-  test "the terrain prompt describes trenches, water, supplies and nearby enemies":
+  firstPartTest "the terrain prompt describes trenches, water, supplies and nearby enemies":
     var source = readFile(Jev).replace("\r\n", "\n").replace("\n  useTerrain = 0\n", "\n  useTerrain = 1\n")
     check "  useTerrain = 1" in source
     let path = getTempDir() / "paintbot-jev-terrain.bas"
