@@ -10,7 +10,7 @@ Capture-the-heart Paintbot built on the Polyworld engine, following its Gods of 
 
 ## Run locally
 
-Requires Nim 2.2.6 or newer and Python 3.12.
+Requires Nim 2.2.10 and Python 3.12.
 
 ```sh
 python3 coworld/tools/sync_dependencies.py
