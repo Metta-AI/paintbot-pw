@@ -418,3 +418,73 @@ suite "Native FFA-kin ABI":
     let swapped = run([ffaHandle(62, 0, 2), teams()])
     check swapped[0] == ffaAlone and swapped[1] == teamsAlone
     check teamsAlone != ffaAlone
+
+suite "Native FFA-kin seat scripts, results and bots":
+  const FfaBas = staticRead("../coworld/paintbot/players/ffa.bas")
+  proc setScript(h: pointer, seat: int, source: string): cint =
+    pw_set_seat_script(h, seat.cint, cast[ptr UncheckedArray[char]](unsafeAddr source[0]), source.len.int32)
+  proc status(h: pointer, seat: int): (cint, string) =
+    var text: array[512, char]
+    let code = pw_seat_script_status(h, seat.cint, cast[ptr UncheckedArray[char]](addr text[0]), 512)
+    (code, $cast[cstring](addr text[0]))
+
+  test "ffa.bas on all 16 seats of an FFA handle plays a whole match without script errors":
+    let h = ffaHandle(71, 0)
+    for seat in 0..<Seats: check h.setScript(seat, FfaBas) == 0
+    var actions: array[Seats*ActionSizes.len, int32]
+    var rewards, terminals: array[Seats, float32]
+    var ticks = 0
+    while true:
+      let code = pw_step(h, ip(actions), fp(rewards), fp(terminals))
+      if code == -2: break
+      require code == 0
+      inc ticks
+      if terminals[0] == 1: break
+    check ticks > 0
+    for seat in 0..<Seats:
+      let (code, message) = h.status(seat)
+      check code == 1
+      if code != 1: echo "seat ", seat, ": ", message
+    var scores: array[Seats, float32]
+    check pw_scores(h, fp(scores)) == 0
+    var total = 0.0
+    for v in scores: total += v
+    check total > 0
+    var results: array[8, float32]
+    check pw_results(h, fp(results)) == 0
+    check results[0] == float32(envOf(h).world.tick) and results[1] == -3
+    check results[4] == max(scores) and scores[results[5].int] == results[4]
+    check results[3] > 0 and results[2] >= 0 and results[2] <= 16
+    echo "  ffa.bas match: ", ticks, " ticks, seats standing ", results[2], ", best R ", results[4]
+    pw_destroy(h)
+
+  test "an FFA script set before the switching reset compiles at that reset; teams refuses it":
+    let h = pw_create(72, 240)
+    check h.setScript(0, FfaBas) == 1 # the teams game has no kin(), gene(), ...
+    let (code, message) = h.status(0)
+    check code == 2 and message.len > 0
+    var actions: array[Seats*ActionSizes.len, int32]
+    var rewards, terminals: array[Seats, float32]
+    check pw_step(h, ip(actions), fp(rewards), fp(terminals)) == 0 # the disabled seat idles
+    check pw_set_game_mode(h, 1) == 0 and pw_reset(h, 72, 240) == 0
+    check h.status(0)[0] == 1
+    for tick in 0..<48: check pw_step(h, ip(actions), fp(rewards), fp(terminals)) == 0
+    check h.status(0)[0] == 1
+    check pw_set_game_mode(h, 0) == 0 and pw_reset(h, 72, 240) == 0
+    check h.status(0)[0] == 2
+    pw_destroy(h)
+
+  test "pw_bot_actions is unsupported in FFA; pw_results keeps the teams layout in teams":
+    let f = ffaHandle(73, 0)
+    var actions: array[Seats*ActionSizes.len, int32]
+    check pw_bot_actions(f, 0, 1, ip(actions)) == -1
+    var results: array[8, float32]
+    check pw_results(f, fp(results)) == 0
+    check results[1] == -1 and results[2] == 16 and results[3] == 0 and results[6] == 0
+    pw_destroy(f)
+    let t = pw_create(73, 240)
+    check pw_bot_actions(t, 0, 1, ip(actions)) == 0
+    check pw_results(t, fp(results)) == 0
+    let w = envOf(t).world
+    check results[2] == float32(w.glory[0]) and results[3] == float32(w.glory[1])
+    pw_destroy(t)

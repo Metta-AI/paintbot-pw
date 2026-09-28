@@ -848,11 +848,33 @@ proc pw_state_hash*(handle: pointer): uint32 {.exportc, cdecl, dynlib.} =
 
 proc pw_results*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
   ## [tick, winner, glory0, glory1, meter0, meter1, hearts0, hearts1].
+  ## FFA-kin: [tick, winner (-1 playing, -3 ended), seats still in the match, total raw
+  ## score (sum of s_j, points), best R_i (points), the seat holding it (lowest on a tie),
+  ## control hearts owned by any seat, great-heart bounty paid in total (points)].
   if handle == nil or output == nil: return -1
   ready(handle)
-  let w = cast[ptr NativeEnv](handle).world
+  template w: untyped = cast[ptr NativeEnv](handle).world
   output[0] = w.tick.float32
   output[1] = w.winner.float32
+  if cast[ptr NativeEnv](handle).mode == gmFfaKin:
+    let scores = w.scores()
+    var standing, owned = 0
+    var raw, great = 0'i64
+    var best = 0
+    for i in 0..<Seats:
+      if w.cogs[i].hp > 0 or w.equipment[i].lives > 0: inc standing
+      raw += w.seatScore[i]
+      great += w.greatShare[i]
+      if scores[i] > scores[best]: best = i
+    for heart in w.controlHearts:
+      if heart.owner >= 0: inc owned
+    output[2] = standing.float32
+    output[3] = float32(raw) / 10
+    output[4] = scores[best].float32
+    output[5] = best.float32
+    output[6] = owned.float32
+    output[7] = float32(great) / 10
+    return 0
   for side in 0..1:
     output[2+side] = w.glory[side].float32
     output[4+side] = w.scoreTicks[side].float32 / TickRate.float32
@@ -865,9 +887,11 @@ proc pw_results*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, d
 proc pw_bot_actions*(handle: pointer, side, level: cint,
     actions: ActionBuffer): cint {.exportc, cdecl, dynlib.} =
   ## Write only the selected team's slots in a full 16-seat action buffer.
+  ## -1 in FFA-kin (the built-in bot plays sides; use pw_set_seat_script with ffa.bas).
   if handle == nil or actions == nil or side notin 0..1 or level notin 1..2: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
+  if env.mode == gmFfaKin: return -1
   for slot in 0..<Seats:
     if team(slot) == side:
       if level == 2 and env.world.cogs[slot].hp > 0:
@@ -1035,7 +1059,10 @@ proc pw_set_seat_script*(handle: pointer, seat: cint, source: ptr UncheckedArray
   ## ignored while a script is installed. Compiles now; a fresh runtime with cleared
   ## persistent variables is installed here and again on every pw_reset. length 0
   ## removes the script. Returns 0 (running), 1 (compile failed: the seat is disabled and
-  ## idles, as a hosted seat would), -1 (bad arguments).
+  ## idles, as a hosted seat would), -1 (bad arguments). The host functions are the current
+  ## world's mode's (FFA-kin adds kin, gene, ...): the source is compiled now against the
+  ## current world, and again at every pw_reset after the pending mode is applied, so an
+  ## FFA script set before the reset that switches the mode compiles at that reset.
   if handle == nil or seat notin 0..<Seats or length < 0 or (length > 0 and source == nil): return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)

@@ -81,7 +81,8 @@ suite "Observation contract ffa.v1":
     # Self.
     check o[0] == float32(me.x - Width div 2)/spanX
     check o[1] == float32(me.z - Height div 2)/spanZ
-    check o[2] == 2'f32/3 and o[3] == 1'f32/3 and o[4] == 36'f32/72
+    check maxHp() == FfaMaxHp and FfaMaxHp == 10
+    check o[2] == 2'f32/10 and o[3] == 1'f32/10 and o[4] == 36'f32/72
     check o[5] == 25'f32/1000 and o[6] == 1 and o[7] == float32(FfaMatchTicks-2400)/8640
     proc row(j: int): int = FfaIdentityOffset + j*FfaIdentityRowSize
     # Own identity row: at the origin, visible, alive, r = 1.
@@ -90,7 +91,7 @@ suite "Observation contract ffa.v1":
     # Seat 1: visible, relative position and hp, genes, r, score, hearts held.
     check w.visible(0, 1) and not w.visible(0, 2)
     check o[row(1)] == 300'f32/spanX and o[row(1)+1] == 0
-    check o[row(1)+2] == 1 and o[row(1)+3] == 1 and o[row(1)+4] == 1'f32/3
+    check o[row(1)+2] == 1 and o[row(1)+3] == 1 and o[row(1)+4] == 1'f32/10
     for b in 0..<Loci:
       check o[row(1)+5+b] == (if ((k.genes[1] shr b) and 1) == 1: 1'f32 else: -1'f32)
     check o[row(1)+37] == float32(k.r(0, 1))
@@ -167,3 +168,4 @@ suite "Observation contract ffa.v1":
       check o[FfaHeartOffset + i*FfaHeartRowSize + 2] in [-1'f32, 0'f32]
       check o[FfaHeartOffset + i*FfaHeartRowSize + 5] == 0
     for c in FfaGreatOffset..<FfaTerrainOffset: check o[c] == 0
+    check maxHp() == 3 and o[2] == float32(w.cogs[0].hp)/3 # the teams game's hp scale

@@ -329,15 +329,16 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   ## flip: positions are in the absolute frame for every seat. "Centred x" is
   ## (x - Width/2) / (maxX - minX), "centred z" likewise with Height and the z span; score is
   ## the raw score s_j in points / 1000 (seatScore is tenths). Fog: a seat's position and hp
-  ## need its body to be visible (bodies, as v1); alive, genes, r, score and hearts held are
+  ## need its body to be visible (bodies, as v1); hp and armor are divided by maxHp()
+  ## (FfaMaxHp = 10 in FFA-kin, 3 in the teams game); alive, genes, r, score and hearts held are
   ## public. Outside FFA the kin, score and seat-ownership columns and the great-heart rows
   ## are zero (the teams game has no kinship). mask bit 0 (FfaObsMaskKin) zeroes every
   ## r-to-me column: identity column 37, and a heart owned by another seat reads 0.
-  ##   0..7      self: centred x, centred z, hp/3, armor/3, cooldown/72, own score/1000,
+  ##   0..7      self: centred x, centred z, hp/maxHp, armor/maxHp, cooldown/72, own score/1000,
   ##             alive, ticks left/8640
   ##   8+42j     identity row j (seat j, 0..15), columns:
   ##             0 dx/xspan, 1 dz/zspan (0 unless visible; own row 0), 2 visible (own 1),
-  ##             3 alive, 4 hp/3 (0 unless visible), 5..36 gene bits 0..31 (+1 set, -1
+  ##             3 alive, 4 hp/maxHp (0 unless visible), 5..36 gene bits 0..31 (+1 set, -1
   ##             clear), 37 r(me, j) (own row 1), 38 score/1000, 39 hearts held/10,
   ##             40..41 reserved 0
   ##   680+6i    control heart row i (0..9): 0 centred x, 1 centred z, 2 owner's r to me
@@ -355,6 +356,7 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   let kinOn = ffa()
   let hideKin = (mask and FfaObsMaskKin) != 0
   let me = w.cogs[slot]
+  let hpScale = float32(maxHp())
   let spanX = float32(maxX()-minX())
   let spanZ = float32(maxZ()-minZ())
   # Templates, not nested procs: a closure would copy the World.
@@ -367,8 +369,8 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   # Self.
   output[0] = cx(me.pos)
   output[1] = cz(me.pos)
-  output[2] = float32(me.hp)/3
-  output[3] = float32(w.equipment[slot].armor)/3
+  output[2] = float32(me.hp)/hpScale
+  output[3] = float32(w.equipment[slot].armor)/hpScale
   output[4] = float32(me.cooldown)/72
   output[5] = points(slot)
   output[6] = float32((me.hp > 0).int)
@@ -386,7 +388,7 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
       output[o] = float32(other.pos.x-me.pos.x)/spanX
       output[o+1] = float32(other.pos.z-me.pos.z)/spanZ
       output[o+2] = 1
-      output[o+4] = float32(other.hp)/3
+      output[o+4] = float32(other.hp)/hpScale
     output[o+3] = float32((w.cogs[j].hp > 0).int)
     if kinOn:
       for b in 0..<Loci:

@@ -20,6 +20,10 @@ int pw_observe(void *handle, float *observations, float *state_resets);
 int pw_observe_seats(void *handle, uint32_t seats, float *observations, float *state_resets);
 int pw_step(void *handle, const int32_t *actions, float *rewards, float *terminals);
 uint32_t pw_state_hash(void *handle);
+/* pw_results: [tick, winner, glory0, glory1, meter0, meter1, hearts0, hearts1]; in FFA-kin
+ * [tick, winner (-1 playing, -3 ended), seats still in the match, total raw score (points),
+ * best R_i (points), the seat holding it (lowest on a tie), control hearts owned by any seat,
+ * great-heart bounty paid in total (points)]. pw_bot_actions returns -1 in FFA-kin. */
 int pw_results(void *handle, float *eight_results);
 int pw_bot_actions(void *handle, int side, int level, int32_t *actions);
 /* Per-seat combat telemetry, cumulative since the last create/reset; additive to v1.
@@ -37,7 +41,9 @@ int pw_seat_stats(void *handle, int32_t *sixteen_seats_times_eight); /* pw_seat_
  * per-decision budget; the caller's actions for that seat are ignored. The script is
  * compiled now and re-instantiated (persistent variables cleared) on every pw_reset;
  * length 0 removes it. Returns 0 running, 1 compile failed (seat idles, as hosted),
- * -1 bad arguments. Worlds without scripts are byte-identical to before. */
+ * -1 bad arguments. Worlds without scripts are byte-identical to before. Host functions are
+ * the current world's mode's; every pw_reset recompiles under the mode it applies, so an
+ * FFA-only script (kin, gene, ...) set before the reset that switches to FFA runs from it. */
 int pw_set_seat_script(void *handle, int seat, const char *source, int32_t length);
 /* 0 unscripted, 1 running, 2 compile failed, 3 disabled by a runtime error (the same
  * errors that disable a hosted seat). Copies the NUL-terminated error text when
