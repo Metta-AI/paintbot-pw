@@ -48,7 +48,7 @@ proc play(seed: int32): MatchStats =
 
 suite "FFA-kin baseline ffa.bas":
   setup:
-    visionRulesVersion = 40
+    visionRulesVersion = 41
     kinshipOverride = none(Kinship)
   teardown:
     gameMode = gmTeams

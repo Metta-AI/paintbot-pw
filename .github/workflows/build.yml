@@ -57,7 +57,37 @@ jobs:
           nimby create
           nimby install "polyworld/polyworld.nimble"
           nimby sync "polyworld/nimby.lock"
+      # Nim's cache (generated C and object files) is kept between runs. The runner gives every
+      # nim command its own directory under CI_NIMCACHE_ROOT (via XDG_CACHE_HOME), so builds with
+      # different flags never share objects, and the key is per OS, Nim version, nimby.lock,
+      # shard and command set. Nim recompiles a C file only when its content hash changes, so a
+      # warm cache cuts compile time without changing what any test runs. Restored on every run;
+      # saved only from pushes to main, so PR builds cannot write it. Windows builds uncached.
+      - name: Nim version
+        id: nim
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo "version=$(nim --version | head -1 | awk '{print $4}')" >> "$GITHUB_OUTPUT"
+      - name: Restore nimcache
+        if: runner.os != 'Windows'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/nimcache
+          key: nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of5-${{ hashFiles('polyworld/tests/ci_tests.txt', 'polyworld/tests/ci_durations.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of5-${{ hashFiles('polyworld/tests/ci_tests.txt', 'polyworld/tests/ci_durations.json') }}-
+            nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of5-
       - name: Check shard plan
         run: python tests/run_ci_shard.py --check --of 5
       - name: Run shard ${{ matrix.shard }} of 5
         run: python tests/run_ci_shard.py --shard ${{ matrix.shard }} --of 5
+        env:
+          CI_NIMCACHE_ROOT: ${{ github.workspace }}/nimcache
+      - name: Save nimcache
+        if: >-
+          !cancelled() && runner.os != 'Windows' &&
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/nimcache
+          key: nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of5-${{ hashFiles('polyworld/tests/ci_tests.txt', 'polyworld/tests/ci_durations.json') }}-${{ github.run_id }}-${{ github.run_attempt }}

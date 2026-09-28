@@ -1,4 +1,4 @@
-## FFA-kin rules (mode "ffa_kin" on rules 40): sixteen separate players, one life, neutral
+## FFA-kin rules (mode "ffa_kin" on the live rules, 41): sixteen separate players, one life, neutral
 ## control hearts captured by a lone cog, great hearts that need three cogs, and kin-weighted
 ## scores. The engine reads only the family grouping (spawn) and r (territory boost), never
 ## genes; the kin invariance test proves it.
@@ -57,7 +57,7 @@ proc hashes(k: Kinship, seed: int32, ticks: int): seq[uint32] =
 
 suite "FFA-kin rules":
   setup:
-    visionRulesVersion = 40
+    visionRulesVersion = 41
     kinshipOverride = none(Kinship)
     gameMode = gmFfaKin
   teardown:
@@ -391,7 +391,7 @@ proc openLane(w: World, length: int): Point =
 
 suite "FFA-kin territory boost":
   setup:
-    visionRulesVersion = 40
+    visionRulesVersion = 41
     gameMode = gmFfaKin
     kinshipOverride = some(kinshipFor(klCousins, 7))
   teardown:
@@ -485,3 +485,53 @@ suite "FFA-kin territory boost":
     var w = newWorld(2026)
     for h in w.controlHearts.mitems: h.owner = 0
     for i in 0..<Seats: check w.territoryBoost(i) == 0
+
+suite "FFA-kin on generated maps (rules 41)":
+  setup:
+    visionRulesVersion = 41
+    kinshipOverride = none(Kinship)
+    gameMode = gmFfaKin
+  teardown:
+    configureMap("")
+    gameMode = gmTeams
+    kinshipOverride = none(Kinship)
+
+  proc seated(w: var World) =
+    ## A crowded start retries next tick; a few idle ticks seat everyone.
+    for tick in 0..<24:
+      var spawned = true
+      for c in w.cogs:
+        if c.hp <= 0: spawned = false
+      if spawned: break
+      w.step(idle())
+
+  for name in MapNames:
+    test name & ": FFA layout from the map's items, valid spawns and great hearts":
+      configureMap(name)
+      for seed in [1'i32, 2026]:
+        var w = ffaWorld(seed)
+        check w.controlHearts.len == currentMap().hearts.len
+        for heart in w.controlHearts: check heart.owner == -1
+        check w.captures == [0'i32, 0]
+        for i in 0..<Seats: check w.equipment[i].lives == 1
+        for pickup in w.pickups: check pickup.kind != uniformPickup
+        check w.greatHearts[1].pos == point(Width-w.greatHearts[0].pos.x.int, Height-w.greatHearts[0].pos.z.int)
+        for heart in w.greatHearts: check not w.blocked(heart.pos)
+        w.seated()
+        for i in 0..<Seats:
+          check w.cogs[i].hp > 0
+          check not w.blocked(w.cogs[i].pos)
+          check not w.blocked(w.spawnAnchor[i])
+          check distance2(w.cogs[i].pos, w.spawnAnchor[i]) <= HeartSpawnRadius.int64*HeartSpawnRadius + 2*MoveSpeed*MoveSpeed
+
+  test "archipelago: a scripted FFA match runs 1440 ticks without a crash":
+    configureMap("archipelago")
+    var w = ffaWorld(7)
+    var shots = 0
+    while w.tick < 1440 and w.winner == -1:
+      w.step(w.scriptedCommands())
+      shots += w.balls.len
+      for i in 0..<Seats:
+        if w.cogs[i].hp > 0: check not w.blocked(w.cogs[i].pos)
+    check w.tick == 1440 or w.winner == -3
+    check shots > 0

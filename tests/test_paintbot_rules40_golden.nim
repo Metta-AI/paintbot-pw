@@ -2,7 +2,9 @@
 ## Any engine change that is meant to leave rules 40 alone must keep every value here byte for
 ## byte; never edit `Golden` to make this pass. Two drivers cover different code paths: a scripted
 ## Nim driver (walks to control hearts, shoots the nearest enemy, lobs grenades) and 16 seats of
-## the shipped BASIC baseline through the real host.
+## the shipped BASIC baseline through the real host. Rules 41 made generated maps the live default
+## (the island itself is unchanged), so this test pins rules 40 explicitly; the rules-41 twin is
+## tests/test_paintbot_rules41_golden.nim.
 import std/[unittest, os, strutils, sequtils]
 import polyworld/cli
 import ../examples/paintbot/[sim, bots]
@@ -44,6 +46,8 @@ proc scriptedCommands(w: World): array[Seats, Command] =
       result[slot].chargeGrenade = w.equipment[slot].grenade and w.tick mod 96 < 48
 
 proc run(driver: Driver, seed: int32): array[3, uint32] =
+  visionRulesVersion = 40
+  configureRules(40)
   var w = newWorld(seed, 14400)
   var players: array[Seats, Bot]
   if driver == basic: players = loadBots(@[BotGroup(path: Base, count: Seats)])
@@ -63,8 +67,17 @@ proc run(driver: Driver, seed: int32): array[3, uint32] =
     for slot in 0..<Seats: doAssert not players[slot].failed, "seat " & $slot & " failed"
 
 suite "rules-40 golden state hashes":
-  test "rules 40 is the live default":
+  setup:
+    visionRulesVersion = 40
+    configureRules(40)
+    configureMap("")
+  teardown:
+    visionRulesVersion = 41
+    configureRules(41)
+
+  test "rules 40 is pinned, on the island":
     check visionRulesVersion == 40
+    check mapName() == ""
 
   for driver in Driver:
     test "driver " & $driver:

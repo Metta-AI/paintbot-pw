@@ -12,7 +12,7 @@
 ## round swaps which side a policy takes from episode to episode, so the caller must map sides
 ## from that episode's roster (`policy_version_ids`, zipped with slots) and not assume.
 ##
-## FFA-kin replays (gameVersion 1040) have no teams: they report each seat's raw score, heart
+## FFA-kin replays (gameVersion 1040/1041) have no teams: they report each seat's raw score, heart
 ## seconds, great-heart shares and kin-weighted score instead.
 import std/[os, sets, strformat]
 import game, sim

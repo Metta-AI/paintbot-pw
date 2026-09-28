@@ -46,7 +46,7 @@ proc handSetWorld(k: Kinship): World =
 
 suite "Observation contract ffa.v1":
   setup:
-    visionRulesVersion = 40
+    visionRulesVersion = 41
     gameMode = gmFfaKin
     kinshipOverride = none(Kinship)
   teardown:

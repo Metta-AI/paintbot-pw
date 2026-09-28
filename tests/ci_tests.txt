@@ -44,9 +44,11 @@ nim r -d:headless tests/test_paintbot_live_rules.nim --bot:examples/paintbot/pla
 nim r tests/test_paintbot_oracle.nim
 nim r tests/test_paintbot_glory.nim
 nim r tests/test_paintbot_glory_hearts.nim
+nim r tests/test_paintbot_maps.nim
 nim r tests/test_paintbot_glory_behind.nim
 nim r tests/test_paintbot_weapon_buff.nim
 nim r tests/test_paintbot_rules40_golden.nim
+nim r tests/test_paintbot_rules41_golden.nim
 nim r tests/test_paintbot_ffa_config.nim
 nim r tests/test_paintbot_kinship.nim
 nim r tests/test_paintbot_ffa_rules.nim

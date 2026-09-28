@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Heartland league readout from recorded matches (plan task C6).
 
-Re-simulates FFA-kin replays (gameVersion 1040) headlessly with tools/kin_replay_counters.nim,
+Re-simulates FFA-kin replays (gameVersion 1040/1041) headlessly with tools/kin_replay_counters.nim,
 which rebuilds each match in the native training library and checks every frame hash, so the pair
 counters are exactly pw_pair_stats'. Then emits the hamilton suite of tools/kin_eval.py over all
 the episodes and per policy (the seat names recorded in the replay; hosted names carry the policy

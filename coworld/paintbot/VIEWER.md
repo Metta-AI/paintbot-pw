@@ -35,8 +35,8 @@ Policies can explicitly publish a shout with `result = shout(strNew("Guard the h
 
 ## FFA-kin (Heartland) replays
 
-Version-1040 replays (mode `ffa_kin`) carry the match's kinship, and the viewer state adds
-`mode`, `family`, `genes`, `rPct` and `kinHue`. Every cog uses one grey body; its ground disc,
+FFA-kin replays (version 1000 + rules: 1040, or 1041, which also records the map) carry the
+match's kinship, and the viewer state adds `mode`, `family`, `genes`, `rPct` and `kinHue`. Every cog uses one grey body; its ground disc,
 seat badge, paint and owned hearts take its family's hue (`examples/paintbot/kinhue.nim`:
 siblings share a hue, cousin families are neighbours, loners are grey). Clicking a cog turns on
 kin view: kin get a halo scaled by r and a ½ / ¼ badge, unrelated cogs fade to 40%. Esc or a

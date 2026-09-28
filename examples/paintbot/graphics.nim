@@ -51,6 +51,16 @@ type
     genes: seq[uint32]
     rPct: seq[array[Seats, int32]] # round(100 r), row = seat
     kinHue: seq[float32] # family hue in degrees, -1 = loner (grey)
+    map: string ## rules 41: the map's name, or "" for the rules' own island
+    land: string ## rules 41 maps, first state only: '1' per dry-land metre cell, row-major
+proc landMask(): string =
+  ## The minimap's coastline for a map, sent once; the island's own coast is computed in JS.
+  var sent {.global.} = false
+  if activeMap() < 0 or sent: return
+  sent = true
+  for z in countup(minZ(), maxZ()-1, 100):
+    for x in countup(minX(), maxX()-1, 100):
+      result.add(if islandMargin(x+50, z+50) >= 40: '1' else: '0')
 var
   kinHues: array[Seats, float32] # FFA-kin family hue per seat; set once the match is loaded.
   kinRgb: array[Seats, ColorRGBX] # kinHues as colours, cached with them (hues are fixed per match).
@@ -586,7 +596,7 @@ proc runGraphics*() =
         if (deepWilderness and (forestRouteDistance(gx*100,gz*100)<180 or abs(gz-20)<2)) or
             (not deepWilderness and (abs(gz+2)<=1 or abs(gz-42)<=1 or abs(gx+4)<=1 or abs(gx-68)<=1)):
           tile.kind=RoadTile
-      if organicTerrain and gx>=minX() div 100 and gx<maxX() div 100 and gz>=minZ() div 100 and gz<maxZ() div 100:
+      if organicTerrain and activeMap() < 0 and gx>=minX() div 100 and gx<maxX() div 100 and gz>=minZ() div 100 and gz<maxZ() div 100:
         let px=gx*100+50;let pz=gz*100+50
         let local=landCoordinates(px,pz)
         let width=130+landWave(px+pz,1600,35)
@@ -594,6 +604,15 @@ proc runGraphics*() =
         tile.kind=GrassTile
         if forestRouteDistance(px,pz)<width or villageLaneDistance(px,pz)<width or abs(radius-620)<110:
           tile.kind=RoadTile
+      if activeMap() >= 0 and gx>=minX() div 100 and gx<maxX() div 100 and gz>=minZ() div 100 and gz<maxZ() div 100:
+        # Rules 41 maps: grass, worn earth around each heart, and bare rock on cliff faces.
+        let px=gx*100+50;let pz=gz*100+50
+        tile.kind=GrassTile
+        for h in world.controlHearts:
+          if distance2(point(px,pz),h.pos)<260*260:tile.kind=RoadTile
+        let slope=max(abs(terrainHeight(px+50,pz)-terrainHeight(px-50,pz)),
+          abs(terrainHeight(px,pz+50)-terrainHeight(px,pz-50)))
+        if slope>100:tile.kind=RockTile
       # Dig into the terrain itself; the rim and floor share textured earth.
       for t in world.trenches:
         let cx = (t.x.float32+t.w.float32/2)/100
@@ -690,7 +709,9 @@ proc runGraphics*() =
   computeWalkable()
   scatterGrass(if deepWilderness: 1800 else: 1500, recording.seed, matchTerrain = true)
   startupPhase("Placing village and woodland")
-  if replayRulesVersion >= 8:
+  if activeMap() >= 0:
+    placeMapScenery()
+  elif replayRulesVersion >= 8:
     placeRoundVillage()
   elif replayRulesVersion >= 7:
     placeVillage(world)
@@ -1260,7 +1281,7 @@ proc runGraphics*() =
             rPct.add row
         let payload = ViewerState(mode: mode, family: family, genes: genes, rPct: rPct, kinHue: kinHue, terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, maxHp: maxHp(), world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
             paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
-            footprint: footprint).toJson()
+            footprint: footprint, map: mapName(), land: landMask()).toJson()
         let data = payload.cstring
         let tick = world.tick
         {.emit: "EM_ASM({if(Module.polyworldFrame)Module.polyworldFrame($1,0);if(Module.paintbotState)Module.paintbotState(JSON.parse(UTF8ToString($0)));}, `data`, `tick`);".}

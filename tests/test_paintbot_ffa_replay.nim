@@ -1,5 +1,6 @@
-## FFA-kin recordings are stamped 1000 + rules and carry the mode and the match's kinship, so a
-## replay rebuilds the recorded families and verifies every hash. Teams recordings are unchanged.
+## FFA-kin recordings are stamped 1000 + rules and carry the mode and the match's kinship (and,
+## from rules 41, the map), so a replay rebuilds the recorded families and verifies every hash.
+## Teams recordings are unchanged. Recordings made at 1040, before rules 41, still load and replay.
 import std/[unittest, os]
 import polyworld/[cli, tapes]
 import ../examples/paintbot/[sim, game, bots, kinship]
@@ -21,15 +22,19 @@ proc record(ticks: int32): Recording =
 
 suite "FFA-kin replay payload":
   setup:
-    visionRulesVersion = 40
-    replayRulesVersion = 40
+    visionRulesVersion = 41
+    replayRulesVersion = 41
     replayMode = false
+    configureMap("")
   teardown:
+    configureMap("")
+    visionRulesVersion = 41
+    replayRulesVersion = 41
     gameMode = gmTeams
     kinshipOverride = none(Kinship)
     replayMode = false
 
-  test "an FFA recording saves as 1040, round-trips its kinship and replays hash for hash":
+  test "an FFA recording saves as 1041, round-trips its kinship and replays hash for hash":
     let path = getTempDir() / "paintbot-ffa-replay-test.replay"
     defer: removeFile(path)
     gameMode = gmFfaKin
@@ -41,7 +46,7 @@ suite "FFA-kin replay payload":
     check world.matchOutcome() == "ended"
     recording = original
     saveRecording(path, recording)
-    check loadReplayFileHeader(path).gameVersion == 1040
+    check loadReplayFileHeader(path).gameVersion == 1041
     # Forget everything the loader must restore.
     gameMode = gmTeams
     kinshipOverride = none(Kinship)
@@ -49,9 +54,10 @@ suite "FFA-kin replay payload":
     visionRulesVersion = 39
     let loaded = loadRecording(path)
     check gameMode == gmFfaKin
-    check replayRulesVersion == 40
-    check visionRulesVersion == 40
+    check replayRulesVersion == 41
+    check visionRulesVersion == 41
     check activeKinship == played
+    check loaded.map == ""
     check loaded.seed == original.seed
     check loaded.endTick == original.endTick
     check loaded.frames == original.frames
@@ -68,7 +74,7 @@ suite "FFA-kin replay payload":
     advance() # past the last frame: a no-op, not "frames after victory"
     check world.tick == 240
 
-  test "a teams recording still saves as version 40 with the old type":
+  test "a teams recording still saves under the live rules (41) with the teams type":
     let path = getTempDir() / "paintbot-teams-replay-test.replay"
     defer: removeFile(path)
     gameMode = gmTeams
@@ -79,8 +85,8 @@ suite "FFA-kin replay payload":
       world.step(commands)
       recording.frames.add Frame(commands: commands, hash: world.stateHash())
     saveRecording(path, recording)
-    check loadReplayFileHeader(path).gameVersion == 40
-    check loadReplayFile(path, "paintbot_pw", 40, Recording).frames == recording.frames
+    check loadReplayFileHeader(path).gameVersion == 41
+    check loadReplayFile(path, "paintbot_pw", 41, Recording).frames == recording.frames
     kinshipOverride = some(kinshipFor(klClones, 1))
     gameMode = gmFfaKin
     check loadRecording(path).frames == recording.frames
@@ -97,18 +103,18 @@ suite "FFA-kin replay payload":
     saveReplayFile(path, "paintbot_pw", 1039, bad)
     expect ReplayError: discard loadRecording(path)
     bad.ibd[0][1] = 33
-    saveReplayFile(path, "paintbot_pw", 1040, bad)
+    saveReplayFile(path, "paintbot_pw", 1041, bad)
     expect ReplayError: discard loadRecording(path)
     bad.ibd = k.ibd
     bad.layout = 9
-    saveReplayFile(path, "paintbot_pw", 1040, bad)
+    saveReplayFile(path, "paintbot_pw", 1041, bad)
     expect ReplayError: discard loadRecording(path)
     bad.layout = k.layout.uint8
     template refused(field, value: untyped) =
       ## One corrupt field, restored afterwards, must make the loader refuse the replay.
       let saved = field
       field = value
-      saveReplayFile(path, "paintbot_pw", 1040, bad)
+      saveReplayFile(path, "paintbot_pw", 1041, bad)
       expect ReplayError: discard loadRecording(path)
       field = saved
     refused(bad.mode, 0'u8) # a teams mode inside an FFA payload
@@ -118,7 +124,8 @@ suite "FFA-kin replay payload":
     refused(bad.ibd[3][3], 31'i8) # r_ii must be 1
     refused(bad.ibd[2][5], (if k.ibd[2][5] == 0: 8'i8 else: 0'i8)) # asymmetric
     refused(bad.ibd[7][1], -1'i8)
-    saveReplayFile(path, "paintbot_pw", 1040, bad)
+    refused(bad.map, "nowhere") # an unknown map is an invalid replay
+    saveReplayFile(path, "paintbot_pw", 1041, bad)
     check loadRecording(path).endTick == 240
     check activeKinship == k
 
@@ -126,7 +133,7 @@ suite "FFA-kin replay payload":
     let path = getTempDir() / "paintbot-ffa-override-test.replay"
     defer: removeFile(path)
     let k = kinshipFor(klPairs, 5)
-    saveReplayFile(path, "paintbot_pw", 1040, RecordingFfa(seed: 1, endTick: 240, mode: 1,
+    saveReplayFile(path, "paintbot_pw", 1041, RecordingFfa(seed: 1, endTick: 240, mode: 1,
       layout: k.layout.uint8, family: k.family, genes: k.genes, ibd: k.ibd))
     discard loadRecording(path)
     check kinshipOverride == some(k) # replay analysis rebuilds the recorded world from it
@@ -137,3 +144,51 @@ suite "FFA-kin replay payload":
     check kinshipOverride.isNone
     check activeKinship == sampleKinship(77)
     check live.endTick == 240
+
+  test "a 1040 FFA recording made before rules 41 still loads and replays hash for hash":
+    # Recorded on the pre-merge Heartland tree (b21f457): 16 ffa.bas seats, seed 2026, 480 ticks,
+    # saved as gameVersion 1040 with the pre-map RecordingFfa layout. Never re-record it.
+    let path = Root / "tests/data/paintbot_ffa_1040.replay"
+    check loadReplayFileHeader(path).gameVersion == 1040
+    gameMode = gmTeams
+    kinshipOverride = none(Kinship)
+    let loaded = loadRecording(path)
+    check gameMode == gmFfaKin
+    check replayRulesVersion == 40
+    check visionRulesVersion == 40
+    check loaded.map == ""
+    check mapName() == ""
+    check loaded.seed == 2026
+    check loaded.endTick == 480
+    check loaded.frames.len == 480
+    check activeKinship.family == [2'i8, 3, 3, 3, 0, 2, 1, 1, 0, 0, 2, 1, 1, 3, 0, 2]
+    recording = loaded
+    replayMode = true
+    world = newWorld(recording.seed, recording.endTick)
+    while world.tick < recording.frames.len and world.winner == -1: advance()
+    check world.tick == 480
+    check world.winner == -3
+    check world.stateHash() == 4171556235'u32
+
+  test "an FFA recording on a generated map saves the map as 1041 and replays on it":
+    let path = getTempDir() / "paintbot-ffa-map-replay-test.replay"
+    defer: removeFile(path)
+    gameMode = gmFfaKin
+    configureMap("crater")
+    let original = record(240)
+    recording = original
+    recording.map = mapName()
+    saveRecording(path, recording)
+    check loadReplayFileHeader(path).gameVersion == 1041
+    configureMap("")
+    gameMode = gmTeams
+    let loaded = loadRecording(path)
+    check loaded.map == "crater"
+    check mapName() == "crater"
+    check gameMode == gmFfaKin
+    recording = loaded
+    replayMode = true
+    world = newWorld(recording.seed, recording.endTick)
+    while world.tick < recording.frames.len and world.winner == -1: advance()
+    check world.tick == 240
+    check world.stateHash() == original.frames[^1].hash

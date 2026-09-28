@@ -99,7 +99,36 @@ proc dryPickup(w: World, p: Point): Point =
           return candidate
   q
 
+proc placeGreatHearts(w: var World) =
+  ## FFA-kin: two great hearts on dry, open ground, an exact mirror pair between the bases.
+  let q = w.dryPickup(point(Width div 2 - 1600, Height div 2))
+  w.greatHearts[0] = GreatHeart(pos: q)
+  w.greatHearts[1] = GreatHeart(pos: mirrorPoint(q))
+
+proc initializeMapEquipment(w: var World) =
+  ## A map's items are placed and mirrored by its generator; they go in exactly as given.
+  ## FFA-kin on a map follows the island's FFA rules: one life, no uniforms, every heart
+  ## unowned, no captures, and the great-heart pair.
+  for i in 0..<Seats:
+    w.equipment[i].lives = (if ffa(): 1 else: 4)
+    w.cogs[i].aim = home(1-team(i))
+  let m = currentMap()
+  for p in m.pickups:
+    if ffa() and PickupKind(p.kind) == uniformPickup: continue
+    w.pickups.add Pickup(pos: point(p.x, p.z), kind: PickupKind(p.kind))
+  for t in m.trenches:
+    w.trenches.add Cover(x: t.x.int32, z: t.z.int32, w: t.w.int32, h: t.h.int32)
+  for h in m.hearts:
+    w.controlHearts.add ControlHeart(pos: point(h.x, h.z),
+      owner: (if ffa(): -1'i32 else: h.owner.int32))
+  w.captures = (if ffa(): [0'i32, 0'i32] else: [1'i32, 1'i32])
+  for heart in w.controlHearts:
+    w.heartCaptures.add HeartCapture(team: -1)
+  if ffa(): w.placeGreatHearts()
+
 proc initializeEquipment(w: var World) =
+  if activeMap() >= 0:
+    w.initializeMapEquipment(); return
   # FFA-kin places no uniforms: a disguise means nothing when every cog is its own side.
   if visionRulesVersion >= 27 and not ffa():
     let spots = w.pairSpots(point(2000, 1000))
@@ -158,16 +187,26 @@ proc initializeEquipment(w: var World) =
     if visionRulesVersion >= 24:
       for heart in w.controlHearts:
         w.heartCaptures.add HeartCapture(team: -1)
-  if ffa():
-    # Two great hearts on dry, open ground, an exact mirror pair between the bases.
-    let q = w.dryPickup(point(Width div 2 - 1600, Height div 2))
-    w.greatHearts[0] = GreatHeart(pos: q)
-    w.greatHearts[1] = GreatHeart(pos: mirrorPoint(q))
+  if ffa(): w.placeGreatHearts()
 
 when defined(pwTraining):
   # Eval-only (native pw_set_spawn_grouping): spawn groups independent of the kinship's
   # families, -1 = alone. Training builds only, so hosted play can never reach it.
   var spawnGroupingOverride* {.threadvar.}: Option[array[Seats, int8]]
+
+proc openAnchor(w: World, p: Point): bool =
+  ## Generated maps only: a spawn anchor needs walkable ground around it, or a family anchored
+  ## on a mesa edge or a steep bank cannot fit within HeartSpawnRadius. Every point of two
+  ## rings (a third and two thirds of the radius) must be open and reachable from the anchor.
+  ## Reads no RNG; the island's anchors never ask, so its FFA matches are unchanged.
+  const Dirs = [(1000, 0), (924, 383), (707, 707), (383, 924), (0, 1000), (-383, 924),
+    (-707, 707), (-924, 383), (-1000, 0), (-924, -383), (-707, -707), (-383, -924),
+    (0, -1000), (383, -924), (707, -707), (924, -383)]
+  for radius in [HeartSpawnRadius div 3, HeartSpawnRadius*2 div 3]:
+    for d in Dirs:
+      let q = point(p.x.int+d[0]*radius div 1000, p.z.int+d[1]*radius div 1000)
+      if w.blocked(q) or not w.traversable(p, q): return false
+  true
 
 proc placeFfaSpawns(w: var World) =
   ## FFA-kin spawn: one anchor per family and per loner, spread over the open map by
@@ -188,6 +227,7 @@ proc placeFfaSpawns(w: var World) =
     let p = point(w.rng.between(int32(minX()+600), int32(maxX()-600)).int,
       w.rng.between(int32(minZ()+600), int32(maxZ()-600)).int)
     if w.blocked(p, HeartSpawnRadius div 2) or riverBlend(p.x.int, p.z.int) > 0: continue
+    if activeMap() >= 0 and not w.openAnchor(p): continue
     candidates.add p
   if candidates.len == 0: candidates.add w.dryPickup(point(Width div 2, Height div 2))
   var anchors = @[candidates[0]]

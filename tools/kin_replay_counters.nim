@@ -1,7 +1,7 @@
 ## kin-replay-counters: the FFA-kin pair counters (pw_pair_stats) of recorded Heartland matches.
 ##
-## Loads each replay with game.loadRecording (gameVersion 1040: the recorded kinship, seed and
-## end tick), rebuilds the match in a training-library handle (native_env: FFA mode, the recorded
+## Loads each replay with game.loadRecording (gameVersion 1040 or 1041: the recorded kinship, seed
+## and end tick; Heartwick only, since the native library has no generated maps), rebuilds the match in a training-library handle (native_env: FFA mode, the recorded
 ## kinship as an eval override), drives every seat with its recorded command through
 ## pw_set_seat_command and checks every frame's state hash, so the counters are exactly the ones a
 ## live pw_step match would have counted. Engine files are untouched: this is a client of the
@@ -42,7 +42,10 @@ proc counters(path: string): JsonNode =
     result["error"] = %("cannot load: " & e.msg)
     return
   if gameMode != gmFfaKin:
-    result["error"] = %"not an FFA-kin (gameVersion 1040) replay"
+    result["error"] = %"not an FFA-kin (gameVersion 1040/1041) replay"
+    return
+  if r.map.len > 0:
+    result["error"] = %("recorded on generated map " & r.map & "; the native library plays Heartwick only")
     return
   let k = activeKinship
   if r.endTick > HeartMeterMatchTicks:
@@ -106,9 +109,11 @@ proc counters(path: string): JsonNode =
 proc recordMatch(output: string, bots: seq[string], seed, ticks, layout: int32) =
   ## A local FFA-kin match recorded as game.advance records a live one: the seats split evenly
   ## over `bots` in seat order, each seat named after its file (the per-policy readout key).
-  replayRulesVersion = 40
-  visionRulesVersion = 40
-  configureRules(40)
+  # The live rules (41), on Heartwick: the native library replays these hash for hash.
+  replayRulesVersion = 41
+  visionRulesVersion = 41
+  configureRules(41)
+  configureMap("")
   gameMode = gmFfaKin
   kinshipOverride = (if layout >= 0: some(kinshipFor(KinLayout(layout), seed)) else: none(Kinship))
   var groups: seq[BotGroup]

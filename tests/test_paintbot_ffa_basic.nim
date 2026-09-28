@@ -24,7 +24,7 @@ proc ffaWorld(seed = 2026'i32): World =
 
 suite "FFA-kin BASIC host":
   setup:
-    visionRulesVersion = 40
+    visionRulesVersion = 41
     kinshipOverride = none(Kinship)
   teardown:
     gameMode = gmTeams

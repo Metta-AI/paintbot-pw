@@ -56,7 +56,7 @@ const
   GreatHeartBounty* = 600
   GreatHeartDormantTicks* = 60*TickRate
   FfaHeartIncome* = 10 # Tenths of a point per second per owned control heart.
-  # FFA-kin tuning (rules 40 untouched): cogs carry 10 HP instead of 3, and gun rays stop at
+  # FFA-kin tuning (the teams game untouched): cogs carry 10 HP instead of 3, and gun rays stop at
   # 20 m instead of GunRange, so fights last long enough to leave and to come to a relative's aid.
   FfaMaxHp* = 10
   FfaGunRange* = 2000
@@ -211,7 +211,7 @@ proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
 type GameMode* = enum
   ## gmTeams is the two-team game every rules version plays. gmFfaKin (config "ffa_kin") makes
-  ## all 16 seats separate players; rules 40 behaviour is untouched while the mode is gmTeams.
+  ## all 16 seats separate players; teams behaviour (rules 40, 41) is untouched while the mode is gmTeams.
   gmTeams, gmFfaKin
 # Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
 # still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
@@ -256,7 +256,7 @@ when defined(pwTraining):
     killed: bool) {.nimcall, gcsafe.}
   var damageObserver* {.threadvar.}: DamageObserver
 else:
-  var visionRulesVersion* = 40
+  var visionRulesVersion* = 41
   var gameMode* = gmTeams
 proc ffa*(): bool = gameMode == gmFfaKin
 proc maxHp*(): int32 =
@@ -273,8 +273,11 @@ proc observedSeat*(w: World, observer, slot: int): int =
     # A disguise must never overwrite the observer's own body.
     if result == observer: result = (result+2) mod Seats
   else: result = slot
-proc home*(side: int): Point = point(if side ==
-    0: Width*15 div 100 else: Width*85 div 100, Height div 2)
+proc home*(side: int): Point =
+  if activeMap() >= 0:
+    let h = currentMap().home
+    return if side == 0: point(h.x, h.z) else: point(Width-h.x, Height-h.z)
+  point(if side == 0: Width*15 div 100 else: Width*85 div 100, Height div 2)
 proc distance2*(a, b: Point): int64 =
   let x = int64(a.x)-b.x; let z = int64(a.z)-b.z
   x*x+z*z
@@ -625,6 +628,15 @@ proc configureRules*(version: int) =
   symmetricTerrain = visionRulesVersion >= 35
   refreshTerrainTable()
 
+proc configureMap*(name: string) =
+  ## Rules 41: "" keeps the rules' own island; a MapNames entry replaces its terrain and
+  ## layout. Like configureRules, it binds the calling thread; set it before newWorld.
+  setActiveMap(mapIndex(name))
+  refreshTerrainTable()
+
+proc mapName*(): string =
+  if activeMap() >= 0: MapNames[activeMap()] else: ""
+
 proc newWorld*(seed: int32, endTick: int32 = 0): World =
   configureRules(visionRulesVersion)
   result.endTick = if ffa():
@@ -639,7 +651,10 @@ proc newWorld*(seed: int32, endTick: int32 = 0): World =
     let seconds = result.endTick div TickRate
     result.glory = [seconds, seconds]
   if visionRulesVersion >= 38 and not ffa(): result.nextGloryHeart = GloryHeartFirstTick
-  if visionRulesVersion >= 8:
+  if activeMap() >= 0:
+    for c in currentMap().cover:
+      result.cover.add Cover(x: c.x.int32, z: c.z.int32, w: c.w.int32, h: 0)
+  elif visionRulesVersion >= 8:
     for lot in roundVillage():
       result.cover.add Cover(x: (lot.x-lot.radius).int32,
           z: (lot.z-lot.radius).int32, w: (lot.radius*2).int32, h: 0)
@@ -662,7 +677,7 @@ proc newWorld*(seed: int32, endTick: int32 = 0): World =
   for side in 0..1: result.resetHeart(side)
   if visionRulesVersion < 24:
     for i in 0..<Seats: result.spawn(i)
-  if wilderness:
+  if wilderness and activeMap() < 0:
     for p in [point(-620,300),point(-620,1700),point(-620,3500),point(1200,-320),point(3100,-320),point(5400,-320)]:
       for q in [p,point(6400-p.x.int,4000-p.z.int)]:
         result.cover.add Cover(x:q.x-65,z:q.z-65,w:130,h:0)
