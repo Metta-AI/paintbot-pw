@@ -99,6 +99,7 @@ jobs:
       - run: nim r tests/test_paintbot_jev_baseline.nim
       - run: node tests/test_paintbot_inspector.js
       - run: node tests/test_paintbot_webinputs.js
+      - run: node tests/test_paintbot_kinhud.js
       - run: python coworld/paintbot/tools/make_jev_baseline.py --check
       # The hosted runtime is Linux-only; its file-URI handling is POSIX, so skip Windows here.
       - run: python -m unittest test_runtime

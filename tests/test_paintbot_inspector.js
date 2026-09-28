@@ -16,6 +16,11 @@ assert.match(objectDetails({kind:'pickup',id:0},state).rows[0][1], /Respawns in 
 state.world.tick = 240;
 assert.equal(objectDetails({kind:'pickup',id:0},state).rows[0][1], 'Available');
 assert.equal(objectDetails({kind:'heart',id:4},state), null);
+// FFA-kin: owners and capturers are seats.
+const ffaState = {mode: 'ffa_kin', world: {tick: 0, controlHearts: [{owner: 6}], heartCaptures: [{team: 11, ticks: 24}], pickups: []}, heartValues: [1]};
+info = objectDetails({kind: 'heart', id: 0}, ffaState);
+assert.deepEqual(info.rows[0], ['Owner', 'Cog 7']);
+assert.match(info.rows[3][1], /Cog 12 capturing/);
 const rect = {left:100,top:50,width:1000,height:500};
 const items = [{kind:'heart',id:0,bottom:[0.5,0.8],top:[0.5,0.2]}, {kind:'pickup',id:2,bottom:[0.7,0.5],top:[0.7,0.4]}];
 assert.deepEqual(objectAt(items,rect,605,200),{kind:'heart',id:0});

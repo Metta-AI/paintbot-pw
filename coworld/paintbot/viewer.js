@@ -28,6 +28,14 @@
   document.body.append(modes);
   let inspectedObject = null, inspectedDetailsKey = "";
   const inspector = window.PaintbotInspector;
+  // FFA-kin (Heartland): family colours, kin view and the collapsible per-cog header.
+  const kin = window.PaintbotKinHud;
+  let kinExpanded = false;
+  const ffaOn = () => !!kin?.isFfa(state);
+  const kinHue = (i) => state?.kinHue?.[i] ?? -1;
+  const seatColor = (i) => ffaOn() ? kin.kinColor(kinHue(i)) : colors[i % 2];
+  // With a cog selected in FFA-kin, cogs unrelated to it are dimmed.
+  const kinDim = (i) => ffaOn() && selected >= 0 && i !== selected && !(state.rPct?.[selected]?.[i] > 0);
   const cogReadout = $("cog-readout");
   const soundReadout = $("sound-readout");
   window.addEventListener('keydown', e => {
@@ -421,6 +429,67 @@
     document.querySelectorAll(".agent-life").forEach(button => {
       button.setAttribute("aria-pressed", String(Number(button.dataset.agent) === selected));
     });
+    if (ffaOn()) renderKin(state);
+  }
+  function setKinExpanded(open) {
+    kinExpanded = open && ffaOn();
+    $("kin-table").hidden = !kinExpanded;
+    $("kin-score").setAttribute("aria-expanded", String(kinExpanded));
+    if (kinExpanded) renderKin(state);
+  }
+  $("kin-score").addEventListener("click", () => setKinExpanded(!kinExpanded));
+  $("kin-score").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      e.stopPropagation();
+      setKinExpanded(!kinExpanded);
+    }
+  });
+  $("kin-table").addEventListener("click", (e) => {
+    const row = e.target.closest("tr[data-seat]");
+    if (row) select(Number(row.dataset.seat));
+  });
+  let kinTableKey = "", kinChipsKey = "";
+  function renderKin(data) {
+    if (!data || !kin.isFfa(data)) return;
+    const w = data.world;
+    $("kin-clock").textContent = clock(w.tick);
+    const chips = kin.familyChips(data);
+    const chipsKey = JSON.stringify(chips);
+    if (chipsKey !== kinChipsKey) {
+      kinChipsKey = chipsKey;
+      $("kin-chips").innerHTML = chips.map((c) => {
+        const who = c.members.map((i) => i + 1).join(", ");
+        const label = c.family >= 0 ? `Family: cogs ${who}` : `Loner: cog ${who}`;
+        return `<span class="kin-chip${c.alive ? "" : " out"}" style="--kin:${kin.kinColor(c.hue)}" title="${label} · ${c.alive}/${c.members.length} alive · raw score ${c.score.toFixed(1)}"><span class="dot">${c.family >= 0 ? c.members.length : c.seat + 1}</span>${c.score.toFixed(1)}</span>`;
+      }).join("");
+    }
+    $("kin-great").innerHTML = kin.greatStatus(data).map((g) =>
+      `<span class="kin-great ${g.state}" title="Great heart ${g.index + 1}: needs ${g.quorum} living cogs in its zone for 5 s; pays 60 points split among them, then sleeps 60 s"><span class="heart">♥</span><span class="label">${kin.greatText(g)}</span></span>`).join("");
+    if (kinExpanded) {
+      const rows = kin.cogRows(data);
+      const key = JSON.stringify(rows) + ":" + selected;
+      if (key !== kinTableKey) {
+        kinTableKey = key;
+        $("kin-table").querySelector("tbody").innerHTML = rows.map((r) => {
+          const pct = selected >= 0 && r.seat !== selected ? data.rPct?.[selected]?.[r.seat] ?? 0 : 0;
+          const classes = [r.dead ? "dead" : "", r.seat === selected ? "selected" : "", pct > 0 ? "kin" : ""].join(" ");
+          return `<tr data-seat="${r.seat}" class="${classes}" title="${escape(name(r.seat))}${r.dead ? " · out" : ""}"><td data-kin="${kin.kinLabel(pct)}"><span class="swatch" style="--kin:${kin.kinColor(r.hue)}">${r.seat + 1}</span>${escape(name(r.seat))}</td><td>${r.held}</td><td>${r.heartSec}</td><td>${r.great.toFixed(1)}</td><td>${r.s.toFixed(1)}</td><td class="R">${r.R.toFixed(1)}</td></tr>`;
+        }).join("");
+      }
+    }
+    // Seat numbers on the board, with the relatedness to the selected cog (½ sibling, ¼ cousin).
+    const marks = $("kin-marks");
+    const rect = $("canvas").getBoundingClientRect();
+    const html = [];
+    for (let i = 0; i < 16; i++) {
+      const p = data.screen?.[i];
+      if (!(w.cogs[i].hp > 0) || !data.visible?.[i] || !p || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1) continue;
+      const pct = selected >= 0 && i !== selected ? data.rPct?.[selected]?.[i] ?? 0 : 0;
+      const cls = `kin-mark${kinDim(i) ? " dim" : ""}${i === selected ? " selected" : ""}`;
+      html.push(`<span class="${cls}" style="left:${rect.left + p[0] * rect.width}px;top:${rect.top + p[1] * rect.height - 30}px;--kin:${kin.kinColor(kinHue(i))}">${i + 1}${pct > 0 ? `<span class="r">${kin.kinLabel(pct)}</span>` : ""}</span>`);
+    }
+    marks.innerHTML = html.join("");
   }
   let currentLens = -1;
   function setLens(value) {
@@ -567,10 +636,13 @@
       .join("");
     show(
       w.tick === state.total
-        ? w.winner < 0
+        ? w.winner === -3
+          ? "Match ended"
+          : w.winner < 0
           ? "Match drawn"
           : `${w.winner ? "Azure" : "Ember"} wins`
         : "Match scoreboard",
+      (w.winner === -3 ? `<p class="hint"><b>${escape(kin.matchResult(state, name).text)}</b></p>` : "") +
       `<p class="hint">${clock(w.tick)} · Ember ${state.rulesVersion >= 23 ? (w.scoreTicks[0]/24).toFixed(2) : w.captures[0]} — ${state.rulesVersion >= 23 ? (w.scoreTicks[1]/24).toFixed(2) : w.captures[1]} Azure · Seed ${index.seed}${state.rulesVersion >= 37 ? `<br>Glory: Ember <b>${w.glory?.[0] ?? 0}</b> — <b>${w.glory?.[1] ?? 0}</b> Azure. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; thirty seconds without supplies adds 10${state.rulesVersion >= 39 ? ", each glory heart picked up 20, and every five seconds a team behind in lives 1 per life it trails by" : state.rulesVersion >= 38 ? ", friendly fire taken in the opening thirty seconds 30 per hit, and each glory heart picked up 20" : ", friendly fire taken in the opening thirty seconds 30 per hit"}. Nothing that helps you win pays glory. The loser's glory drops to zero; the winner's is the match score.` : ""}<br>${state.rulesVersion >= 34 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; an eliminated team loses immediately and the survivor's meter fills. At 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 28 ? "Each heart fills the team meter by 1 point/s. First to 900 wins; at 10:00 the higher meter wins. Equal totals draw." : state.rulesVersion >= 25 ? "Hearts earn 1 point per second; the big heart earns 5. It moves every 30 seconds without repeats. Elimination credits remaining map income." : state.rulesVersion >= 23 ? "Team points = one per heart per second, plus remaining-time points after elimination." : "Team scores reflect heart captures."} ${w.controlHearts?.length ? "Captures count heart claims." : ""} Statistics are evaluated at the playhead.</p><table><thead><tr><th>Player / seat</th><th>Status</th><th>Tags</th><th>Outs</th><th>Captures</th></tr></thead><tbody>${rows}</tbody></table>`,
     );
     $("dialogbody")
@@ -691,8 +763,15 @@
       e.preventDefault();
       $("end").click();
     } else if (e.key === "Escape") {
-      select(-1);
-      setLens(-1);
+      // FFA-kin: Esc first collapses the per-cog table, then clears the selection.
+      if (kinExpanded) setKinExpanded(false);
+      else {
+        select(-1);
+        setLens(-1);
+      }
+    } else if (e.key === "Tab" && ffaOn() && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      setKinExpanded(!kinExpanded);
     } else if (e.key.startsWith("Arrow")) {
       e.preventDefault();
       following = false;
@@ -745,6 +824,11 @@
   }
   function renderTimeline() {
     if (!state || !index) return;
+    if (ffaOn()) {
+      // Team territory history has no meaning when every cog is its own side.
+      $("territory-history").innerHTML = "";
+      return;
+    }
     const tick = state.world.tick,
       total = state.total;
     const samples = index.momentum.filter(p => (spoilers || p.tick <= tick) && p.tick !== tick);
@@ -999,7 +1083,7 @@
               distance = d;
             }
           }
-          ctx.fillStyle = nearest.owner < 0 ? "#747e80" : colors[nearest.owner];
+          ctx.fillStyle = nearest.owner < 0 ? "#747e80" : ffaOn() ? seatColor(nearest.owner) : colors[nearest.owner];
           ctx.globalAlpha = 0.45;
           ctx.fillRect(x / 20, z / 20, 5, 5);
           ctx.globalAlpha = 1;
@@ -1041,7 +1125,7 @@
     cogReadout.hidden = !cog;
     if (cog) {
       $("cog-name").textContent = `${name(inspected)} · Cog ${inspected + 1}`;
-      $("cog-name").style.color = colors[team(inspected)];
+      $("cog-name").style.color = seatColor(inspected);
       $("cog-health").textContent = `${cog.hp} / 3`;
       $("cog-shots").textContent = state.combat?.[inspected]?.shots ?? "—";
       $("cog-hits").textContent = state.combat?.[inspected]?.hits ?? "—";
@@ -1058,7 +1142,7 @@
     const detailsKey = JSON.stringify(details);
     if (details && detailsKey !== inspectedDetailsKey) {
       $("object-name").textContent = details.title;
-      $("object-name").style.color = colors[details.color] || '#f4e7c4';
+      $("object-name").style.color = (ffaOn() && details.color >= 0 ? seatColor(details.color) : colors[details.color]) || '#f4e7c4';
       $("object-description").textContent = details.description;
       $("object-facts").replaceChildren(...details.rows.flatMap(([label, value]) => {
         const dt = document.createElement('dt'), dd = document.createElement('dd');
@@ -1096,7 +1180,7 @@
       ctx.strokeStyle = "#081a18";
       ctx.lineWidth = 4;
       ctx.strokeText("♥", x, y);
-      ctx.fillStyle = h.owner < 0 ? "#ffe8a3" : markerColors[h.owner];
+      ctx.fillStyle = h.owner < 0 ? "#ffe8a3" : ffaOn() ? seatColor(h.owner) : markerColors[h.owner];
       ctx.fillText("♥", x, y);
       if (big) {
         ctx.strokeStyle = "#ffd755";
@@ -1116,7 +1200,7 @@
         ctx.arc(x, y, 13, 0, Math.PI * 2);
         ctx.stroke();
         if (capture.ticks > 0) {
-          ctx.strokeStyle = markerColors[capture.team];
+          ctx.strokeStyle = ffaOn() ? seatColor(capture.team) : markerColors[capture.team];
           ctx.beginPath();
           ctx.arc(x, y, 13, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * capture.ticks / 72);
           ctx.stroke();
@@ -1128,14 +1212,28 @@
         }
       }
     }
+    if (ffaOn()) {
+      // Great hearts: gold when awake, grey while dormant.
+      for (const g of w.greatHearts || []) {
+        const x = mapX(g.pos.x), y = mapY(g.pos.z);
+        ctx.font = "bold 30px sans-serif";
+        ctx.strokeStyle = "#081a18";
+        ctx.lineWidth = 4;
+        ctx.strokeText("♥", x, y);
+        ctx.fillStyle = w.tick < g.dormantUntil ? "#80848a" : "#ffc43c";
+        ctx.fillText("♥", x, y);
+      }
+    }
     for (let i = 0; i < 16; i++) {
       const c = w.cogs[i];
       if (c.hp <= 0 || (state.celebrating && w.winner >= 0 && team(i) !== w.winner)) continue;
       const x = mapX(c.pos.x), y = mapY(c.pos.z);
       ctx.beginPath();
       ctx.arc(x, y, i === selected ? 5 : 4, 0, Math.PI * 2);
-      ctx.fillStyle = markerColors[w.uniforms?.[i] ? 1-team(i) : team(i)];
+      ctx.fillStyle = ffaOn() ? seatColor(i) : markerColors[w.uniforms?.[i] ? 1-team(i) : team(i)];
+      ctx.globalAlpha = kinDim(i) ? 0.4 : 1;
       ctx.fill();
+      ctx.globalAlpha = 1;
       ctx.lineWidth = 2;
       ctx.strokeStyle = "#081a18";
       ctx.stroke();
@@ -1466,10 +1564,20 @@
     const control = (w.controlHearts || []).length > 0;
     $("territorytoggle").hidden = !control;
     updateHeartStrip(w, control);
+    const ffa = kin.isFfa(data);
+    document.querySelector("header")?.classList.toggle("ffa", ffa);
+    $("kin-score").hidden = !ffa;
+    $("kin-marks").hidden = !ffa;
+    if (!ffa && kinExpanded) setKinExpanded(false);
+    $("territory-graph-toggle").hidden = ffa;
+    $("points-graph-toggle").hidden = ffa;
+    if (ffa) renderKin(data);
     updateGloryToast(w, data.rulesVersion);
     updateGloryPops(data);
     document.querySelector("header")?.classList.toggle("glory", data.rulesVersion >= 37);
-    $("modehint").textContent = control
+    $("modehint").textContent = ffa
+      ? "Every cog for itself · Score R = Σ r·s over kin · Great hearts need 3 cogs"
+      : control
       ? (data.rulesVersion >= 37 ? "Fill the heart meter or eliminate the enemy to win · Only the winner keeps its glory" : data.rulesVersion >= 34 ? "Fill the heart meter or eliminate the enemy to win · 900 points · 10-minute limit" : data.rulesVersion >= 28 ? "Fill the heart meter to win · 900 points · 10-minute limit" : data.rulesVersion >= 25 ? (w.bigHeart >= 0 ? `Big heart ${w.bigHeart + 1}: 5 points/s · ${30 - Math.floor(t / 24) % 30}s left` : w.bigHeartRound > 0 ? "All big hearts used · Normal hearts: 1 point/s" : "First big heart at 0:30 · Normal hearts: 1 point/s") : data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
       : "Capture the heart · Three lives";
     updatePovSignal();
@@ -1570,7 +1678,13 @@
     $("feed").innerHTML = recent
       .map(
         (e) =>
-          `<div class="feeditem"><time>${clock(e.tick)}</time><span class="${e.side ? "blue" : "red"}">${escape(e.slot < 0 ? (e.side ? "Azure" : "Ember") : name(e.slot))}</span><br>${eventTitle(e)}</div>`,
+          ffa
+            ? (() => {
+              // FFA-kin territory events carry the capturing seat in side.
+              const actor = e.slot >= 0 ? e.slot : e.kind === "territory" ? e.side : -1;
+              return `<div class="feeditem"><time>${clock(e.tick)}</time><span style="color:${actor >= 0 ? seatColor(actor) : "#f4e7c4"}">${escape(actor >= 0 ? name(actor) : "Heart")}</span><br>${eventTitle(e)}</div>`;
+            })()
+            : `<div class="feeditem"><time>${clock(e.tick)}</time><span class="${e.side ? "blue" : "red"}">${escape(e.slot < 0 ? (e.side ? "Azure" : "Ember") : name(e.slot))}</span><br>${eventTitle(e)}</div>`,
       )
       .join("");
     const capture = recent.findLast((e) => e.kind === "capture");
@@ -1596,7 +1710,8 @@
     } else $("skipping").textContent = "";
     $("victory-banner").hidden = !data.celebrating;
     if (data.celebrating) {
-      const result = w.winner < 0 ? "Match drawn" : `${w.winner ? "Azure" : "Ember"} wins`;
+      // Winner -3: an FFA-kin match ended; name the top cog and family instead of a team.
+      const result = w.winner === -3 ? kin.matchResult(data, name).text : w.winner < 0 ? "Match drawn" : `${w.winner ? "Azure" : "Ember"} wins`;
       const remaining = Math.max(0, Math.ceil(30-data.celebrationSeconds));
       $("victory-banner").textContent = `${result} · ${remaining > 0 ? `${loop ? "Replay in" : "Celebration"} ${remaining}s` : "Final result"}`;
     }
