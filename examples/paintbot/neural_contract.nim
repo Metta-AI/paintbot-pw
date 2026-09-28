@@ -569,6 +569,58 @@ proc sampleActions*(logits: openArray[float32], options: SamplingOptions,
     result[head] = pick.int32
     offset += size
 
+# Decoder joint sampling (bundle option decoder.joint_sampling, schema 2; not a contract
+# change): a head's selection can depend on another head's. After the tick's selection
+# (forbid / BASIC masks, argmax or sampling / temperatures), when head `whenHead` was
+# selected as `whenValue`, head `head` is selected again from its logits plus the
+# bundle's `offsets`, under the same exclusions and temperature it was selected with:
+# argmax (first maximum among the allowed) at temperature 0, else ONE more uniform53 draw
+# from the seat's sampling stream (the float64 softmax sampleActions uses). Otherwise
+# nothing changes and no draw is taken. With the option absent nothing here runs, so
+# every hash is byte-identical. Example: `{"when": {"head": 2, "value": 1}, "head": 0,
+# "offsets": [...]}` lets a shoot order change the movement distribution (e.g. stand while
+# firing) without a rule that overrides the network.
+type
+  JointSampling* = object
+    enabled*: bool
+    whenHead*, whenValue*, head*: int
+    offsets*: array[ActionSizes[0], float32]   # the first ActionSizes[head] entries are used
+const MaxJointOffset* = 1000'f32
+
+proc jointSelect*(logits: openArray[float32], joint: JointSampling, excluded: openArray[bool],
+    temperature: float32, rng: var Rng, actions: var array[ActionSizes.len, int32]): bool =
+  ## Applies decoder.joint_sampling to the tick's selection; true when the condition held
+  ## (and the head was selected again). `excluded` is the head's mask (true = excluded;
+  ## empty = none), `temperature` 0 = argmax.
+  if not joint.enabled or actions[joint.whenHead] != joint.whenValue.int32: return false
+  var offset = 0
+  for h in 0..<joint.head: offset += ActionSizes[h]
+  let size = ActionSizes[joint.head]
+  template allowed(i: int): bool = excluded.len == 0 or not excluded[i]
+  template value(i: int): float64 = float64(logits[offset+i]) + float64(joint.offsets[i])
+  var best = -1
+  for i in 0..<size:
+    if allowed(i) and (best < 0 or value(i) > value(best)): best = i
+  if best < 0: raise newException(ValueError, "every joint-sampling candidate is excluded")
+  if temperature <= 0:
+    actions[joint.head] = best.int32
+    return true
+  let top = value(best)
+  let inverse = 1.0 / float64(temperature)
+  var total = 0.0
+  for i in 0..<size:
+    if allowed(i): total += exp((value(i) - top) * inverse)
+  let threshold = rng.uniform53() * total
+  var cumulative = 0.0
+  var pick = -1
+  for i in 0..<size:
+    if not allowed(i): continue
+    pick = i   # the last allowed index when rounding leaves the threshold uncovered
+    cumulative += exp((value(i) - top) * inverse)
+    if threshold < cumulative: break
+  actions[joint.head] = pick.int32
+  true
+
 # Decoder objective forbid (bundle option decoder.forbid_objectives, schema 2; not a
 # contract change): the listed movement-head candidate indices are never chosen, as if
 # their logits were -inf. The actor's logits are still checked for finiteness exactly as
