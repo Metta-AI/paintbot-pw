@@ -31,12 +31,12 @@ dim spokeX(16)
 dim spokeY(16)
 dim spokeTick(16)
 dim capBy(16)
-dim taken(16)
-dim avoidUntil(16)
-dim pickupMemoryX(32)
-dim pickupMemoryY(32)
-dim pickupMemoryKind(32)
-dim pickupMemoryTick(32)
+dim taken(64)
+dim avoidUntil(64)
+dim pickupMemoryX(64)
+dim pickupMemoryY(64)
+dim pickupMemoryKind(64)
+dim pickupMemoryTick(64)
 dim drF(6)
 dim blindKin(16)
 
@@ -215,7 +215,7 @@ end if
 if worldTick mod 72 = 0 then
   dx = selfX - progressX
   dy = selfY - progressY
-  if dx * dx + dy * dy < 40000 and objective >= 0 and objective < 16 then
+  if dx * dx + dy * dy < 40000 and objective >= 0 and objective < 64 then
     ex = controlX(objective) - selfX
     ey = controlY(objective) - selfY
     if ex * ex + ey * ey > 22500 then
@@ -292,8 +292,10 @@ end if
 
 ' Hearts. capBy(m) = 1 while seat m is capturing something; mine = hearts we own.
 i = 0
-while i < 16
-  capBy(i) = 0
+while i < 64
+  if i < 16 then
+    capBy(i) = 0
+  end if
   taken(i) = 0
   i = i + 1
 wend
@@ -304,7 +306,7 @@ defend = -1
 defendD = 9000000
 objective = -1
 j = 0
-while j < heartCount() and j < 16
+while j < heartCount() and j < 64
   c = controlCaptureTeam(j)
   if c >= 0 and c < 16 then
     capBy(c) = 1
@@ -350,7 +352,7 @@ if objective < 0 and mine < 2 then
     choice = -1
     choiceCost = 2147483647
     j = 0
-    while j < heartCount() and j < 16
+    while j < heartCount() and j < 64
       owner = heartOwner(j)
       c = controlCaptureTeam(j)
       ok = taken(j) = 0 and owner <> selfId and avoidUntil(j) <= worldTick
@@ -390,7 +392,7 @@ end if
 ' steals it, and its owner, at the heart we want, is a target.
 neutral = 0
 j = 0
-while j < heartCount() and j < 16
+while j < heartCount() and j < 64
   if heartOwner(j) < 0 and avoidUntil(j) <= worldTick then
     neutral = 1
   end if
@@ -417,7 +419,7 @@ if neutral = 0 then
     steal = -1
     stealD = 2147483647
     j = 0
-    while j < heartCount() and j < 16
+    while j < heartCount() and j < 64
       owner = heartOwner(j)
       c = controlCaptureTeam(j)
       ok = owner >= 0 and owner <> selfId and avoidUntil(j) <= worldTick
@@ -520,7 +522,7 @@ else
       ' Quiet: walk the rounds of our hearts, one post every 20 s, rather than parking.
       want = (worldTick / 480 + selfId) mod mine
       j = 0
-      while j < heartCount() and j < 16
+      while j < heartCount() and j < 64
         if heartOwner(j) = selfId then
           if want = 0 then
             post = j
@@ -618,7 +620,7 @@ wend
 
 ' Remember seen supplies for ten seconds; equip when nothing is close.
 i = 0
-while i < pickupCount() and i < 32
+while i < pickupCount() and i < 64
   if pickupVisible(i) then
     pickupMemoryX(i) = pickupX(i)
     pickupMemoryY(i) = pickupY(i)
@@ -631,7 +633,7 @@ if mode <> 2 and controlCaptureTeam(objective) <> selfId then
   nearest = -1
   nearestCost = 4840000
   j = 0
-  while j < pickupCount() and j < 32
+  while j < pickupCount() and j < 64
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
       kind = pickupMemoryKind(j)
       wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < kMaxHp) or (kind = 3 and armorHp < 3 and selfHp = kMaxHp)
