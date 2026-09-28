@@ -910,8 +910,13 @@ class ManifestTests(unittest.TestCase):
             self.assertTrue(_schema_errors(schema, dict(competition, glory=bad)), bad)
 
     def test_heartland_is_competition_in_ffa_kin_mode(self):
-        heartland = self._config("heartland")
+        # Heartland is its own Coworld now (coworld/heartland), on this same engine: its config is
+        # the competition config in FFA-kin mode, and this manifest's schema still accepts it.
+        heartland_manifest = json.loads((Path(__file__).parents[1] / "heartland/coworld_manifest_template.json").read_text())
+        variant = next(v for v in heartland_manifest["variants"] if v["id"] == "heartland")
+        heartland = dict(variant["game_config"], tokens=[f"t{i}" for i in range(16)])
         competition = self._config("competition")
+        self.assertFalse({"heartland", "heartland-big"} & {v["id"] for v in self.manifest["variants"]})
         self.assertEqual(heartland["mode"], "ffa_kin")
         self.assertEqual(heartland["max_ticks"], 8640)
         self.assertEqual(heartland["kin_layout"], "cousins")
@@ -928,13 +933,13 @@ class ManifestTests(unittest.TestCase):
         self.assertTrue(_schema_errors(schema, dict(heartland, kin_layout="triples")))
         for layout in ("sampled", "fours", "pairs", "trios_loner", "cousins", "strangers", "clones"):
             self.assertEqual(_schema_errors(schema, dict(heartland, kin_layout=layout)), [])
-        # Only the heartland variant pins a layout.
+        # No paintbot-pw variant is FFA-kin or pins a layout.
         for variant in self.manifest["variants"]:
-            if variant["id"] != "heartland":
-                self.assertNotIn("kin_layout", variant["game_config"])
+            self.assertNotIn("kin_layout", variant["game_config"])
+            self.assertNotEqual(variant["game_config"].get("mode"), "ffa_kin")
         # The certifier seats every declared player in its (teams) fixture and fails one that has
         # no slot. players/ffa.bas calls FFA-only host functions, so it cannot run there and is
-        # not a declared player; it is submitted as a policy for the heartland league instead.
+        # not a declared player; it is a declared player of the heartland Coworld instead.
         seated = {p["player_id"] for p in self.manifest["certification"]["players"]}
         for player in self.manifest["player"]:
             self.assertIn(player["id"], seated)
