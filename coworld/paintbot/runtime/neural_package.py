@@ -289,7 +289,8 @@ def validate_sampling(value):
 PWNET2_MAGIC = b"PWNET002"
 MAX_NEURAL_OPERATIONS = 4_000_000  # per seat per tick (neural_host.MaxNeuralOperations)
 PWNET2_LIMITS = dict(parameters=4_194_304, layers=64, width=4096, state=4096, mingru_hidden=1024, groups=8,
-                     tokens=64, d_model=256, blocks=8, ff=1024)
+                     tokens=64, d_model=256, blocks=8, ff=1024, token_segments=8, token_input=1024, token_model=256,
+                     token_mlp_layers=4)
 TRANSCENDENTAL_OPS, MINGRU_UNIT_OPS = 8, 32
 ATTN_ALWAYS_VALID = 0xFFFFFFFF
 
@@ -306,6 +307,24 @@ def attention_ops(groups, d, heads, blocks, ff, pass_length):
              + t * heads * TRANSCENDENTAL_OPS + t * (2 * d * d + d) + t * d
              + t * (2 * d * ff + 2 * ff) + t * (2 * ff * d + d) + t * d)
     return embed + blocks * block + t + 2 * t * d + d + TRANSCENDENTAL_OPS + pass_length
+
+
+def token_pool_ops(t, d):
+    return t + 2 * t * d + d + TRANSCENDENTAL_OPS
+
+
+def token_mlp_ops(tokens, widths):
+    """TOKEN_MLP's published cost; widths = [token input, layer outputs...]."""
+    return (tokens * widths[0] + sum(tokens * (2 * widths[l - 1] * widths[l] + 2 * widths[l]) for l in range(1, len(widths)))
+            + token_pool_ops(tokens, widths[-1]))
+
+
+def token_mix_ops(tokens, token_in, width, z):
+    return 2 * width * z + width + tokens * (2 * token_in * z + 3 * z) + token_pool_ops(tokens, z)
+
+
+def pointer_ops(tokens, z, width):
+    return width + tokens * (2 * z + 2)
 
 
 def validate_pwnet2(model, observation_contract=None, action_contract=None):
@@ -374,6 +393,7 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
     if not 1 <= count <= lim["layers"]:
         bad("layer count must be 1..%d" % lim["layers"])
     width, state, operations, widths = inputs, 0, 0, []
+    token_layers = {}  # layer index -> ("mlp" | "mix", tokens, floats per token)
     for k in range(count):
         code = u32()
         q = [u32() for _ in range(8)]
@@ -481,6 +501,66 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
             if out > lim["width"]:
                 bad(where + "CONCAT_INPUT output exceeds %d" % lim["width"])
             operations += length
+        elif code == 7:  # TOKEN_MLP
+            tokens, segments, valid_segment, valid_index, layers = q[:5]
+            unused(5)
+            if not 1 <= tokens <= lim["tokens"]:
+                bad(where + "TOKEN_MLP tokens must be 1..%d" % lim["tokens"])
+            if not 1 <= segments <= lim["token_segments"]:
+                bad(where + "TOKEN_MLP segments must be 1..%d" % lim["token_segments"])
+            if not 1 <= layers <= lim["token_mlp_layers"]:
+                bad(where + "TOKEN_MLP layers must be 1..%d" % lim["token_mlp_layers"])
+            lengths = []
+            for g in range(segments):
+                offset, stride, length = u32(), u32(), u32()
+                if not 1 <= length <= inputs or stride > inputs:
+                    bad(where + "TOKEN_MLP segment %d length/stride" % g)
+                if offset > inputs or (tokens - 1) * stride + length > inputs - offset:
+                    bad(where + "TOKEN_MLP segment %d outside the input" % g)
+                lengths.append(length)
+            if sum(lengths) > lim["token_input"]:
+                bad(where + "TOKEN_MLP token input exceeds %d" % lim["token_input"])
+            if valid_segment == ATTN_ALWAYS_VALID:
+                if valid_index != 0:
+                    bad(where + "TOKEN_MLP always-valid tokens need valid index 0")
+            elif not (valid_segment < segments and valid_index < lengths[valid_segment]):
+                bad(where + "TOKEN_MLP valid flag outside the token")
+            mlp = [sum(lengths)]
+            for _ in range(layers):
+                o = u32()
+                if not 1 <= o <= lim["token_model"]:
+                    bad(where + "TOKEN_MLP widths must be 1..%d" % lim["token_model"])
+                mlp.append(o)
+            for l in range(1, len(mlp)):
+                weights(mlp[l] * mlp[l - 1] + mlp[l])
+            out = 2 * mlp[-1]
+            token_layers[k] = ("mlp", tokens, mlp[-1])
+            operations += token_mlp_ops(tokens, mlp)
+        elif code == 8:  # TOKEN_MIX
+            source, z = q[0], q[1]
+            unused(2)
+            if source >= k or token_layers.get(source, ("",))[0] != "mlp":
+                bad(where + "TOKEN_MIX source must name an earlier TOKEN_MLP layer")
+            if not 1 <= z <= lim["token_model"]:
+                bad(where + "TOKEN_MIX width must be 1..%d" % lim["token_model"])
+            _, tokens, token_in = token_layers[source]
+            weights(z * token_in + z + z * width)
+            out = width + 2 * z
+            if out > lim["width"]:
+                bad(where + "TOKEN_MIX output exceeds %d" % lim["width"])
+            token_layers[k] = ("mix", tokens, z)
+            operations += token_mix_ops(tokens, token_in, width, z)
+        elif code == 9:  # POINTER
+            source, offset = q[0], q[1]
+            unused(2)
+            if source >= k or token_layers.get(source, ("",))[0] != "mix":
+                bad(where + "POINTER source must name an earlier TOKEN_MIX layer")
+            _, tokens, z = token_layers[source]
+            if offset > width or tokens > width - offset:
+                bad(where + "POINTER offset + tokens exceeds width %d" % width)
+            weights(z + 1)
+            out = width
+            operations += pointer_ops(tokens, z, width)
         else:
             bad(where + "unknown layer type %d" % code)
         widths.append(out)

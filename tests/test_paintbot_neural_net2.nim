@@ -143,7 +143,7 @@ suite "PWNET002 actor":
     var unusedSet = r.dense(64, 6)
     unusedSet.params[7] = 1
     check rejects(encode2(64, [2, 2, 2], [unusedSet]), "unused parameter")
-    check rejects(encode2(64, [2, 2, 2], [Spec(code: 9)]), "unknown layer type")
+    check rejects(encode2(64, [2, 2, 2], [Spec(code: 99)]), "unknown layer type")
     check rejects(encode2(64, [2, 2, 2], [r.mingru(64, 32, highway = true), r.dense(32, 6)]), "highway")
     check rejects(encode2(64, [2, 2, 2], [r.dense(64, 6), residual(1)]), "earlier layer")
     check rejects(encode2(64, [2, 2, 2], [r.dense(64, 5), residual(0)]), "last layer width")
@@ -184,6 +184,201 @@ suite "PWNET002 actor":
       except ValueError: discard
     check loaded > 0
 
+proc tokenReference(specs: seq[Spec], inputs: int, obs: seq[float32]): seq[float64] =
+  ## A float64 reference for TOKEN_MLP -> TOKEN_MIX -> DENSE -> POINTER (layers 0..3), straight from the specs'
+  ## words and tensors (neural_actor.md's equations), independent of neural_actor.nim.
+  let mlp = specs[0]
+  let t = mlp.params[0].int
+  let nseg = mlp.params[1].int
+  var segs: seq[array[3, int]]
+  for g in 0..<nseg: segs.add [mlp.extra[3*g].int, mlp.extra[3*g+1].int, mlp.extra[3*g+2].int]
+  var widths = @[0]
+  for s in segs: widths[0] += s[2]
+  for l in 0..<mlp.params[4].int: widths.add mlp.extra[3*nseg+l].int
+  let d = widths[^1]
+  var valid = newSeq[bool](t)
+  var e = newSeq[seq[float64]](t)
+  for n in 0..<t:
+    let vs = segs[mlp.params[2].int]
+    valid[n] = obs[vs[0] + n*vs[1] + mlp.params[3].int] > 0.5
+    var x: seq[float64]
+    for s in segs:
+      for i in 0..<s[2]: x.add obs[s[0] + n*s[1] + i].float64
+    var off = 0
+    for l in 1..<widths.len:
+      var y = newSeq[float64](widths[l])
+      for o in 0..<widths[l]:
+        var sum = 0.0
+        for i in 0..<widths[l-1]: sum += x[i]*mlp.tensors[off + o*widths[l-1] + i].float64
+        y[o] = max(0.0, sum + mlp.tensors[off + widths[l]*widths[l-1] + o].float64)
+      off += widths[l]*widths[l-1] + widths[l]
+      x = y
+    e[n] = if valid[n]: x else: newSeq[float64](d)
+  proc pools(rows: seq[seq[float64]], width: int): seq[float64] =
+    result = newSeq[float64](2*width)
+    var count = 0
+    for n in 0..<t:
+      if valid[n]: inc count
+    if count == 0: return
+    for c in 0..<width:
+      var total = 0.0
+      var best = -Inf
+      for n in 0..<t:
+        if valid[n]:
+          total += rows[n][c]; best = max(best, rows[n][c])
+      result[c] = total / count.float64
+      result[width+c] = best
+  var x = pools(e, d)
+  let mix = specs[1]
+  let z = mix.params[1].int
+  let width = x.len
+  var zs = newSeq[seq[float64]](t)
+  for n in 0..<t:
+    zs[n] = newSeq[float64](z)
+    if not valid[n]: continue
+    for o in 0..<z:
+      var sum = mix.tensors[z*d + o].float64
+      for i in 0..<d: sum += e[n][i]*mix.tensors[o*d+i].float64
+      for i in 0..<width: sum += x[i]*mix.tensors[z*d + z + o*width + i].float64
+      zs[n][o] = max(0.0, sum)
+  x = x & pools(zs, z)
+  let den = specs[2]
+  let o2 = den.params[1].int
+  var y = newSeq[float64](o2)
+  for o in 0..<o2:
+    var sum = den.tensors[o2*x.len + o].float64
+    for i in 0..<x.len: sum += x[i]*den.tensors[o*x.len+i].float64
+    y[o] = sum
+  let ptrSpec = specs[3]
+  let offset = ptrSpec.params[1].int
+  for n in 0..<t:
+    if not valid[n]: continue
+    var sum = ptrSpec.tensors[z].float64
+    for i in 0..<z: sum += zs[n][i]*ptrSpec.tensors[i].float64
+    y[offset+n] += sum
+  y
+
+suite "PWNET002 token layers (TOKEN_MLP, TOKEN_MIX, POINTER)":
+  proc small(r: var Rand): seq[Spec] =
+    ## 64 inputs: 5 tokens of 6 floats at stride 8 (flag at +0) plus a shared 3-float slice; heads [2, 2, 2, 3].
+    @[r.tokenMlp(5, [[0'u32, 8, 6], [50'u32, 0, 3]], 0, 0, [8, 5]),
+      r.tokenMix(0, 5, 10, 4),
+      r.dense(18, 9, bias = true),
+      r.pointerHead(1, 3, 4)]
+
+  test "the published operation count (an entity-factored actor: 1,327,278)":
+    var r = initRand(71)
+    let a = loadActor(encode2(538, ActionSizes, r.entityFactored(), UserInputsContractHashes[31],
+      ActionContractV2Hash))
+    let (T, din, d, z, H, I) = (16, 38, 128, 64, 128, 538)
+    let tokenMlp = T*din + T*(2*din*d + 2*d) + T*(2*d*d + 2*d) + (T + 2*T*d + d + 8)
+    let tokenMix = 2*H*z + H + T*(2*d*z + 3*z) + (T + 2*T*z + z + 8)
+    let pointerOps = LogitSize + T*(2*z + 2)
+    let expected = tokenMlp + I + 2*(2*d + I)*H + (2*H*3*H + 32*H) + tokenMix + (2*(H + 2*z)*LogitSize + LogitSize) +
+      pointerOps
+    check a.operationCount == expected
+    check expected == 1_327_278
+    check a.stateSize == 128 and a.layerCount == 7 and a.modelTag == "pwnet2-l7-s128"
+
+  test "token layers equal a float64 reference, masked tokens included":
+    var r = initRand(72)
+    for trial in 0..<40:
+      let specs = r.small()
+      let actor = loadActor(encode2(64, [2, 2, 2, 3], specs))
+      var state: seq[float32]
+      var logits = newSeq[float32](9)
+      var obs = r.observation(64)
+      for n in 0..<5: obs[8*n] = float32(r.rand(1))
+      if trial == 0:
+        for n in 0..<5: obs[8*n] = 0      # no valid token
+      actor.infer(obs, state, logits)
+      let want = tokenReference(specs, 64, obs)
+      for i in 0..<9: check abs(logits[i].float64 - want[i]) <= 1e-5 * max(1.0, abs(want[i]))
+
+  test "a masked token's features change nothing; the shared slice reaches every token":
+    var r = initRand(73)
+    let actor = loadActor(encode2(64, [2, 2, 2, 3], r.small()))
+    var state: seq[float32]
+    var a, b = newSeq[float32](9)
+    var obs = r.observation(64)
+    for n in 0..<5: obs[8*n] = 0
+    actor.infer(obs, state, a)
+    # No valid token: the pools are zero and the pointer adds nothing, so only the DENSE bias remains.
+    var none = newSeq[float32](64)
+    actor.infer(none, state, b)
+    check bits(a) == bits(b)
+    obs[8*2] = 1
+    actor.infer(obs, state, a)
+    for n in [0, 1, 3, 4]:
+      for c in 1..5: obs[8*n+c] = float32(r.rand(2.0) - 1.0)
+    obs[60] = 0.25                        # outside every segment
+    actor.infer(obs, state, b)
+    check bits(a) == bits(b)
+    obs[51] = obs[51] + 0.5               # the shared slice
+    actor.infer(obs, state, b)
+    check bits(a) != bits(b)
+
+  test "an entity-factored actor runs recurrently and does not allocate":
+    var r = initRand(74)
+    let actor = loadActor(encode2(538, ActionSizes, r.entityFactored(), UserInputsContractHashes[31],
+      ActionContractV2Hash))
+    var state = newSeq[float32](128)
+    var logits = newSeq[float32](LogitSize)
+    var obs = r.observation(538)
+    for step in 0..<30:
+      obs = r.observation(538)
+      actor.infer(obs, state, logits)
+      for x in logits: check classify(x) notin {fcNan, fcInf, fcNegInf}
+    check state.anyIt(it != 0)
+    let before = getOccupiedMem()
+    for i in 0..<20: actor.infer(obs, state, logits)
+    check getOccupiedMem() == before
+
+  test "loader rejects malformed token layers":
+    var r = initRand(75)
+    let good = r.small()
+    discard loadActor(encode2(64, [2, 2, 2, 3], good))
+    proc with(specs: seq[Spec], k: int, change: proc (s: var Spec)): string =
+      var v = specs
+      change(v[k])
+      encode2(64, [2, 2, 2, 3], v)
+    check rejects(good.with(0, proc (s: var Spec) = s.params[0] = 0), "tokens")
+    check rejects(good.with(0, proc (s: var Spec) = s.params[0] = 65), "tokens")
+    check rejects(good.with(0, proc (s: var Spec) = s.params[0] = 9), "outside the input")
+    check rejects(good.with(0, proc (s: var Spec) = s.params[2] = 2), "valid flag")
+    check rejects(good.with(0, proc (s: var Spec) = s.params[3] = 6), "valid flag")
+    check rejects(good.with(0, proc (s: var Spec) = (s.params[2] = AttnAlwaysValid; s.params[3] = 1)), "valid index 0")
+    check rejects(good.with(0, proc (s: var Spec) = s.params[5] = 1), "unused parameter")
+    check rejects(good.with(0, proc (s: var Spec) = s.extra[2] = 0), "length/stride")
+    check rejects(good.with(0, proc (s: var Spec) = s.extra[1] = 65), "length/stride")
+    check rejects(good.with(0, proc (s: var Spec) = s.extra[6] = 300), "widths")
+    check rejects(encode2(200, [2, 2, 2, 3], @[r.tokenMlp(1, [[0'u32, 0, 200], [0'u32, 0, 200], [0'u32, 0, 200],
+      [0'u32, 0, 200], [0'u32, 0, 200], [0'u32, 0, 200]], 0, 0, [4]), r.dense(8, 9)]), "token input")
+    check rejects(good.with(1, proc (s: var Spec) = s.params[0] = 1), "earlier TOKEN_MLP")
+    check rejects(good.with(1, proc (s: var Spec) = s.params[1] = 0), "TOKEN_MIX width")
+    check rejects(good.with(3, proc (s: var Spec) = s.params[0] = 0), "earlier TOKEN_MIX")
+    check rejects(good.with(3, proc (s: var Spec) = s.params[1] = 5), "exceeds width")
+    check rejects(encode2(64, [2, 2, 2, 3], @[r.dense(64, 18), r.tokenMix(0, 5, 18, 4), r.dense(26, 9)]),
+      "earlier TOKEN_MLP")
+    var short = good
+    short[3].tensors.setLen(3)
+    check rejects(encode2(64, [2, 2, 2, 3], short))
+    # Fuzz: corrupted token-layer files load or raise ValueError, never crash.
+    let data = encode2(64, [2, 2, 2, 3], good)
+    for trial in 0..<2000:
+      var d = data
+      if trial mod 2 == 0: d = d[0..<r.rand(d.len-1)]
+      else:
+        let at = 8 + 4*r.rand(min(120, (d.len-12) div 4))
+        for i in 0..3: d[at+i] = char(r.rand(255))
+      try:
+        let a = loadActor(d)
+        var state = newSeq[float32](a.stateSize)
+        var logits = newSeq[float32](a.outputSize)
+        try: a.infer(newSeq[float32](a.inputSize), state, logits)
+        except ValueError: discard
+      except ValueError: discard
+
 const NeuralSource = """
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
@@ -217,6 +412,21 @@ suite "PWNET002 hosted seat":
     check players[0].neural.nativeWork == actor.operationCount
     check players[0].neural.telemetry(actor.operationCount, 40) ==
       "neural: peak_ops=" & $actor.operationCount & " budget=4000000 model=pwnet2-l3-s64 ticks=40"
+
+  test "an entity-factored package (token layers) plays on the hosted seat":
+    var r = initRand(44)
+    let model = encode2(ObservationSize, ActionSizes,
+      r.entityFactored(inputs = ObservationSize, segments = [[104'u32, 8, 8], [0'u32, 0, 24]]))
+    let players = seatFixture(model)
+    var w = newWorld(2027)
+    for tick in 0..<40:
+      discard players.decide(w)
+      check not players[0].failed
+      w.step(default(array[Seats, Command]))
+    let actor = loadActor(model)
+    check players[0].neural.state.len == 128
+    check players[0].neural.telemetry(actor.operationCount, 40) ==
+      "neural: peak_ops=" & $actor.operationCount & " budget=4000000 model=pwnet2-l7-s128 ticks=40"
 
   test "an over-budget PWNET002 model is rejected at load with its cost":
     var r = initRand(43)
