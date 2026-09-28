@@ -69,6 +69,7 @@ jobs:
       - run: nim r tests/test_paintbot_ffa_rules.nim
       - run: nim r tests/test_paintbot_ffa_replay.nim
       - run: nim r tests/test_paintbot_ffa_basic.nim
+      - run: nim r tests/test_paintbot_ffa_baseline.nim
       - run: nim r tests/test_paintbot_projection.nim
       - run: nim r -d:headless tests/test_paintbot_neural_contract.nim
       - run: nim r -d:headless tests/test_paintbot_neural_obs_v2.nim
