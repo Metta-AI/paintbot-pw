@@ -327,6 +327,26 @@ touches the world or its hash.
 manifest's `user_inputs.count` must be K. Training: `pw_create_observation_inputs(seed,
 max_ticks, K)`; a policy seat's rows carry its inputs, every other seat's user columns are 0.
 
+**ffa.v1: FFA-kin** (mode `ffa_kin`). Id `paintbot-pw.rules40.obs.ffa.v1.float810`, SHA-256
+`6b19dc324386542eb915d30c2ce1707a8f8e192a0425ee8b2ae9145969583fc7`, 810 floats, native version
+101 (`pw_create_observation(seed, max_ticks, 101)`; 3 stays unknown). A separate encoder
+(`neural_contract.encodeFfaObservation`, which documents every column), not a v1/v2 prefix.
+There is no map flip, for observations or for the compass heads of either action contract
+(in FFA mode no seat is mirrored). Layout:
+
+| columns | block |
+|---|---|
+| 0..7 | self: centred x, centred z, hp/3, armor/3, cooldown/72, own score/1000, alive, ticks left/8640 |
+| 8 + 42j, j = 0..15 | seat j: dx, dz, visible, alive, hp/3, 32 gene bits (+-1), r to me, score/1000, hearts held/10, 2 reserved |
+| 680 + 6i, i = 0..9 | control heart i: centred x, centred z, owner's r to me (-1 neutral, 1 mine), capture progress, contested, owned by me |
+| 740 + 6g, g = 0..1 | great heart g: centred x, centred z, state (-1 dormant, 0 awake, 1 charging), present/16, progress, dormant ticks left/1440 |
+| 752..809 | v2's terrain block columns 0..53, then visible other seats wet/8 and dry/8, 2 reserved |
+
+Positions and hp of other seats are fog-gated; alive, genes, r, score and hearts held are
+public. Scores are raw scores s_j in points. Identity rows are indexed by seat, and the
+aim head's identity index 1..16 aims at that seat. Outside FFA the kin, score and
+seat-ownership columns are zero.
+
 ## Action contracts
 
 Two action contracts share the five heads `[51,25,2,2,2]` and differ only in what an

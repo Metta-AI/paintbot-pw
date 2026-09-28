@@ -393,17 +393,18 @@ proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
 
 proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.exportc, cdecl, dynlib.} =
   ## pw_create with the observation contract chosen: 1 = v1 (identical to pw_create),
-  ## 2 = v2 (v1 + terrain block). nil for any other version or a bad max_ticks.
-  if obsVersion notin [ocV1.int32, ocV2.int32]: return nil
+  ## 2 = v2 (v1 + terrain block), 101 = ffa.v1 (FFA-kin, 810 floats). nil for any other
+  ## version or a bad max_ticks.
+  if obsVersion notin [ocV1.int32, ocV2.int32, ocFfaV1.int32]: return nil
   createEnv(seed, maxTicks, ObservationContractVersion(obsVersion))
 
 proc pw_observation_size_for*(obsVersion: int32): cint {.exportc, cdecl, dynlib.} =
   ## Floats per seat under observation contract `obsVersion`; -1 if unknown.
-  if obsVersion notin [ocV1.int32, ocV2.int32]: return -1
+  if obsVersion notin [ocV1.int32, ocV2.int32, ocFfaV1.int32]: return -1
   observationSize(ObservationContractVersion(obsVersion)).cint
 
 proc pw_observation_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
-  ## The handle's observation contract version (1 or 2); -1 for a nil handle.
+  ## The handle's observation contract version (1, 2 or 101); -1 for a nil handle.
   if handle == nil: return -1
   cast[ptr NativeEnv](handle).obsVersion.cint
 
@@ -443,7 +444,7 @@ proc pw_observation_contract_hash*(obsVersion: int32, output: ptr UncheckedArray
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The 64-hex SHA-256 an actor and manifest carry for observation contract
   ## `obsVersion`, NUL-terminated; capacity must be >= 65. 0, or -1 bad args.
-  if output == nil or capacity < 65 or obsVersion notin [ocV1.int32, ocV2.int32]: return -1
+  if output == nil or capacity < 65 or obsVersion notin [ocV1.int32, ocV2.int32, ocFfaV1.int32]: return -1
   let hash = observationContractHash(ObservationContractVersion(obsVersion))
   for i, c in hash: output[i] = c
   output[hash.len] = '\0'

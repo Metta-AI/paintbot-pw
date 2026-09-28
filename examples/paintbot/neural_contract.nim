@@ -2,7 +2,7 @@
 ## Used unchanged by BASIC deployment and native Puffer rollouts.
 import std/math
 import polyworld/rngs
-import sim
+import sim, kinship
 
 const
   ObservationSize* = 448
@@ -59,11 +59,39 @@ const
   # orders. 1 .. MaxFireHoldRadius; the default (and the boolean form) stays Radius.
   MaxFireHoldRadius* = 2000'i32
 static: doAssert FireHoldRadius == 55
+const
+  ## Observation contract ffa.v1 (FFA-kin; encodeFfaObservation documents every column):
+  ## no map flip, 16 seat-indexed identity rows with genes and relatedness, seat-owned
+  ## hearts, the two great hearts and v2's terrain block. Selected by its hash exactly as
+  ## v2 is (an actor's embedded observation hash, pw_create_observation's version).
+  FfaSelfSize* = 8
+  FfaIdentityRowSize* = 42
+  FfaHeartRows* = 10
+  FfaHeartRowSize* = 6
+  FfaGreatRows* = 2
+  FfaGreatRowSize* = 6
+  FfaIdentityOffset* = FfaSelfSize
+  FfaHeartOffset* = FfaIdentityOffset + Seats*FfaIdentityRowSize
+  FfaGreatOffset* = FfaHeartOffset + FfaHeartRows*FfaHeartRowSize
+  FfaTerrainOffset* = FfaGreatOffset + FfaGreatRows*FfaGreatRowSize
+  ObservationSizeFfaV1* = FfaTerrainOffset + TerrainBlockSize
+  ObservationContractFfaV1* = "paintbot-pw.rules40.obs.ffa.v1.float810"
+  ObservationContractFfaV1Hash* = "6b19dc324386542eb915d30c2ce1707a8f8e192a0425ee8b2ae9145969583fc7"
+  ## encodeFfaObservation mask bit 0 (training ABI only, pw_set_obs_mask): zero every
+  ## r-to-me column, the genes-only ablation.
+  FfaObsMaskKin* = 1'u32
+static:
+  doAssert FfaIdentityRowSize == 2 + 1 + 1 + 1 + Loci + 1 + 1 + 1 + 2
+  doAssert FfaIdentityOffset == 8 and FfaHeartOffset == 680 and FfaGreatOffset == 740
+  doAssert FfaTerrainOffset == 752 and ObservationSizeFfaV1 == 810
+  doAssert ObservationContractFfaV1 == "paintbot-pw.rules40.obs.ffa.v1.float" & $ObservationSizeFfaV1
+  doAssert FfaMatchTicks == 8640 and GreatHeartDormantTicks == 1440
 static: doAssert ObservationSizeV2 == 506 and ObservationContractV2 == "paintbot-pw.rules37.obs.v2.float" & $ObservationSizeV2
 
 type
   ObservationContractVersion* = enum
-    ocV1 = 1, ocV2 = 2
+    ## ocFfaV1 is 101, not 3: version numbers are the native ABI's, and 3 stays unknown.
+    ocV1 = 1, ocV2 = 2, ocFfaV1 = 101
   ActionContractVersion* = enum
     acV1 = 1, acV2 = 2
   AimMemory* = object
@@ -93,18 +121,22 @@ proc observationContractHash*(version: ObservationContractVersion): string =
   case version
   of ocV1: ObservationContractHash
   of ocV2: ObservationContractV2Hash
+  of ocFfaV1: ObservationContractFfaV1Hash
 proc observationContractId*(version: ObservationContractVersion): string =
   case version
   of ocV1: ObservationContract
   of ocV2: ObservationContractV2
+  of ocFfaV1: ObservationContractFfaV1
 proc observationSize*(version: ObservationContractVersion): int =
   case version
   of ocV1: ObservationSize
   of ocV2: ObservationSizeV2
+  of ocFfaV1: ObservationSizeFfaV1
 proc observationContractVersion*(hash: string): ObservationContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ObservationContractHash: ocV1
   elif hash == ObservationContractV2Hash: ocV2
+  elif hash == ObservationContractFfaV1Hash: ocFfaV1
   else: raise newException(ValueError, "unknown neural observation contract")
 
 proc observedBodies*(w: World, slot: int): array[Seats, int] =
@@ -121,6 +153,11 @@ proc observedBodies*(w: World, slot: int): array[Seats, int] =
     if previous < 0 or distance2(w.cogs[slot].pos, w.cogs[body].pos) <
         distance2(w.cogs[slot].pos, w.cogs[previous].pos): result[identity] = body
 
+proc mapFlip*(slot: int): int =
+  ## The teams game mirrors odd seats' observations and compass heads (team 1 plays from
+  ## the other side); FFA-kin has no sides, so nothing is mirrored for any seat.
+  if team(slot) == 0 or ffa(): 1 else: -1
+
 proc relativeTeam(value, side: int): float32 =
   if value < 0: 0'f32
   elif value == side: 1'f32
@@ -134,7 +171,7 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
   let me = w.cogs[slot]
   let gear = w.equipment[slot]
   let side = team(slot)
-  let flip = if side == 0: 1'f32 else: -1'f32
+  let flip = mapFlip(slot).float32
   let spanX = float32(maxX()-minX())
   let spanZ = float32(maxZ()-minZ())
   var k = 0
@@ -286,6 +323,119 @@ proc encodeTerrainBlock*(w: World, slot: int, output: var openArray[float32],
   output[57] = float32(mateDry)/8
 static: doAssert 58 == TerrainBlockSize
 
+proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
+    bodies: array[Seats, int], kin: Kinship, mask = 0'u32) =
+  ## Observation contract ffa.v1 (ObservationSizeFfaV1 = 810 floats), for FFA-kin. No map
+  ## flip: positions are in the absolute frame for every seat. "Centred x" is
+  ## (x - Width/2) / (maxX - minX), "centred z" likewise with Height and the z span; score is
+  ## the raw score s_j in points / 1000 (seatScore is tenths). Fog: a seat's position and hp
+  ## need its body to be visible (bodies, as v1); alive, genes, r, score and hearts held are
+  ## public. Outside FFA the kin, score and seat-ownership columns and the great-heart rows
+  ## are zero (the teams game has no kinship). mask bit 0 (FfaObsMaskKin) zeroes every
+  ## r-to-me column: identity column 37, and a heart owned by another seat reads 0.
+  ##   0..7      self: centred x, centred z, hp/3, armor/3, cooldown/72, own score/1000,
+  ##             alive, ticks left/8640
+  ##   8+42j     identity row j (seat j, 0..15), columns:
+  ##             0 dx/xspan, 1 dz/zspan (0 unless visible; own row 0), 2 visible (own 1),
+  ##             3 alive, 4 hp/3 (0 unless visible), 5..36 gene bits 0..31 (+1 set, -1
+  ##             clear), 37 r(me, j) (own row 1), 38 score/1000, 39 hearts held/10,
+  ##             40..41 reserved 0
+  ##   680+6i    control heart row i (0..9): 0 centred x, 1 centred z, 2 owner's r to me
+  ##             (-1 neutral, 1 mine), 3 capture ticks/HeartCaptureTicks, 4 contested,
+  ##             5 owned by me (absent heart: all 0)
+  ##   740+6g    great heart row g (0..1): 0 centred x, 1 centred z, 2 state (-1 dormant,
+  ##             0 awake and empty of progress, 1 charging), 3 cogs present/16,
+  ##             4 progress/GreatHeartCaptureTicks, 5 dormant ticks left/1440
+  ##   752..809  v2's terrain block (encodeTerrainBlock) columns 0..53, then 54 visible
+  ##             other seats wet/8, 55 visible other seats dry/8, 56..57 reserved 0 (the
+  ##             v2 team split means nothing without teams)
+  if slot notin 0..<Seats or output.len != ObservationSizeFfaV1:
+    raise newException(ValueError, "invalid neural observation dimensions or seat")
+  for i in 0..<output.len: output[i] = 0
+  let kinOn = ffa()
+  let hideKin = (mask and FfaObsMaskKin) != 0
+  let me = w.cogs[slot]
+  let spanX = float32(maxX()-minX())
+  let spanZ = float32(maxZ()-minZ())
+  # Templates, not nested procs: a closure would copy the World.
+  template cx(p: Point): float32 = float32(p.x-Width div 2)/spanX
+  template cz(p: Point): float32 = float32(p.z-Height div 2)/spanZ
+  template rTo(j: int): float32 =
+    (if not kinOn or hideKin: 0'f32 else: float32(kin.r(slot, j)))
+  template points(j: int): float32 =
+    (if kinOn: float32(w.seatScore[j])/10000 else: 0'f32)
+  # Self.
+  output[0] = cx(me.pos)
+  output[1] = cz(me.pos)
+  output[2] = float32(me.hp)/3
+  output[3] = float32(w.equipment[slot].armor)/3
+  output[4] = float32(me.cooldown)/72
+  output[5] = points(slot)
+  output[6] = float32((me.hp > 0).int)
+  output[7] = float32(max(0'i32, w.endTick-w.tick))/8640
+  # Identity rows, indexed by seat.
+  var held: array[Seats, int]
+  if kinOn:
+    for heart in w.controlHearts:
+      if heart.owner in 0'i32..<Seats.int32: inc held[heart.owner]
+  for j in 0..<Seats:
+    let o = FfaIdentityOffset + j*FfaIdentityRowSize
+    let body = bodies[j]
+    if body >= 0:
+      let other = w.cogs[body]
+      output[o] = float32(other.pos.x-me.pos.x)/spanX
+      output[o+1] = float32(other.pos.z-me.pos.z)/spanZ
+      output[o+2] = 1
+      output[o+4] = float32(other.hp)/3
+    output[o+3] = float32((w.cogs[j].hp > 0).int)
+    if kinOn:
+      for b in 0..<Loci:
+        output[o+5+b] = if ((kin.genes[j] shr b) and 1'u32) == 1'u32: 1'f32 else: -1'f32
+    output[o+37] = rTo(j)
+    output[o+38] = points(j)
+    output[o+39] = float32(held[j])/10
+  # Control hearts.
+  for i in 0..<FfaHeartRows:
+    if i >= w.controlHearts.len: continue
+    let o = FfaHeartOffset + i*FfaHeartRowSize
+    let heart = w.controlHearts[i]
+    output[o] = cx(heart.pos)
+    output[o+1] = cz(heart.pos)
+    output[o+2] =
+      if heart.owner < 0: -1'f32
+      elif not kinOn: 0'f32
+      elif heart.owner == slot.int32: 1'f32
+      else: rTo(heart.owner.int)
+    if i < w.heartCaptures.len:
+      output[o+3] = float32(w.heartCaptures[i].ticks)/HeartCaptureTicks
+      output[o+4] = float32(w.heartCaptures[i].contested.int)
+    output[o+5] = float32((kinOn and heart.owner == slot.int32).int)
+  # Great hearts.
+  if kinOn:
+    for g in 0..<FfaGreatRows:
+      let o = FfaGreatOffset + g*FfaGreatRowSize
+      let heart = w.greatHearts[g]
+      output[o] = cx(heart.pos)
+      output[o+1] = cz(heart.pos)
+      output[o+2] =
+        if w.tick < heart.dormantUntil: -1'f32
+        elif heart.progress > 0: 1'f32
+        else: 0'f32
+      output[o+3] = float32(heart.present)/16
+      output[o+4] = float32(heart.progress)/GreatHeartCaptureTicks
+      output[o+5] = float32(max(0'i32, heart.dormantUntil-w.tick))/GreatHeartDormantTicks
+  # Terrain.
+  w.encodeTerrainBlock(slot, output.toOpenArray(FfaTerrainOffset, ObservationSizeFfaV1-1), bodies)
+  var wet, dry = 0
+  for j in 0..<Seats:
+    let body = bodies[j]
+    if body < 0 or j == slot: continue
+    if inWater(w.cogs[body].pos): inc wet else: inc dry
+  output[FfaTerrainOffset+54] = float32(wet)/8
+  output[FfaTerrainOffset+55] = float32(dry)/8
+  output[FfaTerrainOffset+56] = 0
+  output[FfaTerrainOffset+57] = 0
+
 proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
     bodies: array[Seats, int], version: ObservationContractVersion) =
   ## The observation of the given contract. v1 is the encoder above, called unchanged;
@@ -298,6 +448,9 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
   of ocV2:
     w.encodeObservation(slot, output.toOpenArray(0, ObservationSize-1), bodies)
     w.encodeTerrainBlock(slot, output.toOpenArray(ObservationSize, ObservationSizeV2-1), bodies)
+  of ocFfaV1:
+    # Hosted and default callers: the match's kinship, no mask (masks are training-only).
+    w.encodeFfaObservation(slot, output, bodies, activeKinship)
 proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
     version: ObservationContractVersion) =
   if slot notin 0..<Seats or output.len != observationSize(version):
@@ -369,7 +522,7 @@ proc goalCandidate*(w: World, slot, movement: int): (bool, Point) =
   ## Where movement head index `movement` sends the seat, and whether that candidate
   ## exists now (a missing heart or an unavailable/unseen pickup keeps the goal).
   let me = w.cogs[slot]
-  let flip = if team(slot)==0: 1 else: -1
+  let flip = mapFlip(slot)
   if movement in 1..10:
     if movement-1 < w.controlHearts.len: return (true, w.controlHearts[movement-1].pos)
   elif movement in 11..42:
@@ -388,7 +541,7 @@ proc aimCandidate*(w: World, slot, aim: int, bodies: array[Seats, int],
   ## exists now (an identity nobody visible carries keeps the aim). `ownStep` is the
   ## seat's planned move for this tick (read under v2 only).
   let me = w.cogs[slot]
-  let flip = if team(slot)==0: 1 else: -1
+  let flip = mapFlip(slot)
   if aim in 1..16:
     let body = bodies[aim-1]
     if body >= 0:
@@ -914,7 +1067,7 @@ proc strafeActions*(w: World, slot: int, actions: var array[ActionSizes.len, int
     # The allowed compass heading nearest the leg (a diagonal's projection is scaled by
     # 1/sqrt 2 so all eight headings compete fairly); movement compass steps are mirrored
     # for team 1 exactly as goalCandidate mirrors them.
-    let flip = if team(slot) == 0: 1'i64 else: -1'i64
+    let flip = mapFlip(slot).int64
     var bestScore = low(int64)
     var heading = -1
     for k, delta in Directions:
@@ -987,7 +1140,7 @@ proc aimSnapActions*(w: World, slot: int, actions: var array[ActionSizes.len, in
   if actions[1] notin AimFirstCompass.int32..(AimFirstCompass+Directions.len-1).int32: return false
   let me = w.cogs[slot]
   if me.hp <= 0: return false
-  let flip = if team(slot) == 0: 1'i64 else: -1'i64
+  let flip = mapFlip(slot).int64
   let delta = Directions[actions[1] - AimFirstCompass]
   let hx = flip * delta[0]
   let hz = flip * delta[1]
