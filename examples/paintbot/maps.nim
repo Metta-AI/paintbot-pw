@@ -2,12 +2,23 @@
 ## A map replaces the rules-derived island: its terrain grid answers terrainHeight and
 ## islandMargin, and its hearts, pickups, trenches and cover replace the fixed layout. Every
 ## map is its own image under the rules-35 half turn about (3200, 2000).
-const MapNames* = ["twin-mesas", "archipelago", "serpent-river", "crater", "terraces",
+import std/strutils
+const ShippedMaps = ["twin-mesas", "archipelago", "serpent-river", "crater", "terraces",
   "deep-forest", "badlands", "atoll", "highlands", "delta"]
+when defined(pwBenchMaps):
+  # Benchmark-only maps at ten times the area (tests/bench_paintbot_maps.nim); never shipped.
+  const MapNames* = block:
+    var names: array[ShippedMaps.len+2, string]
+    for i, n in ShippedMaps: names[i] = n
+    names[^2] = "big-twin-mesas"; names[^1] = "big-deep-forest"
+    names
+else:
+  const MapNames* = ShippedMaps
 
 const MapBlobs = block:
   var blobs: array[MapNames.len, string]
-  for i, name in MapNames: blobs[i] = staticRead("maps/" & name & ".pbmap")
+  for i, name in MapNames:
+    blobs[i] = staticRead("maps/" & (if name.startsWith("big-"): "bench/" else: "") & name & ".pbmap")
   blobs
 
 type

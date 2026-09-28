@@ -1,4 +1,5 @@
-import village, topography
+import village, topography, bench
+export bench
 export topography
 ## Integer-only Paintbot simulation; Polyworld RNG and portable state hashes.
 import polyworld/[rngs, hashes]
@@ -290,8 +291,12 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-proc minX*():int = (if visionRulesVersion>=22: -4800 elif visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
-proc minZ*():int = (if visionRulesVersion>=22: -2800 elif visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
+proc minX*():int =
+  if activeMap() >= 0: return currentMap().x0
+  (if visionRulesVersion>=22: -4800 elif visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
+proc minZ*():int =
+  if activeMap() >= 0: return currentMap().z0
+  (if visionRulesVersion>=22: -2800 elif visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
 proc maxZ*():int = Height-minZ()
 proc elevation*(w: World, p: Point): int =
@@ -302,6 +307,7 @@ proc elevation*(w: World, p: Point): int =
       result -= 60
       break
 proc traversable*(w: World, a, b: Point): bool =
+  benchEnter(bkTraversable)
   if visionRulesVersion < 9: return true
   let steps = max(abs(b.x-a.x), abs(b.z-a.z)).int div 20+1
   var last = terrainHeight(a.x.int, a.z.int)
@@ -450,6 +456,7 @@ when IndexedGeometry:
             g.seen[index] = stamp
             yield index.int
 proc blocked*(w: World, p: Point, radius = Radius): bool =
+  benchEnter(bkBlocked)
   if boundsBlocked(p, radius): return true
   when IndexedGeometry:
     coverBlockedIndexed(coverIndexFor(w), w, p, radius)
@@ -497,6 +504,7 @@ proc lineClearRay(w: World, a, b: Point): bool =
       if w.elevation(p) > eye: return false
   true
 proc lineClear*(w: World, a, b: Point): bool =
+  benchEnter(bkLineClear)
   when IndexedGeometry:
     # Remembered per thread for the geometry the cover index was built from; the
     # trenches and rules are checked on every call and any change empties the memo.
@@ -529,6 +537,7 @@ proc canSeePoint*(w: World, slot: int, p: Point): bool =
     if dot <= 0 or 4*dot*dot < (fx*fx+fz*fz)*distance: return false
   w.lineClear(c.pos, p)
 proc visible*(w: World, slot, other: int): bool =
+  benchEnter(bkVisible)
   if slot notin 0..<Seats or other notin 0..<Seats or w.cogs[other].hp <= 0:
     return false
   if slot == other: return true
@@ -913,6 +922,7 @@ proc walkCoverBlocks(c: Cover, a,b: Point, dx,dz,length: float64): bool {.inline
       let z=a.z.int+(b.z-a.z).int*i div steps
       if x>c.x-Radius and x<c.x+c.w+Radius and z>c.z-Radius and z<c.z+c.h+Radius:return true
 proc walkClear*(w: World, a,b: Point):bool =
+  benchEnter(bkWalkClear)
   if w.blocked(b) or not w.traversable(a,b):return false
   let dx=(b.x-a.x).float64;let dz=(b.z-a.z).float64
   let length=dx*dx+dz*dz
@@ -968,6 +978,7 @@ proc nearestConnectedCell(goal:Point,nx,nz:int):int =
         if edge or x>=gx+ring:inc x
         else:x=gx+ring
 proc waypoint*(w:World,start,goal:Point):Point =
+  benchEnter(bkWaypoint)
   if visionRulesVersion<22:return w.legacyWaypoint(start,goal)
   # Rules 38: the route measures time, not distance. A cog in the lake moves at a quarter of
   # its speed, and the old search - a straight line whenever no wall is in the way, else an
@@ -1109,6 +1120,7 @@ proc boostedSpeed*(speed, boost: int): int =
 proc stepEquipment(w: var World, commands: array[Seats, Command])
 proc step*(w: var World, commands: array[Seats, Command],
     rulesVersion = visionRulesVersion) =
+  benchEnter(bkStep)
   if rulesVersion >= 6:
     w.stepEquipment(commands)
     return

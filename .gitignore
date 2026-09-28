@@ -49,3 +49,4 @@ coworld/**/__pycache__/
 # Generated Jev experiment arms and Experience Request bodies.
 dist/jev-xp/
 dist/
+examples/paintbot/maps/bench/
