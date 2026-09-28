@@ -323,13 +323,15 @@ proc boundsBlocked(p: Point, radius: int, bounds: array[4,int]): bool {.inline.}
   islandTerrain and islandMargin(p.x.int,p.z.int)<radius div 3+40
 proc boundsBlocked(p: Point, radius: int): bool {.inline.} =
   boundsBlocked(p, radius, [minX(),minZ(),maxX(),maxZ()])
-# Training builds index cover on a coarse grid so point and segment tests visit only
-# nearby obstacles instead of all of them (224 under rules 37). The index belongs to the
-# thread and is keyed by the cover it was built from: a world whose cover payload address
-# or length differs is compared by content and the index rebuilt if it differs. Every
-# candidate set is a superset of the obstacles that can satisfy the predicate, so the
-# answers are identical to the full scans below. Other builds keep the full scans.
-when defined(pwTraining):
+# Every build indexes cover on a coarse grid so point and segment tests visit only nearby
+# obstacles instead of all of them (224 on the island, thousands on a large generated map).
+# The index belongs to the thread and is keyed by the cover it was built from: a world whose
+# cover payload address or length differs is compared by content and the index rebuilt if it
+# differs. Every candidate set is a superset of the obstacles that can satisfy the predicate,
+# so the answers are identical to the full scans below, which -d:pwFullScanGeometry restores
+# for comparison. Training builds always index.
+const IndexedGeometry* = defined(pwTraining) or not defined(pwFullScanGeometry)
+when IndexedGeometry:
   const
     CoverCell = 200
     CoverReach = 90 # Largest radius any caller passes to blocked; larger falls back.
@@ -449,7 +451,7 @@ when defined(pwTraining):
             yield index.int
 proc blocked*(w: World, p: Point, radius = Radius): bool =
   if boundsBlocked(p, radius): return true
-  when defined(pwTraining):
+  when IndexedGeometry:
     coverBlockedIndexed(coverIndexFor(w), w, p, radius)
   else:
     for c in w.cover:
@@ -457,11 +459,11 @@ proc blocked*(w: World, p: Point, radius = Radius): bool =
 const RayCoverLimit = 512
 proc lineClearRay(w: World, a, b: Point): bool =
   # Only obstacles overlapping the ray bounds can block its sampled points, so the
-  # sampled predicate is evaluated against that subset (from the cover index in training
-  # builds, otherwise indexed on the stack; too many for the stack means the full set,
+  # sampled predicate is evaluated against that subset (from the cover index, or under
+  # -d:pwFullScanGeometry indexed on the stack; too many for the stack means the full set,
   # which gives the same answer). Keep the exact sample positions and collision
   # predicates for replay parity. No world copy, no allocation.
-  when not defined(pwTraining):
+  when not IndexedGeometry:
     var rayCover: array[RayCoverLimit, int32]
     var rayCount = 0
     for index, c in w.cover:
@@ -481,7 +483,7 @@ proc lineClearRay(w: World, a, b: Point): bool =
   for i in 1..steps:
     let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
     if boundsBlocked(p, 0, bounds): return false
-    when defined(pwTraining):
+    when IndexedGeometry:
       if coverBlockedIndexed(g, w, p, 0): return false
     else:
       if filtered:
@@ -495,7 +497,7 @@ proc lineClearRay(w: World, a, b: Point): bool =
       if w.elevation(p) > eye: return false
   true
 proc lineClear*(w: World, a, b: Point): bool =
-  when defined(pwTraining):
+  when IndexedGeometry:
     # Remembered per thread for the geometry the cover index was built from; the
     # trenches and rules are checked on every call and any change empties the memo.
     let g = coverIndexFor(w)
@@ -914,7 +916,7 @@ proc walkClear*(w: World, a,b: Point):bool =
   if w.blocked(b) or not w.traversable(a,b):return false
   let dx=(b.x-a.x).float64;let dz=(b.z-a.z).float64
   let length=dx*dx+dz*dz
-  when defined(pwTraining):
+  when IndexedGeometry:
     for index in segmentCover(w,a,b):
       if w.cover[index].walkCoverBlocks(a,b,dx,dz,length):return false
   else:

@@ -1,11 +1,13 @@
-## Training-build geometry caches must be invisible: every tabled terrain value and
-## every indexed obstacle test equals the direct computation, for every rules version
-## that changes the terrain flags, at the arena edges and outside the tabled span.
-## Build with --mm:arc --threads:on -d:pwTraining.
+## Geometry caches must be invisible: every indexed obstacle test equals the direct
+## computation, for every rules version that changes the terrain flags and on every
+## generated map, at the arena edges and outside the indexed span. Runs in the hosted build
+## (cover index, ray memo) and in the training build (plus the terrain table), e.g.
+## `nim r tests/test_paintbot_geometry_cache.nim` and
+## `nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim`.
 import std/[unittest, random]
 import ../examples/paintbot/[sim, neural_contract]
 
-when not defined(pwTraining): {.error: "this test exercises the -d:pwTraining caches".}
+when not IndexedGeometry: {.error: "this test exercises the geometry caches; drop -d:pwFullScanGeometry".}
 
 proc directBlocked(w: World, p: Point, radius: int): bool =
   ## The full scan the index replaces, as it read before the index existed.
@@ -61,29 +63,30 @@ proc directWalkClear(w: World, a,b: Point):bool =
     if islandTerrain and islandMarginDirect(x,z)<Radius div 3+40:return false
   true
 
-suite "Training geometry caches":
-  test "tabled terrain equals the direct functions everywhere":
-    var rng = initRand(2026)
-    for version in [9, 12, 14, 16, 22, 29, 33, 35, 37]:
-      configureRules(version)
-      var checked = 0
-      for _ in 0..<20000:
-        # Inside the arena, on its edges, and well outside the tabled span.
-        let x = case rng.rand(3)
-          of 0: rng.rand(minX()..maxX())
-          of 1: [minX(), maxX(), -5120, -5121, -5120+264*64-1, -5120+264*64][rng.rand(5)]
-          else: rng.rand(-9000..15000)
-        let z = case rng.rand(3)
-          of 0: rng.rand(minZ()..maxZ())
-          of 1: [minZ(), maxZ(), -3072, -3073, -3072+160*64-1, -3072+160*64][rng.rand(5)]
-          else: rng.rand(-7000..11000)
-        check terrainHeight(x, z) == terrainHeightDirect(x, z)
-        check islandMargin(x, z) == islandMarginDirect(x, z)
-        let cell = terrainSample(x, z)
-        check cell.height.int == terrainHeightDirect(x, z) and cell.margin.int == islandMarginDirect(x, z)
-        inc checked
-      check checked == 20000
-    check terrainCacheResidentBlocks() > 0
+suite "Geometry caches":
+  when defined(pwTraining):
+    test "tabled terrain equals the direct functions everywhere":
+      var rng = initRand(2026)
+      for version in [9, 12, 14, 16, 22, 29, 33, 35, 37]:
+        configureRules(version)
+        var checked = 0
+        for _ in 0..<20000:
+          # Inside the arena, on its edges, and well outside the tabled span.
+          let x = case rng.rand(3)
+            of 0: rng.rand(minX()..maxX())
+            of 1: [minX(), maxX(), -5120, -5121, -5120+264*64-1, -5120+264*64][rng.rand(5)]
+            else: rng.rand(-9000..15000)
+          let z = case rng.rand(3)
+            of 0: rng.rand(minZ()..maxZ())
+            of 1: [minZ(), maxZ(), -3072, -3073, -3072+160*64-1, -3072+160*64][rng.rand(5)]
+            else: rng.rand(-7000..11000)
+          check terrainHeight(x, z) == terrainHeightDirect(x, z)
+          check islandMargin(x, z) == islandMarginDirect(x, z)
+          let cell = terrainSample(x, z)
+          check cell.height.int == terrainHeightDirect(x, z) and cell.margin.int == islandMarginDirect(x, z)
+          inc checked
+        check checked == 20000
+      check terrainCacheResidentBlocks() > 0
   test "indexed obstacle tests equal full scans for every rules version":
     var rng = initRand(37)
     for version in [8, 12, 14, 22, 35, 37]:
@@ -104,6 +107,28 @@ suite "Training geometry caches":
         check w.lineClear(a, b) == w.directLineClear(a, b)
         check w.lineClear(a, b) == w.directLineClear(a, b) # memo hit
         check w.walkClear(a, b) == w.directWalkClear(a, b)
+  test "indexed obstacle tests equal full scans on every generated map":
+    var rng = initRand(41)
+    for name in MapNames:
+      configureMap(name)
+      let w = newWorld(2026, 240)
+      for _ in 0..<2000:
+        let p = point(rng.rand(minX()-300..maxX()+300), rng.rand(minZ()-300..maxZ()+300))
+        for radius in [0, Radius, 90]:
+          check w.blocked(p, radius) == directBlocked(w, p, radius)
+      var spots: seq[Point]
+      for c in w.cover: spots.add point(c.x.int+c.w.int div 2, c.z.int+c.w.int div 2+c.w.int div 2+Radius)
+      for cog in w.cogs: spots.add cog.pos
+      for h in w.controlHearts: spots.add h.pos
+      for _ in 0..<1500:
+        let a = if rng.rand(1) == 0: spots[rng.rand(spots.high)] else: point(rng.rand(minX()..maxX()), rng.rand(minZ()..maxZ()))
+        # Long rays too: sight on a generated map has no range cap.
+        let reach = if rng.rand(3) == 0: 4000 else: 700
+        let b = if rng.rand(1) == 0: spots[rng.rand(spots.high)] else: point(a.x.int+rng.rand(-reach..reach), a.z.int+rng.rand(-reach..reach))
+        check w.lineClear(a, b) == w.directLineClear(a, b)
+        check w.lineClear(a, b) == w.directLineClear(a, b) # memo hit
+        check w.walkClear(a, b) == w.directWalkClear(a, b)
+    configureMap("")
   test "navigation memo agrees with a fresh grid and full scans":
     configureRules(37)
     var rng = initRand(11)
