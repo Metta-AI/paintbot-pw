@@ -85,6 +85,8 @@ var
   camY = 0'f32
   firstPerson = false
   territoryOverlay = false
+  territoryNearest: seq[int16] ## per 200-unit overlay cell: nearest control heart, -1 off the island
+  territoryKey = (-2, -1, -1) ## (map, heart count, rules) territoryNearest was built for
   insetSize = 0.25'f32
   bars = true
   trails = false
@@ -359,17 +361,27 @@ proc heartSculpture(r: var ShapeRenderer, p, eye: Vec3, color: ColorRGBX,
   const rings = 8
   type Facet = tuple[a,b,c: Vec3, tint: ColorRGBX, depth: float32]
   var facets: seq[Facet]
+  # The leaned heart surface before spin, scale and placement, computed once.
+  var local {.global.}: array[2, array[rings+1, array[segments+1, Vec3]]]
+  var localReady {.global.} = false
+  if not localReady:
+    for s in 0..1:
+      for j in 0..rings:
+        for i in 0..segments:
+          let t=i.float32*2*PI.float32/segments.float32
+          let latitude=j.float32*PI.float32/(2*rings).float32
+          let radius=sin(latitude)
+          let x=1.5'f32*radius*pow(sin(t),3'f32)
+          let y=1.5'f32*radius*(13*cos(t)-5*cos(2*t)-2*cos(3*t)-cos(4*t))/17
+          let z=(s*2-1).float32*0.8'f32*cos(latitude)
+          # A gentle backwards lean shows the sculpted face from the arena camera.
+          local[s][j][i]=vec3(x,y*cos(0.45'f32)+z*sin(0.45'f32),-y*sin(0.45'f32)+z*cos(0.45'f32))
+    localReady=true
+  let spinCos=cos(spin)
+  let spinSin=sin(spin)
   proc vertex(i,j,side:int):Vec3 =
-    let t=i.float32*2*PI.float32/segments.float32
-    let latitude=j.float32*PI.float32/(2*rings).float32
-    let radius=sin(latitude)
-    let x=1.5'f32*radius*pow(sin(t),3'f32)
-    let y=1.5'f32*radius*(13*cos(t)-5*cos(2*t)-2*cos(3*t)-cos(4*t))/17
-    let z=side.float32*0.8'f32*cos(latitude)
-    # A gentle backwards lean shows the sculpted face from the arena camera.
-    let yy=y*cos(0.45'f32)+z*sin(0.45'f32)
-    let zz = -y*sin(0.45'f32)+z*cos(0.45'f32)
-    p+vec3(x*cos(spin)+zz*sin(spin),yy,-x*sin(spin)+zz*cos(spin))*scale
+    let q=local[(side+1) div 2][j][i]
+    p+vec3(q.x*spinCos+q.z*spinSin,q.y,-q.x*spinSin+q.z*spinCos)*scale
   proc facet(a,b,c:Vec3) =
     let center=(a+b+c)/3
     var normal=cross(b-a,c-a)
@@ -418,14 +430,15 @@ proc heartTower(r: var ShapeRenderer, base, eye: Vec3, color: ColorRGBX,
   let right=normalize(cross(vec3(0,1,0),front))
   let up=cross(front,right)
   # Layered translucent halos soften to nothing at the outer edge.
+  var rim: array[33, Vec3]
+  for i in 0..32:
+    let a=i.float32*2*PI.float32/32
+    rim[i]=right*cos(a)+up*sin(a)
   for layer in 0..<7:
     let radius=(2.15'f32-layer.float32*0.19)*(if big: 1.8'f32 else: 1'f32)
     let center=heart-front*0.85
     for i in 0..<32:
-      let a=i.float32*2*PI.float32/32
-      let b=(i+1).float32*2*PI.float32/32
-      r.addTriangle(center,center+(right*cos(a)+up*sin(a))*radius,
-        center+(right*cos(b)+up*sin(b))*radius,
+      r.addTriangle(center,center+rim[i]*radius,center+rim[i+1]*radius,
         rgbx(color.r,color.g,color.b,uint8(5+layer*2)))
   proc course(r:var ShapeRenderer,y,height,bottomRadius,topRadius:float32,tint:ColorRGBX,offset=0'f32) =
     let top=base+vec3(0,y+height,0)
@@ -484,18 +497,23 @@ proc spawnBeam(r: var ShapeRenderer, p: Vec3, color: ColorRGBX,
     r.gem(center,(0.065+(particle mod 3).float32*0.02)*fade,
       rgbx(255,245,220,uint8(254*fade)))
 
+let paintballSphere = block:
+  # Unit sphere lattice (7 latitudes x 11 longitudes) shared by every paintball.
+  var sphere: array[7, array[11, Vec3]]
+  for ring in 0..6:
+    let a = -PI.float32/2+PI.float32*ring.float32/6
+    for j in 0..10:
+      let c = 2*PI.float32*j.float32/10
+      sphere[ring][j] = vec3(cos(a)*cos(c), sin(a), cos(a)*sin(c))
+  sphere
 proc paintball(r: var ShapeRenderer, p: Vec3, radius: float32,
     color: ColorRGBX) =
   for ring in 0..<6:
-    let a = -PI.float32/2+PI.float32*ring.float32/6
-    let b = -PI.float32/2+PI.float32*(ring+1).float32/6
     for j in 0..<10:
-      let c = 2*PI.float32*j.float32/10
-      let d = 2*PI.float32*(j+1).float32/10
-      let p0 = p+vec3(cos(a)*cos(c), sin(a), cos(a)*sin(c))*radius
-      let p1 = p+vec3(cos(a)*cos(d), sin(a), cos(a)*sin(d))*radius
-      let p2 = p+vec3(cos(b)*cos(d), sin(b), cos(b)*sin(d))*radius
-      let p3 = p+vec3(cos(b)*cos(c), sin(b), cos(b)*sin(c))*radius
+      let p0 = p+paintballSphere[ring][j]*radius
+      let p1 = p+paintballSphere[ring][j+1]*radius
+      let p2 = p+paintballSphere[ring+1][j+1]*radius
+      let p3 = p+paintballSphere[ring+1][j]*radius
       let shade = 0.65+0.35*(ring.float32/6)
       let col = rgbx(uint8(color.r.float32*shade), uint8(color.g.float32*shade),
           uint8(color.b.float32*shade), if color.a==255:254'u8 else:color.a)
@@ -962,6 +980,24 @@ proc runGraphics*() =
       ## Near the camera view; crowd decorations and characters off screen are skipped.
       let q = vp * vec4(p.x, p.y+1, p.z, 1)
       q.w > 0 and abs(q.x) <= q.w*margin+1.5 and abs(q.y) <= q.w*margin+1.5
+    proc groundView(): array[4, int] =
+      ## The world rectangle the camera shows on the ground (with a margin for relief), or
+      ## the whole map when a screen corner looks above the horizon.
+      result = [minX(), minZ(), maxX(), maxZ()]
+      let inverse = vp.inverse
+      var lo = vec2(float32.high, float32.high)
+      var hi = vec2(float32.low, float32.low)
+      for c in [(-1'f32, -1'f32), (1'f32, -1'f32), (-1'f32, 1'f32), (1'f32, 1'f32)]:
+        let a = inverse*vec4(c[0], c[1], -1, 1)
+        let b = inverse*vec4(c[0], c[1], 1, 1)
+        let near = vec3(a.x, a.y, a.z)/a.w
+        let far = vec3(b.x, b.y, b.z)/b.w
+        if near.y <= 0 or far.y >= near.y: return
+        let g = near+(far-near)*(near.y/(near.y-far.y))
+        lo = vec2(min(lo.x, g.x), min(lo.y, g.z)); hi = vec2(max(hi.x, g.x), max(hi.y, g.z))
+      const Margin = 30'f32
+      result = [max(minX(), int((lo.x-Margin+32)*100)), max(minZ(), int((lo.y-Margin+20)*100)),
+        min(maxX(), int((hi.x+Margin+32)*100)), min(maxZ(), int((hi.y+Margin+20)*100))]
     if orderKind != 0:
       # Unproject the click into the same world coordinates used by bot commands.
       let inverse = vp.inverse
@@ -1056,7 +1092,9 @@ proc runGraphics*() =
     actors(); finishCharacters(scene)
     profMark(6)
     shapes.clear()
-    for trench in world.trenches: shapes.trenchCover(trench)
+    for trench in world.trenches:
+      if onScreen(position(point(trench.x.int+trench.w.int div 2, trench.z.int+trench.h.int div 2)), 1.4):
+        shapes.trenchCover(trench)
     # Low stone courses exactly match collision bounds; capstones and stripes read at a glance.
     # Paint splashes and short bursts follow recorded tags, so seeking reconstructs them.
     proc paintOut(p: Vec3, color: ColorRGBX, age, seed: float32) =
@@ -1083,6 +1121,7 @@ proc runGraphics*() =
       let age = world.tick.float32+alpha-event.tick.float32 +
         (if victory.active: victory.elapsed*TickRate.float32 else: 0)
       if event.kind != "tag" or (lens >= 0 and not seen(event.victim)): continue
+      if not onScreen(position(point(event.x, event.z)), 1.3): continue
       paintOut(position(point(event.x, event.z), 0.035),
         (if ffa(): kinColor(event.slot) else: teamColors[event.side]), age, event.slot.float32)
     if victory.active and world.winner >= 0:
@@ -1096,6 +1135,7 @@ proc runGraphics*() =
       let age=world.tick.float32+alpha-hit.tick.float32 +
         (if victory.active: victory.elapsed*TickRate.float32 else: 0)
       if age<0 or age>=14 or not seen(hit.victim):continue
+      if not onScreen(position(point(hit.x,hit.z)),1.3):continue
       let fade=1-age/14
       let center=(if world.cogs[hit.victim].hp>0:poses[hit.victim]
           else:position(point(hit.x,hit.z)))+vec3(0,1.3,0)
@@ -1116,7 +1156,7 @@ proc runGraphics*() =
           187, 111, 255))
     for itemId, item in world.pickups:
       if item.readyAt > world.tick: continue
-      if not pointSeen(item.pos): continue
+      if not pointSeen(item.pos) or not onScreen(position(item.pos), 1.3): continue
       if inspectedKind == 2 and inspectedId == itemId:
         shapes.addCircle(position(item.pos, 0.025), 1.25, rgbx(250,226,140,180))
       let special = item.kind in {grenadePickup,sprayPickup}
@@ -1145,7 +1185,7 @@ proc runGraphics*() =
 
     # Rules 38 glory hearts: small spinning gold hearts that blink out in their last five seconds.
     for heart in world.gloryHearts:
-      if not pointSeen(heart.pos): continue
+      if not pointSeen(heart.pos) or not onScreen(position(heart.pos), 1.3): continue
       let left = heart.expiresAt-world.tick
       if left < 5*TickRate and int(heartAnimationTime*6) mod 2 == 0: continue
       let pulse = 0.5+0.5*sin(heartAnimationTime*4)
@@ -1160,6 +1200,7 @@ proc runGraphics*() =
       shapes.gem(p, 0.4, rgbx(190, 211, 79, 254))
       shapes.addCircle(position(g.target, 0.05), 0.24, rgbx(192, 161, 85, 160))
     for b in world.blasts:
+      if not onScreen(position(b.pos), 1.4): continue
       let age=clamp((world.tick.float32+alpha-b.tick.float32)/24,0'f32,1'f32)
       let bloom=min(age/0.18,1'f32)
       let settle=clamp((age-0.18)/0.72,0'f32,1'f32)
@@ -1207,13 +1248,30 @@ proc runGraphics*() =
     when defined(pwViewerProfile): profMark(15)
     if world.controlHearts.len>0:
       if territoryOverlay:
-        for z in countup(minZ(),maxZ()-200,200):
-          for x in countup(minX(),maxX()-200,200):
-            let center=point(x+100,z+100)
-            if islandTerrain and islandMargin(center.x.int,center.z.int)<60:continue
-            var nearest=0
-            for i,h in world.controlHearts:
-              if distance2(center,h.pos)<distance2(center,world.controlHearts[nearest].pos):nearest=i
+        # Hearts never move: each cell's nearest heart is found once per map, and only the
+        # cells on screen are drawn (a big map has ~37,000 of them).
+        let cellsX=(maxX()-200-minX()) div 200+1
+        let cellsZ=(maxZ()-200-minZ()) div 200+1
+        let key=(activeMap(),world.controlHearts.len,replayRulesVersion)
+        if territoryKey!=key:
+          territoryKey=key
+          territoryNearest=newSeq[int16](cellsX*cellsZ)
+          for iz in 0..<cellsZ:
+            for ix in 0..<cellsX:
+              let center=point(minX()+ix*200+100,minZ()+iz*200+100)
+              var nearest=0
+              if islandTerrain and islandMargin(center.x.int,center.z.int)<60:nearest= -1
+              else:
+                for i,h in world.controlHearts:
+                  if distance2(center,h.pos)<distance2(center,world.controlHearts[nearest].pos):nearest=i
+              territoryNearest[iz*cellsX+ix]=nearest.int16
+        let view=groundView()
+        for iz in max(0,(view[1]-minZ()) div 200)..min(cellsZ-1,(view[3]-minZ()) div 200):
+          for ix in max(0,(view[0]-minX()) div 200)..min(cellsX-1,(view[2]-minX()) div 200):
+            let nearest=territoryNearest[iz*cellsX+ix].int
+            if nearest<0:continue
+            let x=minX()+ix*200
+            let z=minZ()+iz*200
             let owner=world.controlHearts[nearest].owner
             # FFA-kin owners are seats, coloured by family.
             let color=if owner<0:rgbx(150,155,160,55) elif ffa():kinColor(owner.int,85)
