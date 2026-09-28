@@ -308,11 +308,16 @@ int pw_elevation(void *handle, int32_t x, int32_t z);
  * elevation/800; see neural_actor.md), 101 = ffa.v1 "paintbot-pw.rules40.obs.ffa.v1.float810"
  * (FFA-kin; no map flip; offsets: self 0..7, identity row j at 8+42j, heart row i at
  * 680+6i, great heart row g at 740+6g, terrain block 752..809; neural_contract.nim
- * encodeFfaObservation documents every column; 3 stays unknown). NULL for any other
- * version or a bad max_ticks.
+ * encodeFfaObservation documents every column), 3 = v3
+ * "paintbot-pw.rules43.obs.v3.float514" = v2's 506 floats unchanged, then an 8-float
+ * scoreboard block from the seat's team's side {own lives left / 32, enemy lives left / 32,
+ * own glory / 1000, enemy glory / 1000, behind-in-lives award / 10, its period in seconds
+ * / 60, quiet-supplies award / 100, max(0, end_tick - tick) / max(1, end_tick)}
+ * (neural_contract.encodeScoreboardBlock; the teams game only: pw_set_game_mode refuses
+ * FFA-kin on a v3 handle). NULL for any other version or a bad max_ticks.
  * pw_observe / pw_observe_seats rows are then that many floats apart. The contract never
  * touches the world or its hash. pw_observation_size() stays 448;
- * pw_observation_size_for(version) = 448 / 506 / 810 (-1 unknown); pw_handle_observation_size
+ * pw_observation_size_for(version) = 448 / 506 / 514 / 810 (-1 unknown); pw_handle_observation_size
  * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
  * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
  * 0, or -1 bad args). */
@@ -330,6 +335,12 @@ int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, in
  * reads), zeros for every other seat. pw_handle_user_inputs = the handle's K;
  * pw_handle_observation_size = 506 + K; pw_user_inputs_contract_hash writes the v2u<K>
  * SHA-256 (0, or -1 bad args).
+ * pw_create_observation_inputs_v(seed, max_ticks, obs_version, user_inputs): the same with
+ * the base contract chosen, obs_version 2 = v2u<K> (identical to
+ * pw_create_observation_inputs) or 3 = v3u<K> "paintbot-pw.rules43.obs.v3u<K>" (v3's 514
+ * floats, then the K user-input floats; pw_handle_observation_size = 514 + K); K = 0 is
+ * pw_create_observation(.., obs_version). pw_user_inputs_contract_hash_v(obs_version,
+ * user_inputs, ...) writes the v2u<K> or v3u<K> SHA-256 (0, or -1 bad args).
  * pw_set_seat_policy_script: the seat runs a bundle's policy.bas under its manifest.json
  * exactly as the hosted neural seat does (decoder options, sampling, user inputs, action
  * contract; the seat's own sampling and strafe streams from the match seed and slot), with
@@ -352,6 +363,9 @@ int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, in
 void *pw_create_observation_inputs(int32_t seed, int32_t max_ticks, int32_t user_inputs);
 int pw_handle_user_inputs(void *handle);
 int pw_user_inputs_contract_hash(int32_t user_inputs, char *sixty_five_bytes, int32_t capacity);
+void *pw_create_observation_inputs_v(int32_t seed, int32_t max_ticks, int32_t obs_version, int32_t user_inputs);
+int pw_user_inputs_contract_hash_v(int32_t obs_version, int32_t user_inputs, char *sixty_five_bytes,
+    int32_t capacity);
 int pw_set_seat_policy_script(void *handle, int seat, const char *bas, int32_t bas_len,
     const char *manifest_json, int32_t manifest_len);
 int pw_step_logits(void *handle, const int32_t *actions, const float *logits, float *rewards,

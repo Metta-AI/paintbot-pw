@@ -74,6 +74,7 @@ nim r tests/test_actioncam.nim
 nim r tests/test_paintbot_camdirector.nim
 nim r -d:headless tests/test_paintbot_neural_contract.nim
 nim r -d:headless tests/test_paintbot_neural_obs_v2.nim
+nim r -d:headless tests/test_paintbot_neural_obs_v3.nim
 nim r -d:headless tests/test_paintbot_neural_obs_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim
@@ -94,6 +95,7 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_spray.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_weapon_stats.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v3.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map.nim

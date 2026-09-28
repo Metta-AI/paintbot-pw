@@ -452,9 +452,11 @@ proc parseUserInputs*(value: JsonNode): seq[int32] =
   if not sawInit: raise newException(ValueError, "user_inputs.init is required")
   if result.len != count: raise newException(ValueError, "user_inputs.init must have user_inputs.count entries")
 
-proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int) =
+proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int,
+    observationContract = ocV2) =
   ## The manifest's decoder options and user inputs onto the seat (nil manifest = none).
-  ## `userInputs` is the K the actor's (or handle's) observation contract names.
+  ## `userInputs` is the K the actor's (or handle's) observation contract names, and
+  ## `observationContract` that contract's base (v2 for v2u<K>, v3 for v3u<K>).
   var fireHold = false
   var fireHoldRadius = FireHoldRadius.int32
   var sampling: SamplingOptions
@@ -511,12 +513,13 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int) =
         raise newException(ValueError, "user_inputs need package schema 2")
       init = parseUserInputs(manifest["user_inputs"])
       sawInputs = true
+  let family = if observationContract == ocV3: "v3u" else: "v2u"
   if sawInputs and userInputs == 0:
-    raise newException(ValueError, "user_inputs need observation contract v2u<K>")
+    raise newException(ValueError, "user_inputs need observation contract v2u<K> or v3u<K>")
   if userInputs > 0 and not sawInputs:
-    raise newException(ValueError, "observation contract v2u" & $userInputs & " needs manifest user_inputs")
+    raise newException(ValueError, "observation contract " & family & $userInputs & " needs manifest user_inputs")
   if sawInputs and init.len != userInputs:
-    raise newException(ValueError, "user_inputs.count does not match observation contract v2u" & $userInputs)
+    raise newException(ValueError, "user_inputs.count does not match observation contract " & family & $userInputs)
   seat.fireHoldTeammates = fireHold
   seat.fireHoldRadius = fireHoldRadius
   seat.sampling = sampling
@@ -538,10 +541,19 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int) =
   seat.logits = newSeq[float32](LogitSize)
 
 proc observationFor(hash: string): (ObservationContractVersion, int) =
-  ## The encoder and user-input count an observation contract hash names: v1, v2, or
-  ## v2u<K> (= v2 + K); ValueError for anything else.
+  ## The encoder and user-input count an observation contract hash names: v1, v2, v3,
+  ## ffa.v1, v2u<K> (= v2 + K) or v3u<K> (= v3 + K); ValueError for anything else.
   let k = userInputsFromHash(hash)
-  if k > 0: (ocV2, k) else: (observationContractVersion(hash), 0)
+  if k > 0: return (ocV2, k)
+  let k3 = v3UserInputsFromHash(hash)
+  if k3 > 0: return (ocV3, k3)
+  (observationContractVersion(hash), 0)
+
+proc requireTeamsFor(observationContract: ObservationContractVersion) =
+  ## Observation contract v3 (and v3u<K>) reads the teams game's scoreboard: an FFA-kin
+  ## match refuses it at load, as it refuses the teams-only glory and vision options.
+  if observationContract == ocV3 and ffa():
+    raise newException(ValueError, "observation contract v3 is for the teams game only")
 
 proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
@@ -549,7 +561,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   if not fileExists(modelPath): return
   let actor = loadActorFile(modelPath)
   # Model metadata is authoritative even when running a local unpacked package. The
-  # observation contract hash selects the encoder (v1, or v2 = v1 + terrain block) and
+  # observation contract hash selects the encoder (v1; v2 = v1 + terrain block; v3 = v2 + scoreboard) and
   # fixes the input width; the action contract hash selects the decoder: v1 (identity
   # aim = body position) or v2 (lead-compensated identity aim); anything else is rejected.
   # Checks run in the order they always have (dimensions, then contracts), so a bundle
@@ -582,7 +594,8 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
     if manifest{"observation_contract"}.getStr != actor.observationContract or
         manifest{"action_contract"}.getStr != actor.actionContract:
       raise newException(ValueError, "package and actor contract mismatch")
-  result.configureSeat(manifest, userInputs)
+  requireTeamsFor(observationContract)
+  result.configureSeat(manifest, userInputs, observationContract)
   result.actor = actor
   result.contract = contract
   result.observationContract = observationContract
@@ -607,7 +620,8 @@ proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string)
   var contract: ActionContractVersion
   try: contract = actionContractVersion(manifest{"action_contract"}.getStr)
   except ValueError: raise newException(ValueError, "neural actor contract mismatch")
-  result.configureSeat(manifest, userInputs)
+  requireTeamsFor(observationContract)
+  result.configureSeat(manifest, userInputs, observationContract)
   result.contract = contract
   result.observationContract = observationContract
   result.observation = newSeq[float32](observationSize(observationContract) + userInputs)
@@ -665,7 +679,8 @@ proc ensureObservation(seat: NeuralSeat) =
   ## the unchanged pre-action world, so every encode of a tick is the same bytes).
   if seat.observationFresh: return
   if seat.userInputView.len > 0:
-    encodeObservationInputs(seat.world[], seat.slot, seat.observation, seat.bodiesFor(), seat.userInputView)
+    encodeObservationInputs(seat.world[], seat.slot, seat.observation, seat.bodiesFor(), seat.userInputView,
+      seat.observationContract)
   elif seat.observationContract == ocV1:
     encodeObservation(seat.world[], seat.slot, seat.observation, seat.bodiesFor())
   else:

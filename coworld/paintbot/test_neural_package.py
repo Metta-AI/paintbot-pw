@@ -13,7 +13,9 @@ from neural_package import (unpack_package, validate_aim_retarget, validate_shot
                             AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
                             MAX_SHOT_GATE_RANGE, validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS,
                             USER_INPUT_LIMIT, OBSERVATION_V2_SIZE, validate_pwnet2, attention_ops,
-                            MAX_NEURAL_OPERATIONS, PWNET2_LIMITS, USER_INPUTS_CONTRACT_HASHES, segment_near_ops)
+                            MAX_NEURAL_OPERATIONS, PWNET2_LIMITS, USER_INPUTS_CONTRACT_HASHES, segment_near_ops,
+                            OBSERVATION_V3_SIZE, OBSERVATION_CONTRACT_V3, OBSERVATION_CONTRACT_V3_HASH,
+                            v3_user_inputs_contract_id, V3_USER_INPUTS_CONTRACT_HASHES)
 import random
 import struct
 
@@ -29,6 +31,10 @@ def actor_bytes(inputs, observation_hash, hidden=64, outputs=82):
 
 def v2u_hash(k):
     return hashlib.sha256(user_inputs_contract_id(k).encode()).hexdigest()
+
+
+def v3u_hash(k):
+    return hashlib.sha256(v3_user_inputs_contract_id(k).encode()).hexdigest()
 
 
 def package(overrides=None, extra=None, model=b"neutral fixture"):
@@ -86,7 +92,8 @@ class PackageTests(unittest.TestCase):
         consts = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
         pairs = [("ObservationContract", "ObservationContractHash"), ("ActionContract", "ActionContractHash"),
                  ("ActionContractV2", "ActionContractV2Hash"), ("ObservationContractV2", "ObservationContractV2Hash"),
-                 ("ObservationContractFfaV1", "ObservationContractFfaV1Hash")]
+                 ("ObservationContractFfaV1", "ObservationContractFfaV1Hash"),
+                 ("ObservationContractV3", "ObservationContractV3Hash")]
         for name, hashed in pairs:
             self.assertEqual(consts[hashed], hashlib.sha256(consts[name].encode()).hexdigest(), name)
         self.assertEqual(consts["ActionContractV2"], "paintbot-pw.rules37.action.v2.51-25-2-2-2")
@@ -438,6 +445,7 @@ class UserInputTests(unittest.TestCase):
             unpack_package(self.inputs_package(64, observation=hashlib.sha256(user_inputs_contract_id(65).encode()).hexdigest()))
 
     def test_packages_without_user_inputs_are_unaffected(self):
+        # (v3, which checks its actor at staging, is in ObservationV3Tests.)
         # An ordinary contract hash with the model never parsed, exactly as before.
         _, model, _ = unpack_package(package({"schema": "paintbot-neural-basic/2"}))
         self.assertEqual(model, b"neutral fixture")
@@ -704,3 +712,76 @@ class Pwnet2Tests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ObservationV3Tests(unittest.TestCase):
+    """Observation contract v3 (v2 + an 8-float scoreboard) and v3u<K>; neural_host.nim holds the same rules."""
+
+    def v3_package(self, observation=None, inputs=OBSERVATION_V3_SIZE, actor_observation=None, user_inputs=None,
+                   schema="paintbot-neural-basic/2"):
+        observation = observation or OBSERVATION_CONTRACT_V3_HASH
+        overrides = {"schema": schema, "observation_contract": observation}
+        if user_inputs is not None:
+            overrides["user_inputs"] = user_inputs
+        return package(overrides, model=actor_bytes(inputs, actor_observation or observation))
+
+    def test_contract_id_hash_and_width_match_the_engine(self):
+        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
+        consts = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        self.assertEqual(consts["ObservationContractV3"], OBSERVATION_CONTRACT_V3)
+        self.assertEqual(consts["ObservationContractV3Hash"], OBSERVATION_CONTRACT_V3_HASH)
+        self.assertEqual(OBSERVATION_CONTRACT_V3, "paintbot-pw.rules43.obs.v3.float514")
+        self.assertEqual(OBSERVATION_CONTRACT_V3_HASH, "06f16d62adedda6995d393696c0d2ed257aa9380b86341e73d1d6a3c7ea374f1")
+        self.assertEqual(OBSERVATION_V3_SIZE, OBSERVATION_V2_SIZE + 8)
+        sizes = {name: int(value) for name, value in re.findall(r"^  (\w+)\* = (\d+)$", source, re.M)}
+        self.assertEqual(sizes["ScoreboardBlockSize"], 8)
+        # The v3u<K> table: each hash is the SHA-256 of its id, and none is a v2u<K> hash.
+        block = source[source.index("V3UserInputsContractHashes*"):]
+        block = block[block.index("= ["):]
+        hashes = re.findall(r'"([0-9a-f]{64})"', block[:block.index("]")])
+        self.assertEqual(hashes, [v3u_hash(k) for k in range(1, MAX_USER_INPUTS + 1)])
+        self.assertIn('"paintbot-pw.rules43.obs.v3u" & $k', source)
+        self.assertEqual(sorted(V3_USER_INPUTS_CONTRACT_HASHES.values()), list(range(1, 65)))
+        self.assertFalse(set(V3_USER_INPUTS_CONTRACT_HASHES) & set(USER_INPUTS_CONTRACT_HASHES))
+        self.assertEqual(v3u_hash(1), "8086b6f36b9c2cf07e9e6586e97221e484f809e08669075663c5dcf9cb63ac36")
+
+    def test_v3_accepted_with_a_514_input_actor(self):
+        for schema in ("paintbot-neural-basic/1", "paintbot-neural-basic/2"):
+            _, model, manifest = unpack_package(self.v3_package(schema=schema))
+            self.assertEqual(manifest["observation_contract"], OBSERVATION_CONTRACT_V3_HASH)
+            self.assertEqual(int.from_bytes(model[12:16], "little"), 514)
+
+    def test_v3_rejects_a_wrong_actor(self):
+        with self.assertRaisesRegex(ValueError, "input count must be 514 for observation contract v3"):
+            unpack_package(self.v3_package(inputs=OBSERVATION_V2_SIZE))
+        with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
+            unpack_package(self.v3_package(actor_observation=hashlib.sha256(b"paintbot-pw.rules37.obs.v2.float506").hexdigest()))
+        with self.assertRaisesRegex(ValueError, "invalid neural actor magic"):
+            unpack_package(package({"observation_contract": OBSERVATION_CONTRACT_V3_HASH}))
+        with self.assertRaisesRegex(ValueError, "user_inputs need observation contract v2u<K> or v3u<K>"):
+            unpack_package(self.v3_package(user_inputs={"count": 1, "init": [0]}))
+
+    def test_v3u_accepted_for_every_k(self):
+        for k in (1, 3, 32, 63, 64):
+            _, _, manifest = unpack_package(self.v3_package(observation=v3u_hash(k), inputs=OBSERVATION_V3_SIZE + k,
+                                                            user_inputs={"count": k, "init": [7] * k}))
+            self.assertEqual(manifest["user_inputs"]["count"], k)
+
+    def test_v3u_rules_mirror_v2u(self):
+        with self.assertRaisesRegex(ValueError, "observation contract v3u3 needs manifest user_inputs"):
+            unpack_package(self.v3_package(observation=v3u_hash(3), inputs=517))
+        with self.assertRaisesRegex(ValueError, "does not match observation contract v3u3"):
+            unpack_package(self.v3_package(observation=v3u_hash(3), inputs=517, user_inputs={"count": 2, "init": [0, 0]}))
+        with self.assertRaisesRegex(ValueError, "input count must be 517 for 3 user inputs"):
+            unpack_package(self.v3_package(observation=v3u_hash(3), inputs=OBSERVATION_V2_SIZE + 3,
+                                           user_inputs={"count": 3, "init": [0, 0, 0]}))
+        with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
+            unpack_package(self.v3_package(observation=v3u_hash(3), inputs=517, actor_observation=v2u_hash(3),
+                                           user_inputs={"count": 3, "init": [0, 0, 0]}))
+        with self.assertRaisesRegex(ValueError, "need package schema 2"):
+            unpack_package(self.v3_package(observation=v3u_hash(3), inputs=517, schema="paintbot-neural-basic/1",
+                                           user_inputs={"count": 3, "init": [0, 0, 0]}))
+        # v2u<K> keeps v2's width: a v2u3 manifest over a 517-input actor is refused as before.
+        with self.assertRaisesRegex(ValueError, "input count must be 509 for 3 user inputs"):
+            unpack_package(self.v3_package(observation=v2u_hash(3), inputs=517, user_inputs={"count": 3, "init": [0, 0, 0]}))
+
