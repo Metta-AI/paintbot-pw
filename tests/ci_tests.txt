@@ -1,8 +1,8 @@
 # CI test manifest. To add a new CI test, add it to tests/ci_tests.txt (this file).
 #
-# .github/workflows/build.yml runs these on every push and PR, on ubuntu-latest and
-# macos-latest (and on windows-latest through windows.yml), split across parallel shards by
-# tests/run_ci_shard.py. Each line is one command, run from the repository root with no shell,
+# .github/workflows/build.yml runs these on every push and PR on ubuntu-latest (and on
+# macos-latest and windows-latest through macos.yml and windows.yml), split across parallel
+# shards by tests/run_ci_shard.py. Each line is one command, run from the repository root with no shell,
 # so write it the same way on every OS (no pipes, redirects, globs or env assignments).
 #
 # Optional tags go in square brackets before the command:

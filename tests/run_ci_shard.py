@@ -231,12 +231,14 @@ def check(commands, shards, durations, workflow):
 
 
 def command_env(c, args):
-    """The environment for one command. With CI_NIMCACHE_ROOT set (POSIX only), a `nim` command
+    """The environment for one command. With CI_NIMCACHE_ROOT set (POSIX only), each command
     gets its own XDG_CACHE_HOME under it, so Nim keeps that command's nimcache in a directory no
-    other command (or flag set) shares, and CI can cache the whole root between runs. The
-    command's text and flags are unchanged."""
+    other command (or flag set) shares, including nim builds a python test starts itself; CI
+    caches the whole root between runs, and concurrent commands (--jobs) never build into the
+    same directory. The command's text and flags are unchanged. Without it (Windows), commands
+    share Nim's default nimcache, so run them with --jobs 1."""
     root = os.environ.get("CI_NIMCACHE_ROOT")
-    if not root or os.name == "nt" or args[0] != "nim":
+    if not root or os.name == "nt":
         return None
     key = hashlib.sha1(f"{c.cwd}\0{c.command}".encode()).hexdigest()[:16]
     return {**os.environ, "XDG_CACHE_HOME": str(Path(root) / key)}
@@ -297,6 +299,10 @@ def run_shard(commands, shard, shards, durations, jobs=1):
         else:
             runnable.append(c)
     label = lambda c: c.command + (f"  (in {c.cwd})" if c.cwd else "")
+    if jobs > 1 and (os.name == "nt" or not os.environ.get("CI_NIMCACHE_ROOT")):
+        print("no per-command nimcache (CI_NIMCACHE_ROOT unset or Windows): running one at a time",
+              flush=True)
+        jobs = 1
     if jobs > 1:
         pool = sorted((c for c in runnable if not c.serial),
                       key=lambda c: (-durations.get(c.command, DEFAULT_SECONDS), c.index))
