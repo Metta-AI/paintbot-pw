@@ -85,7 +85,7 @@ proc setTick(value: cint) {.exportc: "pw_seek", cdecl,
 proc saveLiveRecording() {.exportc: "pw_save", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   if not replayMode:
-    saveReplayFile("/human.replay", "paintbot_pw", replayRulesVersion.uint16, recording)
+    saveRecording("/human.replay", recording)
 proc chargeGrenade(held: cint) {.exportc: "pw_charge", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   setGrenadeCharge(held != 0 and options.playerSlot > 0 and not replayMode and not transport.inHistory)
@@ -1015,7 +1015,8 @@ proc runGraphics*() =
             for i,h in world.controlHearts:
               if distance2(center,h.pos)<distance2(center,world.controlHearts[nearest].pos):nearest=i
             let owner=world.controlHearts[nearest].owner
-            let color=if owner<0:rgbx(150,155,160,55) else:rgbx(teamColors[owner].r,teamColors[owner].g,teamColors[owner].b,85)
+            # FFA-kin owners are seats; until the viewer colours kin, they draw neutral here.
+            let color=if owner notin 0..1:rgbx(150,155,160,55) else:rgbx(teamColors[owner].r,teamColors[owner].g,teamColors[owner].b,85)
             shapes.addQuad(position(point(x,z),0.09),position(point(x,z+200),0.09),
               position(point(x+200,z+200),0.09),position(point(x+200,z),0.09),color)
       for index, heart in world.controlHearts:
