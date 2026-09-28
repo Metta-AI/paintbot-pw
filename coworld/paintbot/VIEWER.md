@@ -55,13 +55,13 @@ top cog and family. HUD maths live in `coworld/paintbot/kinhud.js`
 
 ## Build
 
-Check out `Metta-AI/polyworld-data` beside this repository as `polyworld_data` at the revision in `coworld/assets.json`, or set `POLYWORLD_DATA`. Run `python3 coworld/tools/sync_dependencies.py`, then:
+Check out `Metta-AI/polyworld_art` beside this repository as `polyworld_art` at the revision in `coworld/assets.json`, or set `POLYWORLD_ART`. Run `python3 coworld/tools/sync_dependencies.py`, then:
 
 ```
 coworld/paintbot/tools/build_replay_viewer.sh "$PWD/tmp/viewer"
 ```
 
-The bundle contains its fonts, portrait, textures and models; it needs no external CDN. The native graphical executable also needs `python3 coworld/paintbot/tools/build_cover.py` before launch from the repository root.
+The bundle contains its fonts, portrait, textures and models; it needs no external CDN. The native graphical executable reads the same prebuilt CC0 models from the public art checkout. See [Paintbot art](../../docs/paintbot-art.md) for provenance and authoring details.
 
 ## Verification
 

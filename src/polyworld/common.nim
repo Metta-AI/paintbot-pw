@@ -1,14 +1,11 @@
-## Shared paths and constants for Polyworld.
-## Native games load assets from the sibling polyworld_data folder.
-## Wasm packs that folder at /polyworld_data.
+import std/os
 
 const
   DataRoot* =
     when defined(emscripten):
-      "/polyworld_data"
+      "/polyworld_art"
     else:
-      "../polyworld_data"
-  # Generated files that do not belong in polyworld_data.
+      getEnv("POLYWORLD_ART", "../polyworld_art")
   TmpRoot* =
     when defined(emscripten):
       "/tmp"

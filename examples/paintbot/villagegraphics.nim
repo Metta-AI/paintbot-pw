@@ -1,21 +1,19 @@
-## Heartleaf's Golden Valley and Enchanted Meadow art, fitted to solid lots.
-import std/[math, sequtils]
+## CC0 village props and generated woodland fitted to solid lots.
+import std/math
 import vmath
-import polyworld/[common, quadterrain]
-import sim, village
+import polyworld/quadterrain
+import scenery, sim, village
 
-proc placeMapScenery*() =
+proc placeMapScenery*(scenery: Scenery) =
   ## Rules 41 maps: every round cover lot gets the prop its kind names, sized to its
   ## footprint; a mirrored pair faces opposite ways.
-  let pack = loadPropPack(when defined(emscripten): "/round-village.glb" else: "tmp/round-village.glb",
-      unitHeight = false, textured = false)
-  let grove = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/vegetation.glb",
-      unitHeight = true, textured = true, maxTextureSize = 512, only = @["tree_01a","tree_02a","tree_03a","tree_04a","tree_05a","tree_06a","bush_01a","bush_02a","flower_bush_01a","flower_bush_02a","flowers_patch_01a","flowers_patch_02a","flowers_patch_03a"])
-  let rocks = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/rocks.glb",
-      unitHeight = true, textured = true, maxTextureSize = 512, only = @["rock_medium_01a","rock_medium_02a","rock_medium_03a"])
-  let trees = ["tree_01a", "tree_02a", "tree_03a", "tree_04a", "tree_05a", "tree_06a"]
-  let bushes = ["bush_01a", "bush_02a", "flower_bush_01a", "flower_bush_02a"]
-  let houses = ["round-cottage", "mushroom-house", "stump-house", "spiral-house"]
+  let
+    pack = scenery.homes
+    grove = scenery.plants
+    rocks = scenery.rocks
+    trees = TreeNames
+    bushes = BushNames
+    houses = HouseNames
   for i, c in currentMap().cover:
     let k = i div 2
     let r = c.w.float32/200
@@ -30,24 +28,23 @@ proc placeMapScenery*() =
       else:
         grove.placeProp(trees[k mod trees.len], p, turn, 3.5+(k mod 5).float32*0.55)
       if k mod 3 == 0:
-        grove.placeProp("flowers_patch_0" & $(1+k mod 3) & "a", p+vec3(0.8, 0, 0.5), turn, 0.8)
+        scenery.details.placeProp(FlowerNames[(1+k mod 3 - 1) mod 3], p+vec3(0.8, 0, 0.5), turn, 0.8)
     of mapHouse:
       pack.placeProp(houses[k mod houses.len], p, turn, r)
     of mapProp:
       if k mod 2 == 0: pack.placeProp("round-garden", p, turn, r)
       else: grove.placeProp(bushes[k mod bushes.len], p, turn, r*2.2)
     of mapRock:
-      rocks.placeProp("rock_medium_0" & $(1+k mod 3) & "a", p, turn, r*1.9)
+      rocks.placeProp(RockNames[k mod 3], p, turn, r*1.9)
 
-proc placeRoundVillage*() =
-  let pack = loadPropPack(when defined(emscripten): "/round-village.glb" else: "tmp/round-village.glb",
-      unitHeight = false, textured = false)
-  let grove = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/vegetation.glb",
-      unitHeight = true, textured = true, maxTextureSize = 512, only = @["tree_01a","tree_02a","tree_03a","tree_04a","tree_05a","tree_06a","bush_01a","bush_02a","flower_bush_01a","flower_bush_02a","flowers_patch_01a","flowers_patch_02a","flowers_patch_03a","ivy_01a"])
-  let rocks = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/rocks.glb",
-      unitHeight = true, textured = true, maxTextureSize = 512, only = @["rock_medium_01a","rock_medium_02a","rock_medium_03a"])
-  let trees = ["tree_01a", "tree_02a", "tree_03a", "tree_04a", "tree_05a", "tree_06a"]
-  let bushes = ["bush_01a", "bush_02a", "flower_bush_01a", "flower_bush_02a"]
+proc placeRoundVillage*(scenery: Scenery) =
+  ## Places CC0 cottages, generated woodland, and original flower patches.
+  let
+    pack = scenery.homes
+    grove = scenery.plants
+    rocks = scenery.rocks
+    trees = TreeNames
+    bushes = BushNames
   proc at(x, z: float32): Vec3 =
     vec3(x/100-32, (if visionRulesVersion >= 9: terrainHeight(x.int,
         z.int).float32/100 else: 0'f32), z/100-20)
@@ -64,12 +61,12 @@ proc placeRoundVillage*() =
       if i != 1:
         for j in 0..<3:
           let a=j.float32*2.1
-          grove.placeProp("flowers_patch_0" & $(j+1) & "a",
+          scenery.details.placeProp(FlowerNames[(j+1 - 1) mod 3],
               p+vec3(cos(a)*r*0.65,r*1.65,sin(a)*r*0.65),a,0.38)
       # Trailing moss and flower beds soften the foundations.
       for j in 0..<4:
         let a = j.float32*1.6+i.float32
-        grove.placeProp("flowers_patch_0" & $(1+j mod 3) & "a",
+        scenery.details.placeProp(FlowerNames[(1+j mod 3 - 1) mod 3],
             p+vec3(cos(a)*r, 0, sin(a)*r), a, 0.38)
     elif i in [2, 3, 8, 9, 12, 13]:
       let treeIndex = [2, 3, 8, 9, 12, 13].find(i)
@@ -78,13 +75,13 @@ proc placeRoundVillage*() =
       grove.placeProp(bushes[treeIndex mod 4], p, treeIndex.float32, r*1.8)
       for j in 0..<5:
         let a = i.float32+j.float32*1.3
-        grove.placeProp("flowers_patch_0" & $(1+j mod 3) & "a",
+        scenery.details.placeProp(FlowerNames[(1+j mod 3 - 1) mod 3],
             p+vec3(cos(a)*r, 0, sin(a)*r), a, 0.6)
     elif i in [6, 7]:
       pack.placeProp("round-garden", p, i.float32, r)
     else:
       grove.placeProp(bushes[(i-10) mod 4], p, i.float32, r*2.2)
-      grove.placeProp("flowers_patch_0" & $(1+i mod 3) & "a", p, 0, r*0.5)
+      scenery.details.placeProp(FlowerNames[(1+i mod 3 - 1) mod 3], p, 0, r*0.5)
   if visionRulesVersion >= 9:
     # Mossy exposed stone on terrace banks. Ramp mouths remain clear.
     for side in 0..1:
@@ -94,8 +91,8 @@ proc placeRoundVillage*() =
         let px = if side == 0: x else: 6400-x
         let pz = if side == 0: z else: 4000-z
         let p = vec3(px.float32/100-32, 0.25, pz.float32/100-20)
-        rocks.placeProp("rock_medium_0" & $(1+j mod 3) & "a", p, j.float32, 2.2)
-        grove.placeProp("ivy_01a", p+vec3(0, 1.5, 0), j.float32, 1.1)
+        rocks.placeProp(RockNames[j mod 3], p, j.float32, 2.2)
+        scenery.details.placeProp("eave_clover", p+vec3(0, 1.5, 0), j.float32, 1.1)
   # Distinct broadleaf silhouettes break up the conifer boundary.
   for i in 0..<6:
     let x = 700+i*1000
@@ -105,7 +102,7 @@ proc placeRoundVillage*() =
   for i in 0..<38:
     let x = 350+(i*157 mod 5600)
     let z = if i mod 2 == 0: 100+(i*31 mod 130) else: 3750+(i*17 mod 100)
-    grove.placeProp("flowers_patch_0" & $(1+i mod 3) & "a", at(x.float32,
+    scenery.details.placeProp(FlowerNames[(1+i mod 3 - 1) mod 3], at(x.float32,
         z.float32), i.float32, 0.5)
 
   if wilderness:
@@ -124,80 +121,54 @@ proc placeRoundVillage*() =
       else:
         grove.placeProp(trees[i mod trees.len],p,i.float32*0.7,3.5+(i mod 5).float32*0.55)
       if i mod 3==0:
-        grove.placeProp("flowers_patch_0" & $(1+i mod 3) & "a",p+vec3(0.8,0,0.5),i.float32,0.8)
+        scenery.details.placeProp(FlowerNames[(1+i mod 3 - 1) mod 3],p+vec3(0.8,0,0.5),i.float32,0.8)
 
-proc placeVillage*(world: World) =
-  let homes = loadPropPack(DataRoot & "/terrain/toon_golden_valley/presets.glb",
-      unitHeight = false, textured = true, only = @["house_02", "house_03", "bakery"])
-  let props = loadPropPack(DataRoot & "/terrain/toon_golden_valley/props.glb",
-      unitHeight = false, textured = true, only = @["well_01a",
-          "wood_barrel_01a", "wood_crate_01a"])
-  let meadow = loadPropPack(DataRoot & "/terrain/toon_enchanted_meadow/props.glb",
-      unitHeight = false, textured = true, only = @["wood_cart_01a",
-          "flower_pot_01a"])
-  let vegetables = loadPropPack(DataRoot & "/terrain/low_poly_village.glb",
-      unitHeight = true, textured = true, only = @["carrot1", "tomato1"])
-  let greenery = loadPropPack(DataRoot &
-      "/terrain/toon_enchanted_meadow/vegetation.glb", unitHeight = true,
-      textured = true,
-      only = @["flowers_patch_01a", "flowers_patch_02a", "mushroom_01a",
-          "mushroom_03a"])
-  proc fit(pack: PropPack, name: string, c: Cover, height: float32,
+proc placeVillage*(world: World, scenery: Scenery) =
+  ## Fits our cottages and market props to historical replay obstacles.
+  proc fit(pack: PropPack, name: string, cover: Cover, height: float32,
       reversed: bool) =
-    let dims = pack.propDimensions(name)
-    pack.placeProp(name, vec3((c.x.float32+c.w.float32/2)/100-32, 0,
-        (c.z.float32+c.h.float32/2)/100-20),
-        if reversed: PI.float32 else: 0'f32, 1, vec3(1, 1, 1),
-        vec3(c.w.float32/100/dims.x, height/dims.y, c.h.float32/100/dims.z))
-  for i, c in world.cover:
-    let kind = if i div 2 < VillageLots.len: VillageLots[
-        i div 2].kind else: well
-    let reverse = i mod 2 == 1
+    ## Preserves the recorded obstacle footprint while replacing its artwork.
+    let dimensions = pack.propDimensions(name)
+    pack.placeProp(
+      name,
+      vec3((cover.x.float32 + cover.w.float32 / 2) / 100 - 32, 0,
+        (cover.z.float32 + cover.h.float32 / 2) / 100 - 20),
+      if reversed: PI.float32 else: 0.0'f,
+      1,
+      vec3(1),
+      vec3(cover.w.float32 / 100 / dimensions.x, height / dimensions.y,
+        cover.h.float32 / 100 / dimensions.z)
+    )
+  for i, cover in world.cover:
+    let
+      kind =
+        if i div 2 < VillageLots.len: VillageLots[i div 2].kind
+        else: well
+      reversed = i mod 2 == 1
     case kind
     of cottage:
-      fit(homes, if i div 2 mod 2 == 0: "house_02" else: "house_03", c, 5.2, reverse)
-    of bakery: fit(homes, "bakery", c, 5.8, reverse)
+      fit(scenery.homes, HouseNames[i div 2 mod 4], cover, 5.2, reversed)
+    of bakery:
+      fit(scenery.homes, "mushroom-house", cover, 5.8, reversed)
     of gardenWall:
-      # Timber raised beds fill the same solid footprints as the village walls.
-      fit(props, "wood_crate_01a", c, 0.7, reverse)
-      let alongX = c.w > c.h
-      let count = max(c.w, c.h).int div 65
-      for n in 0..<count:
-        for row in 0..1:
-          let along = 35'f32+n.float32*65
-          let across = 25'f32+row.float32*40
-          let x = c.x.float32+(if alongX: along else: across)
-          let z = c.z.float32+(if alongX: across else: along)
-          vegetables.placeProp(if i div 2 mod 2 == 0: "carrot1" else: "tomato1",
-              vec3(x/100-32, 0.68, z/100-20), 0, 0.7)
-
-    of cart: fit(meadow, "wood_cart_01a", c, 1.8, reverse)
+      fit(scenery.homes, "round-garden", cover, 0.7, reversed)
+    of cart:
+      fit(scenery.details, "market", cover, 1.8, reversed)
     of supplies:
-      # A filled stack keeps the whole rectangular obstacle visibly occupied.
-      fit(props, "wood_crate_01a", c, 1.35, reverse)
-      let top = Cover(x: c.x+35, z: c.z+35, w: c.w-70, h: c.h-70)
-      let dim = props.propDimensions("wood_barrel_01a")
-      props.placeProp("wood_barrel_01a", vec3((
-          top.x+top.w div 2).float32/100-32, 1.35, (
-              top.z+top.h div 2).float32/100-20), 0, 1,
-          vec3(1, 1, 1), vec3(top.w.float32/100/dim.x, 0.9/dim.y,
-              top.h.float32/100/dim.z))
-    of well: fit(props, "well_01a", c, 2.8, false)
-  # Outskirts are scenic: these pots sit beyond the arena boundary.
-  for x in [-26'f32, -13, 0, 13, 26]:
-    for z in [-22'f32, 22]:
-      meadow.placeProp("flower_pot_01a", vec3(x, 0, z), 0, 0.7)
-
-  # Low flowers are walkable, like the terrain grass; tall decoration stays outside.
-  for side in 0..1:
-    for j in 0..<9:
-      let x = 13.0'f32 + j.float32 * 0.65
-      let z = 10.1'f32
-      let p = if side == 0: vec3(x-32, 0, z-20) else: vec3(32-x, 0, 20-z)
-      greenery.placeProp(if j mod 2 == 0: "flowers_patch_01a" else: "flowers_patch_02a",
-          p, j.float32, 0.35)
-    for j in 0..<7:
-      let x = -27'f32+j.float32*8
-      let z = if side == 0: -21.5'f32 else: 21.5'f32
-      greenery.placeProp(if j mod 2 == 0: "mushroom_01a" else: "mushroom_03a",
-          vec3(x, 0, z), j.float32, 0.9+0.2*(j mod 3).float32)
+      fit(scenery.details, "beehive", cover, 1.8, reversed)
+    of well:
+      fit(scenery.well, "Well", cover, 2.8, reversed)
+  for x in [-26.0'f, -13, 0, 13, 26]:
+    for z in [-22.0'f, 22]:
+      scenery.details.placeProp("bucket_planter", vec3(x, 0, z), 0, 0.7)
+  for side in 0 .. 1:
+    for j in 0 ..< 9:
+      let
+        x = 13.0'f + j.float32 * 0.65'f
+        z = 10.1'f
+        position =
+          if side == 0: vec3(x - 32, 0, z - 20)
+          else: vec3(32 - x, 0, 20 - z)
+      scenery.details.placeProp(
+        FlowerNames[j mod 3], position, j.float32, 0.35
+      )

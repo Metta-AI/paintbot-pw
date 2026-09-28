@@ -14,9 +14,9 @@ if output.is_symlink():
     raise SystemExit('Replay bundle output must not be a symlink')
 PYSAFE
 export POLYWORLD_DEPS="${POLYWORLD_DEPS:-$repo_dir/tmp/coworld/deps}"
-export POLYWORLD_DATA="${POLYWORLD_DATA:-$repo_dir/../polyworld_data}"
+export POLYWORLD_ART="${POLYWORLD_ART:-$repo_dir/../polyworld_art}"
 python3 "$repo_dir/coworld/tools/sync_dependencies.py"
-python3 - "$repo_dir" "$POLYWORLD_DATA" <<'PY'
+python3 - "$repo_dir" "$POLYWORLD_ART" <<'PY'
 import json, subprocess, sys
 from pathlib import Path
 root, data = map(Path, sys.argv[1:])

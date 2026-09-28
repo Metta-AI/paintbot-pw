@@ -3,11 +3,6 @@
 # Destination: Metta-AI/paintbot-pw/.github/workflows/deploy.yml
 #
 # Required repository secrets:
-#   POLYWORLD_DATA_DEPLOY_KEY  read-only SSH deploy key for the PRIVATE repo Metta-AI/polyworld-data.
-#                              Needed even for dry runs: the replay-viewer build hook
-#                              (coworld/paintbot/tools/build_replay_viewer.sh) compiles the viewer
-#                              with emscripten and preloads art from that repo, pinned in
-#                              coworld/assets.json. `coworld build` always runs that hook.
 #   SOFTMAX_TOKEN              Softmax platform bearer token. Only read when dry_run is false.
 #
 # Triggers: a manual dispatch (version typed in, dry run by default), or automatically when
@@ -16,9 +11,7 @@
 # (tests, CI, the deploy log, the other Polyworld games). Every successful upload tags the
 # commit it shipped as coworld-v<version>; the newest such tag is "the last deploy".
 #
-# Layout mirrors build.yml: this repo is checked out into ./paintbot-pw so the art repo can sit
-# beside it at ./polyworld_data, which is where the hook and build_round_village.py look for it
-# (build_round_village.py hard-codes <repo>/../polyworld_data and ignores POLYWORLD_DATA).
+# The public CC0 art checkout sits beside the source at ./polyworld_art.
 name: Deploy Coworld
 # The display title carries the inputs (the runs API does not expose them), so the duplicate
 # guard below and `gh run list` can tell "0.3.36 upload" from "0.3.36 dry run" without opening logs.
@@ -143,16 +136,11 @@ jobs:
 
       - name: Validate inputs
         env:
-          POLYWORLD_DATA_DEPLOY_KEY: ${{ secrets.POLYWORLD_DATA_DEPLOY_KEY }}
           SOFTMAX_TOKEN: ${{ secrets.SOFTMAX_TOKEN }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
             echo "::error::version must be dotted numbers (e.g. 0.3.20), got: $VERSION"
-            exit 1
-          fi
-          if [ -z "$POLYWORLD_DATA_DEPLOY_KEY" ]; then
-            echo "::error::POLYWORLD_DATA_DEPLOY_KEY secret is not set. The replay viewer cannot be built without Metta-AI/polyworld-data."
             exit 1
           fi
           if [ "$DRY_RUN" != "true" ]; then
@@ -222,17 +210,17 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           assets = json.load(open("coworld/assets.json"))
-          assert assets["repository"].rstrip("/").removesuffix(".git").endswith("Metta-AI/polyworld-data"), assets
+          assert assets["repository"].rstrip("/").removesuffix(".git").endswith("Metta-AI/polyworld_art"), assets
           print(f"revision={assets['revision']}")
           PY
 
-      - name: Check out Polyworld art (private, pinned)
+      - name: Check out Polyworld art (public, pinned)
         uses: actions/checkout@v5
         with:
-          repository: Metta-AI/polyworld-data
+          repository: Metta-AI/polyworld_art
           ref: ${{ steps.assets.outputs.revision }}
-          path: polyworld_data
-          ssh-key: ${{ secrets.POLYWORLD_DATA_DEPLOY_KEY }}
+          path: polyworld_art
+          lfs: true
           persist-credentials: false
 
       - uses: treeform/setup-nim-action@v6
@@ -307,7 +295,7 @@ jobs:
           set -euo pipefail
           # shellcheck disable=SC1091
           source "$RUNNER_TEMP/emsdk/emsdk_env.sh" >/dev/null
-          export POLYWORLD_DATA="$GITHUB_WORKSPACE/polyworld_data"
+          export POLYWORLD_ART="$GITHUB_WORKSPACE/polyworld_art"
           export POLYWORLD_DEPS="$GITHUB_WORKSPACE/paintbot-pw/tmp/coworld/deps"
           command -v emcc nim docker python3
           coworld build --project "$COWORLD_PROJECT" --version "$VERSION"
@@ -376,7 +364,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coworld-${{ env.VERSION || 'auto' }}
-          # Deliberately not the replay-viewer bundle: it embeds art from the private polyworld-data repo.
+          # Keep compact deployment records; the public art has its own repository.
           path: |
             paintbot-pw/coworld/paintbot/dist/coworld_manifest.json
             ${{ runner.temp }}/certify.log

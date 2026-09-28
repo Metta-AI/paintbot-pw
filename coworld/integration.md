@@ -27,7 +27,7 @@ coworld build --project coworld/cta --version 2026.9.9.3
 `nimby.lock` pins ordinary dependencies. `coworld/dependencies.lock` pins the same
 revisions plus optional Mummy. `sync_dependencies.py --latest` resolves upstream
 HEADs and updates both locks; ordinary builds never update revisions implicitly.
-The build hook validates the asset commit in `coworld/assets.json`. `POLYWORLD_DATA`
+The build hook validates the asset commit in `coworld/assets.json`. `POLYWORLD_ART`
 can point at a checkout of that revision. Per-game `webdata.txt` files include only
 selected models, their referenced textures, and the assets loaded by each renderer.
 Run `select_assets.py` after changing those dependencies or asset references.

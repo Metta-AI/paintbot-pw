@@ -8,7 +8,7 @@ proc setupEmscripten*(exampleDir: string) =
   when defined(emscripten):
     let
       repoDir = exampleDir / ".." / ".."
-      dataDir = getEnv("POLYWORLD_DATA", repoDir / ".." / "polyworld_data")
+      dataDir = getEnv("POLYWORLD_ART", repoDir / ".." / "polyworld_art")
       outputDir = exampleDir / "emscripten"
       shellFile = repoDir / "src" / "polyworld" /
         (if defined(replayViewer): "replay.html" else: "emscripten.html")
@@ -17,7 +17,7 @@ proc setupEmscripten*(exampleDir: string) =
         ""
       else:
         "--pre-js " & repoDir / "src" / "polyworld" / "webinputs.js"
-    var preload = "--preload-file " & dataDir & "@/polyworld_data"
+    var preload = "--preload-file " & dataDir & "@/polyworld_art"
     let selection = exampleDir / "webdata.txt"
     if fileExists(selection):
       preload = ""
@@ -28,7 +28,7 @@ proc setupEmscripten*(exampleDir: string) =
         if not fileExists(dataDir / name) and not dirExists(dataDir / name):
           raise newException(ValueError, "Missing replay asset: " & name)
         preload.add " --preload-file " & dataDir / name &
-          "@/polyworld_data/" & name
+          "@/polyworld_art/" & name
     if not dirExists(outputDir):
       mkDir(outputDir)
     switch("nimcache", outputDir / "tmp")

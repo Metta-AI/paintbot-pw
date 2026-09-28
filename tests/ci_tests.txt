@@ -119,3 +119,7 @@ python coworld/paintbot/tools/make_jev_baseline.py --check
 # Heartland kinship evals: ffa_blind.bas is current, every kin_eval.py suite runs (2 short
 # episodes), and replay-recomputed pair counters equal the live ones. Multiprocessing + ctypes.
 [posix-only] python tools/test_kin_eval.py
+
+# Original art geometry and the release provenance gate.
+nim r tests/test_paintbot_art.nim
+python tests/test_paintbot_art.py

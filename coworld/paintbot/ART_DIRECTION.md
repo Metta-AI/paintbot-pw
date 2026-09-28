@@ -1,6 +1,6 @@
 # Heartwick concept and local implementation
 
-Artist reference: `art/gnomewick-level-concept.png` (generated for this level).
+Artist reference: `polyworld_art/paintbot/art/gnomewick-level-concept.png` (generated for this level).
 
 The local scene follows the reference's moss/earth palette, wooded interior cover,
 raised banks, sunken route, causeway, organic structures and planted patches.

@@ -2,9 +2,9 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
 output="${1:?Output directory required}"
-export POLYWORLD_DATA="${POLYWORLD_DATA:-$root/../polyworld_data}"
+export POLYWORLD_ART="${POLYWORLD_ART:-$root/../polyworld_art}"
 export POLYWORLD_DEPS="${POLYWORLD_DEPS:-$root/tmp/coworld/deps}"
-python3 - "$root" "$POLYWORLD_DATA" <<'ASSETS'
+python3 - "$root" "$POLYWORLD_ART" <<'ASSETS'
 import json, subprocess, sys
 from pathlib import Path
 root, data = map(Path, sys.argv[1:])
@@ -14,17 +14,19 @@ if actual != expected:
     raise SystemExit(f"Expected Polyworld art revision {expected}; got {actual}")
 ASSETS
 cd "$root"
-python3 coworld/paintbot/tools/build_cover.py
-python3 coworld/paintbot/tools/build_cog.py
-python3 coworld/paintbot/tools/build_round_village.py
+python3 coworld/paintbot/tools/verify_art.py "$POLYWORLD_ART"
 nim c -d:emscripten -d:replayIndexer examples/paintbot/indexer.nim
 nim c -d:emscripten -d:replayViewer -d:workerReplayIndex examples/paintbot/paintbot.nim
 mkdir -p "$output"
 cp examples/paintbot/emscripten/paintbot.{js,wasm,data} "$output/"
 cp examples/paintbot/emscripten/paintbot-index.{js,wasm} "$output/"
 cp "$root/coworld/paintbot/"{viewer.js,inspector.js,kinhud.js,startup.js,index-worker.js} "$output/"
-cp "$POLYWORLD_DATA/fonts/"Rubik-{Regular,Bold}.ttf "$output/"
-cp "$root/coworld/paintbot/art/paint-crew.png" "$output/portrait.png"
+cp "$POLYWORLD_ART/fonts/"Rubik-{Regular,Bold}.ttf "$output/"
+mkdir -p "$output/licenses"
+cp "$POLYWORLD_ART/LICENSE" "$output/licenses/CC0.txt"
+cp "$POLYWORLD_ART/fonts/license.md" "$output/licenses/fonts.md"
+cp "$POLYWORLD_ART/fonts/OFL-Rubik.txt" "$output/licenses/"
+cp "$POLYWORLD_ART/paintbot/art/paint-crew.png" "$output/portrait.png"
 python3 - "$root" "$output" <<'PY'
 from pathlib import Path
 import sys

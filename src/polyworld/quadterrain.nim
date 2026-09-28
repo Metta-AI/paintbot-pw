@@ -4,12 +4,12 @@
 ## authored via shady. The caller builds `layers`, optionally scatters
 ## props, then calls initTerrain once and bakeTerrain after any change.
 ## Requires a current GL context and runs relative to the repo root
-## (prop models load from ../polyworld_data/terrain/).
+## (prop models load from ../polyworld_art/terrain/).
 
 import
   std/[random, strformat, strutils, tables],
   chroma, gltf, opengl, pixie, pixie/internal, shady, vmath,
-  common, pathing, shadows, terrainblends, terrainmaps, terrainsurfaces, toon
+  common, grasses, pathing, shadows, terrainblends, terrainmaps, terrainsurfaces, toon
 
 ## Shaders
 ##
@@ -518,7 +518,7 @@ proc waterFrag(
       surfaceNormal,
       normalize(normalize(cameraPos - worldPos) + envLightDirection)
     ), 0.0),
-    48.0)
+    48.0) * 0.28'f
     visibilityUv = vec2(
       (worldPos.x + visibilityOffset) * visibilityScale,
       (worldPos.z + visibilityOffset) * visibilityScale
@@ -617,6 +617,29 @@ proc treeVert(
   fragmentNormal = normal
   fragmentPosition = vertPos
 
+proc texturedInstantVert(
+    gl_Position: var Vec4,
+    vertPos: Vec3,
+    vertUv: Vec3,
+    normal, modelColor: Vec3,
+    fragUv: var Vec3,
+    fragmentNormal: var Vec3,
+    fragmentPosition: var Vec3,
+    fragTint: var Vec3,
+    shadowPos: var Vec3
+) =
+  ## Emits textured tree vertex outputs for the generated OpenGL shader.
+  gl_Position = mvp * vec4(vertPos.x, vertPos.y, vertPos.z, 1.0)
+  shadowPos = vec3(
+    vertPos.x + normal.x * 0.08,
+    vertPos.y + normal.y * 0.08,
+    vertPos.z + normal.z * 0.08
+  )
+  fragTint = modelColor
+  fragUv = vertUv
+  fragmentNormal = normal
+  fragmentPosition = vertPos
+
 proc treeFrag(
     fragColor: var Vec4,
     fragUv: Vec3,
@@ -653,7 +676,7 @@ proc texturedPropVert(
     vertPos: Vec3,
     vertUv: Vec3,
     normal: Vec3,
-    vertTint: Vec3,
+    vertTint, modelColor: Vec3,
     instancePosition, instanceScale: Vec3,
     instanceRotation: Vec2,
     fragUv: var Vec3,
@@ -678,7 +701,7 @@ proc texturedPropVert(
   fragUv = vertUv
   fragmentNormal = rotatedNormal
   fragmentPosition = position
-  fragTint = vertTint
+  fragTint = vertTint * modelColor
 
 proc instancedDepthFrag(fragColor: var Vec4, fragUv: Vec3) =
   if texture(treeTextures, fragUv).w < treeAlphaCutoff:
@@ -724,6 +747,7 @@ proc texturedInstantFrag(
     fragUv: Vec3,
     fragmentNormal,
     fragmentPosition: Vec3,
+    fragTint: Vec3,
     shadowPos: Vec3
 ) =
   ## The tree cutout shading with the standalone prop tint folded in, for
@@ -742,7 +766,9 @@ proc texturedInstantFrag(
       texture(visibilityTex, visibilityUv).x
     )
     paint = vec3(
-      texel.x * propTint.x, texel.y * propTint.y, texel.z * propTint.z)
+      texel.x * propTint.x * fragTint.x,
+      texel.y * propTint.y * fragTint.y,
+      texel.z * propTint.z * fragTint.z)
     litColor = envShadeTwoSided(
       paint, fragmentNormal, sampleSunShadow(shadowPos))
     gray = dot(litColor, vec3(0.30, 0.59, 0.11)) * 0.32
@@ -987,11 +1013,11 @@ type
     autumnLayers: seq[int]  # greens only, or greens plus reds and yellows
 
   TreeStyle* = enum
-    MixedTrees, EvergreenTrees, DenseTrees
+    MixedTrees, EvergreenTrees, DenseTrees, NoTrees
   TerrainStyle* = enum
     CartoonTerrain, GeneratedTerrain
   RockStyle* = enum
-    LowPolyRocks, PaintedRocks
+    LowPolyRocks, PaintedRocks, NoRocks
 
 var
   treeModels: seq[TreeModel]   # trees; occupy a tile and block it
@@ -1040,7 +1066,8 @@ proc atlasLayer(images: var seq[Image], image: Image): float32 =
 
 proc collectPropModels(
     node: gltf.Node, parent: Mat4, models: var seq[PropModel],
-    skipPrefix = "", only: seq[string] = @[], images: ptr seq[Image] = nil
+    skipPrefix = "", only: seq[string] = @[], images: ptr seq[Image] = nil,
+    materialColors = false
 ) =
   ## Flattens renderable glTF nodes into normalized colored triangle models.
   ## With `only` given, nodes not named in it are skipped. With `images`
@@ -1062,8 +1089,15 @@ proc collectPropModels(
     let normalMatrix = world.inverse.transpose
     for primitive in node.mesh.primitives:
       let
-        image =
+        sourceImage =
           if primitive.material != nil: primitive.material.baseColor else: nil
+        image =
+          if images != nil and sourceImage == nil:
+            let white = newImage(1, 1)
+            white.fill(rgbx(255, 255, 255, 255))
+            white
+          else:
+            sourceImage
         layer =
           if images != nil and image != nil: atlasLayer(images[], image)
           else: 0.0'f32
@@ -1090,7 +1124,18 @@ proc collectPropModels(
           ))
         else:
           sourceNormals.add vec3(0, 0, 0)
-        if image != nil and index < primitive.uvs.len:
+        if materialColors:
+          var tint = vec3(1)
+          if primitive.material != nil:
+            let base = primitive.material.baseColorFactor
+            tint = vec3(base.r, base.g, base.b)
+          if index < primitive.colors.len:
+            let vertex = primitive.colors[index]
+            tint *= vec3(
+              vertex.r.float32, vertex.g.float32, vertex.b.float32
+            ) / 255.0'f
+          colors.add tint
+        elif image != nil and index < primitive.uvs.len:
           let
             uv = primitive.uvs[index]
             px = clamp(int(uv.x * image.width.float32), 0, image.width - 1)
@@ -1150,7 +1195,9 @@ proc collectPropModels(
           model.uvs.add uvs[i].z
       models.add model
   for child in node.nodes:
-    collectPropModels(child, world, models, skipPrefix, only, images)
+    collectPropModels(
+      child, world, models, skipPrefix, only, images, materialColors
+    )
 
 proc scalePack(models: var seq[PropModel], targetTallest: float32) =
   ## Scales a whole pack by one factor (tallest model becomes targetTallest
@@ -1191,7 +1238,7 @@ proc brighten(models: var seq[PropModel], factor: float32) =
       model.vertices[i + 5] = min(model.vertices[i + 5] * factor, 1.0)
       i += 9
 
-## Handpainted trees: textured glb meshes from ../polyworld_data/terrain/handpainted_trees.
+## Handpainted trees: textured glb meshes from ../polyworld_art/terrain/handpainted_trees.
 ## Every variant of a model shares its UV layout, so one texture array holds
 ## all the paintings and each planted tree picks a layer.
 
@@ -1387,7 +1434,8 @@ proc loadPropPack*(
   var images: seq[Image]
   collectPropModels(
     readGltfFile(path).root, mat4(), result.models, only = only,
-    images = if textured: images.addr else: nil)
+    images = if textured: images.addr else: nil,
+    materialColors = textured)
   if textured and images.len > 0:
     var size = 1
     for image in images:
@@ -1411,6 +1459,44 @@ proc loadPropPack*(
     result.models.normalizeModels()
   if brightness != 1.0'f32:
     result.models.brighten(brightness)
+  for i, model in result.models:
+    result.names[model.name] = i
+
+proc createPropPack*(
+    nodes: openArray[gltf.Node], textureSize = 512,
+    repeatTexture = false, mipmaps = true, unitHeight = true
+): PropPack =
+  ## Uploads generated nodes once, preserving their sizes, colors, and shading.
+  result = PropPack()
+  var images: seq[Image]
+  for node in nodes:
+    collectPropModels(
+      node, mat4(), result.models, images = images.addr,
+      materialColors = true
+    )
+  if images.len > 0:
+    var chains: seq[seq[Image]]
+    for image in images:
+      # Generator images use straight alpha; filtering needs premultiplied RGB.
+      let source = image.copy()
+      source.data.toPremultipliedAlpha()
+      let square =
+        if source.width == textureSize and source.height == textureSize:
+          source
+        else:
+          source.resize(textureSize, textureSize)
+      var chain = if mipmaps: mipChain(square) else: @[square]
+      for mip in chain.mitems:
+        mip.data.toStraightAlpha()
+      chains.add chain
+    result.textureArray = buildTextureArray(
+      chains,
+      if repeatTexture: GL_REPEAT.GLint else: GL_CLAMP_TO_EDGE.GLint
+    )
+    for model in result.models:
+      model.textureArray = result.textureArray
+  if unitHeight:
+    result.models.normalizeModels()
   for i, model in result.models:
     result.names[model.name] = i
 
@@ -1571,8 +1657,11 @@ proc uploadTexturedPropModel(model: PropModel) =
     mesh.add model.vertices[i + 6]
     mesh.add model.vertices[i + 7]
     mesh.add model.vertices[i + 8]
+    mesh.add model.vertices[i + 3]
+    mesh.add model.vertices[i + 4]
+    mesh.add model.vertices[i + 5]
     i += 9
-  const stride = (9 * sizeof(float32)).GLsizei
+  const stride = (12 * sizeof(float32)).GLsizei
   glGenBuffers(1, model.texturedVertexBuffer.addr)
   glBindBuffer(GL_ARRAY_BUFFER, model.texturedVertexBuffer)
   glBufferData(
@@ -1586,7 +1675,8 @@ proc uploadTexturedPropModel(model: PropModel) =
   for attribute in [
     (name: "vertPos", count: 3, offset: 0),
     (name: "vertUv", count: 3, offset: 3 * sizeof(float32)),
-    (name: "normal", count: 3, offset: 6 * sizeof(float32))
+    (name: "normal", count: 3, offset: 6 * sizeof(float32)),
+    (name: "modelColor", count: 3, offset: 9 * sizeof(float32))
   ]:
     let location = glGetAttribLocation(
       texturedInstantProgram, attribute.name.cstring)
@@ -1729,7 +1819,6 @@ const
   TerrainTextureSize = 1024
   GeneratedTextureSize = 256
   TerrainVertexSize = 21
-  WaterNormalTextures = ["water_1_normal", "water_2_normal"]
   TerrainMaterials = [
     "grass",
     "sand",
@@ -2008,11 +2097,30 @@ proc bindTerrainData() =
     glUniform1i(location, unit.GLint)
 
 proc loadWaterNormals(): seq[seq[Image]] =
-  ## Water detail uses the same mipmapped texture-array path as terrain and
-  ## trees, with one shared-data image per layer.
-  for name in WaterNormalTextures:
-    result.add mipChain(readImage(
-      &"{DataRoot}/terrain/water_normals/{name}.jpg"))
+  ## Generates two seamless original wave-normal maps from periodic slopes.
+  const Size = 128
+  for layer in 0 .. 1:
+    let image = newImage(Size, Size)
+    for y in 0 ..< Size:
+      for x in 0 ..< Size:
+        let
+          u = x.float32 * 2.0'f * PI.float32 / Size.float32
+          v = y.float32 * 2.0'f * PI.float32 / Size.float32
+          phase = layer.float32 * 1.7'f
+          dx = 0.9'f * cos(u * 3 + v * 2 + phase) +
+            0.6'f * cos(u * 5 - v * 3 + 0.8'f) +
+            0.4'f * cos(u * 2 + v * 7 + phase * 0.7'f)
+          dy = 0.8'f * cos(u * 2 - v * 3 + phase) -
+            0.7'f * cos(u * 7 + v * 4 + 1.3'f) +
+            0.3'f * cos(u * 5 - v * 2 + phase * 0.9'f)
+          normal = normalize(vec3(-dx, -dy, 1))
+        image[x, y] = rgbx(
+          ((normal.x * 0.5'f + 0.5'f) * 255).uint8,
+          ((normal.y * 0.5'f + 0.5'f) * 255).uint8,
+          ((normal.z * 0.5'f + 0.5'f) * 255).uint8,
+          255
+        )
+    result.add mipChain(image)
 
 proc setTerrainMaterial*(index: int, color, height: Image) =
   ## Replaces one material layer with a generated basecolor and height map,
@@ -2477,13 +2585,14 @@ proc initTexturedVertexArrays(batch: var TexturedBatch) =
     for attribute in [
       (name: "vertPos", count: 3, offset: 0),
       (name: "vertUv", count: 3, offset: 3),
-      (name: "normal", count: 3, offset: 6)
+      (name: "normal", count: 3, offset: 6),
+      (name: "modelColor", count: 3, offset: 9)
     ]:
       let location = glGetAttribLocation(program, attribute.name.cstring)
       if location < 0: continue # depth shaders do not need normals or tint
       glEnableVertexAttribArray(location.GLuint)
       glVertexAttribPointer(location.GLuint, attribute.count.GLint, cGL_FLOAT,
-        GL_FALSE, (9 * sizeof(float32)).GLsizei,
+        GL_FALSE, (12 * sizeof(float32)).GLsizei,
         cast[pointer](attribute.offset * sizeof(float32)))
     glBindBuffer(GL_ARRAY_BUFFER, batch.instanceBuffer)
     for attribute in [
@@ -3098,7 +3207,7 @@ proc initTerrain*(
 ) =
   ## Initializes rendering with a current GL context, once before bakeTerrain.
   ## Extra generated tile names append after SurfaceNames without splat stamps.
-  ## Assets load from ../polyworld_data/terrain/ relative to the repo root.
+  ## Assets load from ../polyworld_art/terrain/ relative to the repo root.
   if terrainStyle != GeneratedTerrain and extraTiles.len > 0:
     raise newException(QuadTerrainError, "Extra tiles need generated terrain.")
   initSunShadows()
@@ -3187,7 +3296,10 @@ proc initTerrain*(
   let empty = @[0.0'f, 0.0'f, 0.0'f, 0.0'f]
   splatDimensions = uploadTerrainData(splatDataTexture, empty)
   blendDimensions = uploadTerrainData(blendDataTexture, empty)
-  treeTextureArray = buildTextureArray(loadTreeTextures(), GL_CLAMP_TO_EDGE.GLint)
+  if treeStyle != NoTrees:
+    treeTextureArray = buildTextureArray(
+      loadTreeTextures(), GL_CLAMP_TO_EDGE.GLint
+    )
   waterNormalTextureArray = buildTextureArray(loadWaterNormals(), GL_REPEAT.GLint)
   glGenTextures(1, visibilityTexture.addr)
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
@@ -3308,7 +3420,7 @@ proc initTerrain*(
   texturedPropAlphaCutoffLocation = glGetUniformLocation(
     texturedPropProgram, "treeAlphaCutoff")
   texturedInstantProgram = compileProgram(
-    toShader(treeVert, OpenGlShaderTarget, shaderVertex),
+    toShader(texturedInstantVert, OpenGlShaderTarget, shaderVertex),
     toShader(texturedInstantFrag, OpenGlShaderTarget, shaderFragment)
   )
   texturedInstantMvpLocation = glGetUniformLocation(
@@ -3533,6 +3645,8 @@ proc initTerrain*(
   # tall old-growth fir with a small crown, planted sparingly; the pack's
   # fir 04 is a bare snag and is left out of the forest entirely.
   case treeStyle
+  of NoTrees:
+    discard
   of MixedTrees:
     treeModels.add loadTreeModel("tree_fir_01", 25, @[0], @[0])
     treeModels.add loadTreeModel("tree_fir_02", 20, @[0], @[0])
@@ -3552,9 +3666,11 @@ proc initTerrain*(
     treeModels.add loadTreeModel("tree_fir_02", 20, @[0], @[0])
   treeModels.scaleTrees(8.4)
   collectPropModels(
-    readGltfFile(DataRoot & "/terrain/low_poly_grass.glb").root, mat4(), grassModels)
+    grassNodes(), mat4(), grassModels)
   grassModels.scalePack(0.7)
   case rockStyle
+  of NoRocks:
+    discard
   of LowPolyRocks:
     collectPropModels(
       readGltfFile(DataRoot & "/terrain/low_poly_rocks.glb").root,
