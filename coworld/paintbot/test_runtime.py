@@ -943,5 +943,49 @@ class ManifestTests(unittest.TestCase):
         self.assertTrue((Path(__file__).parent / "players/ffa.bas").is_file())
 
 
+class HeartlandManifestTests(unittest.TestCase):
+    """coworld/heartland: the same engine in FFA-kin mode, published as its own Coworld."""
+
+    root = Path(__file__).parents[1] / "heartland"
+    manifest = json.loads((root / "coworld_manifest_template.json").read_text())
+    paintbot = json.loads((Path(__file__).parent / "coworld_manifest_template.json").read_text())
+
+    def test_every_config_is_ffa_kin_and_validates(self):
+        schema = self.manifest["game"]["config_schema"]
+        self.assertEqual(self.manifest["game"]["name"], "heartland")
+        self.assertEqual(schema["properties"]["mode"]["enum"], ["ffa_kin"])
+        self.assertIn("mode", schema["required"])
+        tokens = [f"t{i}" for i in range(16)]
+        configs = {v["id"]: v["game_config"] for v in self.manifest["variants"]}
+        configs["certification"] = self.manifest["certification"]["game_config"]
+        self.assertEqual(sorted(configs), ["certification", "heartland", "heartland-big"])
+        for name, config in configs.items():
+            with self.subTest(name):
+                self.assertEqual(config["mode"], "ffa_kin")
+                self.assertEqual(_schema_errors(schema, dict(config, tokens=tokens)), [])
+        # A teams config is not a Heartland config.
+        self.assertTrue(_schema_errors(schema, dict(configs["heartland"], tokens=tokens, mode="teams")))
+        self.assertTrue(_schema_errors(schema, {k: v for k, v in dict(configs["heartland"], tokens=tokens).items() if k != "mode"}))
+
+    def test_players_readme_and_engine_contract_track_paintbot(self):
+        sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
+        from sync_readme import synced_files
+
+        stale = [str(path) for path, text in synced_files().items() if not path.is_file() or path.read_text() != text]
+        self.assertEqual(stale, [], "run python3 coworld/tools/sync_readme.py")
+        seated = {p["player_id"] for p in self.manifest["certification"]["players"]}
+        self.assertEqual(len(self.manifest["certification"]["players"]), 16)
+        for player in self.manifest["player"]:
+            self.assertIn(player["id"], seated)
+            self.assertTrue((self.root / player["file"]).is_file(), player["file"])
+        self.assertTrue(self.manifest["game"]["docs"]["readme"]["value"].startswith("# Heartland\n"))
+        # Same image, protocols, results and replay viewer as paintbot-pw: only the mode differs.
+        for key in ("runnable", "results_schema", "replay_viewer", "protocols", "player_runtime"):
+            self.assertEqual(self.manifest["game"][key], self.paintbot["game"][key], key)
+        for key in ("tokens", "players", "seed", "max_ticks", "kin_layout", "map"):
+            self.assertEqual(self.manifest["game"]["config_schema"]["properties"][key],
+                             self.paintbot["game"]["config_schema"]["properties"][key], key)
+
+
 if __name__ == "__main__":
     unittest.main()

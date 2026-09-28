@@ -1,6 +1,6 @@
-# Deploy the paintbot-pw Coworld: coworld build -> coworld certify -> (optional) coworld upload-coworld.
+# Deploy the Heartland Coworld (the paintbot-pw engine in FFA-kin mode, coworld/heartland): coworld build -> coworld certify -> (optional) coworld upload-coworld.
 #
-# Destination: Metta-AI/paintbot-pw/.github/workflows/deploy.yml
+# Destination: Metta-AI/paintbot-pw/.github/workflows/deploy-heartland.yml
 #
 # Required repository secrets:
 #   SOFTMAX_TOKEN              Softmax platform bearer token. Only read when dry_run is false.
@@ -9,20 +9,20 @@
 # build.yml ("Github Actions") passes on a push to main. The automatic path deploys the next
 # platform version unless every file changed since the last deploy is outside the shipped game
 # (tests, CI, the deploy log, the other Polyworld games). Every successful upload tags the
-# commit it shipped as coworld-v<version>; the newest such tag is "the last deploy".
+# commit it shipped as heartland-v<version>; the newest such tag is "the last deploy".
 #
 # The public CC0 art checkout sits beside the source at ./polyworld_art.
-name: Deploy Coworld
+name: Deploy Heartland
 # The display title carries the inputs (the runs API does not expose them), so the duplicate
 # guard below and `gh run list` can tell "0.3.36 upload" from "0.3.36 dry run" without opening logs.
 # Automatic runs are titled by commit; their version is only known once the platform is asked.
-run-name: "${{ github.event_name == 'workflow_run' && format('Deploy Coworld auto @{0}', github.event.workflow_run.head_sha) || format('Deploy Coworld {0} ({1})', inputs.version, inputs.dry_run && 'dry run' || 'upload') }}"
+run-name: "${{ github.event_name == 'workflow_run' && format('Deploy Heartland auto @{0}', github.event.workflow_run.head_sha) || format('Deploy Heartland {0} ({1})', inputs.version, inputs.dry_run && 'dry run' || 'upload') }}"
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Coworld version to build, e.g. 0.3.20. Must be newer than the latest uploaded paintbot-pw."
+        description: "Coworld version to build, e.g. 0.3.20. Must be newer than the latest uploaded heartland (first upload: 0.1.0)."
         required: true
         type: string
       dry_run:
@@ -36,17 +36,17 @@ on:
     branches: [main]
 
 permissions:
-  contents: write # read the tree, and push the coworld-v<version> tag after an upload
+  contents: write # read the tree, and push the heartland-v<version> tag after an upload
   actions: read # to confirm build.yml passed on this commit before a real upload
 
 concurrency:
-  group: deploy-${{ github.repository }}
+  group: deploy-heartland-${{ github.repository }}
   cancel-in-progress: false
 
 env:
   COWORLD_CLI_VERSION: "0.1.47" # PyPI `coworld`; pinned so CI never depends on a metta checkout
-  COWORLD_NAME: paintbot-pw
-  COWORLD_PROJECT: coworld/paintbot
+  COWORLD_NAME: heartland
+  COWORLD_PROJECT: coworld/heartland
   NIM_VERSION: "2.2.10" # matches coworld/paintbot/Dockerfile and coworld/integration.md
   EMSDK_VERSION: "4.0.15" # paintbot-pw pins no emsdk; same pin as cogame-parley's viewer build
   SOFTMAX_API_SERVER: https://softmax.com/api
@@ -92,9 +92,9 @@ jobs:
             echo "main moved on to $head; its own build deploys it. Skipping $sha."
             echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          last="$(git tag -l 'coworld-v*' --sort=-v:refname | head -1)"
+          last="$(git tag -l 'heartland-v*' --sort=-v:refname | head -1)"
           if [ -z "$last" ]; then
-            echo "No coworld-v* tag yet; deploying $sha."
+            echo "No heartland-v* tag yet; deploying $sha."
             echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
           fi
           base="$(git rev-list -n 1 "$last")"
@@ -102,9 +102,9 @@ jobs:
             echo "$sha is already deployed as $last."
             echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
           fi
-          # Paths that never reach the paintbot-pw image or its manifest (tools/slurm/ holds cluster
+          # Paths that never reach the game image or the Heartland manifest (tools/slurm/ holds cluster
           # job scripts). Anything else deploys.
-          ignore='^(tests/|\.github/|coworld/paintbot/DEPLOYMENT\.md$|examples/(call_to_adventure|gods_of_the_arena|heartleaf|light_vs_dark)/|coworld/(cta|gota|lvd|heartland)/|.github/workflows/deploy-heartland\.yml$|tools/slurm/)'
+          ignore='^(tests/|\.github/|coworld/paintbot/DEPLOYMENT\.md$|examples/(call_to_adventure|gods_of_the_arena|heartleaf|light_vs_dark)/|coworld/(cta|gota|lvd)/|coworld/paintbot/(coworld_manifest_template\.json|campaign\.json|[A-Z_]+\.(md|json))$|tools/slurm/)'
           shipped="$(git diff --name-only "$base" "$sha" | grep -Ev "$ignore" || true)"
           if [ -z "$shipped" ]; then
             echo "Nothing shipped changed since $last ($base); not deploying."
@@ -166,16 +166,16 @@ jobs:
       # this run: it fails itself when its turn comes and it sees this run's success. Runs from
       # before this title format have the bare title "Deploy Coworld" and are not matched.
       # Automatic runs cannot duplicate: the concurrency group serializes them and the plan job
-      # skips a commit the newest coworld-v* tag already points at.
+      # skips a commit the newest heartland-v* tag already points at.
       - name: Refuse a duplicate upload of this SHA and version
         if: ${{ github.event_name == 'workflow_dispatch' && env.DRY_RUN != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          title="Deploy Coworld $VERSION (upload)"
+          title="Deploy Heartland $VERSION (upload)"
           mine="$(gh run view "$GITHUB_RUN_ID" --json createdAt --jq .createdAt)"
-          gh run list --workflow deploy.yml --commit "$GITHUB_SHA" --limit 100 \
+          gh run list --workflow deploy-heartland.yml --commit "$GITHUB_SHA" --limit 100 \
             --json databaseId,displayTitle,status,conclusion,createdAt,updatedAt > "$RUNNER_TEMP/deploy-runs.json"
           dup="$(jq -r --arg title "$title" --arg me "$GITHUB_RUN_ID" --arg mine "$mine" '
             map(select(.displayTitle == $title and (.databaseId | tostring) != $me))
@@ -275,7 +275,15 @@ jobs:
         if: ${{ env.DRY_RUN != 'true' }}
         run: |
           set -euo pipefail
-          next="$(coworld next-version "$COWORLD_NAME" --server "$SOFTMAX_API_SERVER")"
+          # The first upload creates the Coworld, which the platform cannot version yet.
+          if out="$(coworld next-version "$COWORLD_NAME" --server "$SOFTMAX_API_SERVER" 2>&1)"; then
+            next="$out"
+          elif grep -q "Coworld not found" <<<"$out"; then
+            next="0.1.0"
+            echo "$COWORLD_NAME is not on the platform yet; this is its first upload."
+          else
+            echo "$out"; exit 1
+          fi
           echo "Platform suggests next version: $next"
           if [ -z "$VERSION" ]; then
             VERSION="$next"
@@ -343,16 +351,16 @@ jobs:
           echo "::error::$cow_id uploaded but is not canonical"
           exit 1
 
-      # The automatic path diffs against the newest coworld-v* tag, so every upload records one.
+      # The automatic path diffs against the newest heartland-v* tag, so every upload records one.
       - name: Tag the deployed commit
         if: ${{ env.DRY_RUN != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/coworld-v$VERSION" -f sha="$SHA" >/dev/null
-          echo "Tagged $SHA as coworld-v$VERSION"
-          echo "Tagged \`$SHA\` as \`coworld-v$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/heartland-v$VERSION" -f sha="$SHA" >/dev/null
+          echo "Tagged $SHA as heartland-v$VERSION"
+          echo "Tagged \`$SHA\` as \`heartland-v$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove Softmax credentials
         if: ${{ always() }}
@@ -366,7 +374,7 @@ jobs:
           name: coworld-${{ env.VERSION || 'auto' }}
           # Keep compact deployment records; the public art has its own repository.
           path: |
-            paintbot-pw/coworld/paintbot/dist/coworld_manifest.json
+            paintbot-pw/coworld/heartland/dist/coworld_manifest.json
             ${{ runner.temp }}/certify.log
             ${{ runner.temp }}/upload.log
           if-no-files-found: ignore

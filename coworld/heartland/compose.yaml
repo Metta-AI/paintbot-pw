@@ -1,0 +1,9 @@
+# Heartland is the paintbot-pw engine in FFA-kin mode: the same game image, published as its own
+# Coworld. Every Heartland variant and the certification config set "mode": "ffa_kin".
+services:
+  game:
+    image: heartland:latest
+    platform: linux/amd64
+    build:
+      context: ../..
+      dockerfile: coworld/paintbot/Dockerfile
