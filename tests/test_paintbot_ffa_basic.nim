@@ -112,9 +112,7 @@ suite "FFA-kin BASIC host":
     check commands[0].goal == point(1 + 2*100, 11 + 6*100)
     # The same program is refused in FFA, where those names are host functions.
     gameMode = gmFfaKin
-    var ffaW = newWorld(2026)
     expect BasicError: discard loadBots(@[BotGroup(path: path, count: Seats)])
-    discard ffaW
     gameMode = gmTeams
     check w.ask(3, "selfTeam", "selfId") == (1'i32, 3'i32)
     check w.ask(2, "homeX", "homeY") == (home(0).x, home(0).z)

@@ -4,7 +4,10 @@
     python3 coworld/tools/sync_readme.py --check  # exit 1 if they differ
 
 The manifest carries the player guide inline (Coworld shows it on the game page), so guide.md
-is the source and this keeps the copy verbatim. coworld/paintbot/test_runtime.py checks it.
+is the source. Sections between <!-- readme:skip-start --> and <!-- readme:skip-end --> lines
+are for operators (private exports, hosted A/B recipes, campaign notes) and stay out of the
+player-facing copy; everything else is copied verbatim. coworld/paintbot/test_runtime.py
+checks the manifest matches.
 """
 
 import argparse
@@ -17,10 +20,37 @@ GUIDE = ROOT / "coworld/paintbot/guide.md"
 MANIFEST = ROOT / "coworld/paintbot/coworld_manifest_template.json"
 
 
+SKIP_START = "<!-- readme:skip-start -->"
+SKIP_END = "<!-- readme:skip-end -->"
+
+
+def player_readme(guide: str) -> str:
+    """guide.md without its marked operator sections (each marker line and the blank line after
+    an end marker go too). Unbalanced or nested markers are an error, not a silent leak."""
+    out, skipping, after_end = [], False, False
+    for number, line in enumerate(guide.splitlines(keepends=True), 1):
+        marker = line.strip()
+        if marker == SKIP_START:
+            if skipping:
+                raise ValueError(f"guide.md:{number}: nested {SKIP_START}")
+            skipping = True
+        elif marker == SKIP_END:
+            if not skipping:
+                raise ValueError(f"guide.md:{number}: {SKIP_END} without a start")
+            skipping, after_end = False, True
+        elif not skipping:
+            if not (after_end and marker == ""):
+                out.append(line)
+            after_end = False
+    if skipping:
+        raise ValueError(f"guide.md: {SKIP_START} is never closed")
+    return "".join(out)
+
+
 def synced_manifest() -> str:
-    """The manifest text with the readme replaced by guide.md, in the file's own formatting."""
+    """The manifest text with the readme replaced by the player guide, in the file's own formatting."""
     manifest = json.loads(MANIFEST.read_text())
-    manifest["game"]["docs"]["readme"] = {"type": "text", "value": GUIDE.read_text()}
+    manifest["game"]["docs"]["readme"] = {"type": "text", "value": player_readme(GUIDE.read_text())}
     return json.dumps(manifest, indent=2) + "\n"
 
 
