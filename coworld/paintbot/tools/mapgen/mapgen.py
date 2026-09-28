@@ -62,6 +62,8 @@ def set_scale(scale: float):
 
 
 SCALE = 1.0
+# Land (m2, as stats' landM2) per control heart; None keeps the rules-40 ten hearts.
+HEART_AREA = None
 
 
 def mirror(p):
@@ -609,6 +611,42 @@ def build(name, title, fn, blurb, seed) -> Map:
     raise SystemExit(f"{name}: no valid map")
 
 
+def heart_target(m: Map) -> int:
+    """How many control hearts the map gets: ten, or its land area over HEART_AREA in mirrored
+    pairs (never fewer than ten)."""
+    if HEART_AREA is None:
+        return 10
+    land_m2 = float((m.land * 1000 >= MARGIN_BLOCK).sum()) * STEP * STEP / 10000
+    return max(10, 2 * int(round(land_m2 / HEART_AREA / 2)))
+
+
+def place_extra_hearts(m: Map, P: Placer, hearts, pairs: int):
+    """Extra neutral pairs by farthest-point sampling: each goes on the open, reachable pad
+    farthest from every heart so far, so the nearest-heart territories stay about even."""
+    base = P.ok & P.clear & P.pad & P.dry & P.inland & np.isfinite(P.ratio)
+    for _ in range(pairs):
+        empty = np.ones((NZ, NX), bool)
+        for x, z, _, _ in hearts:
+            empty[cell((x, z))] = False
+        gap = ndimage.distance_transform_edt(empty) * STEP
+        score = np.where(base, gap + P.noise(40), -np.inf)
+        for flat in np.argsort(score, axis=None)[::-1][:20000]:
+            i, j = divmod(int(flat), NX)
+            if not np.isfinite(score[i, j]):
+                raise RuntimeError("no spot for an extra heart")
+            p = (int(XS[j]), int(ZS[i]))
+            if not first_half(p):
+                p = mirror(p)
+            q = mirror(p)
+            if math.hypot(p[0] - q[0], p[1] - q[1]) < 900 or not (P.free(p, 350) and P.free(q, 350)):
+                continue
+            P.taken += [(p[0], p[1], 0), (q[0], q[1], 0)]
+            hearts += [(p[0], p[1], -1, "extra"), (*q, -1, "extra")]
+            break
+        else:
+            raise RuntimeError("no spot for an extra heart")
+
+
 def populate(m: Map, rng):
     P = Placer(m, rng)
     place_homes(m, P)
@@ -628,11 +666,12 @@ def populate(m: Map, rng):
     for role, lo, hi, score, sep in roles:
         p = P.pick(lo, hi, score, sep=sep, self_sep=1000 if role == "center" else 1400, need_pad=True)
         hearts += [(p[0], p[1], -1, role), (*mirror(p), -1, role)]
+    place_extra_hearts(m, P, hearts, (heart_target(m) - len(hearts)) // 2)
     m.hearts = hearts
     for x, z, _, _ in hearts:
         P.taken.append((x, z, 300))
     lanes = []
-    for x, z, _, _ in hearts[2:]:
+    for x, z, _, _ in hearts[2:10]:  # the role hearts; extra hearts would clear every tree
         lanes += [(m.home, (x, z)), (mirror(m.home), (x, z))]
     lanes.append((m.home, mirror(m.home)))
     m.lanes = lanes
@@ -668,7 +707,7 @@ def validate(m: Map):
     want = {"grenade": 4, "spray": 2, "armor": 2, "medkit": 4, "uniform": 2}
     if kinds != want:
         bad.append(f"pickup counts {kinds}")
-    if len(m.hearts) != 10 or len(m.trenches) != 6:
+    if len(m.hearts) != heart_target(m) or len(m.trenches) != 6:
         bad.append("heart/trench counts")
     for seq in (m.hearts, m.pickups, [(x, z) for x, z in m.trenches], [(c.x, c.z) for c in m.cover]):
         for a, b in zip(seq[0::2], seq[1::2]):
@@ -808,10 +847,13 @@ def main():
     ap.add_argument("--only")
     ap.add_argument("--scale", type=float, default=1.0, help="span multiplier (sqrt(10) for 10x area)")
     ap.add_argument("--prefix", default="", help="name prefix, e.g. big-")
+    ap.add_argument("--heart-area", type=float, help="land m2 per control heart (default: ten hearts)")
     ap.add_argument("--no-png", action="store_true")
     ap.add_argument("--engine", help="also write <name>.pbmap files here (examples/paintbot/maps)")
     args = ap.parse_args()
     set_scale(args.scale)
+    global HEART_AREA
+    HEART_AREA = args.heart_area
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     index = []

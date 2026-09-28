@@ -6,7 +6,7 @@
 '   4. refuse a fight we are visibly losing.
 ' Budget: 20,000 instructions per decision; an overrun disables the cog, so every loop here
 ' is bounded by the 16 seats, the heart count, or a fixed iteration count.
-dim avoidUntil(16)
+dim avoidUntil(128)
 dim pickupMemoryX(32)
 dim pickupMemoryY(32)
 dim pickupMemoryKind(32)
@@ -128,7 +128,7 @@ end if
 if worldTick mod 72 = 0 then
   dxProgress = selfX - progressX
   dyProgress = selfY - progressY
-  if dxProgress * dxProgress + dyProgress * dyProgress < 40000 and objective >= 0 and objective < 16 then
+  if dxProgress * dxProgress + dyProgress * dyProgress < 40000 and objective >= 0 and objective < 128 then
     dxHeart = controlX(objective) - selfX
     dyHeart = controlY(objective) - selfY
     if dxHeart * dxHeart + dyHeart * dyHeart > 160000 then
@@ -224,7 +224,7 @@ if heartCount() > 0 then
     choice = -1
     choiceCost = 2147483647
     j = 0
-    while j < heartCount() and j < 16
+    while j < heartCount() and j < 128
       if controlOwner(j) <> selfTeam and j <> otherTarget then
         dx = (controlX(j) - homeX) / 8
         dy = (controlY(j) - refY) / 8
@@ -350,7 +350,7 @@ if foesNear - friendsNear >= 1 and not carrying then
   away = -1
   awayScore = -2147483647
   j = 0
-  while j < heartCount() and j < 16
+  while j < heartCount() and j < 128
     ex = (controlX(j) - cx) / 16
     ey = (controlY(j) - cy) / 16
     mx = (controlX(j) - selfX) / 16

@@ -358,11 +358,14 @@ record the map name, and the viewer draws each map's terrain, scenery and coastl
 Two big maps stretch the same layouts over ten times the area: `big-twin-mesas` and
 `big-deep-forest` (variants `map-big-twin-mesas` and `map-big-deep-forest`; the
 `heartland-big` variant plays FFA-kin on `big-twin-mesas`). The world spans about
-50,000 x 30,000 units instead of 16,000 x 9,600, still centred on (3200, 2000); the item
-set is the same, so hearts and pickups sit farther apart and the trip home is long.
+50,000 x 30,000 units instead of 16,000 x 9,600, still centred on (3200, 2000). Hearts keep
+the shipped maps' territory per heart, about 730 m2 of land each, so the big maps carry 100
+(`big-twin-mesas`) and 126 (`big-deep-forest`) control hearts: the two homes, the four role
+pairs, and extra neutral pairs spread by farthest-point sampling. Read the count from
+`heartCount()`. The pickups and trenches are the same set, so they sit far apart.
 
-A map keeps the rules you already play under: 16 cogs, 10 control hearts (two homes, then
-four neutral pairs), 4 grenades, 2 sprays, 2 armors, 4 medkits, 2 uniforms and 6 trenches.
+A map keeps the rules you already play under: 16 cogs, 10 control hearts on the shipped-size
+maps (two homes, then four neutral pairs), 4 grenades, 2 sprays, 2 armors, 4 medkits, 2 uniforms and 6 trenches.
 Everything is mirrored under the same half turn about (3200, 2000). What changes is the
 ground and where things sit, so a policy should read positions from the host API
 (`controlX`/`controlY`, `pickupX`/`pickupY`, `terrainHeight`, `waterAt`, `trenchAt`)

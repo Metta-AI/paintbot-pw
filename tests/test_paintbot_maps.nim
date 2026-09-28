@@ -1,6 +1,6 @@
 ## Rules 41 maps: each generated map loads, is its own half-turn image, connects every
 ## objective to both homes, and survives a recorded replay round trip.
-import std/[unittest, sets, deques, os]
+import std/[unittest, sets, deques, os, strutils]
 import polyworld/tapes
 import ../examples/paintbot/[sim, game]
 
@@ -24,7 +24,10 @@ suite "Paintbot generated maps":
       configureMap(name)
       let w = newWorld(2026)
       check mapName() == name
-      check w.controlHearts.len == 10
+      # Ten hearts, or one per ~730 m2 of land on big-* maps (mapgen --heart-area 730).
+      if name.startsWith("big-"): check w.controlHearts.len >= 90
+      else: check w.controlHearts.len == 10
+      check w.controlHearts.len mod 2 == 0
       check w.controlHearts[0].owner == 0 and w.controlHearts[1].owner == 1
       check w.controlHearts[0].pos == home(0) and w.controlHearts[1].pos == home(1)
       check home(1) == mirrored(home(0))
