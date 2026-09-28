@@ -1,7 +1,7 @@
 import village, topography
 export topography
 ## Integer-only Paintbot simulation; Polyworld RNG and portable state hashes.
-import polyworld/[rngs, hashes]
+import polyworld/[rngs, hashes, visions]
 import std/[tables, math]
 import kinship
 
@@ -256,7 +256,7 @@ when defined(pwTraining):
     killed: bool) {.nimcall, gcsafe.}
   var damageObserver* {.threadvar.}: DamageObserver
 else:
-  var visionRulesVersion* = 41
+  var visionRulesVersion* = 42
   var gameMode* = gmTeams
 proc ffa*(): bool = gameMode == gmFfaKin
 proc maxHp*(): int32 =
@@ -513,8 +513,114 @@ proc lineClear*(w: World, a, b: Point): bool =
     g.rayState[slot] = if result: 2 else: 1
   else:
     lineClearRay(w, a, b)
+# Team vision (rules 42, opt-in per match with the "vision": "team" config): a team sees
+# whatever any living teammate sees, out to VisionRange in every direction, on a grid of
+# 1.25 m cells computed once whenever a cog changes cell (Gods of the Arena's revealVision).
+# Cover blocks sight through its cells; terrain occludes in 40 cm steps, so the kernel's
+# three-step eye and target heights are the 120 cm eye line lineClear uses. Visibility is
+# then a table lookup, and a large game no longer traces one sight line per pair of cogs.
+const
+  SightCell* = 125
+  SightRadiusCells = VisionRange div SightCell # 16, the kernel's largest radius
+  SightHeightUnit = 40
+  SightEyeSteps = 3'i16
+  SightCoverSteps = 250'i16 # 100 m: cover blocks every sight line that crosses it
+type SightGrid = object
+  payload: pointer
+  length: int
+  bounds: array[4, int]
+  map, rules: int
+  cover: seq[Cover]
+  originX, originZ, nx, nz: int
+  terrain, blockers: seq[int16]
+  key: seq[int32]
+  seen: array[2, seq[uint8]]
+when defined(pwTraining):
+  var teamVision* {.threadvar.}: bool
+  var sightGrid {.threadvar.}: SightGrid
+else:
+  var teamVision* = false ## rules 42: set by configureVision, never directly
+  var sightGrid: SightGrid
+proc configureVision*(mode: string) =
+  ## Rules 42: "" keeps per-cog sight lines; "team" shares a team-wide sight grid. Like
+  ## configureMap, it binds the calling thread; set it before newWorld.
+  if mode notin ["", "team"]: raise newException(ValueError, "Unknown Paintbot vision mode: " & mode)
+  teamVision = mode == "team"
+proc visionMode*(): string = (if teamVision: "team" else: "")
+proc sightCell(g: ptr SightGrid, p: Point): int =
+  let x = clamp((p.x.int-g.originX) div SightCell, 0, g.nx-1)
+  let z = clamp((p.z.int-g.originZ) div SightCell, 0, g.nz-1)
+  z*g.nx+x
+proc buildSightGrid(g: ptr SightGrid, w: World) =
+  g.cover = w.cover; g.bounds = [minX(), minZ(), maxX(), maxZ()]; g.map = activeMap()
+  g.rules = visionRulesVersion
+  g.originX = minX(); g.originZ = minZ()
+  g.nx = (maxX()-minX()) div SightCell+1; g.nz = (maxZ()-minZ()) div SightCell+1
+  g.terrain = newSeq[int16](g.nx*g.nz); g.blockers = newSeq[int16](g.nx*g.nz)
+  for z in 0..<g.nz:
+    for x in 0..<g.nx:
+      let h = terrainHeight(g.originX+x*SightCell+SightCell div 2, g.originZ+z*SightCell+SightCell div 2)
+      g.terrain[z*g.nx+x] = int16(clamp(floorDiv(h, SightHeightUnit), -3000, 3000))
+  for c in w.cover:
+    # A cell is blocked when its centre lies within the obstacle (plus a quarter cell).
+    let depth = if c.h == 0: c.w else: c.h
+    let x0 = max(0, (c.x.int-SightCell-g.originX) div SightCell)
+    let x1 = min(g.nx-1, (c.x.int+c.w.int+SightCell-g.originX) div SightCell)
+    let z0 = max(0, (c.z.int-SightCell-g.originZ) div SightCell)
+    let z1 = min(g.nz-1, (c.z.int+depth.int+SightCell-g.originZ) div SightCell)
+    for z in z0..z1:
+      for x in x0..x1:
+        let cx = g.originX+x*SightCell+SightCell div 2
+        let cz = g.originZ+z*SightCell+SightCell div 2
+        let inside =
+          if c.h == 0:
+            let r = c.w.int div 2+SightCell div 4
+            let dx = cx-(c.x.int+c.w.int div 2); let dz = cz-(c.z.int+c.w.int div 2)
+            dx*dx+dz*dz <= r*r
+          else:
+            cx >= c.x.int-SightCell div 4 and cx < c.x.int+c.w.int+SightCell div 4 and
+              cz >= c.z.int-SightCell div 4 and cz < c.z.int+c.h.int+SightCell div 4
+        if inside: g.blockers[z*g.nx+x] = SightCoverSteps
+  g.key.setLen(0)
+proc teamSight(w: World): ptr SightGrid =
+  ## The shared grid for w, refreshed when the geometry or any living cog's cell changes.
+  result = addr sightGrid
+  let g = result
+  let payload = if w.cover.len > 0: cast[pointer](unsafeAddr w.cover[0]) else: nil
+  if g.payload != payload or g.length != w.cover.len or g.bounds != [minX(), minZ(), maxX(), maxZ()] or
+      g.map != activeMap() or g.rules != visionRulesVersion:
+    if g.terrain.len == 0 or g.cover != w.cover or g.bounds != [minX(), minZ(), maxX(), maxZ()] or
+        g.map != activeMap() or g.rules != visionRulesVersion:
+      buildSightGrid(g, w)
+    g.payload = payload; g.length = w.cover.len
+  var same = g.key.len == Seats
+  if same:
+    for i in 0..<Seats:
+      let k = if w.cogs[i].hp > 0: sightCell(g, w.cogs[i].pos).int32 else: -1'i32
+      if g.key[i] != k: same = false; break
+  if same: return
+  g.key.setLen(Seats)
+  for i in 0..<Seats: g.key[i] = if w.cogs[i].hp > 0: sightCell(g, w.cogs[i].pos).int32 else: -1'i32
+  for side in 0..1:
+    var sources: seq[VisionSource]
+    for i in 0..<Seats:
+      if team(i) != side or g.key[i] < 0: continue
+      sources.add VisionSource(x: int32(g.key[i] mod g.nx), z: int32(g.key[i] div g.nx),
+        radius: SightRadiusCells.int32, eyeHeight: SightEyeSteps)
+    revealVision(g.seen[side], g.nx.int32, g.nz.int32, g.terrain, g.blockers, sources)
+proc teamSightGrid*(w: World): tuple[nx, nz, originX, originZ: int, terrain, blockers: seq[int16]] =
+  ## Tests: the static grid behind team vision.
+  let g = teamSight(w)
+  (g.nx, g.nz, g.originX, g.originZ, g.terrain, g.blockers)
+proc teamSees*(w: World, side: int, p: Point): bool =
+  ## Rules 42 team vision: whether side's shared sight grid covers p.
+  let g = teamSight(w)
+  if p.x < g.originX or p.z < g.originZ: return false
+  let x = (p.x.int-g.originX) div SightCell; let z = (p.z.int-g.originZ) div SightCell
+  x < g.nx and z < g.nz and g.seen[side][z*g.nx+x] != 0
 proc canSeePoint*(w: World, slot: int, p: Point): bool =
   if slot notin 0..<Seats or w.cogs[slot].hp <= 0: return false
+  if teamVision and not ffa(): return w.teamSees(team(slot), p)
   let c = w.cogs[slot]
   let distance = distance2(c.pos, p)
   if visionRulesVersion < 5 and distance >
@@ -533,6 +639,11 @@ proc visible*(w: World, slot, other: int): bool =
     return false
   if slot == other: return true
   if visionRulesVersion < 4 and team(slot) == team(other): return true
+  if teamVision and not ffa():
+    # Team vision: teammates always share positions; enemies show on the team's grid.
+    if w.cogs[slot].hp <= 0: return false
+    if team(slot) == team(other): return true
+    return w.teamSees(team(slot), w.cogs[other].pos)
   w.canSeePoint(slot, w.cogs[other].pos)
 proc occupied(w: World, p: Point, slot: int): bool =
   for other in 0..<Seats:

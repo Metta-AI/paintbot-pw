@@ -20,6 +20,7 @@ type
     maxTicks*: int32 = DefaultDurationTicks
     spawnIntervalTicks*: int32 = 240
     map*: string ## optional game-specific map name; "" is the game's default
+    vision*: string ## optional game-specific vision mode; "" is the game's default
   CoworldSeat* = object
     slot*: int
     fileUri*, contentHash*: string

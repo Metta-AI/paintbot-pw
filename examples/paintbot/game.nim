@@ -44,6 +44,14 @@ type
     names: array[Seats, string]
     communications: seq[Communication]
     endTick: int32
+  PreVisionRecording = object
+    ## Teams recordings at rules 41: Recording without the vision mode.
+    seed: int32
+    frames: seq[Frame]
+    names: array[Seats, string]
+    communications: seq[Communication]
+    endTick: int32
+    map: string
   Recording* = object
     seed*: int32
     frames*: seq[Frame]
@@ -51,6 +59,7 @@ type
     communications*: seq[Communication]
     endTick*: int32
     map*: string ## rules 41: a MapNames entry, or "" for the rules' own island
+    vision*: string ## rules 42 teams games: "" per-cog sight lines, or "team" shared vision
   PreMapRecordingFfa = object
     ## FFA-kin recordings at gameVersion 1040: RecordingFfa without the map.
     seed: int32
@@ -100,10 +109,10 @@ proc convertFrames(frames: seq[PreSoundFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
         goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
     result.add next
-var replayRulesVersion* = 41
+var replayRulesVersion* = 42
 const
   FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1041 today).
-  FfaRulesVersions = [40, 41]
+  FfaRulesVersions = [40, 41, 42]
 proc replayGameVersion*(): uint16 =
   ## The header version a recording made now is saved with.
   uint16((if ffa(): FfaReplayVersionBase else: 0) + replayRulesVersion)
@@ -123,7 +132,14 @@ proc saveRecording*(path: string, r: Recording) =
     else:
       saveReplayFile(path, "paintbot_pw", replayGameVersion(),
         r.toPreMapFfaRecording(activeKinship))
-  else: saveReplayFile(path, "paintbot_pw", replayGameVersion(), r)
+  elif replayRulesVersion >= 42: saveReplayFile(path, "paintbot_pw", replayGameVersion(), r)
+  elif replayRulesVersion == 41:
+    # Each version is written in the shape its loader reads.
+    saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreVisionRecording(seed: r.seed,
+      frames: r.frames, names: r.names, communications: r.communications, endTick: r.endTick, map: r.map))
+  else:
+    saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreMapRecording(seed: r.seed,
+      frames: r.frames, names: r.names, communications: r.communications, endTick: r.endTick))
 proc loadFfaRecording(path: string, version: int): Recording =
   let rules = version - FfaReplayVersionBase
   if rules notin FfaRulesVersions:
@@ -182,8 +198,14 @@ proc loadRecording*(path: string): Recording =
     result = Recording(seed: old.seed, frames: old.frames, names: old.names,
       communications: old.communications, endTick: old.endTick)
   elif replayRulesVersion == 41:
+    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreVisionRecording)
+    result = Recording(seed: old.seed, frames: old.frames, names: old.names,
+      communications: old.communications, endTick: old.endTick, map: old.map)
+    discard mapIndex(result.map) # an unknown map is an invalid replay
+  elif replayRulesVersion == 42:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
     discard mapIndex(result.map) # an unknown map is an invalid replay
+    if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
   if replayRulesVersion < 23: result.endTick = MatchTicks
@@ -203,6 +225,7 @@ proc loadRecording*(path: string): Recording =
   # Bind the recorded map too, so replay analysis that rebuilds the world with newWorld
   # (replay_stats, the viewer's index, kin_replay_counters) plays on the recorded ground.
   configureMap(result.map)
+  configureVision(result.vision)
 var
   world*: World
   recording*: Recording
@@ -211,6 +234,7 @@ var
   players: array[Seats, Bot]
   bridge: File
   mapChoice*: string ## live games: --map:<name>, or the Coworld config's "map"
+  visionChoice*: string ## live teams games: --vision:team, or the Coworld config's "vision"
 proc parseGameMode*(config: JsonNode): GameMode =
   ## The coworld config's optional "mode": absent or "teams" is the two-team game.
   let mode = config{"mode"}
@@ -261,6 +285,8 @@ proc setup*() =
     while i < args.len:
       if args[i].startsWith("--map:"):
         mapChoice = args[i]["--map:".len..^1]; discard mapIndex(mapChoice); inc i; continue
+      if args[i].startsWith("--vision:"):
+        visionChoice = args[i]["--vision:".len..^1]; configureVision(visionChoice); inc i; continue
       if not options.takeCommonFlag(args, i, args[i]): raise newException(
           ValueError, "Unknown argument: "&args[i])
       inc i
@@ -271,12 +297,17 @@ proc setup*() =
     recording = loadRecording(options.replayPath)
     if recording.frames.len > 28800: raise newException(ValueError, "Replay tick limit exceeded")
     configureMap(recording.map)
+    configureVision(recording.vision)
     world = newWorld(recording.seed, recording.endTick)
   else:
     # The recording header and live simulation must use the same rules.
     configureRules(replayRulesVersion)
     when defined(coworld): mapChoice = config.map
     configureMap(mapChoice); recording.map = mapName()
+    when defined(coworld): visionChoice = config.vision
+    if visionChoice.len > 0 and ffa():
+      raise newException(ValueError, "Team vision applies to the teams game only")
+    configureVision(visionChoice); recording.vision = visionMode()
     world = newLiveWorld(options.seed, options.maximumTicks); recording.seed = options.seed
     recording.endTick = world.endTick
     players = loadBots(options.botGroups, options.playerSlot)

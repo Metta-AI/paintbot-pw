@@ -124,6 +124,14 @@
             "delta"
           ],
           "description": "Rules 41: a generated map (coworld/paintbot/tools/mapgen); \"\" or absent is Heartwick island."
+        },
+        "vision": {
+          "type": "string",
+          "enum": [
+            "",
+            "team"
+          ],
+          "description": "Rules 42, teams game only: \"team\" shares one sight grid per team (20 m in every direction, computed once per tick); \"\" or absent keeps per-cog sight lines."
         }
       }
     },

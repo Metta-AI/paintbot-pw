@@ -319,6 +319,16 @@ open (a full-health kill) and 2 to victims in other trenches; spray recovers in 
 instead of 20 and its cone is a third wider. Charge time (24 ticks) and spray reach (850)
 are unchanged so existing throw-distance math and neural decoders keep working.
 
+### Team vision (rules 42, opt-in)
+
+Rules 42 add an optional vision mode for large games. With `"vision": "team"` in the game config
+(teams game only), each team shares what any living teammate can see. Sight reaches 20 m in every
+direction, is blocked by cover, and is occluded by terrain. It is computed once per tick on a grid of
+1.25 m cells, the approach Gods of the Arena uses. Teammates always see each other. `visible`,
+`playerX/Y/Hp`, `nearAgents` and pickup visibility all read the shared grid, so a large game no
+longer traces one sight line per pair of cogs. Without the option, every variant keeps per-cog
+sight lines, and the game plays exactly as under rules 41. Replays record the mode.
+
 ### Generated maps (rules 41)
 
 Rules 41 add ten generated maps beside Heartwick island. Each map has its own variant,
