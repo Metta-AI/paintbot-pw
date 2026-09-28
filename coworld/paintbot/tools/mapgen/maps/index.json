@@ -1,0 +1,212 @@
+[
+ {
+  "name": "twin-mesas",
+  "title": "Twin Mesas",
+  "archetype": "mesas",
+  "description": "Two ramped mesas overlook a central pond; high ground is the prize.",
+  "seed": 101000,
+  "stats": {
+   "homeToHome": 5207,
+   "landM2": 7332,
+   "waterPct": 0.4,
+   "highGroundPct": 8.0,
+   "cliffPct": 2.3,
+   "reachablePct": 100.0,
+   "cover": {
+    "tree": 138,
+    "house": 2,
+    "prop": 4,
+    "rock": 0
+   }
+  }
+ },
+ {
+  "name": "archipelago",
+  "title": "Archipelago",
+  "archetype": "archipelago",
+  "description": "Five islands joined by slow wading sandbars.",
+  "seed": 101101,
+  "stats": {
+   "homeToHome": 4800,
+   "landM2": 4162,
+   "waterPct": 13.3,
+   "highGroundPct": 0.0,
+   "cliffPct": 3.6,
+   "reachablePct": 100.0,
+   "cover": {
+    "tree": 46,
+    "house": 0,
+    "prop": 0,
+    "rock": 0
+   }
+  }
+ },
+ {
+  "name": "serpent-river",
+  "title": "Serpent River",
+  "archetype": "river",
+  "description": "An S-bend river splits the field; three dry fords.",
+  "seed": 101202,
+  "stats": {
+   "homeToHome": 5400,
+   "landM2": 7912,
+   "waterPct": 3.0,
+   "highGroundPct": 0.0,
+   "cliffPct": 0.0,
+   "reachablePct": 100.0,
+   "cover": {
+    "tree": 68,
+    "house": 0,
+    "prop": 2,
+    "rock": 0
+   }
+  }
+ },
+ {
+  "name": "crater",
+  "title": "Crater",
+  "archetype": "crater",
+  "description": "A ringed caldera with four breaches around a central pond.",
+  "seed": 101303,
+  "stats": {
+   "homeToHome": 5207,
+   "landM2": 6810,
+   "waterPct": 0.3,
+   "highGroundPct": 6.7,
+   "cliffPct": 2.7,
+   "reachablePct": 100.0,
+   "cover": {
+    "tree": 64,
+    "house": 0,
+    "prop": 0,
+    "rock": 14
+   }
+  }
+ },
+ {
+  "name": "terraces",
+  "title": "Terraces",
+  "archetype": "terraces",
+  "description": "Three stepped terraces climb to a king-of-the-hill crown.",
+  "seed": 101404,
+  "stats": {
+   "homeToHome": 7462,
+   "landM2": 7106,
+   "waterPct": 0.0,
+   "highGroundPct": 9.7,
+   "cliffPct": 1.0,
+   "reachablePct": 100.0,
+   "cover": {
+    "tree": 84,
+    "house": 0,
+    "prop": 0,
+    "rock": 4
+   }
+  }
+ },
+ {
+  "name": "deep-forest",
+  "title": "Deep Forest",
+  "archetype": "forest",
+  "description": "Dense woodland with trails and a diagonal brook.",
+  "seed": 101505,
+  "stats": {
+   "homeToHome": 6217,
+   "landM2": 9224,
+   "waterPct": 15.2,
+   "highGroundPct": 0.0,
+   "cliffPct": 0.0,
+   "reachablePct": 100.0,
+   "cover": {
+    "tree": 246,
+    "house": 2,
+    "prop": 0,
+    "rock": 0
+   }
+  }
+ },
+ {
+  "name": "badlands",
+  "title": "Badlands",
+  "archetype": "badlands",
+  "description": "Cliff walls carve corridors; rocks for cover.",
+  "seed": 101606,
+  "stats": {
+   "homeToHome": 5400,
+   "landM2": 6949,
+   "waterPct": 0.0,
+   "highGroundPct": 9.9,
+   "cliffPct": 5.6,
+   "reachablePct": 90.7,
+   "cover": {
+    "tree": 4,
+    "house": 0,
+    "prop": 0,
+    "rock": 26
+   }
+  }
+ },
+ {
+  "name": "atoll",
+  "title": "Atoll",
+  "archetype": "atoll",
+  "description": "A ring island around a wadeable lagoon with a central spit.",
+  "seed": 101707,
+  "stats": {
+   "homeToHome": 10532,
+   "landM2": 6769,
+   "waterPct": 26.7,
+   "highGroundPct": 0.0,
+   "cliffPct": 0.3,
+   "reachablePct": 100.0,
+   "cover": {
+    "tree": 76,
+    "house": 0,
+    "prop": 0,
+    "rock": 0
+   }
+  }
+ },
+ {
+  "name": "highlands",
+  "title": "Highlands",
+  "archetype": "highlands",
+  "description": "Rolling hills with many contested hilltops.",
+  "seed": 101808,
+  "stats": {
+   "homeToHome": 6200,
+   "landM2": 7883,
+   "waterPct": 0.0,
+   "highGroundPct": 23.8,
+   "cliffPct": 0.8,
+   "reachablePct": 100.0,
+   "cover": {
+    "tree": 90,
+    "house": 4,
+    "prop": 8,
+    "rock": 0
+   }
+  }
+ },
+ {
+  "name": "delta",
+  "title": "Delta",
+  "archetype": "delta",
+  "description": "Four channels cut the map into bands; fords are chokepoints.",
+  "seed": 101909,
+  "stats": {
+   "homeToHome": 10000,
+   "landM2": 7655,
+   "waterPct": 7.1,
+   "highGroundPct": 0.0,
+   "cliffPct": 0.0,
+   "reachablePct": 100.0,
+   "cover": {
+    "tree": 34,
+    "house": 6,
+    "prop": 6,
+    "rock": 0
+   }
+  }
+ }
+]
