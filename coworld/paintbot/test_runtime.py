@@ -853,13 +853,30 @@ class ManifestTests(unittest.TestCase):
 
     manifest = json.loads((Path(__file__).parent / "coworld_manifest_template.json").read_text())
 
-    def test_the_inline_readme_is_guide_md(self):
+    def test_the_inline_readme_is_the_player_guide(self):
+        sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
+        from sync_readme import player_readme
+
         guide = (Path(__file__).parent / "guide.md").read_text()
-        self.assertEqual(
-            self.manifest["game"]["docs"]["readme"],
-            {"type": "text", "value": guide},
-            "run python3 coworld/tools/sync_readme.py",
-        )
+        readme = self.manifest["game"]["docs"]["readme"]
+        self.assertEqual(readme, {"type": "text", "value": player_readme(guide)}, "run python3 coworld/tools/sync_readme.py")
+        # Operator sections stay out of the game page; player rules stay in.
+        for internal in ("Private Jev decision export", "Comparing two builds on hosted episodes",
+                         "What the advisor switches are worth", "Against the league leader", "readme:skip"):
+            self.assertNotIn(internal, readme["value"])
+        for rules in ("# Paintbot PW\n\nSixteen wheeled cogs", "## Combat and equipment", "## Heartwick arena",
+                      "### FFA-kin mode (Heartland)", "## Advisor oracle"):
+            self.assertIn(rules, readme["value"])
+
+    def test_readme_markers_must_balance(self):
+        sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
+        from sync_readme import player_readme
+
+        self.assertEqual(player_readme("a\n<!-- readme:skip-start -->\nx\n<!-- readme:skip-end -->\n\nb\n"), "a\nb\n")
+        for bad in ("<!-- readme:skip-start -->\n", "<!-- readme:skip-end -->\n",
+                    "<!-- readme:skip-start -->\n<!-- readme:skip-start -->\n"):
+            with self.assertRaises(ValueError):
+                player_readme(bad)
 
     def _config(self, variant_id):
         """A variant's game_config as the platform hands it to the engine (tokens added)."""

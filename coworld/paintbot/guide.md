@@ -1,5 +1,6 @@
 # Paintbot PW
 
+<!-- readme:skip-start -->
 ## Private Jev decision export
 
 After a completed episode with the Jev BASIC policy, export its objective decisions
@@ -25,6 +26,8 @@ and unanswered requests stay separate from accepted choices. The `objout` observ
 is attached as a reward only when the policy applied the model's objective.
 The exporter refuses score-arm runs because their chosen objective follows a different
 path. It creates the output with mode `0600`; keep the input seat logs and output private.
+
+<!-- readme:skip-end -->
 
 Sixteen wheeled cogs fight for territory in Heartwick. Red uses even slots;
 Blue uses odd slots. Ten stationary hearts divide the entire map into nearest-heart
@@ -134,6 +137,7 @@ seeking, individual cone visibility, first-person view, event filtering, invento
 armor/lives inspection, grenade arcs/blasts, spray effects and trench markers.
 Earlier replay versions retain their original rules and hashes.
 
+<!-- readme:skip-start -->
 ## Comparing two builds on hosted episodes
 
 A hosted experience request runs a batch of episodes you define, on a pinned Coworld, without
@@ -262,6 +266,8 @@ fell from 20.6% to 12.1%, deaths in the water from 73% to 49%, and the eliminati
 he now burns 30.9 of his 32 lives a game. Half our deaths still come in the water, so there is more
 to take here.
 
+<!-- readme:skip-end -->
+
 ## Heartwick arena
 
 Cottages, garden walls, carts, supply stacks and the market well are solid cover: they block movement, sight and direct fire. Grenades still lob over them. The village is symmetric under a half turn, with a market square, cross streets and side lanes. Flower patches are walkable decoration. Trenches retain their existing movement and damage rules.
@@ -362,7 +368,10 @@ same names as ordinary variables (a script that calls them fails to compile ther
 names in existing bots. The baseline for this mode is `players/ffa.bas` (submit it as a policy; it calls FFA-only
 functions, so it does not compile in the teams game): it never shoots a cog
 with `kin` of 50 or more, prefers strangers seen hurting relatives, joins a ready great heart
-when others gather there, and captures hearts that no relative is holding or taking.
+when others gather there, and captures hearts that no relative is holding or taking. Once no
+neutral heart is left it waits at a ready great heart (while three or more cogs live) or walks
+into the nearest stranger's heart to steal it. In a fight it shouts "at" every fourth tick so
+relatives who cannot see it know where it stands.
 
 ### Expanded island and navigation (rules 22)
 
