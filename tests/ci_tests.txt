@@ -95,6 +95,7 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_config.nim
 nim r -d:headless tests/test_paintbot_neural_host.nim
 nim r -d:headless tests/test_paintbot_neural_basic_io.nim "neuralDecode + neuralIssue*"
 nim r -d:headless tests/test_paintbot_neural_basic_io.nim "neuralMask forbids*" "the grenade mask in BASIC*"
