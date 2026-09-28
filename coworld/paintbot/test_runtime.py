@@ -817,5 +817,106 @@ class SeatStagingTests(unittest.TestCase):
             )
 
 
+def _schema_errors(schema, value, path="$"):
+    """The subset of JSON Schema the manifest's config_schema uses; returns the violations."""
+    kinds = {"object": dict, "array": list, "string": str, "integer": int, "number": (int, float), "boolean": bool}
+    kind = schema.get("type")
+    if kind and (not isinstance(value, kinds[kind]) or (kind in ("integer", "number") and isinstance(value, bool))):
+        return [f"{path}: expected {kind}"]
+    errors = []
+    if "enum" in schema and value not in schema["enum"]:
+        errors.append(f"{path}: {value!r} not in {schema['enum']}")
+    if "minimum" in schema and value < schema["minimum"]:
+        errors.append(f"{path}: below {schema['minimum']}")
+    if "maximum" in schema and value > schema["maximum"]:
+        errors.append(f"{path}: above {schema['maximum']}")
+    if "minLength" in schema and len(value) < schema["minLength"]:
+        errors.append(f"{path}: shorter than {schema['minLength']}")
+    if kind == "array":
+        if not schema.get("minItems", 0) <= len(value) <= schema.get("maxItems", len(value)):
+            errors.append(f"{path}: {len(value)} items")
+        for i, item in enumerate(value):
+            errors += _schema_errors(schema.get("items", {}), item, f"{path}[{i}]")
+    if kind == "object":
+        properties = schema.get("properties", {})
+        errors += [f"{path}: missing {key}" for key in schema.get("required", []) if key not in value]
+        for key, item in value.items():
+            if key in properties:
+                errors += _schema_errors(properties[key], item, f"{path}.{key}")
+            elif schema.get("additionalProperties") is False:
+                errors.append(f"{path}: unexpected {key}")
+    return errors
+
+
+class ManifestTests(unittest.TestCase):
+    """The manifest template's inline player guide and variants."""
+
+    manifest = json.loads((Path(__file__).parent / "coworld_manifest_template.json").read_text())
+
+    def test_the_inline_readme_is_the_player_guide(self):
+        sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
+        from sync_readme import player_readme
+
+        guide = (Path(__file__).parent / "guide.md").read_text()
+        readme = self.manifest["game"]["docs"]["readme"]
+        self.assertEqual(readme, {"type": "text", "value": player_readme(guide)}, "run python3 coworld/tools/sync_readme.py")
+        # Operator sections stay out of the game page; player rules stay in.
+        for internal in ("Private Jev decision export", "Comparing two builds on hosted episodes",
+                         "What the advisor switches are worth", "Against the league leader", "readme:skip"):
+            self.assertNotIn(internal, readme["value"])
+        for rules in ("# Paintbot PW\n\nSixteen wheeled cogs", "## Combat and equipment", "## Heartwick arena",
+                      "### FFA-kin mode (Heartland)", "## Advisor oracle"):
+            self.assertIn(rules, readme["value"])
+
+    def test_readme_markers_must_balance(self):
+        sys.path.insert(0, str(Path(__file__).parents[1] / "tools"))
+        from sync_readme import player_readme
+
+        self.assertEqual(player_readme("a\n<!-- readme:skip-start -->\nx\n<!-- readme:skip-end -->\n\nb\n"), "a\nb\n")
+        for bad in ("<!-- readme:skip-start -->\n", "<!-- readme:skip-end -->\n",
+                    "<!-- readme:skip-start -->\n<!-- readme:skip-start -->\n"):
+            with self.assertRaises(ValueError):
+                player_readme(bad)
+
+    def _config(self, variant_id):
+        """A variant's game_config as the platform hands it to the engine (tokens added)."""
+        variant = next(v for v in self.manifest["variants"] if v["id"] == variant_id)
+        return dict(variant["game_config"], tokens=[f"t{i}" for i in range(16)])
+
+    def test_every_variant_and_the_certification_config_validate(self):
+        schema = self.manifest["game"]["config_schema"]
+        for variant in self.manifest["variants"]:
+            with self.subTest(variant["id"]):
+                self.assertEqual(_schema_errors(schema, self._config(variant["id"])), [])
+        certification = dict(self.manifest["certification"]["game_config"], tokens=[f"t{i}" for i in range(16)])
+        self.assertEqual(_schema_errors(schema, certification), [])
+        self.assertNotIn("mode", self.manifest["certification"]["game_config"])
+
+    def test_heartland_is_competition_in_ffa_kin_mode(self):
+        heartland = self._config("heartland")
+        competition = self._config("competition")
+        self.assertEqual(heartland["mode"], "ffa_kin")
+        self.assertEqual(heartland["max_ticks"], 8640)
+        self.assertNotIn("slots", heartland)
+        self.assertEqual(
+            {k: v for k, v in heartland.items() if k not in ("mode", "max_ticks")},
+            {k: v for k, v in competition.items() if k not in ("slots", "max_ticks")},
+        )
+        # The validator refuses what the schema refuses.
+        schema = self.manifest["game"]["config_schema"]
+        self.assertTrue(_schema_errors(schema, dict(heartland, mode="ffa")))
+        self.assertTrue(_schema_errors(schema, dict(heartland, max_ticks=28801)))
+        self.assertTrue(_schema_errors(schema, dict(heartland, extra=1)))
+        # The certifier seats every declared player in its (teams) fixture and fails one that has
+        # no slot. players/ffa.bas calls FFA-only host functions, so it cannot run there and is
+        # not a declared player; it is submitted as a policy for the heartland league instead.
+        seated = {p["player_id"] for p in self.manifest["certification"]["players"]}
+        for player in self.manifest["player"]:
+            self.assertIn(player["id"], seated)
+            self.assertTrue((Path(__file__).parent / player["file"]).is_file(), player["file"])
+        self.assertNotIn("players/ffa.bas", {p["file"] for p in self.manifest["player"]})
+        self.assertTrue((Path(__file__).parent / "players/ffa.bas").is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

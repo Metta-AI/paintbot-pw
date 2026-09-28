@@ -86,31 +86,56 @@ proc pairSpots(w: World, p: Point): (Point, Point) =
   if visionRulesVersion >= 35: (q, mirrorPoint(q))
   else: (q, w.freePickup(mirrorPoint(p)))
 
+proc dryPickup(w: World, p: Point): Point =
+  ## freePickup that also refuses river water; used for FFA great hearts and spawn anchors.
+  let q = w.freePickup(p)
+  if not w.blocked(q) and riverBlend(q.x.int, q.z.int) == 0: return q
+  for r in 1..40:
+    for dz in -r..r:
+      for dx in -r..r:
+        if abs(dx) != r and abs(dz) != r: continue
+        let candidate = point(p.x.int+dx*60, p.z.int+dz*60)
+        if not w.blocked(candidate) and riverBlend(candidate.x.int, candidate.z.int) == 0:
+          return candidate
+  q
+
+proc placeGreatHearts(w: var World) =
+  ## FFA-kin: two great hearts on dry, open ground, an exact mirror pair between the bases.
+  let q = w.dryPickup(point(Width div 2 - 1600, Height div 2))
+  w.greatHearts[0] = GreatHeart(pos: q)
+  w.greatHearts[1] = GreatHeart(pos: mirrorPoint(q))
+
 proc initializeMapEquipment(w: var World) =
   ## A map's items are placed and mirrored by its generator; they go in exactly as given.
+  ## FFA-kin on a map follows the island's FFA rules: one life, no uniforms, every heart
+  ## unowned, no captures, and the great-heart pair.
   for i in 0..<Seats:
-    w.equipment[i].lives = 4
+    w.equipment[i].lives = (if ffa(): 1 else: 4)
     w.cogs[i].aim = home(1-team(i))
   let m = currentMap()
   for p in m.pickups:
+    if ffa() and PickupKind(p.kind) == uniformPickup: continue
     w.pickups.add Pickup(pos: point(p.x, p.z), kind: PickupKind(p.kind))
   for t in m.trenches:
     w.trenches.add Cover(x: t.x.int32, z: t.z.int32, w: t.w.int32, h: t.h.int32)
   for h in m.hearts:
-    w.controlHearts.add ControlHeart(pos: point(h.x, h.z), owner: h.owner.int32)
-  w.captures = [1'i32, 1'i32]
+    w.controlHearts.add ControlHeart(pos: point(h.x, h.z),
+      owner: (if ffa(): -1'i32 else: h.owner.int32))
+  w.captures = (if ffa(): [0'i32, 0'i32] else: [1'i32, 1'i32])
   for heart in w.controlHearts:
     w.heartCaptures.add HeartCapture(team: -1)
+  if ffa(): w.placeGreatHearts()
 
 proc initializeEquipment(w: var World) =
   if activeMap() >= 0:
     w.initializeMapEquipment(); return
-  if visionRulesVersion >= 27:
+  # FFA-kin places no uniforms: a disguise means nothing when every cog is its own side.
+  if visionRulesVersion >= 27 and not ffa():
     let spots = w.pairSpots(point(2000, 1000))
     for q in [spots[0], spots[1]]:
       w.pickups.add Pickup(pos: q, kind: uniformPickup)
   for i in 0..<Seats:
-    w.equipment[i].lives = (if visionRulesVersion >= 19: 4 else: StartingLives)
+    w.equipment[i].lives = (if ffa(): 1 elif visionRulesVersion >= 19: 4 else: StartingLives)
     w.cogs[i].aim = home(1-team(i))
   # Mirrors use the same symmetry as this arena's terrain (180-degree rotation).
   for p in [point(300, 300), point(300, Height-300)]:
@@ -143,7 +168,7 @@ proc initializeEquipment(w: var World) =
     for i,p in [home(0),home(1),point(2050,950),point(4350,3050),
         point(1800,-200),point(4600,4200),point(-400,3000),point(6800,1000),
         point(3200,1250),point(3200,2750)]:
-      w.controlHearts.add ControlHeart(pos:w.freePickup(p),owner:(if i<2:i.int32 else: -1'i32))
+      w.controlHearts.add ControlHeart(pos:w.freePickup(p),owner:(if i<2 and not ffa():i.int32 else: -1'i32))
     if deepWilderness:
       for i,p in [point(-1700,700),point(8100,3300),point(1200,-650),point(5200,4650),
           point(-1700,3300),point(8100,700)]:
@@ -158,10 +183,64 @@ proc initializeEquipment(w: var World) =
     if visionRulesVersion >= 35:
       for i in countup(0, w.controlHearts.len-2, 2):
         w.controlHearts[i+1].pos = mirrorPoint(w.controlHearts[i].pos)
-    w.captures=[1'i32,1'i32]
+    w.captures=(if ffa(): [0'i32,0'i32] else: [1'i32,1'i32])
     if visionRulesVersion >= 24:
       for heart in w.controlHearts:
         w.heartCaptures.add HeartCapture(team: -1)
+  if ffa(): w.placeGreatHearts()
+
+when defined(pwTraining):
+  # Eval-only (native pw_set_spawn_grouping): spawn groups independent of the kinship's
+  # families, -1 = alone. Training builds only, so hosted play can never reach it.
+  var spawnGroupingOverride* {.threadvar.}: Option[array[Seats, int8]]
+
+proc openAnchor(w: World, p: Point): bool =
+  ## Generated maps only: a spawn anchor needs walkable ground around it, or a family anchored
+  ## on a mesa edge or a steep bank cannot fit within HeartSpawnRadius. Every point of two
+  ## rings (a third and two thirds of the radius) must be open and reachable from the anchor.
+  ## Reads no RNG; the island's anchors never ask, so its FFA matches are unchanged.
+  const Dirs = [(1000, 0), (924, 383), (707, 707), (383, 924), (0, 1000), (-383, 924),
+    (-707, 707), (-924, 383), (-1000, 0), (-924, -383), (-707, -707), (-383, -924),
+    (0, -1000), (383, -924), (707, -707), (924, -383)]
+  for radius in [HeartSpawnRadius div 3, HeartSpawnRadius*2 div 3]:
+    for d in Dirs:
+      let q = point(p.x.int+d[0]*radius div 1000, p.z.int+d[1]*radius div 1000)
+      if w.blocked(q) or not w.traversable(p, q): return false
+  true
+
+proc placeFfaSpawns(w: var World) =
+  ## FFA-kin spawn: one anchor per family and per loner, spread over the open map by
+  ## farthest-point sampling (World RNG), and every member spawns within HeartSpawnRadius of
+  ## its group's anchor. This is the only place the engine reads kinship, and it reads only
+  ## the family grouping.
+  var family = activeKinship.family
+  when defined(pwTraining):
+    if spawnGroupingOverride.isSome: family = spawnGroupingOverride.get
+  var group: array[Seats, int]
+  var groups = 0
+  for i in 0..<Seats: groups = max(groups, family[i].int+1)
+  for i in 0..<Seats:
+    if family[i] >= 0: group[i] = family[i].int
+    else: group[i] = groups; inc groups
+  var candidates: seq[Point]
+  for attempt in 0..<64:
+    let p = point(w.rng.between(int32(minX()+600), int32(maxX()-600)).int,
+      w.rng.between(int32(minZ()+600), int32(maxZ()-600)).int)
+    if w.blocked(p, HeartSpawnRadius div 2) or riverBlend(p.x.int, p.z.int) > 0: continue
+    if activeMap() >= 0 and not w.openAnchor(p): continue
+    candidates.add p
+  if candidates.len == 0: candidates.add w.dryPickup(point(Width div 2, Height div 2))
+  var anchors = @[candidates[0]]
+  var nearest = newSeq[int64](candidates.len)
+  for k, c in candidates: nearest[k] = distance2(c, anchors[0])
+  while anchors.len < groups:
+    var best = 0
+    for k in 1..<candidates.len:
+      if nearest[k] > nearest[best]: best = k
+    anchors.add candidates[best]
+    for k, c in candidates: nearest[k] = min(nearest[k], distance2(c, candidates[best]))
+  for i in 0..<Seats: w.spawnAnchor[i] = anchors[group[i]]
+  for i in 0..<Seats: discard w.spawnNear(i, w.spawnAnchor[i])
 
 proc updateBigHeart*(w: var World) =
   if visionRulesVersion < 25 or visionRulesVersion >= 28 or w.tick >= w.endTick: return
@@ -184,7 +263,64 @@ proc remainingHeartPoints*(w: World): int32 =
     let bonusEnd = min(w.endTick, (w.controlHearts.len.int32+1)*BigHeartInterval)
     result += (BigHeartPoints-1)*max(0'i32, bonusEnd-bonusStart)
 
+proc updateFfaTerritory(w: var World) =
+  ## FFA-kin: one living cog alone within reach captures in HeartCaptureTicks; a second cog of
+  ## any kin pauses it, and an empty heart or the owner alone resets it. Owners are seats.
+  for index, heart in w.controlHearts.mpairs:
+    var touching = 0
+    var seat = -1'i32
+    for i, c in w.cogs:
+      if c.hp > 0 and distance2(c.pos, heart.pos) <= ControlHeartRadius*ControlHeartRadius and
+          w.traversable(c.pos, heart.pos):
+        inc touching
+        seat = i.int32
+    w.heartCaptures[index].contested = touching >= 2
+    if touching >= 2: continue
+    if touching == 0 or seat == heart.owner:
+      w.heartCaptures[index] = HeartCapture(team: -1)
+      continue
+    if w.heartCaptures[index].team != seat:
+      w.heartCaptures[index] = HeartCapture(team: seat)
+    inc w.heartCaptures[index].ticks
+    if w.heartCaptures[index].ticks < HeartCaptureTicks: continue
+    w.heartCaptures[index] = HeartCapture(team: -1)
+    heart.owner = seat
+    inc w.cogs[seat].captures
+
+proc updateGreatHearts*(w: var World) =
+  ## FFA-kin stag hunt, once per tick: quorum grows progress, fewer cogs decay it, and a full
+  ## charge pays the bounty equally to every cog in the zone (remainder dropped).
+  for heart in w.greatHearts.mitems:
+    var present: seq[int]
+    for i, c in w.cogs:
+      if c.hp > 0 and distance2(c.pos, heart.pos) <= GreatHeartRadius.int64*GreatHeartRadius:
+        present.add i
+    heart.present = present.len.int8
+    if w.tick < heart.dormantUntil: continue
+    if present.len < GreatHeartQuorum:
+      heart.progress = max(0'i32, heart.progress-1)
+      continue
+    inc heart.progress
+    if heart.progress < GreatHeartCaptureTicks: continue
+    let share = GreatHeartBounty.int32 div present.len.int32
+    for i in present:
+      w.seatScore[i] += share
+      w.greatShare[i] += share
+    heart.progress = 0
+    heart.dormantUntil = w.tick+GreatHeartDormantTicks
+
+proc payFfaIncome*(w: var World) =
+  ## FFA-kin, once per second: every owned control heart pays its owner.
+  if w.tick mod TickRate != 0: return
+  for heart in w.controlHearts:
+    if heart.owner >= 0:
+      w.seatScore[heart.owner] += FfaHeartIncome
+      inc w.heartSeconds[heart.owner]
+
 proc updateTerritory*(w:var World) =
+  if ffa():
+    w.updateFfaTerritory()
+    return
   for index, heart in w.controlHearts.mpairs:
     var touching:array[2,bool]
     for i,c in w.cogs:
@@ -281,11 +417,20 @@ proc damage*(w: var World, victim, attacker, amount: int) =
           else:
             t[attacker].sprayDamageEnemy += removed
             if killed: inc t[attacker].sprayKillsEnemy
+  when defined(pwTraining):
+    if damageObserver != nil:
+      damageObserver(w, victim, attacker, hpBefore-w.cogs[victim].hp, w.cogs[victim].hp == 0)
   if w.equipment[victim].armor == 0 and not w.cogs[victim].carrying and
       w.trenchAt(w.cogs[victim].pos) < 0:
     w.cogs[victim].cooldown = min(w.cogs[victim].cooldown,
         FireCooldownTicks.int32)
   if w.cogs[victim].hp > 0: return
+  if ffa():
+    # FFA-kin: a dead cog's hearts go neutral at once, and its capture in progress is lost.
+    for heart in w.controlHearts.mitems:
+      if heart.owner == victim.int32: heart.owner = -1
+    for capture in w.heartCaptures.mitems:
+      if capture.team == victim.int32: capture = HeartCapture(team: -1)
   if w.cogs[victim].carrying:
     w.resetHeart(1-team(victim)); w.cogs[victim].carrying = false
   let lives = if visionRulesVersion in 13..18:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
@@ -392,7 +537,7 @@ proc pickupEquipment(w: var World, attacked: array[Seats, bool]) =
       of sprayPickup:
         if not w.equipment[i].sprayCan: w.equipment[i].sprayCan = true; taken = true
       of medkitPickup:
-        if w.cogs[i].hp < 3: w.cogs[i].hp = 3; taken = true
+        if w.cogs[i].hp < maxHp(): w.cogs[i].hp = maxHp(); taken = true
       of uniformPickup:
         if visionRulesVersion >= 27 and not w.uniforms[i] and not attacked[i] and
             not w.cogs[i].firing and w.equipment[i].windup == 0 and
@@ -434,6 +579,11 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
       if w.equipment[i].lives > 0:
         dec w.cogs[i].respawn
         if w.cogs[i].respawn <= 0:
+          if ffa():
+            # One life: only a cog that has never spawned (crowded at start) gets here, and it
+            # keeps trying near its anchor. There is no end-zone fallback.
+            discard w.spawnNear(i, w.spawnAnchor[i])
+            continue
           if visionRulesVersion >= 24:
             var ownsHeart = false
             for heart in w.controlHearts:
@@ -447,7 +597,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
             let x = w.rng.between(150, 800)
             let p = point(if team(i) == 0: x else: Width-x, w.rng.between(150, Height-150))
             if not w.movementBlocked(p, i, true):
-              w.cogs[i].pos = p; w.cogs[i].goal = p; w.cogs[i].hp = 3
+              w.cogs[i].pos = p; w.cogs[i].goal = p; w.cogs[i].hp = maxHp()
               w.cogs[i].shield = 36; placed = true; break
           if not placed: w.spawn(i)
       continue
@@ -463,6 +613,8 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     let dest = if cmd.direct: w.cogs[i].goal else: w.waypointFor(i, w.cogs[i].pos,
         w.cogs[i].goal)
     var speed = if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed
+    # FFA-kin territory boost (0 in the teams game, where this is the identity).
+    speed = boostedSpeed(speed, w.territoryBoost(i))
     if visionRulesVersion >= 26 and cmd.sneak: speed = speed div 2
     if visionRulesVersion >= 30 and riverBlend(w.cogs[i].pos.x.int, w.cogs[i].pos.z.int) > 0 and
         terrainHeight(w.cogs[i].pos.x.int, w.cogs[i].pos.z.int) < RiverWaterHeight:
@@ -532,15 +684,19 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           var jitter = w.rng.between(-32, 32)+w.rng.between(-32, 32)
           if visionRulesVersion >= 10:
             let target = Point(x: origin.x+aim.x, z: origin.z+aim.z)
-            jitter = jitter*w.gunSpreadPercent(origin, target).int32 div 100
+            # FFA-kin territory boost narrows the spread (identity at boost 0).
+            let spread = w.gunSpreadPercent(origin, target)*(100-w.territoryBoost(i)) div 100
+            jitter = jitter*spread.int32 div 100
             aim = direction(Point(), aim, GunRange)
           aim = Point(x: aim.x-int32(int64(aim.z)*jitter div GunRange),
               z: aim.z+int32(int64(aim.x)*jitter div GunRange))
           let ray = direction(Point(), aim, GunRange)
           var checked: uint32 = 0
           var endPoint = origin
+          # FFA-kin rays stop at FfaGunRange: the same samples along the same ray, fewer of them.
+          let samples = (if ffa(): FfaGunRange else: GunRange) div 20
           block trace:
-            for n in 1..(GunRange div 20):
+            for n in 1..samples:
               let p = Point(x: origin.x+ray.x*n.int32 div (GunRange div 20),
                   z: origin.z+ray.z*n.int32 div (GunRange div 20))
               if w.blocked(p, 0): break
@@ -594,6 +750,18 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     else: airborne.add g
   w.grenades = airborne
   w.pickupEquipment(attacked)
+  if ffa():
+    # FFA-kin: no glory, meter or elimination victory. The match ends at endTick or when at
+    # most one cog is left standing, and winner -3 means "ended" (results carry the scores).
+    w.updateTerritory()
+    w.updateGreatHearts()
+    w.payFfaIncome()
+    inc w.tick
+    var standing = 0
+    for i, c in w.cogs:
+      if c.hp > 0 or w.equipment[i].lives > 0: inc standing
+    if standing <= 1 or w.tick >= w.endTick: w.winner = -3
+    return
   w.updateGloryHearts()
   if visionRulesVersion>=13:
     w.updateTerritory()

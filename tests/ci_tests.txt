@@ -47,9 +47,19 @@ nim r tests/test_paintbot_glory_hearts.nim
 nim r tests/test_paintbot_maps.nim
 nim r tests/test_paintbot_glory_behind.nim
 nim r tests/test_paintbot_weapon_buff.nim
+nim r tests/test_paintbot_rules40_golden.nim
+nim r tests/test_paintbot_rules41_golden.nim
+nim r tests/test_paintbot_ffa_config.nim
+nim r tests/test_paintbot_kinship.nim
+nim r tests/test_paintbot_ffa_rules.nim
+nim r tests/test_paintbot_ffa_replay.nim
+nim r tests/test_paintbot_kinhue.nim
+nim r tests/test_paintbot_ffa_basic.nim
+nim r tests/test_paintbot_ffa_baseline.nim
 nim r tests/test_paintbot_projection.nim
 nim r -d:headless tests/test_paintbot_neural_contract.nim
 nim r -d:headless tests/test_paintbot_neural_obs_v2.nim
+nim r -d:headless tests/test_paintbot_neural_obs_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_seat_stats.nim
@@ -68,6 +78,7 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_spray.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_weapon_stats.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
 nim r -d:headless tests/test_paintbot_neural_host.nim
 nim r -d:headless tests/test_paintbot_neural_basic_io.nim
@@ -81,9 +92,13 @@ nim r -d:jevArmShards=3 -d:jevArmShard=1 tests/test_paintbot_jev_baseline.nim
 nim r -d:jevArmShards=3 -d:jevArmShard=2 tests/test_paintbot_jev_baseline.nim
 node tests/test_paintbot_inspector.js
 node tests/test_paintbot_webinputs.js
+node tests/test_paintbot_kinhud.js
 python coworld/paintbot/tools/make_jev_baseline.py --check
 
 # The hosted runtime is Linux-only; its file-URI handling is POSIX, so skip Windows here.
 [posix-only cwd=coworld/paintbot] python -m unittest test_runtime
 [posix-only cwd=coworld/paintbot] python -m unittest test_semantic_trajectory
 [posix-only] python coworld/paintbot/test_training_bridge.py
+# Heartland kinship evals: ffa_blind.bas is current, every kin_eval.py suite runs (2 short
+# episodes), and replay-recomputed pair counters equal the live ones. Multiprocessing + ctypes.
+[posix-only] python tools/test_kin_eval.py

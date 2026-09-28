@@ -85,7 +85,8 @@ class PackageTests(unittest.TestCase):
         source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
         consts = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
         pairs = [("ObservationContract", "ObservationContractHash"), ("ActionContract", "ActionContractHash"),
-                 ("ActionContractV2", "ActionContractV2Hash"), ("ObservationContractV2", "ObservationContractV2Hash")]
+                 ("ActionContractV2", "ActionContractV2Hash"), ("ObservationContractV2", "ObservationContractV2Hash"),
+                 ("ObservationContractFfaV1", "ObservationContractFfaV1Hash")]
         for name, hashed in pairs:
             self.assertEqual(consts[hashed], hashlib.sha256(consts[name].encode()).hexdigest(), name)
         self.assertEqual(consts["ActionContractV2"], "paintbot-pw.rules37.action.v2.51-25-2-2-2")

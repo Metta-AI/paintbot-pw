@@ -3,6 +3,7 @@ export topography
 ## Integer-only Paintbot simulation; Polyworld RNG and portable state hashes.
 import polyworld/[rngs, hashes]
 import std/[tables, math]
+import kinship
 
 const
   Seats* = 16
@@ -10,6 +11,7 @@ const
   MatchTicks* = 5*60*TickRate # Historical replay duration.
   HeartMeterMatchTicks* = 10*60*TickRate
   HeartMeterFillTicks* = 3*60*TickRate
+  FfaMatchTicks* = 6*60*TickRate # FFA-kin: a fixed six-minute match.
   Width* = 6400
   Height* = 4000
   Radius* = 55
@@ -45,6 +47,25 @@ const
   GloryBehindLivesTicks* = 5*TickRate
   SpawnTemperature* = 1000
   HeartSpawnRadius* = 350
+  # FFA-kin great hearts (a stag hunt): GreatHeartQuorum living cogs inside GreatHeartRadius
+  # for GreatHeartCaptureTicks split GreatHeartBounty (tenths of a point) equally, then the
+  # heart sleeps GreatHeartDormantTicks. Progress decays one tick per tick below quorum.
+  GreatHeartRadius* = 200
+  GreatHeartQuorum* = 3
+  GreatHeartCaptureTicks* = 5*TickRate
+  GreatHeartBounty* = 600
+  GreatHeartDormantTicks* = 60*TickRate
+  FfaHeartIncome* = 10 # Tenths of a point per second per owned control heart.
+  # FFA-kin tuning (the teams game untouched): cogs carry 10 HP instead of 3, and gun rays stop at
+  # 20 m instead of GunRange, so fights last long enough to leave and to come to a relative's aid.
+  FfaMaxHp* = 10
+  FfaGunRange* = 2000
+  ## FFA-kin territory boost: a cog standing in territory owned by seat j (the owner of the
+  ## nearest control heart) moves up to this much faster and has this much less gun spread,
+  ## scaled by rPercent(me, j): own 30, sibling 15, cousin 7 (7.5 floored), stranger 0.
+  TerritoryBoostPercent* = 30
+  ControlHeartRadius* = 140 # A cog within this (and a traversable line) touches a control heart.
+  TeamsMaxHp = 3
   # Compile-time exponential table keeps native/WASM sampling integer-only.
   # Scores are quantized to 10 world units (1% of the temperature).
   SpawnWeights = block:
@@ -110,6 +131,11 @@ type
     ## Rules 38: who took a glory heart, where, and when; kept for the viewer's +20.
     tick*, seat*, amount*: int32
     pos*: Point
+  GreatHeart* = object
+    ## FFA-kin: a stag-hunt heart. present is the living cogs in its zone this tick (viewer).
+    pos*: Point
+    progress*, dormantUntil*: int32
+    present*: int8
   World* = object
     seed*, tick*: int32
     rng*: Rng
@@ -139,6 +165,12 @@ type
     gloryHearts*: seq[GloryHeart] # Rules 38: glory hearts on the field.
     nextGloryHeart*: int32 # Rules 38: the tick the next pair appears.
     gloryPickups*: seq[GloryPickup] # Rules 38: recent pickups, kept GloryEventLifetime ticks.
+    # FFA-kin only; hashed only in that mode, so rules-40 hashes are unchanged.
+    seatScore*: array[Seats, int32] # Raw score s_i in tenths: heart income plus great-heart shares.
+    heartSeconds*: array[Seats, int32] # Seconds of heart ownership paid to each seat.
+    greatShare*: array[Seats, int32] # Great-heart bounty paid to each seat, in tenths.
+    greatHearts*: array[2, GreatHeart]
+    spawnAnchor*: array[Seats, Point] # Where each seat's family (or the loner) spawns.
   TerritoryWorld = object
     seed*, tick*: int32
     rng*: Rng
@@ -174,12 +206,18 @@ type
     chargeGrenade*: bool
     sneak*: bool
 
+static: doAssert KinSeats == Seats
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
+type GameMode* = enum
+  ## gmTeams is the two-team game every rules version plays. gmFfaKin (config "ffa_kin") makes
+  ## all 16 seats separate players; teams behaviour (rules 40, 41) is untouched while the mode is gmTeams.
+  gmTeams, gmFfaKin
 # Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
 # still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
 when defined(pwTraining):
   var visionRulesVersion* {.threadvar.}: int
+  var gameMode* {.threadvar.}: GameMode
   type
     SeatStats* = object
       ## Per-seat combat telemetry for training hosts. Cumulative per match; never
@@ -211,8 +249,19 @@ when defined(pwTraining):
   # Per-attacker damage scale in permille, pointed at by the host for one step; nil or
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
   var damageScale* {.threadvar.}: ptr array[Seats, int32]
+  # FFA-kin pair counters (native pw_pair_stats): the host points this at a proc for one
+  # step and damage() reports every damage event past the shield and life checks, with the
+  # health it removed. Telemetry only; never part of World, its hash or any decision.
+  type DamageObserver* = proc(w: World, victim, attacker: int, removed: int32,
+    killed: bool) {.nimcall, gcsafe.}
+  var damageObserver* {.threadvar.}: DamageObserver
 else:
   var visionRulesVersion* = 41
+  var gameMode* = gmTeams
+proc ffa*(): bool = gameMode == gmFfaKin
+proc maxHp*(): int32 =
+  ## Base HP a cog spawns with and a medkit restores: FfaMaxHp in FFA-kin, 3 otherwise.
+  if ffa(): FfaMaxHp.int32 else: TeamsMaxHp.int32
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
@@ -520,20 +569,22 @@ proc sampleSpawnHeart*(w: var World, slot: int): int =
     draw -= weight
   candidates[^1]
 
-proc spawnAtHeart(w: var World, slot: int): bool =
-  let heart = w.sampleSpawnHeart(slot)
-  if heart < 0: return false
-  let origin = w.controlHearts[heart].pos
-  # Search only near the selected heart. If crowded, retry next tick.
+proc spawnNear(w: var World, slot: int, origin: Point): bool =
+  # Search only near the origin (a heart, or an FFA spawn anchor). If crowded, retry next tick.
   for attempt in 0..<128:
     let p = point(origin.x.int+w.rng.between(-HeartSpawnRadius, HeartSpawnRadius).int,
         origin.z.int+w.rng.between(-HeartSpawnRadius, HeartSpawnRadius).int)
     if distance2(origin, p) > HeartSpawnRadius*HeartSpawnRadius: continue
     if w.blocked(p) or w.occupied(p, slot) or not w.traversable(origin, p): continue
     w.cogs[slot].pos = p; w.cogs[slot].goal = p
-    w.cogs[slot].hp = 3; w.cogs[slot].shield = 36
+    w.cogs[slot].hp = maxHp(); w.cogs[slot].shield = 36
     w.cogs[slot].firing = false; w.cogs[slot].carrying = false
     return true
+
+proc spawnAtHeart(w: var World, slot: int): bool =
+  let heart = w.sampleSpawnHeart(slot)
+  if heart < 0: return false
+  w.spawnNear(slot, w.controlHearts[heart].pos)
 
 proc spawn(w: var World, slot: int, solid = true) =
   var p = point(if team(slot) == 0: 350+(slot div 2 mod 2)*160 else: Width-350-(
@@ -555,11 +606,12 @@ proc spawn(w: var World, slot: int, solid = true) =
               break search
     if not found: return # Retry next tick rather than overlap a living cog.
   w.cogs[slot].pos = p; w.cogs[slot].goal = p
-  w.cogs[slot].hp = 3; w.cogs[slot].shield = 36
+  w.cogs[slot].hp = maxHp(); w.cogs[slot].shield = 36
   w.cogs[slot].firing = false; w.cogs[slot].carrying = false
 proc resetHeart*(w: var World, side: int) =
   w.hearts[side] = Heart(pos: home(side), carrier: -1)
 proc initializeEquipment(w: var World)
+proc placeFfaSpawns(w: var World)
 proc configureRules*(version: int) =
   ## Native rollout workers call this on their own thread before accessing a world.
   visionRulesVersion = version
@@ -587,14 +639,18 @@ proc mapName*(): string =
 
 proc newWorld*(seed: int32, endTick: int32 = 0): World =
   configureRules(visionRulesVersion)
-  result.endTick = if visionRulesVersion >= 28:
+  result.endTick = if ffa():
+    (if endTick <= 0: FfaMatchTicks.int32 else: min(endTick, FfaMatchTicks.int32))
+  elif visionRulesVersion >= 28:
     (if endTick <= 0: HeartMeterMatchTicks.int32 else: min(endTick, HeartMeterMatchTicks.int32))
   else: (if endTick <= 0: MatchTicks.int32 else: endTick)
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
-  if visionRulesVersion >= 37:
+  # FFA-kin draws the match's kinship here, on its own stream; the World RNG never sees it.
+  if ffa(): activeKinship = matchKinship(seed)
+  if visionRulesVersion >= 37 and not ffa():
     let seconds = result.endTick div TickRate
     result.glory = [seconds, seconds]
-  if visionRulesVersion >= 38: result.nextGloryHeart = GloryHeartFirstTick
+  if visionRulesVersion >= 38 and not ffa(): result.nextGloryHeart = GloryHeartFirstTick
   if activeMap() >= 0:
     for c in currentMap().cover:
       result.cover.add Cover(x: c.x.int32, z: c.z.int32, w: c.w.int32, h: 0)
@@ -629,7 +685,8 @@ proc newWorld*(seed: int32, endTick: int32 = 0): World =
     for lot in forestLots():
       result.cover.add Cover(x:(lot.x-lot.radius).int32,z:(lot.z-lot.radius).int32,w:(2*lot.radius).int32,h:0)
   if visionRulesVersion >= 6: result.initializeEquipment()
-  if visionRulesVersion >= 24:
+  if ffa(): result.placeFfaSpawns()
+  elif visionRulesVersion >= 24:
     for i in 0..<Seats:
       discard result.spawnAtHeart(i)
   result.bigHeart = -1
@@ -721,6 +778,13 @@ proc settleGlory*(w: var World) =
     if w.winner != side.int32: w.glory[side] = 0
 
 proc scores*(w: World): seq[float] =
+  if ffa():
+    # R_i = sum over j of r(i,j) * s_j, in points.
+    for i in 0..<Seats:
+      var total = 0.0
+      for j in 0..<Seats: total += activeKinship.r(i, j) * w.seatScore[j].float
+      result.add total / 10.0
+    return
   for i in 0..<Seats:
     result.add (if visionRulesVersion >= 37: w.glory[team(i)].float elif visionRulesVersion >= 23: w.scoreTicks[team(i)].float / TickRate.float else: float(if visionRulesVersion >= 20 and w.winner >= 0: (if w.winner == team(i).int32: 10 else: 0) elif visionRulesVersion>=13:w.captures[team(i)].int else:int(w.winner == team(i).int32)))
 type LegacyWorld = object
@@ -742,6 +806,8 @@ proc stateHash*(w: World): uint32 =
         if visionRulesVersion >= 37: result.addHashy(value)
       elif name == "gloryHearts" or name == "nextGloryHeart" or name == "gloryPickups":
         if visionRulesVersion >= 38: result.addHashy(value)
+      elif name in ["seatScore", "heartSeconds", "greatShare", "greatHearts", "spawnAnchor"]:
+        if ffa(): result.addHashy(value)
       else: result.addHashy(value)
     return
   if visionRulesVersion >= 13:
@@ -1013,6 +1079,31 @@ proc waypoint*(w:World,start,goal:Point):Point =
     if not w.walkClear(start,p):break
     if pullDry and not navSegmentDry(start,p,nx,nz):break
     result=p;anchor=next
+proc territoryOwner*(w: World, p: Point): int32 =
+  ## Who owns the territory at p: the owner of the nearest control heart (distance2, ties
+  ## to the lower index; the viewer's territory overlay uses the same rule), -1 when that
+  ## heart is neutral or there are no hearts.
+  if w.controlHearts.len == 0: return -1
+  var nearest = 0
+  for i, h in w.controlHearts:
+    if distance2(p, h.pos) < distance2(p, w.controlHearts[nearest].pos): nearest = i
+  w.controlHearts[nearest].owner
+proc territoryBoost*(w: World, slot: int, kin: Kinship): int =
+  ## The FFA-kin territory boost for the seat where it stands, in percent:
+  ## TerritoryBoostPercent * rPercent(slot, owner) div 100. 0 in the teams game, on neutral
+  ## ground and on a stranger's. Movement speed is multiplied by (100 + boost) / 100 and gun
+  ## spread by (100 - boost) / 100. This and spawn grouping are the only places the engine
+  ## reads kinship; it reads r (ibd), never genes.
+  if not ffa() or slot notin 0..<Seats: return 0
+  let owner = w.territoryOwner(w.cogs[slot].pos)
+  if owner notin 0'i32..<Seats.int32: return 0
+  TerritoryBoostPercent * kin.rPercent(slot, owner.int).int div 100
+proc territoryBoost*(w: World, slot: int): int =
+  ## territoryBoost under the match's kinship (activeKinship).
+  w.territoryBoost(slot, activeKinship)
+proc boostedSpeed*(speed, boost: int): int =
+  ## A move speed under a territory boost; exact identity at boost 0 (the teams game).
+  speed * (100 + boost) div 100
 proc stepEquipment(w: var World, commands: array[Seats, Command])
 proc step*(w: var World, commands: array[Seats, Command],
     rulesVersion = visionRulesVersion) =
@@ -1038,7 +1129,8 @@ proc step*(w: var World, commands: array[Seats, Command],
       w.cogs[i].aim = cmd.goal
     let dest = if cmd.direct: w.cogs[i].goal else: w.waypoint(w.cogs[i].pos,
         w.cogs[i].goal)
-    let speed = if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed
+    let speed = boostedSpeed(if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed,
+      w.territoryBoost(i))
     if distance2(w.cogs[i].pos, dest) > speed.int64*speed:
       let v = direction(w.cogs[i].pos, dest, speed)
       var p = w.cogs[i].pos; p.x+=v.x

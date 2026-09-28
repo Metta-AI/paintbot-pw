@@ -33,6 +33,21 @@ The viewer reads original v1 files and v2 files. V2 adds bounded player display 
 
 Policies can explicitly publish a shout with `result = shout(strNew("Guard the heart"))`. BASIC `PRINT` remains a private diagnostic log. Shouts are currently spectator messages; they do not add a new policy observation channel. BASIC permits four shouts per seat per tick, maximum 1024 bytes per string; the replay caps public messages at 20,000.
 
+## FFA-kin (Heartland) replays
+
+FFA-kin replays (version 1000 + rules: 1040, or 1041, which also records the map) carry the
+match's kinship, and the viewer state adds `mode`, `family`, `genes`, `rPct` and `kinHue`. Every cog uses one grey body; its ground disc,
+seat badge, paint and owned hearts take its family's hue (`examples/paintbot/kinhue.nim`:
+siblings share a hue, cousin families are neighbours, loners are grey). Clicking a cog turns on
+kin view: kin get a halo scaled by r and a ½ / ¼ badge, unrelated cogs fade to 40%. Esc or a
+click on empty ground clears it; it persists through scrubbing. The header keeps its height:
+clock, one chip per family (hearts held now and summed raw score) and the two great hearts (n/3 charging, dormant
+countdown, or ready). Click it or press Tab for the per-cog table (hearts held, heart-seconds,
+great-heart shares, s and R, sorted by R, dead cogs greyed); a row click selects that cog, and
+Esc collapses the table before clearing the selection. The end card reads "Match ended" with the
+top cog and family. HUD maths live in `coworld/paintbot/kinhud.js`
+(`tests/test_paintbot_kinhud.js`). Teams replays are unchanged.
+
 ## Build
 
 Check out `Metta-AI/polyworld-data` beside this repository as `polyworld_data` at the revision in `coworld/assets.json`, or set `POLYWORLD_DATA`. Run `python3 coworld/tools/sync_dependencies.py`, then:

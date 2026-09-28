@@ -6,7 +6,7 @@
   const pickups = {
     grenadePickup: ['Grenade', 'A throwable paint grenade. Deals 2 damage in the open, 1 into another trench, or 6 inside the blast’s trench.'],
     sprayPickup: ['Spray can', 'Adds a reusable short-range paint spray that hits in a forward cone.'],
-    medkitPickup: ['Med kit', 'Restores health to 3 HP when collected by an injured cog.'],
+    medkitPickup: ['Med kit', 'Restores full health (3 HP; 10 in FFA-kin) when collected by an injured cog.'],
     armorPickup: ['Armor', 'Grants 3 armor points that absorb damage. While armored, gun cooldown is tripled.'],
     uniformPickup: ['Uniform', 'Disguises the cog as the opposing team. Attacking ends the disguise; friendly fire still applies.'],
   };
@@ -19,7 +19,10 @@
     if (cog.carrying) items.push('Carrying enemy heart');
     return items.length ? items.join(' · ') : 'None';
   }
-  function bonuses(cog, terrain, e = {}, rules = 27) {
+  function territoryText(boost) {
+    return boost > 0 ? `Territory boost +${boost}%: ${boost}% faster, ${boost}% less gun spread.` : 'Territory boost +0% (neutral or unrelated ground).';
+  }
+  function bonuses(cog, terrain, e = {}, rules = 27, ffa = false) {
     if (cog.hp <= 0) return 'None while respawning or eliminated.';
     const items = [];
     if (cog.shield > 0) items.push(`Spawn protection · ${seconds(cog.shield)} remaining.`);
@@ -29,6 +32,8 @@
       const delta = terrain.spread - 100;
       items.push(delta === 0 ? 'Aim: normal gun spread.' : `Aim: ${Math.abs(delta)}% ${delta < 0 ? 'less' : 'more'} gun spread (${delta < 0 ? 'downhill' : 'uphill'}).`);
     }
+    // FFA-kin: 30% x r(me, territory owner) faster and less gun spread (sim.territoryBoost).
+    if (ffa && terrain) items.push(territoryText(terrain.territoryBoost ?? 0));
     if (rules >= 6 && (e.armor > 0 || cog.carrying || terrain?.trench >= 0)) items.push('Gun cooldown: 3s (normally 1s).');
     return items.join(' ') || 'None';
   }
@@ -40,11 +45,13 @@
       if (!h) return null;
       const value = state.heartValues?.[selection.id] ?? 1;
       const capture = w.heartCaptures?.[selection.id];
+      // FFA-kin owners and capturers are seats, not teams.
+      const side = state.mode === 'ffa_kin' ? (i => i >= 0 ? `Cog ${i + 1}` : undefined) : (i => teams[i]);
       let status = 'No capture in progress';
       if (capture?.contested) status = 'Contested · capture paused';
-      else if (capture?.ticks > 0) status = `${teams[capture.team]} capturing · ${seconds(72 - capture.ticks)} remaining`;
+      else if (capture?.ticks > 0) status = `${side(capture.team)} capturing · ${seconds(72 - capture.ticks)} remaining`;
       return {title: `${value === 5 ? 'Big heart' : 'Heart'} ${selection.id + 1}`, color: h.owner,
-        rows: [['Owner', teams[h.owner] ?? 'Neutral'], ['Held continuously', h.owner < 0 ? 'Unclaimed' : seconds(state.heartHeld?.[selection.id] ?? 0)],
+        rows: [['Owner', side(h.owner) ?? 'Neutral'], ['Held continuously', h.owner < 0 ? 'Unclaimed' : seconds(state.heartHeld?.[selection.id] ?? 0)],
           ['Value', `${value} point${value === 1 ? '' : 's'}/s`], ['Capture', status]],
         description: 'Hold this heart to earn points. The held timer resets when ownership changes.'};
     }
@@ -67,7 +74,7 @@
     }
     return best;
   }
-  const api = {equipment, bonuses, objectDetails, objectAt};
+  const api = {equipment, bonuses, territoryText, objectDetails, objectAt};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaintbotInspector = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

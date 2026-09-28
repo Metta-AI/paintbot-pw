@@ -1,5 +1,6 @@
 # Paintbot PW
 
+<!-- readme:skip-start -->
 ## Private Jev decision export
 
 After a completed episode with the Jev BASIC policy, export its objective decisions
@@ -26,6 +27,8 @@ is attached as a reward only when the policy applied the model's objective.
 The exporter refuses score-arm runs because their chosen objective follows a different
 path. It creates the output with mode `0600`; keep the input seat logs and output private.
 
+<!-- readme:skip-end -->
+
 Sixteen wheeled cogs fight for territory in Heartwick. Red uses even slots;
 Blue uses odd slots. Ten stationary hearts divide the entire map into nearest-heart
 regions. Each team starts with its base heart; eight hearts start neutral gray.
@@ -40,7 +43,9 @@ ownership are public. BASIC exposes `heartCount()`, `controlX(i)`, `controlY(i)`
 and `controlOwner(i)` (-1 neutral, 0 red, 1 blue). Capture state is also public:
 `controlCaptureTeam(i)` (-1 idle), `controlCaptureTicks(i)` (0–71 of 72), and
 `controlContested(i)` (0 or 1). Invalid indices return -1. Glory is
-public too: `glory(team)` (-1 for an invalid team) (rules 37).
+public too: `glory(team)` (-1 for an invalid team) (rules 37). In FFA-kin mode
+(Heartland, below) owners and capturers are seats instead of teams: `controlOwner(i)`,
+its FFA-only alias `heartOwner(i)` and `controlCaptureTeam(i)` return the seat (0-15) or -1.
 
 Cogs have three base HP and three respawns (four lives total). Death loses equipment and respawns
 after 72 ticks; spawn protection lasts 36 ticks. Initial spawns and respawns are within 350 world units
@@ -112,7 +117,11 @@ Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `pickupY(id)`, `pickupKind(id)` (0 grenade, 1 spray, 2 medkit, 3 armor),
 `glory(team)` (rules 37), `gloryHeartCount()`, `gloryHeartX(id)`, `gloryHeartY(id)`,
 `gloryHeartTicksLeft(id)` (rules 38). Hidden player, pickup and glory-heart coordinates are
-not disclosed (-1).
+not disclosed (-1). Available in FFA-kin mode only (Heartland): `gameMode()`, `kin(slot)`, `gene(slot,i)`,
+`seatScore(slot)`, `seatAlive(slot)`, `heartOwner(i)`, `greatHeartCount()`, `greatHeartX(i)`,
+`greatHeartY(i)`, `greatHeartPresent(i)`, `greatHeartProgress(i)`, `greatHeartDormant(i)` and
+`territoryBoost()`; see "FFA-kin mode (Heartland)". In the teams game these names are not defined, so scripts may
+use them as ordinary variables.
 
 Actions: `walkTo(x,y)`, `lookAt(x,y)`, `shootAt(x,y)`, `chargeGrenade(held)`.
 Release by calling `chargeGrenade(0)` or not calling it on the next tick.
@@ -128,6 +137,7 @@ seeking, individual cone visibility, first-person view, event filtering, invento
 armor/lives inspection, grenade arcs/blasts, spray effects and trench markers.
 Earlier replay versions retain their original rules and hashes.
 
+<!-- readme:skip-start -->
 ## Comparing two builds on hosted episodes
 
 A hosted experience request runs a batch of episodes you define, on a pinned Coworld, without
@@ -256,6 +266,8 @@ fell from 20.6% to 12.1%, deaths in the water from 73% to 49%, and the eliminati
 he now burns 30.9 of his 32 lives a game. Half our deaths still come in the water, so there is more
 to take here.
 
+<!-- readme:skip-end -->
+
 ## Heartwick arena
 
 Cottages, garden walls, carts, supply stacks and the market well are solid cover: they block movement, sight and direct fire. Grenades still lob over them. The village is symmetric under a half turn, with a market square, cross streets and side lanes. Flower patches are walkable decoration. Trenches retain their existing movement and damage rules.
@@ -319,6 +331,74 @@ instead of assuming Heartwick coordinates. The generator places items by role: g
 behind your lines, spray in the thickest cover, armor on exposed high ground, medkits at
 the centre and on a flank, and trenches on open approaches.
 The generator and previews are in `tools/mapgen/`.
+
+### FFA-kin mode (Heartland)
+
+The `heartland` variant sets `"mode": "ffa_kin"` in the game config (rules 41 otherwise; the
+teams game is untouched when the mode is absent or `"teams"`). The variant plays on Heartwick;
+a config may add a generated `"map"`, and the FFA-kin rules below apply there unchanged. All sixteen cogs are separate
+players, but some are related, and a cog's score counts its relatives' points.
+
+- **Families.** Every match draws a kinship layout from the seed: four families of four,
+  eight pairs, five trios and a loner, four families of four in two cousin-linked pairs,
+  rarely all strangers, rarely all clones. Each cog has 32 genes (bits). Siblings share
+  16 loci by descent, so their relatedness r is 1/2; linked cousins share 8 (r = 1/4); clones
+  share all 32 (r = 1); strangers 0. A cog's r to itself is 1. Other matching bits are chance
+  and do not count. Families spawn together around one anchor each, spread over the map.
+- **Rules.** Every hit is an ordinary hit (there are no teams, so no friendly fire, and no
+  uniforms). Cogs carry 10 base HP instead of 3 (a medkit restores all 10; `selfHp` and
+  `playerHp` read 0-10), and gun rays stop at 20 m (2,000 units) instead of 52.5 m. Grenades,
+  spray and armor are unchanged. One life: a cog that dies is out, and every heart it owns goes neutral at once.
+  All ten control hearts start neutral. One cog alone within 140 units for 72 ticks captures
+  a heart; any second cog in range, relatives included, pauses the capture, and the heart's
+  owner standing on it blocks capture entirely. An owned heart pays its owner 1 point per
+  second.
+- **Territory boost.** The ground belongs to the owner of the nearest control heart (the
+  territory overlay; a neutral heart's ground belongs to nobody). A cog on ground owned by
+  seat j moves faster and shoots straighter by 30% × r(me, j): +30% on its own ground, +15% on
+  a sibling's, +7% on a cousin's (7.5 rounded down), nothing on a stranger's or neutral ground.
+  Speed is multiplied by (100 + boost)/100 (before sneaking or wading halve or quarter it) and
+  gun spread by (100 - boost)/100.
+- **Great hearts.** Two great hearts sit at mirrored spots. Three or more living cogs inside
+  200 units for 5 seconds (120 ticks) capture one; progress falls one tick per tick while
+  fewer than three are present. A capture pays 60 points split equally among every cog in the
+  zone, then the heart is dormant for 60 seconds.
+- **Match.** A fixed 6:00 (8,640 ticks), ending early when at most one cog is left. No glory,
+  no heart meter, no elimination victory; results report outcome `ended`.
+- **Score.** Raw score s_i is heart income plus great-heart shares, kept in tenths of a point.
+  The match score is the kin-weighted R_i = sum over j of r_ij * s_j (in points). Helping a
+  sibling earn a point is worth half a point of your own; killing one costs you.
+
+BASIC in this mode: `selfTeam` and `playerTeam(slot)` are the seat, so team-parity bots treat
+everyone as an opponent. `homeX`/`homeY` are the seat's spawn anchor, and `heartX`/`heartY`/
+`ownHeartX`/`ownHeartY` read the same point (`ownHeartStolen` is 0). Kinship, genes, scores and
+who is still playing are public and need no line of sight. The functions below are available
+in FFA-kin mode only: in the teams game they do not exist, and a teams script may use the
+same names as ordinary variables (a script that calls them fails to compile there).
+
+- `gameMode()`: 1 (FFA-kin); it exists only in this mode.
+- `kin(slot)`: round(100 r) between you and `slot`: 100 self (and clones), 50 siblings,
+  25 cousins, 0 strangers; -1 for an invalid slot.
+- `gene(slot, i)`: bit `i` (0-31) of that cog's genome, 0 or 1; -1 for an invalid slot or
+  locus, or a cog that is out of the match.
+- `seatScore(slot)`: raw score s in tenths of a point.
+- `seatAlive(slot)`: 1 while the cog is still in the match, 0 once it is out.
+- `heartOwner(i)`: the control heart's owning seat, -1 neutral (same as `controlOwner(i)`).
+- `greatHeartCount()`: 2. `greatHeartX(i)`, `greatHeartY(i)`: its
+  position. `greatHeartPresent(i)`: living cogs in its zone. `greatHeartProgress(i)`: capture
+  ticks (0-119). `greatHeartDormant(i)`: ticks until it is ready again, 0 if ready. Invalid
+  indices return -1.
+- `territoryBoost()`: your territory boost where you stand, in percent (30 own, 15 sibling,
+  7 cousin, 0 stranger or neutral).
+
+`seatScore` and `seatAlive` are named that way because `score` and `alive` are common variable
+names in existing bots. The baseline for this mode is `players/ffa.bas` (submit it as a policy; it calls FFA-only
+functions, so it does not compile in the teams game): it never shoots a cog
+with `kin` of 50 or more, prefers strangers seen hurting relatives, joins a ready great heart
+when others gather there, and captures hearts that no relative is holding or taking. Once no
+neutral heart is left it waits at a ready great heart (while three or more cogs live) or walks
+into the nearest stranger's heart to steal it. In a fight it shouts "at" every fourth tick so
+relatives who cannot see it know where it stands.
 
 ### Expanded island and navigation (rules 22)
 

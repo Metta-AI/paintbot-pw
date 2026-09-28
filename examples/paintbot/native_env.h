@@ -5,7 +5,7 @@
 extern "C" {
 #endif
 /* v1 buffers: 16 seats, 448 floats/seat (observation contract v1; a handle from
- * pw_create_observation(..., 2) writes 506), 5 int32 actions/seat.
+ * pw_create_observation(..., 2) writes 506, (..., 101) writes 810), 5 int32 actions/seat.
  * Output reset masks are independent of match terminals. Handles are exclusive
  * to one call at a time. Caller provides correctly sized non-null buffers. */
 int pw_env_version(void);
@@ -20,6 +20,10 @@ int pw_observe(void *handle, float *observations, float *state_resets);
 int pw_observe_seats(void *handle, uint32_t seats, float *observations, float *state_resets);
 int pw_step(void *handle, const int32_t *actions, float *rewards, float *terminals);
 uint32_t pw_state_hash(void *handle);
+/* pw_results: [tick, winner, glory0, glory1, meter0, meter1, hearts0, hearts1]; in FFA-kin
+ * [tick, winner (-1 playing, -3 ended), seats still in the match, total raw score (points),
+ * best R_i (points), the seat holding it (lowest on a tie), control hearts owned by any seat,
+ * great-heart bounty paid in total (points)]. pw_bot_actions returns -1 in FFA-kin. */
 int pw_results(void *handle, float *eight_results);
 int pw_bot_actions(void *handle, int side, int level, int32_t *actions);
 /* Per-seat combat telemetry, cumulative since the last create/reset; additive to v1.
@@ -37,7 +41,9 @@ int pw_seat_stats(void *handle, int32_t *sixteen_seats_times_eight); /* pw_seat_
  * per-decision budget; the caller's actions for that seat are ignored. The script is
  * compiled now and re-instantiated (persistent variables cleared) on every pw_reset;
  * length 0 removes it. Returns 0 running, 1 compile failed (seat idles, as hosted),
- * -1 bad arguments. Worlds without scripts are byte-identical to before. */
+ * -1 bad arguments. Worlds without scripts are byte-identical to before. Host functions are
+ * the current world's mode's; every pw_reset recompiles under the mode it applies, so an
+ * FFA-only script (kin, gene, ...) set before the reset that switches to FFA runs from it. */
 int pw_set_seat_script(void *handle, int seat, const char *source, int32_t length);
 /* 0 unscripted, 1 running, 2 compile failed, 3 disabled by a runtime error (the same
  * errors that disable a hosted seat). Copies the NUL-terminated error text when
@@ -299,10 +305,14 @@ int pw_elevation(void *handle, int32_t x, int32_t z);
  * then a 58-float public terrain block (self wet, self height; per heart 0..9 wet and
  * height delta; per apparent identity 0..15 wet and height delta, zero when v1's slot is
  * empty; visible apparent enemies wet/dry and teammates wet/dry, each /8; heights are
- * elevation/800; see neural_actor.md). NULL for any other version or a bad max_ticks.
+ * elevation/800; see neural_actor.md), 101 = ffa.v1 "paintbot-pw.rules40.obs.ffa.v1.float810"
+ * (FFA-kin; no map flip; offsets: self 0..7, identity row j at 8+42j, heart row i at
+ * 680+6i, great heart row g at 740+6g, terrain block 752..809; neural_contract.nim
+ * encodeFfaObservation documents every column; 3 stays unknown). NULL for any other
+ * version or a bad max_ticks.
  * pw_observe / pw_observe_seats rows are then that many floats apart. The contract never
  * touches the world or its hash. pw_observation_size() stays 448;
- * pw_observation_size_for(version) = 448 / 506 (-1 unknown); pw_handle_observation_size
+ * pw_observation_size_for(version) = 448 / 506 / 810 (-1 unknown); pw_handle_observation_size
  * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
  * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
  * 0, or -1 bad args). */
@@ -368,6 +378,66 @@ int pw_net_info(void *net, int64_t *eight);
 int pw_net_head_sizes(void *net, int32_t *sizes, int32_t capacity);
 int pw_net_contracts(void *net, char *out, int32_t capacity);
 int pw_net_infer(void *net, const float *observation, float *state, float *logits);
+/* FFA-kin (mode "ffa_kin"; additive). With none of these called a handle plays the teams
+ * game byte for byte as before.
+ * pw_set_game_mode: 0 teams (default), 1 FFA-kin; pw_set_kin_layout: -1 drawn from the seed
+ * (default), 0 fours, 1 pairs, 2 trios + loner, 3 cousins, 4 strangers, 5 clones. Both are
+ * kept across pw_reset and applied at the NEXT pw_reset (the current world keeps its
+ * mode); pw_game_mode reads the current world's mode (-1 NULL).
+ * In FFA, pw_step pays every seat, dead ones included, its kin-weighted score change each
+ * tick: (R_i(t) - R_i(t-1)) / 4320, R_i = sum_j r_ij s_j in points (s_j raw score), so a
+ * match's rewards sum to R_i / 4320. The teams reward is unchanged.
+ * Reads (current world): pw_kin float[256] r(i,j) at [16i+j] (zeros in teams);
+ * pw_genes uint32[16]; pw_scores float[16] = results.scores (R_i in FFA);
+ * pw_reward_split float[32] = {own_i, kin_i} per seat for the last step in reward units,
+ * own = r_ii ds_i / 4320, kin = sum_{j!=i} r_ij ds_j / 4320, own + kin = the step's reward;
+ * pw_kin_seat_stats float[48] = {death_tick (-1 alive), own-part return, kin-part return}
+ * per seat, cumulative since create/reset.
+ * pw_pair_stats int32[16*16*PW_PAIR_STAT_COUNT], cumulative since create/reset, at
+ * [(16i + j) * 13 + stat] = i's count about j; telemetry outside the world, never hashed,
+ * zero in teams. KinWindow = 72 ticks, near = 400 units:
+ *   0 visible: ticks i could see j (both alive)      1 in_range: ... and within gun range (2000 in FFA)
+ *   2 damage: health i removed from j                3 kills: kills of j by i
+ *   4 defend: health i removed from a cog that removed health from j in the last 72 ticks
+ *     (every "last 72 ticks" window is exclusive: 0 <= now - then < 72)
+ *   5 defend_opp: ticks such an attacker of j (alive, not i) was visible to i (j alive)
+ *   6 yield_opp: ticks j was capturing a heart uncontested and i was within 400 of it
+ *   7 contest: ticks i stood in the capture zone (140) of a heart j was capturing (a
+ *     capture paused by i's presence still names j as capturer)
+ *   8 near: ticks the pair was within 400 (both alive)
+ *   9 co_capture: great-heart captures i and j shared
+ *  10 costly_defend: the part of defend dealt while i was in its last third of health
+ *     (hp * 3 <= max hp, max hp 10 in FFA)
+ *  11 death_after_defend: i died within 72 ticks of a defend event for j
+ *  12 heart_pass: hearts whose ownership went directly from j to i
+ * Eval-only overrides (training library only; hosted play cannot reach them):
+ * pw_set_spawn_grouping int8[16] spawn groups (0..15, -1 alone) independent of the
+ * kinship, NULL clears; pw_set_kin_override an exact kinship: family int8[16] (-1..15),
+ * genes uint32[16], ibd int8[256] (0..32, symmetric, 32 on the diagonal; r = ibd/32),
+ * family NULL clears, wins over the layout (the override's layout is a label only). The engine
+ * reads the ibd matrix (the FFA territory boost, sim.territoryBoost) but never the genes. Both apply at the NEXT pw_reset and stay until
+ * cleared. pw_set_obs_mask: bit 0 zeroes every r-to-me column of ffa.v1 (the genes-only
+ * ablation; the own row reads 0 too, as does the own row's territory-boost column), read
+ * by the next pw_observe, kept across resets;
+ * other bits rejected. pw_set_pair_stats_enabled(h, 0/1): pair counters off/on (default
+ * on; off skips their per-tick work, from the next pw_step, kept across resets); the
+ * reward, its split, the returns and death ticks are always kept.
+ * All return 0, or -1 bad args. */
+#define PW_PAIR_STAT_COUNT 13
+int pw_set_game_mode(void *handle, int32_t mode);
+int pw_game_mode(void *handle);
+int pw_set_kin_layout(void *handle, int32_t layout);
+int pw_kin(void *handle, float *two_fifty_six);
+int pw_genes(void *handle, uint32_t *sixteen);
+int pw_scores(void *handle, float *sixteen);
+int pw_reward_split(void *handle, float *thirty_two);
+int pw_kin_seat_stats(void *handle, float *forty_eight);
+int pw_pair_stats(void *handle, int32_t *sixteen_sixteen_thirteen);
+int pw_set_spawn_grouping(void *handle, const int8_t *sixteen);
+int pw_set_kin_override(void *handle, const int8_t *family_sixteen, const uint32_t *genes_sixteen,
+                        const int8_t *ibd_two_fifty_six);
+int pw_set_obs_mask(void *handle, uint32_t flags);
+int pw_set_pair_stats_enabled(void *handle, int32_t enabled);
 #ifdef __cplusplus
 }
 #endif

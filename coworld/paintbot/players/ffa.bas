@@ -1,0 +1,911 @@
+' Paintbot PW FFA-kin baseline (Heartland). Sixteen separate players, some related: the match
+' score is sum over j of r(me,j) * s_j, so a sibling's point is worth half of ours and a dead
+' sibling costs us. Every cog runs this file alone; nothing is shared but shouts.
+'   1. Fight: shoot the best visible stranger (kin < 25) in gun range that is a threat (it hurt
+'      us or a relative, it is in gun range, or it is at the heart we want): first one seen
+'      hurting a relative (kin >= 25), then one standing near a sibling, then the nearest. Never
+'      shoot a cog with kin >= 50 (nor a cousin), and hold fire when a relative stands in the line
+'      or the blast.
+'   2. Great heart: when one is ready and two others are in or near its zone (or one is there and
+'      we are within 15 m and not capturing), go and make three. A cog with nothing to take or
+'      hold waits at one. Strangers inside the zone with us are spared unless they hurt us or kin.
+'   3. Hearts: capture the heart this cog is assigned. Siblings share a spawn anchor (homeX,
+'      homeY), so each ranks the hearts no relative owns or is taking by distance from it and
+'      takes the one at its own rank among its living, idle siblings: no two siblings stand on
+'      the same heart, which would pause the capture for both.
+'   4. Guard: with two hearts held (or nothing left to take), stand on our nearest heart; an
+'      owner inside the ring blocks any capture. After 10 s with no stranger near, walk the
+'      rounds of our hearts instead. When a stranger starts taking one of ours, go back to it.
+'   5. Late game (no neutral heart left): go to a ready great heart and wait there while three
+'      or more cogs live; otherwise walk into the nearest stranger-owned heart to steal it.
+' Movement, aim lead, dodge legs and the dry-route detour are base.bas's. Every loop is bounded by
+' the 16 seats, the heart count or a fixed count; the heaviest tick stays far under the budget.
+dim oldX(16)
+dim oldY(16)
+dim oldHp(16)
+dim lastSeen(16)
+dim hurtUntil(16)
+dim spokeX(16)
+dim spokeY(16)
+dim spokeTick(16)
+dim capBy(16)
+dim taken(16)
+dim avoidUntil(16)
+dim pickupMemoryX(32)
+dim pickupMemoryY(32)
+dim pickupMemoryKind(32)
+dim pickupMemoryTick(32)
+dim drF(6)
+
+' Integer square root by Newton's method from above. 23170^2 exceeds any squared map distance.
+sub isqrt(n)
+  root = 0
+  if n <= 0 then
+    exit sub
+  end if
+  root = 23170
+  guess = (root + n / root) / 2
+  iterations = 0
+  while guess < root and iterations < 24
+    root = guess
+    guess = (root + n / root) / 2
+    iterations = iterations + 1
+  wend
+end sub
+
+' How much of the straight line between two points is under water, in ten samples: into wet.
+sub wetLine(ax, ay, bx, by)
+  wet = 0
+  s3 = 1
+  while s3 <= 10
+    if waterAt(ax + (bx - ax) * s3 / 10, ay + (by - ay) * s3 / 10) then
+      wet = wet + 1
+    end if
+    s3 = s3 + 1
+  wend
+end sub
+
+' Time to walk a leg, in metres of dry walking: a wet metre costs kWetCost dry ones. Into legCost.
+sub legTime(ax, ay, bx, by)
+  wetLine(ax, ay, bx, by)
+  isqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
+  legCost = root / 100 + root / 100 * wet * (kWetCost - 1) / 10
+end sub
+
+sub nextRandom()
+  rngState = (rngState * 75 + 74) mod 65537
+end sub
+
+' Next dodge leg across the line to the threat, keeping some progress toward the goal.
+sub planLeg(minTicks, maxTicks)
+  nextRandom()
+  if rngState mod 5 <> 0 then
+    zig = 0 - zig
+  end if
+  if zig = 0 then
+    zig = 1
+  end if
+  nextRandom()
+  legTicks = minTicks + rngState mod (maxTicks - minTicks + 1)
+  tx = threatX - selfX
+  ty = threatY - selfY
+  isqrt(tx * tx + ty * ty)
+  legX = 0
+  legY = 0
+  if root > 0 then
+    legX = (0 - ty) * 100 * zig / root
+    legY = tx * 100 * zig / root
+  end if
+  if holding = 0 then
+    fx = goalX - selfX
+    fy = goalY - selfY
+    isqrt(fx * fx + fy * fy)
+    if root > 60 then
+      legX = legX * 3 / 4 + fx * 100 / root
+      legY = legY * 3 / 4 + fy * 100 / root
+    end if
+  end if
+  isqrt(legX * legX + legY * legY)
+  if root > 0 then
+    legX = legX * 28 / root
+    legY = legY * 28 / root
+  end if
+end sub
+
+' Would our shot at (ex, ey) touch a relative (kin >= 25) we can see or hear? A gun ray: one
+' within 150 units of the ray plus a tenth of the distance along it (spread, and five ticks of
+' their walking before the ray leaves), out to its full 20 m (a miss flies on past the target),
+' and a little behind us. A spray can: one inside the whole cone, which
+' reaches 850 (+ a body radius) and is along * 4/5 + a body radius wide on each side, plus a
+' 40-unit margin for movement during the burst. Into blocked.
+sub kinAt(ox, oy)
+  along = (ox * sx + oy * sy) / reach
+  across = (ox * sy - oy * sx) / reach
+  if across < 0 then
+    across = 0 - across
+  end if
+  if hasSpray then
+    if along > -40 and along <= 945 and across <= along * 4 / 5 + 95 then
+      blocked = 1
+    end if
+  else
+    if along > -40 and along < 2120 and across < 150 + along / 10 then
+      blocked = 1
+    end if
+  end if
+end sub
+
+sub kinInLine(ex, ey)
+  blocked = 0
+  sx = ex - selfX
+  sy = ey - selfY
+  isqrt(sx * sx + sy * sy)
+  reach = root
+  if reach > 0 then
+    k = 0
+    while k < 16
+      if k <> selfId and kin(k) >= 25 and visible(k) then
+        kinAt(playerX(k) - selfX, playerY(k) - selfY)
+      end if
+      k = k + 1
+    wend
+    ' Relatives beside or behind us are outside the vision cone; where they last spoke from, in
+    ' the past six ticks, stands in for where they are.
+    k = 0
+    while k < 16
+      if k <> selfId and spokeTick(k) > 0 and worldTick - spokeTick(k) <= 6 and kin(k) >= 25 and not visible(k) then
+        kinAt(spokeX(k) - selfX, spokeY(k) - selfY)
+      end if
+      k = k + 1
+    wend
+    ' And where we last saw them, in the past second (they walk under 900 units in that time,
+    ' so this only catches the ones who just left the cone).
+    k = 0
+    while k < 16
+      if k <> selfId and lastSeen(k) > 0 and worldTick - lastSeen(k) <= 24 and kin(k) >= 25 and not visible(k) then
+        kinAt(oldX(k) - selfX, oldY(k) - selfY)
+      end if
+      k = k + 1
+    wend
+  end if
+end sub
+
+if started = 0 then
+  started = 1
+  drF(0) = -10
+  drF(1) = -6
+  drF(2) = -3
+  drF(3) = 3
+  drF(4) = 6
+  drF(5) = 10
+  kWetCost = 6
+  ' FFA-kin guns reach 20 m and cogs carry 10 HP. Engage any stranger in gun range; join a
+  ' great heart with one cog already there from 15 m.
+  kRange = 4000000
+  kEngage = 4000000
+  kMaxHp = 10
+  kJoin = 2250000
+  rngState = selfId * 4099 + 977
+  zig = 1
+  if selfId mod 4 >= 2 then
+    zig = -1
+  end if
+  lastX = selfX
+  lastY = selfY
+  lastHp = selfHp + armorHp
+  i = 0
+  while i < 16
+    spokeTick(i) = -100
+    i = i + 1
+  wend
+end if
+myVX = selfX - lastX
+myVY = selfY - lastY
+if gunWait > 0 then
+  gunWait = gunWait - 1
+end if
+
+' Drop an unreachable heart for a minute after three seconds without meaningful progress while
+' still outside its 140-unit ring. (Some shore hearts cannot be reached from every side: a cog
+' can stall 300 units short of one in the lake.)
+if worldTick mod 72 = 0 then
+  dx = selfX - progressX
+  dy = selfY - progressY
+  if dx * dx + dy * dy < 40000 and objective >= 0 and objective < 16 then
+    ex = controlX(objective) - selfX
+    ey = controlY(objective) - selfY
+    if ex * ex + ey * ey > 22500 then
+      avoidUntil(objective) = worldTick + 1440
+    end if
+  end if
+  progressX = selfX
+  progressY = selfY
+end if
+
+' Who hurt a relative? A visible relative whose health fell since last tick, a relative's "hurt"
+' shout, or our own loss marks the nearest visible stranger to the victim for three seconds.
+hurtX = -1
+hurtY = -1
+if selfHp + armorHp < lastHp then
+  hurtX = selfX
+  hurtY = selfY
+  if worldTick >= nextHurtShout then
+    shout(strNew("hurt"))
+    nextHurtShout = worldTick + 24
+  end if
+end if
+lastHp = selfHp + armorHp
+' In a fight, say where we stand every fourth tick, so relatives who cannot see us do not shoot
+' through us. Everyone we hear is remembered by where they spoke from.
+if worldTick - lastThreat < 48 and (worldTick + selfId) mod 4 = 0 then
+  shout(strNew("at"))
+end if
+i = 0
+while i < heardCount() and i < 24
+  s = heardSlot(i)
+  if s >= 0 and s < 16 then
+    spokeX(s) = heardX(i)
+    spokeY(s) = heardY(i)
+    spokeTick(s) = worldTick
+    if kin(s) >= 25 and strEq(heardText(i), strNew("hurt")) then
+      hurtX = heardX(i)
+      hurtY = heardY(i)
+    end if
+  end if
+  i = i + 1
+wend
+i = 0
+while i < 16
+  if i <> selfId and kin(i) >= 25 and visible(i) then
+    if lastSeen(i) = worldTick - 1 and playerHp(i) < oldHp(i) then
+      hurtX = playerX(i)
+      hurtY = playerY(i)
+    end if
+  end if
+  i = i + 1
+wend
+if hurtX >= 0 then
+  lastThreat = worldTick
+  culprit = -1
+  culpritD = 36000000
+  i = 0
+  while i < 16
+    if i <> selfId and kin(i) < 25 and visible(i) then
+      dx = playerX(i) - hurtX
+      dy = playerY(i) - hurtY
+      d2 = dx * dx + dy * dy
+      if d2 < culpritD then
+        culprit = i
+        culpritD = d2
+      end if
+    end if
+    i = i + 1
+  wend
+  if culprit >= 0 then
+    hurtUntil(culprit) = worldTick + 72
+  end if
+end if
+
+' Hearts. capBy(m) = 1 while seat m is capturing something; mine = hearts we own.
+i = 0
+while i < 16
+  capBy(i) = 0
+  taken(i) = 0
+  i = i + 1
+wend
+mine = 0
+nearestMine = -1
+nearestMineD = 2147483647
+defend = -1
+defendD = 9000000
+objective = -1
+j = 0
+while j < heartCount() and j < 16
+  c = controlCaptureTeam(j)
+  if c >= 0 and c < 16 then
+    capBy(c) = 1
+  end if
+  if c = selfId then
+    objective = j
+  end if
+  owner = heartOwner(j)
+  if owner = selfId then
+    mine = mine + 1
+    dx = controlX(j) - selfX
+    dy = controlY(j) - selfY
+    d2 = dx * dx + dy * dy
+    if d2 < nearestMineD then
+      nearestMine = j
+      nearestMineD = d2
+    end if
+    ' A stranger is taking one of our hearts: go back and stand on it.
+    if c >= 0 and c < 16 then
+      if kin(c) < 50 and d2 < defendD then
+        defend = j
+        defendD = d2
+      end if
+    end if
+  end if
+  j = j + 1
+wend
+
+' Our rank among living siblings that are still taking hearts (lower seats first, not already
+' capturing), then the heart at that rank. A cog holding two hearts stops taking more and
+' guards them (taking more whenever it was quiet led to more deaths and matches ending early).
+if objective < 0 and mine < 2 then
+  rank = 0
+  i = 0
+  while i < selfId
+    if kin(i) >= 50 and seatAlive(i) and capBy(i) = 0 then
+      rank = rank + 1
+    end if
+    i = i + 1
+  wend
+  picked = 0
+  while picked <= rank and picked < 16
+    choice = -1
+    choiceCost = 2147483647
+    j = 0
+    while j < heartCount() and j < 16
+      owner = heartOwner(j)
+      c = controlCaptureTeam(j)
+      ok = taken(j) = 0 and owner <> selfId and avoidUntil(j) <= worldTick
+      if ok and owner >= 0 then
+        ok = kin(owner) < 50
+      end if
+      if ok and c >= 0 and c <> selfId then
+        ok = kin(c) < 50
+      end if
+      if ok then
+        dx = (controlX(j) - homeX) / 8
+        dy = (controlY(j) - homeY) / 8
+        cost = dx * dx + dy * dy
+        if cost < choiceCost then
+          choice = j
+          choiceCost = cost
+        end if
+      end if
+      j = j + 1
+    wend
+    if choice < 0 then
+      picked = 16
+    else
+      taken(choice) = 1
+      if picked = rank then
+        objective = choice
+      end if
+      picked = picked + 1
+    end if
+  wend
+end if
+
+' Late game: no neutral heart is left, so holding still would freeze the match. While three or
+' more cogs are alive and a great heart is ready, go to it and wait (a cog waiting there invites
+' the others); give up for 20 s after 20 s of waiting in the zone with no capture. Otherwise
+' walk into the nearest heart a stranger (kin < 25) owns and hold the ring: that pauses or
+' steals it, and its owner, at the heart we want, is a target.
+neutral = 0
+j = 0
+while j < heartCount() and j < 16
+  if heartOwner(j) < 0 and avoidUntil(j) <= worldTick then
+    neutral = 1
+  end if
+  j = j + 1
+wend
+living = 0
+i = 0
+while i < 16
+  if seatAlive(i) then
+    living = living + 1
+  end if
+  i = i + 1
+wend
+lateGreat = 0
+if neutral = 0 then
+  g = 0
+  while g < greatHeartCount()
+    if greatHeartDormant(g) = 0 and living >= 3 and worldTick >= greatSkipUntil then
+      lateGreat = 1
+    end if
+    g = g + 1
+  wend
+  if lateGreat = 0 and capBy(selfId) = 0 then
+    steal = -1
+    stealD = 2147483647
+    j = 0
+    while j < heartCount() and j < 16
+      owner = heartOwner(j)
+      c = controlCaptureTeam(j)
+      ok = owner >= 0 and owner <> selfId and avoidUntil(j) <= worldTick
+      if ok then
+        ok = kin(owner) < 25
+      end if
+      if ok and c >= 0 and c <> selfId then
+        ok = kin(c) < 50
+      end if
+      if ok then
+        dx = (controlX(j) - selfX) / 8
+        dy = (controlY(j) - selfY) / 8
+        if dx * dx + dy * dy < stealD then
+          steal = j
+          stealD = dx * dx + dy * dy
+        end if
+      end if
+      j = j + 1
+    wend
+    if steal >= 0 then
+      objective = steal
+    end if
+  end if
+end if
+
+' Great hearts: the nearest ready one with two or more other cogs in its zone or within 600.
+' A cog with no heart to take or hold (or in the late game, above) waits at the nearest ready
+' one instead, so a third cog passing by finds two already there.
+idle = (objective < 0 and nearestMine < 0 and defend < 0) or lateGreat
+greatGoal = -1
+greatX = 0
+greatY = 0
+g = 0
+while g < greatHeartCount()
+  if greatHeartDormant(g) = 0 and living >= 3 and worldTick >= greatSkipUntil then
+    gx = greatHeartX(g)
+    gy = greatHeartY(g)
+    dx = gx - selfX
+    dy = gy - selfY
+    myD2 = dx * dx + dy * dy
+    others = greatHeartPresent(g)
+    if myD2 <= 40000 then
+      others = others - 1
+    end if
+    near = 0
+    i = 0
+    while i < 16
+      if i <> selfId and visible(i) then
+        ex = playerX(i) - gx
+        ey = playerY(i) - gy
+        if ex * ex + ey * ey <= 360000 then
+          near = near + 1
+        end if
+      end if
+      i = i + 1
+    wend
+    if near > others then
+      others = near
+    end if
+    join = others >= 2 and myD2 < 12250000
+    if others >= 1 and myD2 < kJoin and capBy(selfId) = 0 then
+      join = 1
+    end if
+    if join or idle then
+      if greatGoal < 0 or myD2 < greatD2 then
+        greatGoal = g
+        greatD2 = myD2
+        greatX = gx
+        greatY = gy
+      end if
+    end if
+  end if
+  g = g + 1
+wend
+
+' Waiting in a great-heart zone that never fills: after 20 s, leave great hearts alone for 20 s.
+' (With fewer than three cogs alive none can ever be captured, so none is chosen at all.)
+if greatGoal >= 0 and greatD2 <= 40000 then
+  greatWait = greatWait + 1
+  if greatWait > 480 then
+    greatSkipUntil = worldTick + 480
+    greatWait = 0
+  end if
+else
+  greatWait = 0
+end if
+
+goalX = homeX
+goalY = homeY
+holding = 0
+mode = 0
+if objective >= 0 then
+  goalX = controlX(objective)
+  goalY = controlY(objective)
+  mode = 3
+else
+  if nearestMine >= 0 then
+    post = nearestMine
+    if worldTick - lastThreat > 240 and mine >= 2 then
+      ' Quiet: walk the rounds of our hearts, one post every 20 s, rather than parking.
+      want = (worldTick / 480 + selfId) mod mine
+      j = 0
+      while j < heartCount() and j < 16
+        if heartOwner(j) = selfId then
+          if want = 0 then
+            post = j
+          end if
+          want = want - 1
+        end if
+        j = j + 1
+      wend
+    end if
+    goalX = controlX(post)
+    goalY = controlY(post)
+    mode = 4
+  end if
+end if
+if defend >= 0 and controlCaptureTeam(objective) <> selfId then
+  goalX = controlX(defend)
+  goalY = controlY(defend)
+  mode = 4
+end if
+if greatGoal >= 0 then
+  ' Spread a little inside the 200-unit zone so bodies do not jam.
+  goalX = greatX + (selfId mod 4 - 1) * 50
+  goalY = greatY + (selfId / 4 mod 4 - 1) * 50
+  mode = 2
+end if
+dx = goalX - selfX
+dy = goalY - selfY
+if mode >= 2 and dx * dx + dy * dy < 8100 then
+  holding = 1
+end if
+
+' Fight: the best stranger in gun range that is a threat: one that hurt us or kin, one within
+' gun range, or one at the heart we are going to or holding. With one life each, duels with
+' passers-by only thin out everyone. Strangers sharing a great-heart zone with us are spared
+' unless marked for hurting us or kin.
+best = -1
+bestCost = 2147483647
+threatsNear = 0
+i = 0
+while i < 16
+  if i <> selfId and visible(i) then
+    if kin(i) < 25 then
+      px = playerX(i)
+      py = playerY(i)
+      dx = px - selfX
+      dy = py - selfY
+      d2 = dx * dx + dy * dy
+      if d2 < 4000000 then
+        threatsNear = threatsNear + 1
+        lastThreat = worldTick
+      end if
+      spare = 0
+      if greatGoal >= 0 and hurtUntil(i) <= worldTick then
+        ex = px - greatX
+        ey = py - greatY
+        if ex * ex + ey * ey <= 250000 and greatD2 <= 250000 then
+          spare = 1
+        end if
+      end if
+      threat = d2 <= kEngage or hurtUntil(i) > worldTick
+      if mode >= 3 then
+        ex = px - goalX
+        ey = py - goalY
+        if ex * ex + ey * ey <= 490000 then
+          threat = 1
+        end if
+      end if
+      if threat and d2 <= kRange and spare = 0 then
+        cost = d2 - (kMaxHp - playerHp(i)) * 60000
+        if hurtUntil(i) > worldTick then
+          cost = cost - 9000000
+        end if
+        ' A stranger close to a visible sibling is a threat to it.
+        k = 0
+        while k < 16
+          if k <> selfId and kin(k) >= 50 and visible(k) then
+            ex = playerX(k) - px
+            ey = playerY(k) - py
+            if ex * ex + ey * ey < 1440000 then
+              cost = cost - 2500000
+              k = 16
+            end if
+          end if
+          k = k + 1
+        wend
+        if cost < bestCost then
+          best = i
+          bestCost = cost
+        end if
+      end if
+    end if
+  end if
+  i = i + 1
+wend
+
+' Remember seen supplies for ten seconds; equip when nothing is close.
+i = 0
+while i < pickupCount() and i < 32
+  if pickupVisible(i) then
+    pickupMemoryX(i) = pickupX(i)
+    pickupMemoryY(i) = pickupY(i)
+    pickupMemoryKind(i) = pickupKind(i)
+    pickupMemoryTick(i) = worldTick + 1
+  end if
+  i = i + 1
+wend
+if mode <> 2 and controlCaptureTeam(objective) <> selfId then
+  nearest = -1
+  nearestCost = 4840000
+  j = 0
+  while j < pickupCount() and j < 32
+    if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
+      kind = pickupMemoryKind(j)
+      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < kMaxHp) or (kind = 3 and armorHp < 3 and selfHp = kMaxHp)
+      if wanted then
+        dx = pickupMemoryX(j) - selfX
+        dy = pickupMemoryY(j) - selfY
+        cost = dx * dx + dy * dy
+        if kind = 2 and selfHp <= 3 then
+          cost = cost / 4
+        end if
+        if cost < 10000 and not pickupVisible(j) then
+          pickupMemoryTick(j) = 0
+        else
+          if cost < nearestCost then
+            nearest = j
+            nearestCost = cost
+          end if
+        end if
+      end if
+    end if
+    j = j + 1
+  wend
+  if nearest >= 0 and (best < 0 or bestCost > 1440000 or selfHp <= 3) then
+    goalX = pickupMemoryX(nearest)
+    goalY = pickupMemoryY(nearest)
+    holding = 0
+  end if
+end if
+
+' Three hit points or fewer with a stranger close: fall back to the family anchor unless holding
+' a ring.
+if selfHp <= 3 and armorHp = 0 and threatsNear >= 1 and holding = 0 then
+  goalX = homeX
+  goalY = homeY
+end if
+
+' Nothing to shoot: sweep, then turn toward speech and sound.
+if best < 0 then
+  scan = (worldTick / 24 + selfId) mod 4
+  lookX = goalX
+  lookY = goalY
+  if holding or scan = 1 then
+    lookX = selfX + 2000
+    lookY = selfY
+    if scan = 1 then
+      lookX = selfX
+      lookY = selfY + 2000
+    end if
+    if scan = 2 then
+      lookX = selfX - 2000
+    end if
+    if scan = 3 then
+      lookX = selfX
+      lookY = selfY - 2000
+    end if
+  end if
+  if soundCount() > 0 then
+    soundBest = -1
+    soundCost = 2147483647
+    j = 0
+    while j < soundCount() and j < 12
+      cost = soundAge(j)
+      if soundKind(j) = 1 or soundKind(j) = 2 then
+        cost = cost - 48
+      end if
+      if cost < soundCost then
+        soundBest = j
+        soundCost = cost
+      end if
+      j = j + 1
+    wend
+    if soundBest >= 0 and soundCost < 24 then
+      bearing = soundDirection(soundBest)
+      dxSound = 0
+      dySound = 0
+      if bearing = 0 or bearing = 1 or bearing = 7 then
+        dxSound = 1000
+      end if
+      if bearing = 3 or bearing = 4 or bearing = 5 then
+        dxSound = -1000
+      end if
+      if bearing = 1 or bearing = 2 or bearing = 3 then
+        dySound = 1000
+      end if
+      if bearing = 5 or bearing = 6 or bearing = 7 then
+        dySound = -1000
+      end if
+      lookX = selfX + dxSound
+      lookY = selfY + dySound
+    end if
+  end if
+  lookAt(lookX, lookY)
+end if
+
+' Footwork: short random legs across the line to the threat while in contact.
+moveX = goalX
+moveY = goalY
+inContact = best >= 0 and trenchId < 0
+if inContact then
+  threatX = playerX(best)
+  threatY = playerY(best)
+  if legTicks > 0 and myVX * myVX + myVY * myVY < 64 then
+    stalled = stalled + 1
+  else
+    stalled = 0
+  end if
+  if stalled >= 3 then
+    pathUntil = worldTick + 24
+    stalled = 0
+    legTicks = 0
+  end if
+  wantShot = gunWait = 0 and (hasSpray = 0 or bestCost < 640000)
+  if worldTick >= pathUntil then
+    if legTicks <= 0 or (wantShot and legTicks < 6) then
+      if wantShot then
+        planLeg(6, 9)
+      else
+        planLeg(3, 6)
+      end if
+    end if
+    legTicks = legTicks - 1
+    moveX = selfX + legX * 4
+    moveY = selfY + legY * 4
+    if holding then
+      dx = selfX + legX * 2 - goalX
+      dy = selfY + legY * 2 - goalY
+      if dx * dx + dy * dy > 9000 then
+        moveX = goalX
+        moveY = goalY
+        legTicks = 0
+      end if
+    end if
+  end if
+else
+  legTicks = 0
+  stalled = 0
+end if
+
+' Dry route around the lake (base.bas): walk to a dry point beside a wet straight line.
+drWalk = 0
+drTx = moveX
+drTy = moveY
+drDx = drTx - selfX
+drDy = drTy - selfY
+if drDx * drDx + drDy * drDy > 640000 then
+  if drActive then
+    drEx = drTx - drGx
+    drEy = drTy - drGy
+    if drEx * drEx + drEy * drEy > 1000000 then
+      drActive = 0
+    end if
+    drEx = drWx - selfX
+    drEy = drWy - selfY
+    if drEx * drEx + drEy * drEy < 90000 then
+      drActive = 0
+    end if
+    if worldTick - drTick > 240 then
+      drActive = 0
+    end if
+  end if
+  if drActive = 0 and worldTick - drTick >= 12 then
+    drTick = worldTick
+    legTime(selfX, selfY, drTx, drTy)
+    if wet > 0 then
+      drBest = legCost
+      drBestK = -1
+      drMx = selfX + drDx / 2
+      drMy = selfY + drDy / 2
+      drK = 0
+      while drK < 6
+        drCx = drMx - drDy * drF(drK) / 10
+        drCy = drMy + drDx * drF(drK) / 10
+        if drCx > mapMinX() + 200 and drCx < mapMaxX() - 200 and drCy > mapMinY() + 200 and drCy < mapMaxY() - 200 then
+          if waterAt(drCx, drCy) = 0 then
+            legTime(selfX, selfY, drCx, drCy)
+            drSc = legCost
+            legTime(drCx, drCy, drTx, drTy)
+            drSc = drSc + legCost
+            if drSc < drBest then
+              drBest = drSc
+              drBestK = drK
+              drWx = drCx
+              drWy = drCy
+            end if
+          end if
+        end if
+        drK = drK + 1
+      wend
+      if drBestK >= 0 then
+        drActive = 1
+        drGx = drTx
+        drGy = drTy
+      end if
+    end if
+  end if
+  if drActive then
+    drWalk = 1
+  end if
+end if
+if drWalk then
+  walkTo(drWx, drWy)
+else
+  walkTo(moveX, moveY)
+end if
+
+' Gun: lead the target by the windup, minus our own drift; never through a relative.
+if best >= 0 then
+  tx = playerX(best)
+  ty = playerY(best)
+  if lastSeen(best) = worldTick - 1 then
+    tx = tx + (tx - oldX(best)) * 6
+    ty = ty + (ty - oldY(best)) * 6
+  end if
+  if inContact and worldTick >= pathUntil then
+    tx = tx - legX * 5
+    ty = ty - legY * 5
+  else
+    tx = tx - myVX * 5
+    ty = ty - myVY * 5
+  end if
+  kinInLine(tx, ty)
+  if hasSpray = 0 or bestCost < 640000 then
+    if blocked = 0 and gunWait = 0 then
+      shootAt(tx, ty)
+      gunWait = 25
+      if armorHp > 0 or trenchId >= 0 then
+        gunWait = 73
+      end if
+      if hasSpray then
+        gunWait = 25
+      end if
+    else
+      lookAt(tx, ty)
+    end if
+  else
+    lookAt(tx, ty)
+  end if
+end if
+
+' Grenade: charge to the distance, never with a relative within 450 of the landing point.
+if hasGrenade and best >= 0 then
+  nx = playerX(best)
+  ny = playerY(best)
+  dx = nx - selfX
+  dy = ny - selfY
+  d2 = dx * dx + dy * dy
+  safe = 1
+  i = 0
+  while i < 16
+    if i <> selfId and kin(i) >= 25 and visible(i) then
+      fx = playerX(i) - nx
+      fy = playerY(i) - ny
+      if fx * fx + fy * fy < 202500 then
+        safe = 0
+      end if
+    end if
+    i = i + 1
+  wend
+  if safe and d2 > 250000 and d2 < 1562500 then
+    isqrt(d2)
+    need = (root - 150) * 24 / 1130 + 1
+    if need < 1 then
+      need = 1
+    end if
+    lookAt(nx, ny)
+    chargeGrenade(grenadeCharge < need)
+  end if
+end if
+
+i = 0
+while i < 16
+  if visible(i) then
+    oldX(i) = playerX(i)
+    oldY(i) = playerY(i)
+    oldHp(i) = playerHp(i)
+    lastSeen(i) = worldTick
+  end if
+  i = i + 1
+wend
+lastX = selfX
+lastY = selfY

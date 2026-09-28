@@ -1,7 +1,7 @@
-import std/[os, strutils]
+import std/[os, strutils, json]
 import jsony
 import polyworld/[cli, tapes]
-import sim, bots, controls
+import sim, bots, controls, kinship
 when defined(coworld): import polyworld/coworld
 
 type
@@ -51,6 +51,33 @@ type
     communications*: seq[Communication]
     endTick*: int32
     map*: string ## rules 41: a MapNames entry, or "" for the rules' own island
+  PreMapRecordingFfa = object
+    ## FFA-kin recordings at gameVersion 1040: RecordingFfa without the map.
+    seed: int32
+    frames: seq[Frame]
+    names: array[Seats, string]
+    communications: seq[Communication]
+    endTick: int32
+    mode: uint8
+    layout: uint8
+    family: array[KinSeats, int8]
+    genes: array[KinSeats, uint32]
+    ibd: array[KinSeats, array[KinSeats, int8]]
+  RecordingFfa* = object
+    ## FFA-kin recordings (gameVersion 1000 + rules): Recording's fields (map included from
+    ## rules 41), then the mode and the match's kinship, so a replay plays the recorded
+    ## families even under a kinship override.
+    seed*: int32
+    frames*: seq[Frame]
+    names*: array[Seats, string]
+    communications*: seq[Communication]
+    endTick*: int32
+    map*: string
+    mode*: uint8
+    layout*: uint8
+    family*: array[KinSeats, int8]
+    genes*: array[KinSeats, uint32]
+    ibd*: array[KinSeats, array[KinSeats, int8]]
   BridgeReply = object
     ## The host's answer to one bridge line: settled advisor-oracle requests, nothing else.
     oracle: seq[OracleReply]
@@ -74,10 +101,68 @@ proc convertFrames(frames: seq[PreSoundFrame]): seq[Frame] =
         goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
     result.add next
 var replayRulesVersion* = 41
+const
+  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1041 today).
+  FfaRulesVersions = [40, 41]
+proc replayGameVersion*(): uint16 =
+  ## The header version a recording made now is saved with.
+  uint16((if ffa(): FfaReplayVersionBase else: 0) + replayRulesVersion)
+proc toFfaRecording(r: Recording, k: Kinship): RecordingFfa =
+  RecordingFfa(seed: r.seed, frames: r.frames, names: r.names, communications: r.communications,
+    endTick: r.endTick, map: r.map, mode: gameMode.uint8, layout: k.layout.uint8,
+    family: k.family, genes: k.genes, ibd: k.ibd)
+proc toPreMapFfaRecording(r: Recording, k: Kinship): PreMapRecordingFfa =
+  PreMapRecordingFfa(seed: r.seed, frames: r.frames, names: r.names,
+    communications: r.communications, endTick: r.endTick, mode: gameMode.uint8,
+    layout: k.layout.uint8, family: k.family, genes: k.genes, ibd: k.ibd)
+proc saveRecording*(path: string, r: Recording) =
+  ## Teams games keep the rules-numbered Recording; FFA-kin adds the mode and kinship.
+  if ffa():
+    if replayRulesVersion >= 41:
+      saveReplayFile(path, "paintbot_pw", replayGameVersion(), r.toFfaRecording(activeKinship))
+    else:
+      saveReplayFile(path, "paintbot_pw", replayGameVersion(),
+        r.toPreMapFfaRecording(activeKinship))
+  else: saveReplayFile(path, "paintbot_pw", replayGameVersion(), r)
+proc loadFfaRecording(path: string, version: int): Recording =
+  let rules = version - FfaReplayVersionBase
+  if rules notin FfaRulesVersions:
+    raise newException(ReplayError, "Unsupported Paintbot FFA replay version")
+  let old =
+    if rules >= 41: loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa)
+    else:
+      let pre = loadReplayFile(path, "paintbot_pw", version.uint16, PreMapRecordingFfa)
+      RecordingFfa(seed: pre.seed, frames: pre.frames, names: pre.names,
+        communications: pre.communications, endTick: pre.endTick, mode: pre.mode,
+        layout: pre.layout, family: pre.family, genes: pre.genes, ibd: pre.ibd)
+  if old.map.len > 0 and old.map notin MapNames: # an unknown map is an invalid replay
+    raise newException(ReplayError, "Unknown Paintbot map in FFA replay")
+  if old.mode != gmFfaKin.uint8 or old.layout > KinLayout.high.uint8:
+    raise newException(ReplayError, "Invalid Paintbot FFA kinship")
+  var k = Kinship(layout: KinLayout(old.layout), family: old.family, genes: old.genes, ibd: old.ibd)
+  for i in 0..<KinSeats:
+    if k.family[i] notin -1'i8..<KinSeats.int8 or k.ibd[i][i] != Loci.int8:
+      raise newException(ReplayError, "Invalid Paintbot FFA kinship")
+    for j in 0..<KinSeats:
+      if k.ibd[i][j] notin 0'i8..Loci.int8 or k.ibd[i][j] != k.ibd[j][i]:
+        raise newException(ReplayError, "Invalid Paintbot FFA kinship")
+  replayRulesVersion = rules
+  visionRulesVersion = rules
+  gameMode = gmFfaKin
+  activeKinship = k
+  kinshipOverride = some(k)
+  Recording(seed: old.seed, frames: old.frames, names: old.names,
+    communications: old.communications, endTick: old.endTick, map: old.map)
 proc loadRecording*(path: string): Recording =
-  replayRulesVersion = loadReplayFileHeader(path).gameVersion.int
+  let version = loadReplayFileHeader(path).gameVersion.int
+  # A replay sets the mode it was played in; teams replays never inherit an FFA override.
+  gameMode = gmTeams
+  kinshipOverride = none(Kinship)
+  replayRulesVersion = version
   visionRulesVersion = replayRulesVersion
-  if replayRulesVersion == 1:
+  if version >= FfaReplayVersionBase:
+    result = loadFfaRecording(path, version)
+  elif replayRulesVersion == 1:
     let old = loadReplayFile(path, "paintbot_pw", 1, LegacyRecording)
     result.seed = old.seed
     result.frames = convertFrames(old.frames)
@@ -107,13 +192,17 @@ proc loadRecording*(path: string): Recording =
   if result.frames.len > 28800 or result.communications.len > 20000:
     raise newException(ReplayError, "Replay limits exceeded")
   for i in 0..<Seats:
-    if result.names[i].len == 0: result.names[i] = (if team(i) ==
-        0: "Ember" else: "Azure") & " " & $(i div 2 + 1)
+    if result.names[i].len == 0: result.names[i] =
+      if ffa(): "Cog " & $(i + 1)
+      else: (if team(i) == 0: "Ember" else: "Azure") & " " & $(i div 2 + 1)
     if result.names[i].len > 256: raise newException(ReplayError, "Invalid player name")
   for item in result.communications:
     if item.slot notin 0..<Seats or item.tick notin 0..result.frames.len or
         item.text.len > 1024:
       raise newException(ReplayError, "Invalid communication")
+  # Bind the recorded map too, so replay analysis that rebuilds the world with newWorld
+  # (replay_stats, the viewer's index, kin_replay_counters) plays on the recorded ground.
+  configureMap(result.map)
 var
   world*: World
   recording*: Recording
@@ -122,8 +211,31 @@ var
   players: array[Seats, Bot]
   bridge: File
   mapChoice*: string ## live games: --map:<name>, or the Coworld config's "map"
+proc parseGameMode*(config: JsonNode): GameMode =
+  ## The coworld config's optional "mode": absent or "teams" is the two-team game.
+  let mode = config{"mode"}
+  if mode.isNil or mode.kind == JNull: return gmTeams
+  if mode.kind != JString: raise newException(ValueError, "Paintbot mode must be a string")
+  case mode.getStr
+  of "teams": gmTeams
+  of "ffa_kin": gmFfaKin
+  else: raise newException(ValueError, "Unknown Paintbot mode: " & mode.getStr)
+proc applyGameConfig*(text: string) =
+  ## Reads the keys CoworldConfig skips. An FFA-kin match lasts at most six minutes.
+  gameMode = parseGameMode(parseJson(text))
+  if ffa():
+    options.maximumTicks = min(options.maximumTicks, FfaMatchTicks.int32)
+    options.seconds = options.maximumTicks div TickRate
+proc newLiveWorld*(seed, maximumTicks: int32): World =
+  ## A live match's world. It draws its kinship from its own seed, never from a replay this
+  ## process loaded earlier: loadRecording leaves kinshipOverride set so replay analysis (the
+  ## viewer's index, replay_stats) can rebuild the recorded world with newWorld.
+  kinshipOverride = none(Kinship)
+  newWorld(seed, maximumTicks)
 proc setup*() =
-  when defined(coworld): options = coworldOptions(Seats)
+  when defined(coworld):
+    options = coworldOptions(Seats)
+    applyGameConfig(readLocal(getEnv("COGAME_CONFIG_URI")))
   else:
     options = GameOptions(seed: 2026, maximumTicks: HeartMeterMatchTicks, speed: 1)
     let args = commandLineParams(); var i = 0
@@ -146,7 +258,7 @@ proc setup*() =
     configureRules(replayRulesVersion)
     when defined(coworld): mapChoice = config.map
     configureMap(mapChoice); recording.map = mapName()
-    world = newWorld(options.seed, options.maximumTicks); recording.seed = options.seed
+    world = newLiveWorld(options.seed, options.maximumTicks); recording.seed = options.seed
     recording.endTick = world.endTick
     players = loadBots(options.botGroups, options.playerSlot)
     for i in 0..<Seats:
@@ -190,13 +302,15 @@ proc advance*() =
     deliverSpeech(world)
     world.step(commands)
     recording.frames.add Frame(commands: commands, hash: world.stateHash())
+proc matchOutcome*(w: World): string =
+  ## results.outcome: FFA-kin matches simply end (winner -3); the scores carry the result.
+  if ffa(): "ended" elif w.winner < 0: "time_limit" else: $w.winner
 proc runHeadless*() =
   setup()
   let limit = if replayMode: recording.frames.len else: options.maximumTicks.int
   while (world.tick < limit or (not replayMode and replayRulesVersion in 20..22 and limit >= 7200)) and world.winner == -1: advance()
   if replayMode and world.tick != limit: raise newException(ReplayError, "Replay has frames after victory")
-  if not replayMode and options.recordPath.len > 0: saveReplayFile(
-      options.recordPath, "paintbot_pw", replayRulesVersion.uint16, recording)
+  if not replayMode and options.recordPath.len > 0: saveRecording(options.recordPath, recording)
   echo "ticks=", world.tick, " captures=", world.captures, " hash=",
       world.stateHash()
   if getEnv("PW_BASIC_PEAKS") == "1":
@@ -210,5 +324,4 @@ proc runHeadless*() =
     # seat's inference cost goes there before the platform's "completed" line.
     if not replayMode: players.logNeuralTelemetry(world.tick, playerLog)
     finishCoworld(NumericCoworldResults[float](scores: world.scores(), ticks: world.tick,
-        seed: world.seed, outcome: if world.winner <
-        0: "time_limit" else: $world.winner))
+        seed: world.seed, outcome: world.matchOutcome()))
