@@ -752,3 +752,15 @@ version unless one of these holds:
 Each successful upload, manual or automatic, tags the commit it shipped as `coworld-v<version>`. Manual dispatch
 works as before. An automatic deploy does not write an entry here; add one when a release needs its own notes.
 Editing this file never triggers a deploy.
+
+## Configurable glory, 5x behind-in-lives: 0.3.60 (rules 43)
+
+Automatic deploy run 36474703052 shipped `a21fa46` (#144) as 0.3.60 = `cow_afcf33d1-556b-40a3-8fdc-b19f91695692`,
+now canonical, with hosted smoke and certification passing. The commit is tagged `coworld-v0.3.60`.
+
+Glory awards now come from the game config's optional `"glory"` object (`quiet_supplies`,
+`quiet_supplies_seconds`, `behind_lives`, `behind_lives_seconds`, `heart`). Missing keys keep the old defaults.
+Every teams variant sets `"glory": {"behind_lives": 5}`, so a team behind in lives now earns 5 glory per life
+it trails every five seconds (was 1). To retune glory later, edit the variants' `game_config` in
+`coworld_manifest_template.json`; no engine change is needed. Rules 43 recordings carry the awards they were
+played with. Rules 42 and older recordings load with the defaults.
