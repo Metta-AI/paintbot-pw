@@ -24,7 +24,7 @@ when defined(emscripten) and not defined(replayIndexer):
   switch("passL", "--preload-file " & thisDir() / "../../tmp/paintbot-cover.glb" & "@/paintbot-cover.glb")
 
 when defined(emscripten) and not defined(replayIndexer):
-  for team in ["red", "blue", "red-blue", "blue-red"]:
+  for team in ["red", "blue", "red-blue", "blue-red", "grey"]:
     switch("passL", "--preload-file " & thisDir() / ("../../tmp/paintbot-cog-" & team & ".glb") & "@/paintbot-cog-" & team & ".glb")
 
 when defined(emscripten) and not defined(replayIndexer):

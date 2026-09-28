@@ -496,7 +496,7 @@ proc pickupEquipment(w: var World, attacked: array[Seats, bool]) =
       of sprayPickup:
         if not w.equipment[i].sprayCan: w.equipment[i].sprayCan = true; taken = true
       of medkitPickup:
-        if w.cogs[i].hp < 3: w.cogs[i].hp = 3; taken = true
+        if w.cogs[i].hp < maxHp(): w.cogs[i].hp = maxHp(); taken = true
       of uniformPickup:
         if visionRulesVersion >= 27 and not w.uniforms[i] and not attacked[i] and
             not w.cogs[i].firing and w.equipment[i].windup == 0 and
@@ -556,7 +556,7 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
             let x = w.rng.between(150, 800)
             let p = point(if team(i) == 0: x else: Width-x, w.rng.between(150, Height-150))
             if not w.movementBlocked(p, i, true):
-              w.cogs[i].pos = p; w.cogs[i].goal = p; w.cogs[i].hp = 3
+              w.cogs[i].pos = p; w.cogs[i].goal = p; w.cogs[i].hp = maxHp()
               w.cogs[i].shield = 36; placed = true; break
           if not placed: w.spawn(i)
       continue
@@ -648,8 +648,10 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           let ray = direction(Point(), aim, GunRange)
           var checked: uint32 = 0
           var endPoint = origin
+          # FFA-kin rays stop at FfaGunRange: the same samples along the same ray, fewer of them.
+          let samples = (if ffa(): FfaGunRange else: GunRange) div 20
           block trace:
-            for n in 1..(GunRange div 20):
+            for n in 1..samples:
               let p = Point(x: origin.x+ray.x*n.int32 div (GunRange div 20),
                   z: origin.z+ray.z*n.int32 div (GunRange div 20))
               if w.blocked(p, 0): break

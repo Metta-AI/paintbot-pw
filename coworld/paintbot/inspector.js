@@ -6,7 +6,7 @@
   const pickups = {
     grenadePickup: ['Grenade', 'A throwable paint grenade. Deals 2 damage in the open, 1 into another trench, or 6 inside the blast’s trench.'],
     sprayPickup: ['Spray can', 'Adds a reusable short-range paint spray that hits in a forward cone.'],
-    medkitPickup: ['Med kit', 'Restores health to 3 HP when collected by an injured cog.'],
+    medkitPickup: ['Med kit', 'Restores full health (3 HP; 10 in FFA-kin) when collected by an injured cog.'],
     armorPickup: ['Armor', 'Grants 3 armor points that absorb damage. While armored, gun cooldown is tripled.'],
     uniformPickup: ['Uniform', 'Disguises the cog as the opposing team. Attacking ends the disguise; friendly fire still applies.'],
   };
@@ -40,11 +40,13 @@
       if (!h) return null;
       const value = state.heartValues?.[selection.id] ?? 1;
       const capture = w.heartCaptures?.[selection.id];
+      // FFA-kin owners and capturers are seats, not teams.
+      const side = state.mode === 'ffa_kin' ? (i => i >= 0 ? `Cog ${i + 1}` : undefined) : (i => teams[i]);
       let status = 'No capture in progress';
       if (capture?.contested) status = 'Contested · capture paused';
-      else if (capture?.ticks > 0) status = `${teams[capture.team]} capturing · ${seconds(72 - capture.ticks)} remaining`;
+      else if (capture?.ticks > 0) status = `${side(capture.team)} capturing · ${seconds(72 - capture.ticks)} remaining`;
       return {title: `${value === 5 ? 'Big heart' : 'Heart'} ${selection.id + 1}`, color: h.owner,
-        rows: [['Owner', teams[h.owner] ?? 'Neutral'], ['Held continuously', h.owner < 0 ? 'Unclaimed' : seconds(state.heartHeld?.[selection.id] ?? 0)],
+        rows: [['Owner', side(h.owner) ?? 'Neutral'], ['Held continuously', h.owner < 0 ? 'Unclaimed' : seconds(state.heartHeld?.[selection.id] ?? 0)],
           ['Value', `${value} point${value === 1 ? '' : 's'}/s`], ['Capture', status]],
         description: 'Hold this heart to earn points. The held timer resets when ownership changes.'};
     }
