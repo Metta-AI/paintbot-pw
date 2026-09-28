@@ -268,13 +268,14 @@ when defined(pwTraining):
     killed: bool) {.nimcall, gcsafe.}
   var damageObserver* {.threadvar.}: DamageObserver
 else:
-  var visionRulesVersion* = 44
+  var visionRulesVersion* = 45
   var gameMode* = gmTeams
 proc ffa*(): bool = gameMode == gmFfaKin
 proc wadesToWetGoals*(): bool =
-  ## Rules 44, FFA-kin only: a cog on dry land whose goal lies in the lake may route into the
-  ## water (see waypoint). The teams game and FFA rules 40-43 keep the rules-38 dry anchors.
-  ffa() and visionRulesVersion >= 44
+  ## Whether a cog on dry land whose goal lies in the lake may route into the water (see
+  ## waypoint): FFA-kin from rules 44, every mode from rules 45. Teams games at rules 44 and
+  ## older, and FFA at 43 and older, keep the rules-38 dry anchors.
+  visionRulesVersion >= 45 or (ffa() and visionRulesVersion >= 44)
 proc maxHp*(): int32 =
   ## Base HP a cog spawns with and a medkit restores: FfaMaxHp in FFA-kin, 3 otherwise.
   if ffa(): FfaMaxHp.int32 else: TeamsMaxHp.int32
@@ -353,6 +354,16 @@ proc boundsBlocked(p: Point, radius: int): bool {.inline.} =
 # so the answers are identical to the full scans below, which -d:pwFullScanGeometry restores
 # for comparison. Training builds always index.
 const IndexedGeometry* = defined(pwTraining) or not defined(pwFullScanGeometry)
+template parkForMap(current, parked, slot: untyped) =
+  ## Training builds: make `current`, a thread's geometry cache, the one for the thread's
+  ## active map. The old map's cache is parked in parked[slot] and the new map's taken from
+  ## parked[1 + activeMap()]; what goes back in its place is the empty value, so every parked
+  ## entry is either a map's own cache or empty.
+  let wanted = activeMap()+1
+  if slot != wanted:
+    swap(current, parked[slot])
+    swap(current, parked[wanted])
+    slot = wanted
 when IndexedGeometry:
   const
     CoverCell = 200
@@ -377,6 +388,14 @@ when IndexedGeometry:
       rayKeys: seq[RayKey]
       rayState: seq[uint8] # 0 empty, 1 blocked, 2 clear
   var coverIndex {.threadvar.}: CoverIndex
+  when defined(pwTraining):
+    # A training thread may step worlds on different maps (native_env's per-handle map), and
+    # the index describes one map's geometry: each map keeps its own, parked here while the
+    # thread is on another. Switching maps swaps rather than rebuilds, and one map's index is
+    # never taken for another's cover (two maps may share a cover count, and a freed world's
+    # cover address may be reused).
+    var coverIndexParked {.threadvar.}: array[MapNames.len+1, CoverIndex]
+    var coverIndexMap {.threadvar.}: int # 1 + the map coverIndex belongs to (0 = the island)
   proc coverSpan(c: Cover): tuple[x0, x1, z0, z1: int] =
     let depth = if c.h == 0: c.w else: c.h
     (c.x.int-CoverReach-1, c.x.int+c.w.int+CoverReach+1, c.z.int-CoverReach-1, c.z.int+depth.int+CoverReach+1)
@@ -415,6 +434,7 @@ when IndexedGeometry:
         g.items[fill[cell]] = index.int32
         inc fill[cell]
   proc coverIndexFor(w: World): ptr CoverIndex =
+    when defined(pwTraining): parkForMap(coverIndex, coverIndexParked, coverIndexMap)
     result = addr coverIndex
     let payload = if w.cover.len > 0: cast[pointer](unsafeAddr w.cover[0]) else: nil
     if result.payload == payload and result.length == w.cover.len and
@@ -1062,6 +1082,9 @@ type
 when defined(pwTraining):
   var nav {.threadvar.}: NavCache
   var navCompleteFields* {.threadvar.}: bool
+  # Per map, as coverIndex above: the grid, water and fields describe one map's geometry.
+  var navParked {.threadvar.}: array[MapNames.len+1, NavCache]
+  var navMap {.threadvar.}: int # 1 + the map nav belongs to (0 = the island)
 else:
   var nav: NavCache
   var navCompleteFields* = false ## tests: expand every field to the end, as before the cache
@@ -1150,6 +1173,7 @@ proc waypoint*(w:World,start,goal:Point):Point =
   let nz=(maxZ()-minZ()) div NavCell
   let bounds=[minX(),minZ(),maxX(),maxZ()]
   let payload=if w.cover.len>0:cast[pointer](unsafeAddr w.cover[0]) else:nil
+  when defined(pwTraining): parkForMap(nav, navParked, navMap)
   # The grid depends only on cover and bounds. A world whose cover payload address or
   # length differs from the last is compared by content; the grid survives if it agrees.
   let same=nav.edges.len==nx*nz and nav.bounds==bounds and nav.length==w.cover.len and
@@ -1186,10 +1210,10 @@ proc waypoint*(w:World,start,goal:Point):Point =
     if nav.targets.len>=NavTargetLimit:nav.targets.clear()
     nav.targets[goal]=target
   if target<0:return start
-  # Rules 44 (FFA only): when the goal's own cell is in the lake, every route to it ends in
-  # the water, so dry anchors and dry string pulls can only lead to the shore cell nearest it,
-  # where the cog then stood still for as long as it kept the goal (Heartland's two lake
-  # hearts and their medkits, ~300 units short of the capture ring). Such a cog takes anchors
+  # Rules 44 (FFA) and 45 (every mode): when the goal's own cell is in the lake, every route
+  # to it ends in the water, so dry anchors and dry string pulls can only lead to the shore
+  # cell nearest it, where the cog then stood still for as long as it kept the goal (the two
+  # lake hearts and their medkits, ~300 units short of the capture ring). Such a cog takes anchors
   # and pulls as a wading cog does; the time-weighted field keeps it on dry land for as long
   # as that is faster. The straight dry shortcut above is unchanged: it never ends in water.
   let dryAnchors=dryOnly and not (wadesToWetGoals() and nav.water[target])
