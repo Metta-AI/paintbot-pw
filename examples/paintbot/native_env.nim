@@ -189,6 +189,11 @@ type
     # pw_set_pair_stats_enabled(h, 0) sets this (zeroed = counters on): the per-tick pair
     # counters and the damage hook are skipped; the reward, its split and death ticks stay.
     pairStatsOff: bool
+    # Map (pw_set_map): 1 + an index into MapNames, 0 = the rules' own island (the zero-init
+    # default, so an untouched handle plays exactly as before). mapSlot is the current world's
+    # and ready() installs it on the calling thread like the mode and kinship; nextMapSlot is
+    # kept across resets and applied at the next reset, so a live world never changes map.
+    mapSlot, nextMapSlot: int32
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -203,10 +208,13 @@ const
 static: doAssert PairStatCount == 13 and KinWindow == 72
 
 proc ready(handle: pointer = nil) =
-  ## Every entry point: the thread's GC and rules, and, for a handle, its game mode and
-  ## kinship. Both are threadvars the engine reads (ffa(), scores, the ffa.v1 encoder) and
-  ## several handles may share a thread, so each call installs its own handle's.
+  ## Every entry point: the thread's GC, map and rules, and, for a handle, its game mode and
+  ## kinship. All are threadvars the engine reads (terrain, layout, ffa(), scores, the ffa.v1
+  ## encoder) and several handles may share a thread, so each call installs its own handle's;
+  ## without a handle, the rules' own island. The map goes first so configureRules binds the
+  ## terrain table once, for the right key (a key compare when nothing changed).
   setupForeignThreadGc()
+  setActiveMap(if handle == nil: -1 else: cast[ptr NativeEnv](handle).mapSlot.int-1)
   configureRules(NativeRules)
   if handle != nil:
     let env = cast[ptr NativeEnv](handle)
@@ -254,9 +262,11 @@ proc resetKin(env: ptr NativeEnv) =
       env.kin.lastDefend[i][j] = NoTick
 proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
   ## The world a create or reset starts, in the pending game mode, with the pending kin
-  ## layout and eval overrides fed to the engine through its threadvars for this call only.
+  ## layout and eval overrides fed to the engine through its threadvars for this call only,
+  ## on the pending map (newWorld's configureRules binds its terrain table).
   let mode = env.nextMode
   gameMode = mode
+  setActiveMap(env.nextMapSlot.int-1)
   let savedKinship = kinshipOverride
   kinshipOverride =
     if env.kinOverride.isSome: env.kinOverride
@@ -268,6 +278,7 @@ proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
   finally:
     kinshipOverride = savedKinship
     spawnGroupingOverride = none(array[Seats, int8])
+  env.mapSlot = env.nextMapSlot
   env.mode = mode
   env.kinship = if mode == gmFfaKin: activeKinship else: Kinship()
   activeKinship = env.kinship
@@ -946,6 +957,34 @@ proc pw_game_mode*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   ## The current world's mode (0 teams, 1 FFA-kin); -1 for nil.
   if handle == nil: return -1
   cast[ptr NativeEnv](handle).mode.cint
+
+proc pw_map_count*(): cint {.exportc, cdecl, dynlib.} =
+  ## The number of maps pw_set_map accepts (MapNames), besides -1 for the rules' own island.
+  MapNames.len.cint
+
+proc pw_map_name*(index: cint, output: ptr UncheckedArray[char], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## MapNames[index], NUL-terminated ("" for -1, the rules' own island); capacity must hold the
+  ## name and its NUL (32 always does). 0, or -1 bad args.
+  if output == nil or index notin -1'i32..MapNames.high.int32: return -1
+  let name = if index < 0: "" else: MapNames[index]
+  if capacity <= name.len: return -1
+  for i, c in name: output[i] = c
+  output[name.len] = '\0'
+  0
+
+proc pw_set_map*(handle: pointer, index: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The map for this handle's worlds from its NEXT pw_reset on: -1 = the rules' own island
+  ## (the default), 0 .. pw_map_count()-1 = MapNames[index]. Kept across resets; the current
+  ## world keeps its map until then. Handles on one thread may play different maps. 0, or -1
+  ## bad args.
+  if handle == nil or index notin -1'i32..MapNames.high.int32: return -1
+  cast[ptr NativeEnv](handle).nextMapSlot = index+1
+  0
+
+proc pw_map*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
+  ## The current world's map: an index into MapNames, -1 for the rules' own island; -2 for nil.
+  if handle == nil: return -2
+  cint(cast[ptr NativeEnv](handle).mapSlot-1)
 
 proc pw_set_kin_layout*(handle: pointer, layout: int32): cint {.exportc, cdecl, dynlib.} =
   ## FFA kin layout for the next resets: -1 = drawn from the seed by weight (default), else

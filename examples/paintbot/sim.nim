@@ -354,6 +354,16 @@ proc boundsBlocked(p: Point, radius: int): bool {.inline.} =
 # so the answers are identical to the full scans below, which -d:pwFullScanGeometry restores
 # for comparison. Training builds always index.
 const IndexedGeometry* = defined(pwTraining) or not defined(pwFullScanGeometry)
+template parkForMap(current, parked, slot: untyped) =
+  ## Training builds: make `current`, a thread's geometry cache, the one for the thread's
+  ## active map. The old map's cache is parked in parked[slot] and the new map's taken from
+  ## parked[1 + activeMap()]; what goes back in its place is the empty value, so every parked
+  ## entry is either a map's own cache or empty.
+  let wanted = activeMap()+1
+  if slot != wanted:
+    swap(current, parked[slot])
+    swap(current, parked[wanted])
+    slot = wanted
 when IndexedGeometry:
   const
     CoverCell = 200
@@ -378,6 +388,14 @@ when IndexedGeometry:
       rayKeys: seq[RayKey]
       rayState: seq[uint8] # 0 empty, 1 blocked, 2 clear
   var coverIndex {.threadvar.}: CoverIndex
+  when defined(pwTraining):
+    # A training thread may step worlds on different maps (native_env's per-handle map), and
+    # the index describes one map's geometry: each map keeps its own, parked here while the
+    # thread is on another. Switching maps swaps rather than rebuilds, and one map's index is
+    # never taken for another's cover (two maps may share a cover count, and a freed world's
+    # cover address may be reused).
+    var coverIndexParked {.threadvar.}: array[MapNames.len+1, CoverIndex]
+    var coverIndexMap {.threadvar.}: int # 1 + the map coverIndex belongs to (0 = the island)
   proc coverSpan(c: Cover): tuple[x0, x1, z0, z1: int] =
     let depth = if c.h == 0: c.w else: c.h
     (c.x.int-CoverReach-1, c.x.int+c.w.int+CoverReach+1, c.z.int-CoverReach-1, c.z.int+depth.int+CoverReach+1)
@@ -416,6 +434,7 @@ when IndexedGeometry:
         g.items[fill[cell]] = index.int32
         inc fill[cell]
   proc coverIndexFor(w: World): ptr CoverIndex =
+    when defined(pwTraining): parkForMap(coverIndex, coverIndexParked, coverIndexMap)
     result = addr coverIndex
     let payload = if w.cover.len > 0: cast[pointer](unsafeAddr w.cover[0]) else: nil
     if result.payload == payload and result.length == w.cover.len and
@@ -1060,6 +1079,9 @@ type
 when defined(pwTraining):
   var nav {.threadvar.}: NavCache
   var navCompleteFields* {.threadvar.}: bool
+  # Per map, as coverIndex above: the grid, water and fields describe one map's geometry.
+  var navParked {.threadvar.}: array[MapNames.len+1, NavCache]
+  var navMap {.threadvar.}: int # 1 + the map nav belongs to (0 = the island)
 else:
   var nav: NavCache
   var navCompleteFields* = false ## tests: expand every field to the end, as before the cache
@@ -1148,6 +1170,7 @@ proc waypoint*(w:World,start,goal:Point):Point =
   let nz=(maxZ()-minZ()) div NavCell
   let bounds=[minX(),minZ(),maxX(),maxZ()]
   let payload=if w.cover.len>0:cast[pointer](unsafeAddr w.cover[0]) else:nil
+  when defined(pwTraining): parkForMap(nav, navParked, navMap)
   # The grid depends only on cover and bounds. A world whose cover payload address or
   # length differs from the last is compared by content; the grid survives if it agrees.
   let same=nav.edges.len==nx*nz and nav.bounds==bounds and nav.length==w.cover.len and
