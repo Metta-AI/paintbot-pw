@@ -104,5 +104,36 @@ suite "FFA-kin replay payload":
     saveReplayFile(path, "paintbot_pw", 1040, bad)
     expect ReplayError: discard loadRecording(path)
     bad.layout = k.layout.uint8
+    template refused(field, value: untyped) =
+      ## One corrupt field, restored afterwards, must make the loader refuse the replay.
+      let saved = field
+      field = value
+      saveReplayFile(path, "paintbot_pw", 1040, bad)
+      expect ReplayError: discard loadRecording(path)
+      field = saved
+    refused(bad.mode, 0'u8) # a teams mode inside an FFA payload
+    refused(bad.mode, 2'u8)
+    refused(bad.family[4], 16'i8) # family ids are -1 (loner) or 0..15
+    refused(bad.family[4], -2'i8)
+    refused(bad.ibd[3][3], 31'i8) # r_ii must be 1
+    refused(bad.ibd[2][5], (if k.ibd[2][5] == 0: 8'i8 else: 0'i8)) # asymmetric
+    refused(bad.ibd[7][1], -1'i8)
     saveReplayFile(path, "paintbot_pw", 1040, bad)
     check loadRecording(path).endTick == 240
+    check activeKinship == k
+
+  test "a live match after an FFA replay load draws its own kinship":
+    let path = getTempDir() / "paintbot-ffa-override-test.replay"
+    defer: removeFile(path)
+    let k = kinshipFor(klPairs, 5)
+    saveReplayFile(path, "paintbot_pw", 1040, RecordingFfa(seed: 1, endTick: 240, mode: 1,
+      layout: k.layout.uint8, family: k.family, genes: k.genes, ibd: k.ibd))
+    discard loadRecording(path)
+    check kinshipOverride == some(k) # replay analysis rebuilds the recorded world from it
+    check newWorld(1, 240).spawnAnchor == newWorld(1, 240).spawnAnchor
+    check activeKinship == k
+    # game.setup's live branch builds its world with newLiveWorld, which drops the override.
+    let live = newLiveWorld(77, 240)
+    check kinshipOverride.isNone
+    check activeKinship == sampleKinship(77)
+    check live.endTick == 240

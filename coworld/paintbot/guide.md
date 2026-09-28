@@ -40,7 +40,9 @@ ownership are public. BASIC exposes `heartCount()`, `controlX(i)`, `controlY(i)`
 and `controlOwner(i)` (-1 neutral, 0 red, 1 blue). Capture state is also public:
 `controlCaptureTeam(i)` (-1 idle), `controlCaptureTicks(i)` (0–71 of 72), and
 `controlContested(i)` (0 or 1). Invalid indices return -1. Glory is
-public too: `glory(team)` (-1 for an invalid team) (rules 37).
+public too: `glory(team)` (-1 for an invalid team) (rules 37). In FFA-kin mode
+(Heartland, below) owners and capturers are seats instead of teams: `controlOwner(i)`,
+its alias `heartOwner(i)` and `controlCaptureTeam(i)` return the seat (0-15) or -1.
 
 Cogs have three base HP and three respawns (four lives total). Death loses equipment and respawns
 after 72 ticks; spawn protection lasts 36 ticks. Initial spawns and respawns are within 350 world units
@@ -112,7 +114,10 @@ Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `pickupY(id)`, `pickupKind(id)` (0 grenade, 1 spray, 2 medkit, 3 armor),
 `glory(team)` (rules 37), `gloryHeartCount()`, `gloryHeartX(id)`, `gloryHeartY(id)`,
 `gloryHeartTicksLeft(id)` (rules 38). Hidden player, pickup and glory-heart coordinates are
-not disclosed (-1).
+not disclosed (-1). FFA-kin (Heartland) adds `gameMode()`, `kin(slot)`, `gene(slot,i)`,
+`seatScore(slot)`, `seatAlive(slot)`, `heartOwner(i)`, `greatHeartCount()`, `greatHeartX(i)`,
+`greatHeartY(i)`, `greatHeartPresent(i)`, `greatHeartProgress(i)` and `greatHeartDormant(i)`;
+see "FFA-kin mode (Heartland)".
 
 Actions: `walkTo(x,y)`, `lookAt(x,y)`, `shootAt(x,y)`, `chargeGrenade(held)`.
 Release by calling `chargeGrenade(0)` or not calling it on the next tick.
@@ -301,6 +306,57 @@ them worth the detour: grenade blasts reach 360 units instead of 270 and deal 3 
 open (a full-health kill) and 2 to victims in other trenches; spray recovers in 8 ticks
 instead of 20 and its cone is a third wider. Charge time (24 ticks) and spray reach (850)
 are unchanged so existing throw-distance math and neural decoders keep working.
+
+### FFA-kin mode (Heartland)
+
+The `heartland` variant sets `"mode": "ffa_kin"` in the game config (rules 40 otherwise; the
+teams game is untouched when the mode is absent or `"teams"`). All sixteen cogs are separate
+players, but some are related, and a cog's score counts its relatives' points.
+
+- **Families.** Every match draws a kinship layout from the seed: four families of four,
+  eight pairs, five trios and a loner, four families of four in two cousin-linked pairs,
+  rarely all strangers, rarely all clones. Each cog has 32 genes (bits). Siblings share
+  16 loci by descent, so their relatedness r is 1/2; linked cousins share 8 (r = 1/4); clones
+  share all 32 (r = 1); strangers 0. A cog's r to itself is 1. Other matching bits are chance
+  and do not count. Families spawn together around one anchor each, spread over the map.
+- **Rules.** Every hit is an ordinary hit (there are no teams, so no friendly fire, and no
+  uniforms). One life: a cog that dies is out, and every heart it owns goes neutral at once.
+  All ten control hearts start neutral. One cog alone within 140 units for 72 ticks captures
+  a heart; any second cog in range, relatives included, pauses the capture, and the heart's
+  owner standing on it blocks capture entirely. An owned heart pays its owner 1 point per
+  second.
+- **Great hearts.** Two great hearts sit at mirrored spots. Three or more living cogs inside
+  200 units for 5 seconds (120 ticks) capture one; progress falls one tick per tick while
+  fewer than three are present. A capture pays 60 points split equally among every cog in the
+  zone, then the heart is dormant for 60 seconds.
+- **Match.** A fixed 6:00 (8,640 ticks), ending early when at most one cog is left. No glory,
+  no heart meter, no elimination victory; results report outcome `ended`.
+- **Score.** Raw score s_i is heart income plus great-heart shares, kept in tenths of a point.
+  The match score is the kin-weighted R_i = sum over j of r_ij * s_j (in points). Helping a
+  sibling earn a point is worth half a point of your own; killing one costs you.
+
+BASIC in this mode: `selfTeam` and `playerTeam(slot)` are the seat, so team-parity bots treat
+everyone as an opponent. `homeX`/`homeY` are the seat's spawn anchor, and `heartX`/`heartY`/
+`ownHeartX`/`ownHeartY` read the same point (`ownHeartStolen` is 0). Kinship, genes, scores and
+who is still playing are public and need no line of sight:
+
+- `gameMode()`: 0 teams, 1 FFA-kin.
+- `kin(slot)`: round(100 r) between you and `slot`: 100 self (and clones), 50 siblings,
+  25 cousins, 0 strangers; -1 for an invalid slot. In the teams game 100 for self, else 0.
+- `gene(slot, i)`: bit `i` (0-31) of that cog's genome, 0 or 1; -1 for an invalid slot or
+  locus, a cog that is out of the match, or the teams game.
+- `seatScore(slot)`: raw score s in tenths of a point (0 in the teams game).
+- `seatAlive(slot)`: 1 while the cog is still in the match, 0 once it is out.
+- `heartOwner(i)`: the control heart's owning seat, -1 neutral (same as `controlOwner(i)`).
+- `greatHeartCount()`: 2 in FFA-kin, 0 otherwise. `greatHeartX(i)`, `greatHeartY(i)`: its
+  position. `greatHeartPresent(i)`: living cogs in its zone. `greatHeartProgress(i)`: capture
+  ticks (0-119). `greatHeartDormant(i)`: ticks until it is ready again, 0 if ready. Invalid
+  indices, and every great-heart query in the teams game, return -1.
+
+`seatScore` and `seatAlive` are named that way because `score` and `alive` are common variable
+names in existing bots. The baseline for this mode is `players/ffa.bas`: it never shoots a cog
+with `kin` of 50 or more, prefers strangers seen hurting relatives, joins a ready great heart
+when others gather there, and captures hearts that no relative is holding or taking.
 
 ### Expanded island and navigation (rules 22)
 

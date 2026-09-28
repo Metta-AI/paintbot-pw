@@ -817,5 +817,19 @@ class SeatStagingTests(unittest.TestCase):
             )
 
 
+class ManifestTests(unittest.TestCase):
+    """The manifest template's inline player guide and variants."""
+
+    manifest = json.loads((Path(__file__).parent / "coworld_manifest_template.json").read_text())
+
+    def test_the_inline_readme_is_guide_md(self):
+        guide = (Path(__file__).parent / "guide.md").read_text()
+        self.assertEqual(
+            self.manifest["game"]["docs"]["readme"],
+            {"type": "text", "value": guide},
+            "run python3 coworld/tools/sync_readme.py",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
