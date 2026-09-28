@@ -302,8 +302,14 @@ proc direction*(a, b: Point, speed: int): Point =
   if d == 0: return
   result.x = int32((int64(b.x)-a.x)*speed.int64 div d)
   result.z = int32((int64(b.z)-a.z)*speed.int64 div d)
-proc minX*():int = (if visionRulesVersion>=22: -4800 elif visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
-proc minZ*():int = (if visionRulesVersion>=22: -2800 elif visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
+# A map carries its own bounds (the rules-22 span for the shipped size, wider for big-*
+# maps), always centred on the half turn about (Width/2, Height/2).
+proc minX*():int =
+  if activeMap() >= 0: return currentMap().x0
+  (if visionRulesVersion>=22: -4800 elif visionRulesVersion>=14: -2800 elif visionRulesVersion>=12: -800 else: 0)
+proc minZ*():int =
+  if activeMap() >= 0: return currentMap().z0
+  (if visionRulesVersion>=22: -2800 elif visionRulesVersion>=14: -1200 elif visionRulesVersion>=12: -400 else: 0)
 proc maxX*():int = Width-minX()
 proc maxZ*():int = Height-minZ()
 proc elevation*(w: World, p: Point): int =

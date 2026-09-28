@@ -46,6 +46,24 @@ ZS = MIN_Z + STEP * np.arange(NZ)
 X, Z = np.meshgrid(XS.astype(float), ZS.astype(float))
 
 
+def set_scale(scale: float):
+    """Grow the world span about the half-turn centre (1.0 is the engine's rules-22 span).
+    Archetypes then see stretched coordinates (bigger features, same count); cover keeps its
+    density, so a 10x-area map carries ~10x the trees."""
+    global MIN_X, MIN_Z, MAX_X, MAX_Z, NX, NZ, XS, ZS, X, Z, SCALE
+    SCALE = scale
+    hx = int(round(8000 * scale / STEP)) * STEP
+    hz = int(round(4800 * scale / STEP)) * STEP
+    MIN_X, MAX_X, MIN_Z, MAX_Z = CX - hx, CX + hx, CZ - hz, CZ + hz
+    NX, NZ = (MAX_X - MIN_X) // STEP + 1, (MAX_Z - MIN_Z) // STEP + 1
+    XS = MIN_X + STEP * np.arange(NX)
+    ZS = MIN_Z + STEP * np.arange(NZ)
+    X, Z = np.meshgrid(XS.astype(float), ZS.astype(float))
+
+
+SCALE = 1.0
+
+
 def mirror(p):
     return (2 * CX - p[0], 2 * CZ - p[1])
 
@@ -570,7 +588,16 @@ def build(name, title, fn, blurb, seed) -> Map:
     for attempt in range(12):
         rng = np.random.default_rng(seed * 101 + attempt)
         m = Map(name, title, fn.__name__[2:], blurb, seed * 101 + attempt)
-        fn(m, rng)
+        global X, Z
+        real = (X, Z)
+        X, Z = CX + (real[0] - CX) / SCALE, CZ + (real[1] - CZ) / SCALE
+        try:
+            fn(m, rng)
+        finally:
+            X, Z = real
+        grow = lambda p: (int(CX + (p[0] - CX) * SCALE), int(CZ + (p[1] - CZ) * SCALE))
+        m.home = grow(m.home)
+        m.village = [grow(v) for v in m.village]
         try:
             populate(m, rng)
             problems = validate(m)
@@ -779,16 +806,20 @@ def main():
     ap.add_argument("--out", default="maps")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--only")
+    ap.add_argument("--scale", type=float, default=1.0, help="span multiplier (sqrt(10) for 10x area)")
+    ap.add_argument("--prefix", default="", help="name prefix, e.g. big-")
     ap.add_argument("--no-png", action="store_true")
     ap.add_argument("--engine", help="also write <name>.pbmap files here (examples/paintbot/maps)")
     args = ap.parse_args()
+    set_scale(args.scale)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     index = []
     for i, (name, title, fn, blurb) in enumerate(CATALOGUE):
-        if args.only and args.only != name:
+        if args.only and args.only not in (name, args.prefix + name):
             continue
-        m = build(name, title, fn, blurb, args.seed * 1000 + i)
+        m = build(args.prefix + name, title, fn, blurb, args.seed * 1000 + i)
+        name = args.prefix + name
         doc = to_json(m)
         (out / f"{name}.json").write_text(json.dumps(doc, separators=(",", ":")))
         if not args.no_png:
