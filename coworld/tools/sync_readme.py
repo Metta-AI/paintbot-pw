@@ -1,4 +1,4 @@
-"""Copy coworld/paintbot/guide.md into the Paintbot manifest's inline game.docs.readme.
+"""Copy coworld/paintbot/guide.md into the Paintbot and Heartland manifests' inline readmes.
 
     python3 coworld/tools/sync_readme.py          # rewrite the manifest
     python3 coworld/tools/sync_readme.py --check  # exit 1 if they differ
@@ -8,6 +8,11 @@ is the source. Sections between <!-- readme:skip-start --> and <!-- readme:skip-
 are for operators (private exports, hosted A/B recipes, campaign notes) and stay out of the
 player-facing copy; everything else is copied verbatim. coworld/paintbot/test_runtime.py
 checks the manifest matches.
+
+Heartland (coworld/heartland) is the same engine in FFA-kin mode, published as its own Coworld:
+its readme is coworld/heartland/guide.md followed by the same player guide, and its player
+files are copies of coworld/paintbot/players/ffa*.bas (Coworld refuses symlinked or
+out-of-package player files), kept here so the two never drift.
 """
 
 import argparse
@@ -18,6 +23,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 GUIDE = ROOT / "coworld/paintbot/guide.md"
 MANIFEST = ROOT / "coworld/paintbot/coworld_manifest_template.json"
+HEARTLAND_GUIDE = ROOT / "coworld/heartland/guide.md"
+HEARTLAND_MANIFEST = ROOT / "coworld/heartland/coworld_manifest_template.json"
+HEARTLAND_PLAYERS = ["ffa.bas", "ffa_blind.bas"]
 
 
 SKIP_START = "<!-- readme:skip-start -->"
@@ -47,24 +55,37 @@ def player_readme(guide: str) -> str:
     return "".join(out)
 
 
-def synced_manifest() -> str:
+def synced_manifest(path: Path = MANIFEST, intro: str = "") -> str:
     """The manifest text with the readme replaced by the player guide, in the file's own formatting."""
-    manifest = json.loads(MANIFEST.read_text())
-    manifest["game"]["docs"]["readme"] = {"type": "text", "value": player_readme(GUIDE.read_text())}
+    manifest = json.loads(path.read_text())
+    manifest["game"]["docs"]["readme"] = {"type": "text", "value": intro + player_readme(GUIDE.read_text())}
     return json.dumps(manifest, indent=2) + "\n"
+
+
+def synced_files() -> dict[Path, str]:
+    """Every generated file and the text it should hold."""
+    files = {
+        MANIFEST: synced_manifest(),
+        HEARTLAND_MANIFEST: synced_manifest(HEARTLAND_MANIFEST, HEARTLAND_GUIDE.read_text()),
+    }
+    for name in HEARTLAND_PLAYERS:
+        files[ROOT / "coworld/heartland/players" / name] = (ROOT / "coworld/paintbot/players" / name).read_text()
+    return files
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--check", action="store_true", help="fail if the readme is stale")
+    parser.add_argument("--check", action="store_true", help="fail if a readme or Heartland player copy is stale")
     args = parser.parse_args()
-    text = synced_manifest()
-    if text == MANIFEST.read_text():
-        return 0
+    stale = [path for path, text in synced_files().items() if not path.is_file() or path.read_text() != text]
     if args.check:
-        print(f"{MANIFEST.relative_to(ROOT)}: readme differs from guide.md; run {Path(__file__).name}", file=sys.stderr)
-        return 1
-    MANIFEST.write_text(text)
+        for path in stale:
+            print(f"{path.relative_to(ROOT)} is stale; run {Path(__file__).name}", file=sys.stderr)
+        return 1 if stale else 0
+    for path, text in synced_files().items():
+        if path in stale:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
     return 0
 
 
