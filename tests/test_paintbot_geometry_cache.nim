@@ -129,6 +129,29 @@ suite "Geometry caches":
         check w.lineClear(a, b) == w.directLineClear(a, b) # memo hit
         check w.walkClear(a, b) == w.directWalkClear(a, b)
     configureMap("")
+  test "partial flow fields route exactly like complete ones":
+    var rng = initRand(19)
+    for name in @[""] & @MapNames:
+      configureMap(name)
+      configureRules(41)
+      let w = newWorld(2026, 240)
+      var goals: seq[Point]
+      for h in w.controlHearts: goals.add h.pos
+      for pk in w.pickups: goals.add pk.pos
+      for _ in 0..<90: goals.add point(rng.rand(minX()+100..maxX()-100), rng.rand(minZ()+100..maxZ()-100))
+      var starts: seq[Point]
+      for cog in w.cogs: starts.add cog.pos
+      for _ in 0..<40: starts.add point(rng.rand(minX()+100..maxX()-100), rng.rand(minZ()+100..maxZ()-100))
+      var queries: seq[(Point, Point)]
+      for _ in 0..<500: queries.add (starts[rng.rand(starts.high)], goals[rng.rand(goals.high)])
+      navCompleteFields = false
+      var partial: seq[Point]
+      for q in queries: partial.add w.waypoint(q[0], q[1])
+      navCompleteFields = true
+      for i, q in queries: check w.waypoint(q[0], q[1]) == partial[i]
+      navCompleteFields = false
+      for i, q in queries: check w.waypoint(q[0], q[1]) == partial[i]
+    configureMap("")
   test "navigation memo agrees with a fresh grid and full scans":
     configureRules(37)
     var rng = initRand(11)

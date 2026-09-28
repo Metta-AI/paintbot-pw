@@ -880,21 +880,34 @@ proc legacyWaypoint(w: World, start, goal: Point): Point =
   point(minX()+n mod nx*200+100, minZ()+n div nx*200+100)
 # Navigation uses body clearance, never the visibility ray. Cached flow fields
 # share static terrain work across cogs headed for the same objective.
-type NavCache = object
-  cover: seq[Cover]
-  payload: pointer
-  length: int
-  bounds: array[4,int]
-  edges: seq[seq[int]]
-  fields: Table[int,seq[int32]] # target cell -> BFS distance per cell, -1 unreachable
-  recent: seq[int]              # targets, least recently used first
-  targets: Table[Point,int]     # goal -> nearest connected cell (or -1)
-  water: seq[bool]              # rules 38: whether each cell's centre is in the lake
-  weighted: bool                # rules 38: `fields` measure time, a lake cell costing four
+type
+  NavField = object
+    ## Distances to one target cell, expanded only as far as callers have needed. Every cell
+    ## whose distance is below `level` is final; any other value is tentative (or -1, not yet
+    ## reached). A field stops early once the cells a caller reads are final and resumes where
+    ## it stopped for the next caller; run to the end it equals the old full search.
+    dist: seq[int32]
+    buckets: array[5, seq[int]]   # rules 38 Dial buckets, by distance mod 5
+    level: int32
+    pending: int
+  NavCache = object
+    cover: seq[Cover]
+    payload: pointer
+    length: int
+    bounds: array[4,int]
+    edges: seq[seq[int]]
+    fields: Table[int,NavField]  # target cell -> distances toward it
+    recent: seq[int]              # targets, least recently used first
+    pinned: seq[int]              # target cells of the map's hearts, pickups and homes: never evicted
+    targets: Table[Point,int]     # goal -> nearest connected cell (or -1)
+    water: seq[bool]              # rules 38: whether each cell's centre is in the lake
+    weighted: bool                # rules 38: `fields` measure time, a lake cell costing four
 when defined(pwTraining):
   var nav {.threadvar.}: NavCache
+  var navCompleteFields* {.threadvar.}: bool
 else:
   var nav: NavCache
+  var navCompleteFields* = false ## tests: expand every field to the end, as before the cache
 const
   NavCell = 100
   NavFieldLimit = 64
@@ -987,6 +1000,7 @@ proc waypoint*(w:World,start,goal:Point):Point =
     ((nav.payload==payload and defined(pwTraining)) or nav.cover==w.cover)
   if not same:
     nav.cover=w.cover;nav.bounds=bounds;nav.fields.clear();nav.recent.setLen(0);nav.targets.clear()
+    nav.pinned.setLen(0)
     nav.weighted=wetRouting;nav.water.setLen(0)
     nav.edges=newSeq[seq[int]](nx*nz)
     for n in 0..<nx*nz:
@@ -1016,41 +1030,69 @@ proc waypoint*(w:World,start,goal:Point):Point =
     nav.targets[goal]=target
   if target<0:return start
   if target notin nav.fields:
-    var distances=newSeq[int32](nx*nz)
-    for d in distances.mitems:d = -1
+    var f=NavField(dist:newSeq[int32](nx*nz))
+    for d in f.dist.mitems:d = -1
+    f.dist[target]=0
     if wetRouting:
-      # Dial's buckets: exact for step costs of 1 and 4, and deterministic in scan order.
-      distances[target]=0
-      var buckets:array[5,seq[int]]
-      buckets[0].add target
-      var pending=1
-      var d=0'i32
-      while pending>0:
-        let bucket=buckets[d mod 5];buckets[d mod 5].setLen(0)
-        pending-=bucket.len
-        for n in bucket:
-          if distances[n]!=d:continue
-          for j in nav.edges[n]:
-            let nd=d+(if nav.water[j]:4'i32 else:1'i32)
-            if distances[j]<0 or nd<distances[j]:
-              distances[j]=nd;buckets[nd mod 5].add j;inc pending
-        inc d
+      f.buckets[0].add target;f.pending=1
     else:
-      var queue = @[target];distances[target]=0
+      # Unweighted rules: the old breadth-first search, complete at once.
+      var queue = @[target]
       var head=0
       while head<queue.len:
         let n=queue[head];inc head
         for j in nav.edges[n]:
-          if distances[j]<0:
-            distances[j]=distances[n]+1;queue.add j
-    if nav.fields.len>=NavFieldLimit:
-      # Bounded eviction of the least recently used field; results never depend on it.
-      nav.fields.del(nav.recent[0]);nav.recent.delete(0)
-    nav.fields[target]=distances
+          if f.dist[j]<0:
+            f.dist[j]=f.dist[n]+1;queue.add j
+      f.level=high(int32)
+    if nav.pinned.len==0:
+      # The map's fixed objectives are routed to all match long; their fields stay cached.
+      var fixed: seq[Point] = @[home(0), home(1)]
+      for h in w.controlHearts: fixed.add h.pos
+      for pk in w.pickups: fixed.add pk.pos
+      for p in fixed:
+        let c=nearestConnectedCell(p,nx,nz)
+        if c>=0 and c notin nav.pinned: nav.pinned.add c
+      if nav.pinned.len==0: nav.pinned.add -1
+    var unpinned=0
+    for t in nav.recent:
+      if t notin nav.pinned: inc unpinned
+    if unpinned>=NavFieldLimit:
+      # Bounded eviction of the least recently used unpinned field; results never depend on it.
+      for i, t in nav.recent:
+        if t notin nav.pinned:
+          nav.fields.del(t);nav.recent.delete(i);break
+    nav.fields[target]=f
     nav.recent.add target
   elif nav.recent[^1]!=target:
     nav.recent.delete(nav.recent.find(target));nav.recent.add target
-  let distances=addr nav.fields[target]
+  block:
+    # Expand the field until every cell the anchor search below can read is final: the
+    # connected cells within three of the start. Any cell the string pull then reads is
+    # nearer the target than the anchor, so it is final too; a tentative neighbour is never
+    # below the anchor either way, so the comparisons match a complete search exactly.
+    let f=addr nav.fields[target]
+    let sx0=(start.x.int-minX()) div NavCell
+    let sz0=(start.z.int-minZ()) div NavCell
+    proc ready(f: ptr NavField): bool =
+      if navCompleteFields: return false
+      for z in max(0,sz0-3)..min(nz-1,sz0+3):
+        for x in max(0,sx0-3)..min(nx-1,sx0+3):
+          let n=z*nx+x
+          if nav.edges[n].len>0 and not (f.dist[n]>=0 and f.dist[n]<f.level):return false
+      true
+    while f.pending>0 and not ready(f):
+      # Dial's buckets: exact for step costs of 1 and 4, and deterministic in scan order.
+      let bucket=f.buckets[f.level mod 5];f.buckets[f.level mod 5].setLen(0)
+      f.pending-=bucket.len
+      for n in bucket:
+        if f.dist[n]!=f.level:continue
+        for j in nav.edges[n]:
+          let nd=f.level+(if nav.water[j]:4'i32 else:1'i32)
+          if f.dist[j]<0 or nd<f.dist[j]:
+            f.dist[j]=nd;f.buckets[nd mod 5].add j;inc f.pending
+      inc f.level
+  let distances=addr nav.fields[target].dist
   result=start
   var best=high(int64)
   var anchor = -1
