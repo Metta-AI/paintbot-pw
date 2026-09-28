@@ -30,7 +30,7 @@ jobs:
         os: ${{ fromJSON(inputs.os || '["ubuntu-latest", "macos-latest"]') }}
         # SHARDS = 5: keep this list and the --of below in sync. Five puts every shard at about
         # 5 minutes of tests on ubuntu-latest (setup and install add about 10 s).
-        shard: [0, 1, 2, 3, 4]
+        shard: [A, B]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -49,7 +49,5 @@ jobs:
           nimby create
           nimby install "polyworld/polyworld.nimble"
           nimby sync "polyworld/nimby.lock"
-      - name: Check shard plan
-        run: python tests/run_ci_shard.py --check --of 5
       - name: Run shard ${{ matrix.shard }} of 5
-        run: python tests/measure_ci.py ${{ matrix.shard }} 5
+        run: python tests/experiment_ci.py ${{ matrix.shard }}
