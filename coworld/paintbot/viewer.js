@@ -1065,6 +1065,18 @@
     strip.hidden = !control;
     if (!control) return;
     const hearts = w.controlHearts;
+    if (hearts.length > 16) {
+      // Many-heart maps (mapgen --heart-area): one tally instead of a heart per altar.
+      const held = [0, 1].map((team) => hearts.filter((h) => h.owner === team).length);
+      const text = `\u2665 Ember ${held[0]} \u00b7 Azure ${held[1]} \u00b7 ${hearts.length - held[0] - held[1]} unclaimed`;
+      if (strip.dataset.tally !== text) {
+        strip.dataset.tally = text;
+        strip.textContent = text;
+        strip.setAttribute("aria-label", `Territory hearts: Ember ${held[0]}, Azure ${held[1]}, unclaimed ${hearts.length - held[0] - held[1]}`);
+      }
+      return;
+    }
+    delete strip.dataset.tally;
     if (strip.childElementCount !== hearts.length) {
       strip.innerHTML = "";
       heartStripOrder.length = 0;

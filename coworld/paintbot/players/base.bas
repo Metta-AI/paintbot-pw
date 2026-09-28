@@ -6,11 +6,11 @@
 '   4. refuse a fight we are visibly losing.
 ' Budget: 20,000 instructions per decision; an overrun disables the cog, so every loop here
 ' is bounded by the 16 seats, the heart count, or a fixed iteration count.
-dim avoidUntil(16)
-dim pickupMemoryX(32)
-dim pickupMemoryY(32)
-dim pickupMemoryKind(32)
-dim pickupMemoryTick(32)
+dim avoidUntil(64)
+dim pickupMemoryX(64)
+dim pickupMemoryY(64)
+dim pickupMemoryKind(64)
+dim pickupMemoryTick(64)
 dim drF(6)
 dim oldX(16)
 dim oldY(16)
@@ -128,7 +128,7 @@ end if
 if worldTick mod 72 = 0 then
   dxProgress = selfX - progressX
   dyProgress = selfY - progressY
-  if dxProgress * dxProgress + dyProgress * dyProgress < 40000 and objective >= 0 and objective < 16 then
+  if dxProgress * dxProgress + dyProgress * dyProgress < 40000 and objective >= 0 and objective < 64 then
     dxHeart = controlX(objective) - selfX
     dyHeart = controlY(objective) - selfY
     if dxHeart * dxHeart + dyHeart * dyHeart > 160000 then
@@ -224,7 +224,7 @@ if heartCount() > 0 then
     choice = -1
     choiceCost = 2147483647
     j = 0
-    while j < heartCount() and j < 16
+    while j < heartCount() and j < 64
       if controlOwner(j) <> selfTeam and j <> otherTarget then
         dx = (controlX(j) - homeX) / 8
         dy = (controlY(j) - refY) / 8
@@ -299,7 +299,7 @@ end if
 
 ' Remember seen supplies for ten seconds and equip when it is safe to.
 i = 0
-while i < pickupCount() and i < 32
+while i < pickupCount() and i < 64
   if pickupVisible(i) then
     pickupMemoryX(i) = pickupX(i)
     pickupMemoryY(i) = pickupY(i)
@@ -312,7 +312,7 @@ if not carrying and thief < 0 then
   nearest = -1
   nearestCost = 4840000
   j = 0
-  while j < pickupCount() and j < 32
+  while j < pickupCount() and j < 64
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
       kind = pickupMemoryKind(j)
       wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3 and selfHp = 3)
@@ -350,7 +350,7 @@ if foesNear - friendsNear >= 1 and not carrying then
   away = -1
   awayScore = -2147483647
   j = 0
-  while j < heartCount() and j < 16
+  while j < heartCount() and j < 64
     ex = (controlX(j) - cx) / 16
     ey = (controlY(j) - cy) / 16
     mx = (controlX(j) - selfX) / 16

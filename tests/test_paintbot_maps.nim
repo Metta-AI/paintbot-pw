@@ -1,6 +1,6 @@
 ## Rules 41 maps: each generated map loads, is its own half-turn image, connects every
 ## objective to both homes, and survives a recorded replay round trip.
-import std/[unittest, sets, deques, os]
+import std/[unittest, sets, deques, os, strutils]
 import polyworld/tapes
 import ../examples/paintbot/[sim, game]
 
@@ -24,14 +24,19 @@ suite "Paintbot generated maps":
       configureMap(name)
       let w = newWorld(2026)
       check mapName() == name
-      check w.controlHearts.len == 10
+      # Ten hearts, or one per ~730 m2 of land on big-* maps (mapgen --heart-area 730).
+      if name.startsWith("big-"): check w.controlHearts.len >= 90
+      else: check w.controlHearts.len == 10
+      check w.controlHearts.len mod 2 == 0
       check w.controlHearts[0].owner == 0 and w.controlHearts[1].owner == 1
       check w.controlHearts[0].pos == home(0) and w.controlHearts[1].pos == home(1)
       check home(1) == mirrored(home(0))
       var kinds: array[PickupKind, int]
       for p in w.pickups: inc kinds[p.kind]
-      check kinds == [4, 2, 4, 2, 2] # grenade, spray, medkit, armor, uniform
-      check w.trenches.len == 6
+      # Items and trenches scale with the hearts: one rules-40 set per ten hearts.
+      let copies = max(1, (w.controlHearts.len+5) div 10)
+      check kinds == [4*copies, 2*copies, 4*copies, 2*copies, 2*copies] # grenade, spray, medkit, armor, uniform
+      check w.trenches.len == 6*copies
       check w.cover.len == currentMap().cover.len
       for i in countup(0, w.controlHearts.len-2, 2):
         check w.controlHearts[i+1].pos == mirrored(w.controlHearts[i].pos)

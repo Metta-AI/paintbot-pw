@@ -28,6 +28,8 @@ both homes can reach, clear of cover.
 ```bash
 python3 mapgen.py --out maps            # the ten catalogue maps (+ PNG previews, index.json)
 python3 mapgen.py --out maps --only crater --seed 7
+# Big maps: ten times the area, one control heart per ~730 m2 of land (the shipped maps' density)
+python3 mapgen.py --out maps --scale 3.1623 --prefix big- --heart-area 730 --engine ../../../../examples/paintbot/maps
 python3 -m unittest test_mapgen
 ```
 
