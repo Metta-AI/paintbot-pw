@@ -2,15 +2,21 @@
 ## A map replaces the rules-derived island: its terrain grid answers terrainHeight and
 ## islandMargin, and its hearts, pickups, trenches and cover replace the fixed layout. Every
 ## map is its own image under the rules-35 half turn about (3200, 2000).
-import std/strutils
+import std/[strutils, os]
 const ShippedMaps = ["twin-mesas", "archipelago", "serpent-river", "crater", "terraces",
   "deep-forest", "badlands", "atoll", "highlands", "delta"]
 when defined(pwBenchMaps):
-  # Benchmark-only maps at ten times the area (tests/bench_paintbot_maps.nim); never shipped.
+  # Benchmark-only maps (tests/bench_paintbot_maps.nim): every .pbmap in maps/bench, which is
+  # gitignored and never shipped.
+  const BenchMaps = block:
+    var found: seq[string]
+    for line in staticExec("ls " & currentSourcePath().parentDir() & "/maps/bench").splitLines():
+      if line.endsWith(".pbmap"): found.add line[0..^7]
+    found
   const MapNames* = block:
-    var names: array[ShippedMaps.len+2, string]
+    var names: array[ShippedMaps.len+BenchMaps.len, string]
     for i, n in ShippedMaps: names[i] = n
-    names[^2] = "big-twin-mesas"; names[^1] = "big-deep-forest"
+    for i, n in BenchMaps: names[ShippedMaps.len+i] = n
     names
 else:
   const MapNames* = ShippedMaps
@@ -18,7 +24,7 @@ else:
 const MapBlobs = block:
   var blobs: array[MapNames.len, string]
   for i, name in MapNames:
-    blobs[i] = staticRead("maps/" & (if name.startsWith("big-"): "bench/" else: "") & name & ".pbmap")
+    blobs[i] = staticRead("maps/" & (if i >= ShippedMaps.len: "bench/" else: "") & name & ".pbmap")
   blobs
 
 type

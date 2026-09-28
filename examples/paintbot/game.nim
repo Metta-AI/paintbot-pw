@@ -141,7 +141,7 @@ proc loadFfaRecording(path: string, version: int): Recording =
     raise newException(ReplayError, "Invalid Paintbot FFA kinship")
   var k = Kinship(layout: KinLayout(old.layout), family: old.family, genes: old.genes, ibd: old.ibd)
   for i in 0..<KinSeats:
-    if k.family[i] notin -1'i8..<KinSeats.int8 or k.ibd[i][i] != Loci.int8:
+    if k.family[i].int notin -1..<KinSeats or k.ibd[i][i] != Loci.int8:
       raise newException(ReplayError, "Invalid Paintbot FFA kinship")
     for j in 0..<KinSeats:
       if k.ibd[i][j] notin 0'i8..Loci.int8 or k.ibd[i][j] != k.ibd[j][i]:

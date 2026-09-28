@@ -9,7 +9,7 @@ export options
 import polyworld/rngs
 
 const
-  KinSeats* = 16 # Seats in sim.nim; kept separate so sim can import this module.
+  KinSeats* {.intdefine: "pwSeats".} = 16 # Seats in sim.nim; kept separate so sim can import this module.
   Loci* = 32
   SiblingLoci = 16 # r = 1/2
   CousinLoci = 8 # r = 1/4

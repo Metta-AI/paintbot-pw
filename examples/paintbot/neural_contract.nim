@@ -81,13 +81,15 @@ const
   ## r-to-me column (and the territory-boost column, which is r to the local owner), the
   ## genes-only ablation.
   FfaObsMaskKin* = 1'u32
-static:
-  doAssert FfaIdentityRowSize == 2 + 1 + 1 + 1 + Loci + 1 + 1 + 1 + 2
-  doAssert FfaIdentityOffset == 8 and FfaHeartOffset == 680 and FfaGreatOffset == 740
-  doAssert FfaTerrainOffset == 752 and ObservationSizeFfaV1 == 810
-  doAssert ObservationContractFfaV1 == "paintbot-pw.rules40.obs.ffa.v1.float" & $ObservationSizeFfaV1
-  doAssert FfaMatchTicks == 8640 and GreatHeartDormantTicks == 1440
-static: doAssert ObservationSizeV2 == 506 and ObservationContractV2 == "paintbot-pw.rules37.obs.v2.float" & $ObservationSizeV2
+# The contracts pin the 16-seat layout; -d:pwSeats scale benchmarks never run neural seats.
+when Seats == 16:
+  static:
+    doAssert FfaIdentityRowSize == 2 + 1 + 1 + 1 + Loci + 1 + 1 + 1 + 2
+    doAssert FfaIdentityOffset == 8 and FfaHeartOffset == 680 and FfaGreatOffset == 740
+    doAssert FfaTerrainOffset == 752 and ObservationSizeFfaV1 == 810
+    doAssert ObservationContractFfaV1 == "paintbot-pw.rules40.obs.ffa.v1.float" & $ObservationSizeFfaV1
+    doAssert FfaMatchTicks == 8640 and GreatHeartDormantTicks == 1440
+  static: doAssert ObservationSizeV2 == 506 and ObservationContractV2 == "paintbot-pw.rules37.obs.v2.float" & $ObservationSizeV2
 
 type
   ObservationContractVersion* = enum

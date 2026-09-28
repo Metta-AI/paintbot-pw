@@ -7,7 +7,7 @@ import std/[tables, math]
 import kinship
 
 const
-  Seats* = 16
+  Seats* {.intdefine: "pwSeats".} = 16 ## -d:pwSeats=N for scale benchmarks only; hosted play is 16
   TickRate* = 24
   MatchTicks* = 5*60*TickRate # Historical replay duration.
   HeartMeterMatchTicks* = 10*60*TickRate
