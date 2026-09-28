@@ -1,0 +1,15 @@
+# Windows build: the same steps as build.yml, run on Windows only. It runs on every push and PR
+# but is kept out of the "Github Actions" workflow that deploy.yml waits on, so a slow or flaky
+# Windows run never delays a release. A red Windows run still shows on the commit and the PR.
+name: Windows build
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+jobs:
+  windows:
+    uses: ./.github/workflows/build.yml
+    with:
+      os: '["windows-latest"]'

@@ -5,12 +5,22 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+  # windows.yml reuses these steps for Windows. Windows runs separately so that deploy.yml,
+  # which triggers when this workflow ("Github Actions") passes on main, waits only for the
+  # Linux and macOS builds. The hosted game runs on Linux; Windows is about 15 minutes slower
+  # and its setup-nim step flakes, so it no longer holds up a release.
+  workflow_call:
+    inputs:
+      os:
+        description: JSON list of runner labels to build on.
+        required: false
+        type: string
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(inputs.os || '["ubuntu-latest", "macos-latest"]') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
