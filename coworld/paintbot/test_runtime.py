@@ -890,10 +890,15 @@ class ManifestTests(unittest.TestCase):
         self.assertTrue(_schema_errors(schema, dict(heartland, mode="ffa")))
         self.assertTrue(_schema_errors(schema, dict(heartland, max_ticks=28801)))
         self.assertTrue(_schema_errors(schema, dict(heartland, extra=1)))
-        files = {p["file"] for p in self.manifest["player"]}
-        self.assertIn("players/ffa.bas", files)
-        for file in files:
-            self.assertTrue((Path(__file__).parent / file).is_file(), file)
+        # The certifier seats every declared player in its (teams) fixture and fails one that has
+        # no slot. players/ffa.bas calls FFA-only host functions, so it cannot run there and is
+        # not a declared player; it is submitted as a policy for the heartland league instead.
+        seated = {p["player_id"] for p in self.manifest["certification"]["players"]}
+        for player in self.manifest["player"]:
+            self.assertIn(player["id"], seated)
+            self.assertTrue((Path(__file__).parent / player["file"]).is_file(), player["file"])
+        self.assertNotIn("players/ffa.bas", {p["file"] for p in self.manifest["player"]})
+        self.assertTrue((Path(__file__).parent / "players/ffa.bas").is_file())
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 ' score is sum over j of r(me,j) * s_j, so a sibling's point is worth half of ours and a dead
 ' sibling costs us. Every cog runs this file alone; nothing is shared but shouts.
 '   1. Fight: shoot the best visible stranger (kin < 25) in gun range that is a threat (it hurt
-'      us or a relative, it is within 25 m, or it is at the heart we want): first one seen
+'      us or a relative, it is in gun range, or it is at the heart we want): first one seen
 '      hurting a relative (kin >= 25), then one standing near a sibling, then the nearest. Never
 '      shoot a cog with kin >= 50 (nor a cousin), and hold fire when a relative stands in the line
 '      or the blast.
@@ -144,8 +144,11 @@ if started = 0 then
   drF(4) = 6
   drF(5) = 10
   kWetCost = 6
-  ' Engage any stranger within 25 m; join a great heart with one cog already there from 15 m.
-  kEngage = 6250000
+  ' FFA-kin guns reach 20 m and cogs carry 10 HP. Engage any stranger in gun range; join a
+  ' great heart with one cog already there from 15 m.
+  kRange = 4000000
+  kEngage = 4000000
+  kMaxHp = 10
   kJoin = 2250000
   rngState = selfId * 4099 + 977
   zig = 1
@@ -415,7 +418,7 @@ if mode >= 2 and dx * dx + dy * dy < 8100 then
 end if
 
 ' Fight: the best stranger in gun range that is a threat: one that hurt us or kin, one within
-' 25 m, or one at the heart we are going to or holding. With one life each, long duels with
+' gun range, or one at the heart we are going to or holding. With one life each, duels with
 ' passers-by only thin out everyone. Strangers sharing a great-heart zone with us are spared
 ' unless marked for hurting us or kin.
 best = -1
@@ -449,8 +452,8 @@ while i < 16
           threat = 1
         end if
       end if
-      if threat and d2 <= 27562500 and spare = 0 then
-        cost = d2 - (3 - playerHp(i)) * 160000
+      if threat and d2 <= kRange and spare = 0 then
+        cost = d2 - (kMaxHp - playerHp(i)) * 60000
         if hurtUntil(i) > worldTick then
           cost = cost - 9000000
         end if
@@ -495,12 +498,12 @@ if mode <> 2 and controlCaptureTeam(objective) <> selfId then
   while j < pickupCount() and j < 32
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
       kind = pickupMemoryKind(j)
-      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3 and selfHp = 3)
+      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < kMaxHp) or (kind = 3 and armorHp < 3 and selfHp = kMaxHp)
       if wanted then
         dx = pickupMemoryX(j) - selfX
         dy = pickupMemoryY(j) - selfY
         cost = dx * dx + dy * dy
-        if kind = 2 and selfHp = 1 then
+        if kind = 2 and selfHp <= 3 then
           cost = cost / 4
         end if
         if cost < 10000 and not pickupVisible(j) then
@@ -515,15 +518,16 @@ if mode <> 2 and controlCaptureTeam(objective) <> selfId then
     end if
     j = j + 1
   wend
-  if nearest >= 0 and (best < 0 or bestCost > 1440000 or selfHp = 1) then
+  if nearest >= 0 and (best < 0 or bestCost > 1440000 or selfHp <= 3) then
     goalX = pickupMemoryX(nearest)
     goalY = pickupMemoryY(nearest)
     holding = 0
   end if
 end if
 
-' One hit point and outnumbered: fall back to the family anchor unless holding a ring.
-if selfHp = 1 and armorHp = 0 and threatsNear >= 2 and holding = 0 then
+' Three hit points or fewer with a stranger close: fall back to the family anchor unless holding
+' a ring.
+if selfHp <= 3 and armorHp = 0 and threatsNear >= 1 and holding = 0 then
   goalX = homeX
   goalY = homeY
 end if

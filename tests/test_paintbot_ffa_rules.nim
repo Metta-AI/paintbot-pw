@@ -287,6 +287,70 @@ suite "FFA-kin rules":
     let fours = kinshipFor(klFours, 1)
     check hashes(fours, 1, 24) != hashes(kinshipFor(klPairs, 1), 1, 24)
 
+  test "FFA cogs spawn with 10 HP and a medkit restores 10; teams cogs keep 3":
+    var w = ffaWorld()
+    check maxHp() == FfaMaxHp
+    for i in 0..<Seats:
+      check w.cogs[i].hp == FfaMaxHp
+    var kit = -1
+    for k, pickup in w.pickups:
+      if pickup.kind == medkitPickup: kit = k
+    check kit >= 0
+    w.place(0, w.pickups[kit].pos)
+    w.cogs[0].hp = 4
+    w.step(idle())
+    check w.cogs[0].hp == FfaMaxHp
+    gameMode = gmTeams
+    check maxHp() == 3
+    let teams = newWorld(2026)
+    for i in 0..<Seats:
+      check teams.cogs[i].hp == 3
+
+  test "FFA gun rays stop at 20 m; the same shot at 24 m hits in the teams game":
+    proc shot(mode: GameMode, gap: int): int32 =
+      ## Seat 0 fires once at seat 1 standing `gap` units away on a clear, dry, level line;
+      ## returns the damage seat 1 took. Every other cog is parked out of play.
+      gameMode = mode
+      var w = newWorld(2026)
+      for i in 2..<Seats:
+        w.cogs[i].hp = 0
+        w.cogs[i].respawn = 100000
+        w.equipment[i].lives = 1
+      var a, b: Point
+      var found = false
+      for z in countup(minZ()+300, maxZ()-300, 50):
+        for x in countup(minX()+300, maxX()-300-gap, 50):
+          a = point(x, z)
+          b = point(x+gap, z)
+          if w.blocked(a) or w.blocked(b) or not w.lineClear(a, b) or
+              w.trenchAt(a) >= 0 or w.trenchAt(b) >= 0 or
+              terrainHeight(a.x.int, a.z.int) != terrainHeight(b.x.int, b.z.int):
+            continue
+          var clear = true
+          for n in 1..(gap div 20):
+            if w.blocked(point(x+n*20, z), 0) or w.trenchAt(point(x+n*20, z)) >= 0: clear = false
+          if clear:
+            found = true
+            break
+        if found: break
+      doAssert found
+      for i in 0..1:
+        w.cogs[i].pos = (if i == 0: a else: b)
+        w.cogs[i].goal = w.cogs[i].pos
+        w.cogs[i].shield = 0
+        w.equipment[i].armor = 0
+      let before = w.cogs[1].hp
+      var fire = idle()
+      fire[0].shoot = true
+      fire[0].aim = b
+      w.step(fire)
+      for tick in 0..<8: w.step(idle())
+      before - w.cogs[1].hp
+    check shot(gmFfaKin, 1900) == 1
+    check shot(gmFfaKin, 2400) == 0
+    check shot(gmTeams, 2400) == 1
+    check shot(gmTeams, 1900) == 1
+
   test "scores are kin-weighted raw scores in points":
     kinshipOverride = some(kinshipFor(klCousins, 5))
     var w = ffaWorld(5)

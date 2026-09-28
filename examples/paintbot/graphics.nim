@@ -27,6 +27,7 @@ type
     heartValues: seq[int32]
     combat: array[Seats, CombatStats]
     rulesVersion: int
+    maxHp: int32 # 3, or FfaMaxHp in FFA-kin: the HUD's "hp / max".
     world: World
     bounds: array[4,int]
     recorded: int
@@ -1070,8 +1071,11 @@ proc runGraphics*() =
         shapes.addLine(p+vec3(0, 0.08, 0), position(c.goal, 0.08), teamColors[
             team(i)], halfWidth = 0.035)
       if bars:
-        for hp in 0..<c.hp: shapes.box(p.x-0.35+hp.float32*0.28, p.y+2.5, p.z,
-            0.1, 0.09, 0.09, rgbx(221, 253, 180, 255))
+        # Three pips in the teams game; FFA-kin's ten squeeze into the same 0.84-wide bar.
+        let pitch = (if maxHp() > 3: 0.84'f32 / maxHp().float32 else: 0.28'f32)
+        let pip = (if maxHp() > 3: 0.035'f32 else: 0.1'f32)
+        for hp in 0..<c.hp: shapes.box(p.x-0.35+hp.float32*pitch, p.y+2.5, p.z,
+            pip, 0.09, 0.09, rgbx(221, 253, 180, 255))
     for b in world.balls:
       if victory.active: continue
       if lens >= 0 and not seen(b.owner.int): continue
@@ -1159,7 +1163,7 @@ proc runGraphics*() =
           if item.readyAt > world.tick or not pointSeen(item.pos): continue
           objects.add Inspectable(kind: "pickup", id: i,
             bottom: projected(vp, position(item.pos, 0.1)), top: projected(vp, position(item.pos, 1.7)))
-        let payload = ViewerState(terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
+        let payload = ViewerState(terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, maxHp: maxHp(), world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
             paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint).toJson()
         let data = payload.cstring

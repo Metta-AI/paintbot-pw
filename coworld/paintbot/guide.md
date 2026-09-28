@@ -321,7 +321,9 @@ players, but some are related, and a cog's score counts its relatives' points.
   share all 32 (r = 1); strangers 0. A cog's r to itself is 1. Other matching bits are chance
   and do not count. Families spawn together around one anchor each, spread over the map.
 - **Rules.** Every hit is an ordinary hit (there are no teams, so no friendly fire, and no
-  uniforms). One life: a cog that dies is out, and every heart it owns goes neutral at once.
+  uniforms). Cogs carry 10 base HP instead of 3 (a medkit restores all 10; `selfHp` and
+  `playerHp` read 0-10), and gun rays stop at 20 m (2,000 units) instead of 52.5 m. Grenades,
+  spray and armor are unchanged. One life: a cog that dies is out, and every heart it owns goes neutral at once.
   All ten control hearts start neutral. One cog alone within 140 units for 72 ticks captures
   a heart; any second cog in range, relatives included, pauses the capture, and the heart's
   owner standing on it blocks capture entirely. An owned heart pays its owner 1 point per
@@ -357,7 +359,8 @@ same names as ordinary variables (a script that calls them fails to compile ther
   indices return -1.
 
 `seatScore` and `seatAlive` are named that way because `score` and `alive` are common variable
-names in existing bots. The baseline for this mode is `players/ffa.bas`: it never shoots a cog
+names in existing bots. The baseline for this mode is `players/ffa.bas` (submit it as a policy; it calls FFA-only
+functions, so it does not compile in the teams game): it never shoots a cog
 with `kin` of 50 or more, prefers strangers seen hurting relatives, joins a ready great heart
 when others gather there, and captures hearts that no relative is holding or taking.
 

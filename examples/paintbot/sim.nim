@@ -56,6 +56,11 @@ const
   GreatHeartBounty* = 600
   GreatHeartDormantTicks* = 60*TickRate
   FfaHeartIncome* = 10 # Tenths of a point per second per owned control heart.
+  # FFA-kin tuning (rules 40 untouched): cogs carry 10 HP instead of 3, and gun rays stop at
+  # 20 m instead of GunRange, so fights last long enough to leave and to come to a relative's aid.
+  FfaMaxHp* = 10
+  FfaGunRange* = 2000
+  TeamsMaxHp = 3
   # Compile-time exponential table keeps native/WASM sampling integer-only.
   # Scores are quantized to 10 world units (1% of the temperature).
   SpawnWeights = block:
@@ -243,6 +248,9 @@ else:
   var visionRulesVersion* = 40
   var gameMode* = gmTeams
 proc ffa*(): bool = gameMode == gmFfaKin
+proc maxHp*(): int32 =
+  ## Base HP a cog spawns with and a medkit restores: FfaMaxHp in FFA-kin, 3 otherwise.
+  if ffa(): FfaMaxHp.int32 else: TeamsMaxHp.int32
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
@@ -555,7 +563,7 @@ proc spawnNear(w: var World, slot: int, origin: Point): bool =
     if distance2(origin, p) > HeartSpawnRadius*HeartSpawnRadius: continue
     if w.blocked(p) or w.occupied(p, slot) or not w.traversable(origin, p): continue
     w.cogs[slot].pos = p; w.cogs[slot].goal = p
-    w.cogs[slot].hp = 3; w.cogs[slot].shield = 36
+    w.cogs[slot].hp = maxHp(); w.cogs[slot].shield = 36
     w.cogs[slot].firing = false; w.cogs[slot].carrying = false
     return true
 
@@ -584,7 +592,7 @@ proc spawn(w: var World, slot: int, solid = true) =
               break search
     if not found: return # Retry next tick rather than overlap a living cog.
   w.cogs[slot].pos = p; w.cogs[slot].goal = p
-  w.cogs[slot].hp = 3; w.cogs[slot].shield = 36
+  w.cogs[slot].hp = maxHp(); w.cogs[slot].shield = 36
   w.cogs[slot].firing = false; w.cogs[slot].carrying = false
 proc resetHeart*(w: var World, side: int) =
   w.hearts[side] = Heart(pos: home(side), carrier: -1)
