@@ -108,3 +108,18 @@ suite "kinship":
           for j in 0..<KinSeats:
             let agree = Loci - popcount(k.genes[i] xor k.genes[j])
             check agree >= k.ibd[i][j].int
+
+  test "linked cousin families agree on at least 8 common loci":
+    for seed in 0'i32..<200:
+      let k = kinshipFor(klCousins, seed)
+      for link in 0..1:
+        var members: seq[int]
+        for i in 0..<KinSeats:
+          if k.family[i] >= 0 and k.family[i] div 2 == link: members.add i
+        check members.len == 8
+        # Loci on which all 8 members of the linked pair agree.
+        var common = high(uint32)
+        for i in members:
+          for j in members:
+            common = common and not (k.genes[i] xor k.genes[j])
+        check popcount(common) >= 8

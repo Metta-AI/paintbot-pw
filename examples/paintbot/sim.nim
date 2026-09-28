@@ -3,6 +3,7 @@ export topography
 ## Integer-only Paintbot simulation; Polyworld RNG and portable state hashes.
 import polyworld/[rngs, hashes]
 import std/[tables, math]
+import kinship
 
 const
   Seats* = 16
@@ -46,6 +47,15 @@ const
   GloryBehindLivesTicks* = 5*TickRate
   SpawnTemperature* = 1000
   HeartSpawnRadius* = 350
+  # FFA-kin great hearts (a stag hunt): GreatHeartQuorum living cogs inside GreatHeartRadius
+  # for GreatHeartCaptureTicks split GreatHeartBounty (tenths of a point) equally, then the
+  # heart sleeps GreatHeartDormantTicks. Progress decays one tick per tick below quorum.
+  GreatHeartRadius* = 200
+  GreatHeartQuorum* = 3
+  GreatHeartCaptureTicks* = 5*TickRate
+  GreatHeartBounty* = 600
+  GreatHeartDormantTicks* = 60*TickRate
+  FfaHeartIncome* = 10 # Tenths of a point per second per owned control heart.
   # Compile-time exponential table keeps native/WASM sampling integer-only.
   # Scores are quantized to 10 world units (1% of the temperature).
   SpawnWeights = block:
@@ -111,6 +121,11 @@ type
     ## Rules 38: who took a glory heart, where, and when; kept for the viewer's +20.
     tick*, seat*, amount*: int32
     pos*: Point
+  GreatHeart* = object
+    ## FFA-kin: a stag-hunt heart. present is the living cogs in its zone this tick (viewer).
+    pos*: Point
+    progress*, dormantUntil*: int32
+    present*: int8
   World* = object
     seed*, tick*: int32
     rng*: Rng
@@ -140,6 +155,12 @@ type
     gloryHearts*: seq[GloryHeart] # Rules 38: glory hearts on the field.
     nextGloryHeart*: int32 # Rules 38: the tick the next pair appears.
     gloryPickups*: seq[GloryPickup] # Rules 38: recent pickups, kept GloryEventLifetime ticks.
+    # FFA-kin only; hashed only in that mode, so rules-40 hashes are unchanged.
+    seatScore*: array[Seats, int32] # Raw score s_i in tenths: heart income plus great-heart shares.
+    heartSeconds*: array[Seats, int32] # Seconds of heart ownership paid to each seat.
+    greatShare*: array[Seats, int32] # Great-heart bounty paid to each seat, in tenths.
+    greatHearts*: array[2, GreatHeart]
+    spawnAnchor*: array[Seats, Point] # Where each seat's family (or the loner) spawns.
   TerritoryWorld = object
     seed*, tick*: int32
     rng*: Rng
@@ -175,6 +196,7 @@ type
     chargeGrenade*: bool
     sneak*: bool
 
+static: doAssert KinSeats == Seats
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
 type GameMode* = enum
@@ -525,11 +547,8 @@ proc sampleSpawnHeart*(w: var World, slot: int): int =
     draw -= weight
   candidates[^1]
 
-proc spawnAtHeart(w: var World, slot: int): bool =
-  let heart = w.sampleSpawnHeart(slot)
-  if heart < 0: return false
-  let origin = w.controlHearts[heart].pos
-  # Search only near the selected heart. If crowded, retry next tick.
+proc spawnNear(w: var World, slot: int, origin: Point): bool =
+  # Search only near the origin (a heart, or an FFA spawn anchor). If crowded, retry next tick.
   for attempt in 0..<128:
     let p = point(origin.x.int+w.rng.between(-HeartSpawnRadius, HeartSpawnRadius).int,
         origin.z.int+w.rng.between(-HeartSpawnRadius, HeartSpawnRadius).int)
@@ -539,6 +558,11 @@ proc spawnAtHeart(w: var World, slot: int): bool =
     w.cogs[slot].hp = 3; w.cogs[slot].shield = 36
     w.cogs[slot].firing = false; w.cogs[slot].carrying = false
     return true
+
+proc spawnAtHeart(w: var World, slot: int): bool =
+  let heart = w.sampleSpawnHeart(slot)
+  if heart < 0: return false
+  w.spawnNear(slot, w.controlHearts[heart].pos)
 
 proc spawn(w: var World, slot: int, solid = true) =
   var p = point(if team(slot) == 0: 350+(slot div 2 mod 2)*160 else: Width-350-(
@@ -565,6 +589,7 @@ proc spawn(w: var World, slot: int, solid = true) =
 proc resetHeart*(w: var World, side: int) =
   w.hearts[side] = Heart(pos: home(side), carrier: -1)
 proc initializeEquipment(w: var World)
+proc placeFfaSpawns(w: var World)
 proc configureRules*(version: int) =
   ## Native rollout workers call this on their own thread before accessing a world.
   visionRulesVersion = version
@@ -583,14 +608,18 @@ proc configureRules*(version: int) =
 
 proc newWorld*(seed: int32, endTick: int32 = 0): World =
   configureRules(visionRulesVersion)
-  result.endTick = if visionRulesVersion >= 28:
+  result.endTick = if ffa():
+    (if endTick <= 0: FfaMatchTicks.int32 else: min(endTick, FfaMatchTicks.int32))
+  elif visionRulesVersion >= 28:
     (if endTick <= 0: HeartMeterMatchTicks.int32 else: min(endTick, HeartMeterMatchTicks.int32))
   else: (if endTick <= 0: MatchTicks.int32 else: endTick)
   result.seed = seed; result.rng = initRng(seed); result.winner = -1
-  if visionRulesVersion >= 37:
+  # FFA-kin draws the match's kinship here, on its own stream; the World RNG never sees it.
+  if ffa(): activeKinship = matchKinship(seed)
+  if visionRulesVersion >= 37 and not ffa():
     let seconds = result.endTick div TickRate
     result.glory = [seconds, seconds]
-  if visionRulesVersion >= 38: result.nextGloryHeart = GloryHeartFirstTick
+  if visionRulesVersion >= 38 and not ffa(): result.nextGloryHeart = GloryHeartFirstTick
   if visionRulesVersion >= 8:
     for lot in roundVillage():
       result.cover.add Cover(x: (lot.x-lot.radius).int32,
@@ -622,7 +651,8 @@ proc newWorld*(seed: int32, endTick: int32 = 0): World =
     for lot in forestLots():
       result.cover.add Cover(x:(lot.x-lot.radius).int32,z:(lot.z-lot.radius).int32,w:(2*lot.radius).int32,h:0)
   if visionRulesVersion >= 6: result.initializeEquipment()
-  if visionRulesVersion >= 24:
+  if ffa(): result.placeFfaSpawns()
+  elif visionRulesVersion >= 24:
     for i in 0..<Seats:
       discard result.spawnAtHeart(i)
   result.bigHeart = -1
@@ -714,6 +744,13 @@ proc settleGlory*(w: var World) =
     if w.winner != side.int32: w.glory[side] = 0
 
 proc scores*(w: World): seq[float] =
+  if ffa():
+    # R_i = sum over j of r(i,j) * s_j, in points.
+    for i in 0..<Seats:
+      var total = 0.0
+      for j in 0..<Seats: total += activeKinship.r(i, j) * w.seatScore[j].float
+      result.add total / 10.0
+    return
   for i in 0..<Seats:
     result.add (if visionRulesVersion >= 37: w.glory[team(i)].float elif visionRulesVersion >= 23: w.scoreTicks[team(i)].float / TickRate.float else: float(if visionRulesVersion >= 20 and w.winner >= 0: (if w.winner == team(i).int32: 10 else: 0) elif visionRulesVersion>=13:w.captures[team(i)].int else:int(w.winner == team(i).int32)))
 type LegacyWorld = object
@@ -735,6 +772,8 @@ proc stateHash*(w: World): uint32 =
         if visionRulesVersion >= 37: result.addHashy(value)
       elif name == "gloryHearts" or name == "nextGloryHeart" or name == "gloryPickups":
         if visionRulesVersion >= 38: result.addHashy(value)
+      elif name in ["seatScore", "heartSeconds", "greatShare", "greatHearts", "spawnAnchor"]:
+        if ffa(): result.addHashy(value)
       else: result.addHashy(value)
     return
   if visionRulesVersion >= 13:

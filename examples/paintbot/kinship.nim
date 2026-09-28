@@ -3,7 +3,8 @@
 ## engine reads only the family grouping (for spawn placement), and scoring, reward,
 ## observations and the viewer read the rest. r(i,j) = loci shared by descent / 32; chance
 ## matches between independent random bits never count.
-import std/math
+import std/[math, options]
+export options
 import polyworld/rngs
 
 const
@@ -27,10 +28,17 @@ static: doAssert LayoutWeights.sum == 100
 
 when defined(pwTraining):
   var activeKinship* {.threadvar.}: Kinship
+  var kinshipOverride* {.threadvar.}: Option[Kinship]
 else:
   var activeKinship*: Kinship ## Set at world creation in FFA; unused in the teams game.
+  ## When set, FFA worlds use this kinship instead of sampling one from the seed (training
+  ## overrides, tests, and replays whose kinship is recorded).
+  var kinshipOverride*: Option[Kinship]
 
-proc r*(k: Kinship, i, j: int): float = k.ibd[i][j].float / Loci.float
+proc r*(k: Kinship, i, j: int): float =
+  ## Relatedness as a float, for scoring and reward only. Engine and hashed code must use
+  ## ibd or rPercent, which are integers.
+  k.ibd[i][j].float / Loci.float
 proc rPercent*(k: Kinship, i, j: int): int32 =
   ## round(100 r) in integers; ibd is at most 32, so this is exact for 0, 1/4, 1/2 and 1.
   int32((k.ibd[i][j].int * 100 + Loci div 2) div Loci)
@@ -107,6 +115,8 @@ proc build(layout: KinLayout, rng: var Rng): Kinship =
 
 proc kinshipFor*(layout: KinLayout, seed: int32): Kinship =
   ## A fixed layout (training overrides, tests); families and genes still come from the seed.
+  ## It does not reproduce sampleKinship's families for the same seed: sampleKinship spends a
+  ## draw on the layout first, so the rest of the stream is shifted.
   var rng = initRng(seed xor KinSalt)
   build(layout, rng)
 
@@ -121,3 +131,7 @@ proc sampleKinship*(seed: int32): Kinship =
       break
     roll -= LayoutWeights[candidate]
   build(layout, rng)
+
+proc matchKinship*(seed: int32): Kinship =
+  ## The kinship an FFA world created with this seed plays: the override, else the sample.
+  if kinshipOverride.isSome: kinshipOverride.get else: sampleKinship(seed)

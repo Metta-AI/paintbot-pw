@@ -1,0 +1,304 @@
+## FFA-kin rules (mode "ffa_kin" on rules 40): sixteen separate players, one life, neutral
+## control hearts captured by a lone cog, great hearts that need three cogs, and kin-weighted
+## scores. The engine reads only the family grouping (spawn); the kin invariance test proves it.
+import std/unittest
+import ../examples/paintbot/[sim, kinship]
+
+proc ffaWorld(seed = 2026'i32, endTick = 0'i32): World =
+  gameMode = gmFfaKin
+  newWorld(seed, endTick)
+
+proc emptyFfa(): World =
+  ## An FFA world with every cog out of the match; tests place the cogs they need.
+  result = ffaWorld()
+  for i in 0..<Seats:
+    result.cogs[i].hp = 0
+    result.equipment[i].lives = 0
+
+proc place(w: var World, slot: int, p: Point) =
+  w.cogs[slot].hp = 3
+  w.cogs[slot].shield = 0
+  w.cogs[slot].pos = p
+  w.cogs[slot].goal = p
+  w.equipment[slot].lives = 1
+
+proc near(p: Point, dx: int): Point = point(p.x.int+dx, p.z.int)
+
+proc idle(): array[Seats, Command] = default(array[Seats, Command])
+
+proc scriptedCommands(w: World): array[Seats, Command] =
+  ## The golden test's scripted driver for FFA: walk to a heart, shoot the nearest living cog.
+  for slot in 0..<Seats:
+    let cog = w.cogs[slot]
+    if cog.hp <= 0: continue
+    result[slot].walk = true
+    result[slot].goal = w.controlHearts[slot mod w.controlHearts.len].pos
+    var best = -1
+    var bestD = int64.high
+    for other in 0..<Seats:
+      if other == slot or w.cogs[other].hp <= 0: continue
+      let d = distance2(cog.pos, w.cogs[other].pos)
+      if d < bestD: best = other; bestD = d
+    if best >= 0 and bestD <= ShotRange.int64 * ShotRange:
+      result[slot].aim = w.cogs[best].pos
+      result[slot].shoot = true
+      result[slot].chargeGrenade = w.equipment[slot].grenade and w.tick mod 96 < 48
+
+proc hashes(k: Kinship, seed: int32, ticks: int): seq[uint32] =
+  kinshipOverride = some(k)
+  var w = ffaWorld(seed)
+  doAssert activeKinship == k
+  while w.tick < ticks and w.winner == -1:
+    w.step(w.scriptedCommands())
+    result.add w.stateHash()
+  kinshipOverride = none(Kinship)
+
+suite "FFA-kin rules":
+  setup:
+    visionRulesVersion = 40
+    kinshipOverride = none(Kinship)
+    gameMode = gmFfaKin
+  teardown:
+    gameMode = gmTeams
+    kinshipOverride = none(Kinship)
+
+  test "an FFA match starts neutral, one life each, no uniforms, two mirrored great hearts":
+    let w = ffaWorld()
+    check w.endTick == FfaMatchTicks
+    check w.winner == -1
+    check activeKinship == sampleKinship(2026)
+    for heart in w.controlHearts: check heart.owner == -1
+    for capture in w.heartCaptures: check capture == HeartCapture(team: -1)
+    for i in 0..<Seats: check w.equipment[i].lives == 1
+    for pickup in w.pickups: check pickup.kind != uniformPickup
+    check w.glory == [0'i32, 0]
+    check w.greatHearts[1].pos == point(Width-w.greatHearts[0].pos.x.int, Height-w.greatHearts[0].pos.z.int)
+    for heart in w.greatHearts:
+      check not w.blocked(heart.pos)
+      check heart.progress == 0 and heart.dormantUntil == 0
+    check ffaWorld(2026, 14400).endTick == FfaMatchTicks
+    check ffaWorld(2026, 240).endTick == 240
+
+  test "families spawn together around distinct anchors; clones and strangers spawn too":
+    for layout in [klFours, klPairs, klTriosLoner, klCousins, klStrangers, klClones]:
+      for seed in [1'i32, 7, 2026]:
+        let k = kinshipFor(layout, seed)
+        kinshipOverride = some(k)
+        var w = ffaWorld(seed)
+        # A crowded start retries next tick; a few idle ticks seat everyone.
+        for tick in 0..<24:
+          var spawned = true
+          for c in w.cogs:
+            if c.hp <= 0: spawned = false
+          if spawned: break
+          w.step(idle())
+        for i in 0..<Seats:
+          check w.cogs[i].hp > 0
+          check distance2(w.cogs[i].pos, w.spawnAnchor[i]) <= HeartSpawnRadius.int64*HeartSpawnRadius + 2*MoveSpeed*MoveSpeed
+          for j in 0..<Seats:
+            let together = k.family[i] >= 0 and k.family[i] == k.family[j]
+            if i == j or together: check w.spawnAnchor[i] == w.spawnAnchor[j]
+            else: check w.spawnAnchor[i] != w.spawnAnchor[j]
+
+  test "a lone cog captures a neutral heart after 72 ticks and earns 10 tenths a second":
+    var w = emptyFfa()
+    w.place(0, w.controlHearts[2].pos)
+    w.place(1, w.greatHearts[0].pos.near(-800)) # standing elsewhere, so the match goes on
+    for tick in 1..<HeartCaptureTicks:
+      w.updateTerritory()
+      check w.controlHearts[2].owner == -1
+      check w.heartCaptures[2] == HeartCapture(team: 0, ticks: tick.int32)
+    w.updateTerritory()
+    check w.controlHearts[2].owner == 0
+    check w.heartCaptures[2] == HeartCapture(team: -1)
+    check w.cogs[0].captures == 1
+    # Income through the real step: exactly FfaHeartIncome per whole second of ownership.
+    while w.tick mod TickRate != 1: w.step(idle())
+    let score = w.seatScore[0]
+    let seconds = w.heartSeconds[0]
+    for tick in 0..<5*TickRate: w.step(idle())
+    check w.winner == -1
+    check w.seatScore[0] - score == 5*FfaHeartIncome
+    check w.heartSeconds[0] - seconds == 5
+    check w.seatScore[1] == 0
+
+  test "a second cog of any kin pauses the capture; leaving resumes it":
+    for layout in [klStrangers, klClones]:
+      kinshipOverride = some(kinshipFor(layout, 3))
+      var w = emptyFfa()
+      w.place(0, w.controlHearts[2].pos)
+      for tick in 0..<30: w.updateTerritory()
+      w.place(1, w.controlHearts[2].pos.near(60))
+      for tick in 0..<100: w.updateTerritory()
+      check w.heartCaptures[2] == HeartCapture(team: 0, ticks: 30, contested: true)
+      check w.controlHearts[2].owner == -1
+      w.cogs[1].hp = 0
+      for tick in 0..<41: w.updateTerritory()
+      check w.controlHearts[2].owner == -1
+      w.updateTerritory()
+      check w.controlHearts[2].owner == 0
+
+  test "an empty heart resets the capture, and the owner alone does not recapture":
+    var w = emptyFfa()
+    w.place(3, w.controlHearts[4].pos)
+    for tick in 0..<40: w.updateTerritory()
+    w.cogs[3].pos = w.greatHearts[0].pos
+    w.updateTerritory()
+    check w.heartCaptures[4] == HeartCapture(team: -1)
+    w.controlHearts[4].owner = 3
+    w.cogs[3].pos = w.controlHearts[4].pos
+    for tick in 0..<100: w.updateTerritory()
+    check w.heartCaptures[4] == HeartCapture(team: -1)
+    check w.controlHearts[4].owner == 3
+    check w.cogs[3].captures == 0
+
+  test "a dead owner's hearts go neutral the same tick":
+    var w = emptyFfa()
+    w.place(5, w.controlHearts[2].pos)
+    w.place(6, w.controlHearts[9].pos)
+    w.controlHearts[2].owner = 5
+    w.controlHearts[4].owner = 5
+    w.controlHearts[6].owner = 6
+    w.heartCaptures[3] = HeartCapture(team: 5, ticks: 40)
+    w.damage(5, 6, 99)
+    check w.cogs[5].hp == 0
+    check w.equipment[5].lives == 0
+    check w.controlHearts[2].owner == -1
+    check w.controlHearts[4].owner == -1
+    check w.controlHearts[6].owner == 6
+    check w.heartCaptures[3] == HeartCapture(team: -1)
+
+  test "one life: a dead cog never respawns, and the match ends at 8640 with winner -3":
+    var w = ffaWorld()
+    for tick in 0..<24: w.step(idle())
+    for i in 0..<Seats: check w.cogs[i].hp > 0
+    w.cogs[3].shield = 0
+    w.damage(3, 4, 99)
+    check w.equipment[3].lives == 0
+    var seenAlive = false
+    while w.winner == -1:
+      w.step(idle())
+      if w.cogs[3].hp > 0: seenAlive = true
+    check not seenAlive
+    check w.tick == FfaMatchTicks
+    check w.winner == -3
+    let before = w.stateHash()
+    w.step(idle())
+    check w.tick == FfaMatchTicks
+    check w.stateHash() == before
+
+  test "the match ends on the tick the second-to-last cog dies":
+    var w = emptyFfa()
+    w.place(0, w.controlHearts[2].pos)
+    w.place(1, w.controlHearts[3].pos)
+    w.place(2, w.controlHearts[5].pos)
+    w.grenades.add Lob(start: w.cogs[2].pos, target: w.cogs[2].pos, owner: 0,
+        releasedAt: w.tick, landsAt: w.tick)
+    w.step(idle())
+    check w.cogs[2].hp == 0
+    check w.winner == -1
+    let tick = w.tick
+    w.grenades.add Lob(start: w.cogs[1].pos, target: w.cogs[1].pos, owner: 0,
+        releasedAt: w.tick, landsAt: w.tick)
+    w.step(idle())
+    check w.cogs[1].hp == 0
+    check w.tick == tick+1
+    check w.winner == -3
+
+  test "a great heart needs three cogs, pays the bounty equally, then sleeps a minute":
+    var w = emptyFfa()
+    let spot = w.greatHearts[0].pos
+    w.place(0, spot)
+    w.place(1, spot.near(120))
+    w.greatHearts[0].progress = 50
+    for tick in 0..<10:
+      w.updateGreatHearts(); inc w.tick
+    check w.greatHearts[0].progress == 40
+    check w.greatHearts[0].present == 2
+    w.greatHearts[0].progress = 0
+    w.place(2, spot.near(-120))
+    for tick in 1..<GreatHeartCaptureTicks:
+      w.updateGreatHearts(); inc w.tick
+      check w.greatHearts[0].progress == tick.int32
+    check w.seatScore == default(array[Seats, int32])
+    w.updateGreatHearts()
+    for i in 0..2:
+      check w.seatScore[i] == 200
+      check w.greatShare[i] == 200
+    check w.greatHearts[0].progress == 0
+    check w.greatHearts[0].present == 3
+    check w.greatHearts[0].dormantUntil == w.tick+GreatHeartDormantTicks
+    inc w.tick
+    for tick in 1..<GreatHeartDormantTicks:
+      w.updateGreatHearts(); inc w.tick
+      check w.greatHearts[0].progress == 0
+    check w.seatScore[0] == 200
+    # Awake again: four cogs split 600 into 150 each.
+    w.place(3, spot.near(60))
+    for tick in 0..<GreatHeartCaptureTicks:
+      w.updateGreatHearts(); inc w.tick
+    for i in 0..3: check w.greatShare[i] == (if i < 3: 350 else: 150)
+    check w.greatHearts[1].progress == 0 and w.greatHearts[1].present == 0
+
+  test "dead cogs neither capture nor count toward a quorum":
+    var w = emptyFfa()
+    let spot = w.greatHearts[1].pos
+    w.place(0, spot); w.place(1, spot.near(100)); w.place(2, spot.near(-100))
+    w.cogs[2].hp = 0
+    for tick in 0..<GreatHeartCaptureTicks+5:
+      w.updateGreatHearts(); inc w.tick
+    check w.greatHearts[1].progress == 0
+    check w.seatScore == default(array[Seats, int32])
+    w.cogs[0].pos = w.controlHearts[2].pos
+    w.cogs[0].hp = 0
+    for tick in 0..<HeartCaptureTicks+5: w.updateTerritory()
+    check w.controlHearts[2].owner == -1
+
+  test "FFA fields are hashed only in FFA":
+    var w = ffaWorld()
+    let base = w.stateHash()
+    w.seatScore[4] = 7
+    check w.stateHash() != base
+    gameMode = gmTeams
+    var t = newWorld(2026)
+    let teams = t.stateHash()
+    t.seatScore[4] = 7
+    t.greatHearts[0].progress = 3
+    t.spawnAnchor[2] = point(1, 1)
+    check t.stateHash() == teams
+
+  test "kin invariance: same families, different genes and r, identical hashes":
+    for seed in [1'i32, 2026]:
+      for layout in [klFours, klCousins, klTriosLoner]:
+        let a = kinshipFor(layout, seed)
+        var b = a
+        b.genes = kinshipFor(layout, seed+1).genes
+        for i in 0..<KinSeats:
+          for j in 0..<KinSeats:
+            # Clones inside each family, and no cousin links: r changes, grouping does not.
+            if i == j or (a.family[i] >= 0 and a.family[i] == a.family[j]): b.ibd[i][j] = Loci.int8
+            else: b.ibd[i][j] = 0
+        check a.family == b.family
+        check a.ibd != b.ibd and a.genes != b.genes
+        let ha = hashes(a, seed, 1440)
+        check ha.len == 1440
+        check ha == hashes(b, seed, 1440)
+    # The test can fail: a different family grouping moves the spawns.
+    let fours = kinshipFor(klFours, 1)
+    check hashes(fours, 1, 24) != hashes(kinshipFor(klPairs, 1), 1, 24)
+
+  test "scores are kin-weighted raw scores in points":
+    kinshipOverride = some(kinshipFor(klCousins, 5))
+    var w = ffaWorld(5)
+    for j in 0..<Seats: w.seatScore[j] = int32(j*10+3)
+    let s = w.scores()
+    check s.len == Seats
+    for i in 0..<Seats:
+      var expected = 0.0
+      for j in 0..<Seats: expected += activeKinship.ibd[i][j].float / 32.0 * float(j*10+3)
+      check abs(s[i] - expected / 10.0) < 1e-9
+    kinshipOverride = some(kinshipFor(klStrangers, 5))
+    w = ffaWorld(5)
+    w.seatScore[3] = 420
+    check w.scores()[3] == 42.0
+    check w.scores()[4] == 0.0
