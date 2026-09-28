@@ -74,6 +74,13 @@
           "minimum": 1,
           "maximum": 28800
         },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "teams",
+            "ffa_kin"
+          ]
+        },
         "slots": {
           "type": "array",
           "minItems": 16,

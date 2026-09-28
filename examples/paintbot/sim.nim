@@ -10,6 +10,7 @@ const
   MatchTicks* = 5*60*TickRate # Historical replay duration.
   HeartMeterMatchTicks* = 10*60*TickRate
   HeartMeterFillTicks* = 3*60*TickRate
+  FfaMatchTicks* = 6*60*TickRate # FFA-kin: a fixed six-minute match.
   Width* = 6400
   Height* = 4000
   Radius* = 55
@@ -176,10 +177,15 @@ type
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
+type GameMode* = enum
+  ## gmTeams is the two-team game every rules version plays. gmFfaKin (config "ffa_kin") makes
+  ## all 16 seats separate players; rules 40 behaviour is untouched while the mode is gmTeams.
+  gmTeams, gmFfaKin
 # Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
 # still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
 when defined(pwTraining):
   var visionRulesVersion* {.threadvar.}: int
+  var gameMode* {.threadvar.}: GameMode
   type
     SeatStats* = object
       ## Per-seat combat telemetry for training hosts. Cumulative per match; never
@@ -213,6 +219,8 @@ when defined(pwTraining):
   var damageScale* {.threadvar.}: ptr array[Seats, int32]
 else:
   var visionRulesVersion* = 40
+  var gameMode* = gmTeams
+proc ffa*(): bool = gameMode == gmFfaKin
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)

@@ -1,4 +1,4 @@
-import std/[os, strutils]
+import std/[os, strutils, json]
 import jsony
 import polyworld/[cli, tapes]
 import sim, bots, controls
@@ -109,8 +109,25 @@ var
   options*: GameOptions
   players: array[Seats, Bot]
   bridge: File
+proc parseGameMode*(config: JsonNode): GameMode =
+  ## The coworld config's optional "mode": absent or "teams" is the two-team game.
+  let mode = config{"mode"}
+  if mode.isNil or mode.kind == JNull: return gmTeams
+  if mode.kind != JString: raise newException(ValueError, "Paintbot mode must be a string")
+  case mode.getStr
+  of "teams": gmTeams
+  of "ffa_kin": gmFfaKin
+  else: raise newException(ValueError, "Unknown Paintbot mode: " & mode.getStr)
+proc applyGameConfig*(text: string) =
+  ## Reads the keys CoworldConfig skips. An FFA-kin match lasts at most six minutes.
+  gameMode = parseGameMode(parseJson(text))
+  if ffa():
+    options.maximumTicks = min(options.maximumTicks, FfaMatchTicks.int32)
+    options.seconds = options.maximumTicks div TickRate
 proc setup*() =
-  when defined(coworld): options = coworldOptions(Seats)
+  when defined(coworld):
+    options = coworldOptions(Seats)
+    applyGameConfig(readLocal(getEnv("COGAME_CONFIG_URI")))
   else:
     options = GameOptions(seed: 2026, maximumTicks: HeartMeterMatchTicks, speed: 1)
     let args = commandLineParams(); var i = 0
