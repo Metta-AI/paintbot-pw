@@ -1,7 +1,7 @@
 ## Painted Polyworld arena with hash-verified spectator analysis.
 import std/[math, times, algorithm]
 when defined(emscripten) and defined(workerReplayIndex): import flatty
-import windy, opengl, vmath, chroma, jsony
+import windy, opengl, vmath, chroma, jsony, gltf
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam, selectionoutlines]
 import game, sim, analysis, villagegraphics, controls, celebration, projection, kinhue
 from kinship import activeKinship, rPercent
@@ -753,12 +753,30 @@ proc runGraphics*() =
         "paintbot-cog-" & name & ".glb"
       models[side][apparent] = loadCharacterModel(path, 1.9)
       models[side][apparent].unlitParts = @["eye", "smile"]
-  # FFA-kin cogs share one neutral body; the family colour lives on the ground disc.
+  # FFA-kin cogs share one body model; its paint (shell, fenders, hopper) is recoloured
+  # per cog to the family colour just before each draw. The toon pass reads baseColorFactor at
+  # draw time, so rewriting the shared material between drawCharacter calls is per-instance.
+  # Eyes, screen, rubber and metal keep their own materials; loners keep the stock grey.
   var neutralModel: CharacterModel
+  var paintMaterials: seq[Material]
+  var paintGrey: Color
   if ffa():
     neutralModel = loadCharacterModel((when defined(emscripten): "/" else: "tmp/") &
       "paintbot-cog-grey.glb", 1.9)
     neutralModel.unlitParts = @["eye", "smile"]
+    # By node name (build_cog.py): the gltf reader gives each primitive its own unnamed Material.
+    for node in neutralModel.file.root.walkNodes:
+      if node.mesh == nil or node.name notin ["shell", "fender", "hopper"]: continue
+      for primitive in node.mesh.primitives:
+        if primitive.material != nil: paintMaterials.add primitive.material
+    if paintMaterials.len > 0: paintGrey = paintMaterials[0].baseColorFactor
+  proc paintCog(seat: int) =
+    ## Sets the shared FFA body paint to this seat's family colour (same RGB as the HUD chips).
+    let c = if seat in 0..<Seats and kinHues[seat] >= 0:
+        color(kinRgb[seat].r.float32/255, kinRgb[seat].g.float32/255,
+          kinRgb[seat].b.float32/255, 1)
+      else: paintGrey
+    for m in paintMaterials: m.baseColorFactor = c
   var occlusionOutline = initSelectionOutline(OccludedOutline)
   var shapes = initShapeRenderer()
   var last = epochTime()
@@ -912,6 +930,7 @@ proc runGraphics*() =
           # Kin view or picked families: the rest fade to 40%.
           let dim = kinEmphasis(i).dim
           # tint.a < 1 takes the blended pass (characters.nim:207); visually verified for the dim.
+          paintCog(i)
           drawCharacter(scene, neutralModel, poses[i]-vec3(0, lowered, 0), facing, 0, rolling,
             tint = (if dim: color(1, 1, 1, 0.4) else: color(1, 1, 1, 1)))
         else:
