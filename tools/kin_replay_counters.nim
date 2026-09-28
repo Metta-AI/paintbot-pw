@@ -139,9 +139,9 @@ when isMainModule:
   if args[0] == "--record":
     var output = ""
     var bots: seq[string]
-    var seed, layout = 2026'i32
+    var seed = 2026'i32
+    var layout = -1'i32
     var ticks = 600'i32
-    layout = -1
     var i = 1
     while i < args.len:
       let value = if i + 1 < args.len: args[i + 1] else: ""

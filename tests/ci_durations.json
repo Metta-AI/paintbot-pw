@@ -72,6 +72,6 @@
     "nim r tests/test_paintbot_rules40_golden.nim": 90.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim": 120.0,
     "nim r tests/test_paintbot_ffa_basic.nim": 90.0,
-    "python tools/test_kin_eval.py": 90.0
+    "python tools/test_kin_eval.py": 180.0
   }
 }

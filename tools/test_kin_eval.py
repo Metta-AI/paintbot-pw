@@ -113,7 +113,15 @@ class KinEvalTest(unittest.TestCase):
         self.assertIn(inc["gate"]["pass"], (True, False))
         ham = results["hamilton"]
         for m in kin_eval.HEADLINE:
-            self.assertIn("slope", ham["curve"][m])
+            self.assertIn("slope", ham["curve"][m])  # within-layout (headline)
+            self.assertIn("slope_pooled", ham["curve"][m])
+            self.assertIn("slope", ham["per_layout"]["cousins"][m])
+        for b in ham["curve"]["yield"]["by"].values():
+            if b["value"] is not None:
+                self.assertTrue(0 <= b["value"] <= 1)
+        self.assertIn("welfare_clone_minus_stranger", inc)
+        self.assertIn("dropped", results["rsweep"]["dose_slope"]["harm"])
+        self.assertIn("kin recognition pays", page)
         self.assertEqual(ham["episodes"], 12)
         self.assertIn("control_strangers", ham)
         self.assertIn("control_clones", ham)
