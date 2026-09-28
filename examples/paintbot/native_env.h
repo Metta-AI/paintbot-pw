@@ -457,7 +457,9 @@ int pw_map(void *handle);
  * the current world's (-1 NULL). pw_set_config_json takes a whole Coworld game config object
  * (a manifest variant's game_config, verbatim; not NUL-terminated, `length` bytes) and reads it
  * with the host's parser: mode, kin_layout, glory, map, vision, each absent key the host's
- * default; tokens, players, slots, seed and max_ticks are accepted and ignored (seats and match
+ * default except "map": a config without "map" keeps the handle's map (pw_set_map's or an
+ * earlier config's), so maps can be drawn per reset under one config; "map": "" is the island;
+ * tokens, players, slots, seed and max_ticks are accepted and ignored (seats and match
  * length come from this ABI). It replaces the handle's mode, kin layout, map, vision and glory
  * awards. 0; -1 bad args; -2 a config the host would refuse, its reason written to `error`
  * (NUL-terminated, truncated to capacity, "" on success, may be NULL). Rules and config are

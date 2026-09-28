@@ -1037,10 +1037,11 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
   ## the host's own parser (match_config.parseMatchConfig): mode, kin_layout, glory, map and
   ## vision; its seating and length keys (tokens, players, slots, seed, max_ticks) are
   ## accepted and ignored, since a handle's seats and match length come from its own calls.
-  ## Every match key it has not got takes the host's default. All of them replace the
-  ## handle's mode, kin layout, map, vision and glory awards from its NEXT pw_reset on (the
-  ## current world keeps its own), as pw_set_game_mode, pw_set_kin_layout and pw_set_map do;
-  ## the rules stay pw_set_rules'. 0; -1 bad args; -2 a config the host would refuse, with
+  ## Every match key it has not got takes the host's default, except "map": without it the
+  ## handle keeps its map (pw_set_map's, or an earlier config's); "map": "" is the island. They
+  ## replace the handle's mode, kin layout, map, vision and glory awards from its NEXT pw_reset
+  ## on (the current world keeps its own), as pw_set_game_mode, pw_set_kin_layout and pw_set_map
+  ## do; the rules stay pw_set_rules'. 0; -1 bad args; -2 a config the host would refuse, with
   ## its reason in `error` (NUL-terminated, truncated to capacity; "" on success; may be NULL).
   if handle == nil or length < 0 or (length > 0 and json == nil): return -1
   var text = newString(length.int)
@@ -1053,7 +1054,9 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
   let env = cast[ptr NativeEnv](handle)
   env.nextMode = config.mode
   env.kinLayout = if config.kinLayout.isSome: config.kinLayout.get.ord.int32 else: -1
-  env.nextMapSlot = int32(mapIndex(config.map)+1)
+  # A config without "map" keeps the handle's map (pw_set_map), so a trainer can draw maps
+  # per reset under one config; "map": "" is the island.
+  if config.mapGiven: env.nextMapSlot = int32(mapIndex(config.map)+1)
   env.nextVision = config.vision == "team"
   env.nextGlory = config.glory
   writeMessage(error, capacity, "")

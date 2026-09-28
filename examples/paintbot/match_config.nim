@@ -70,6 +70,7 @@ type MatchConfig* = object
   kinLayout*: Option[KinLayout]
   glory*: GloryConfig
   map*: string   ## "" = Heartwick island, else a MapNames entry
+  mapGiven*: bool ## the config names a map ("" included); the host plays Heartwick without one
   vision*: string ## "" = per-cog sight lines, "team" = one sight grid per team
 
 const
@@ -95,7 +96,7 @@ proc parseMatchConfig*(config: JsonNode): MatchConfig =
     let node = config{key}
     if node.isNil or node.kind == JNull: continue
     if node.kind != JString: raise newException(ValueError, "Paintbot " & key & " must be a string")
-    if key == "map": result.map = node.getStr else: result.vision = node.getStr
+    if key == "map": (result.map = node.getStr; result.mapGiven = true) else: result.vision = node.getStr
   discard mapIndex(result.map) # raises for a name that is not a map, as configureMap does
   if result.vision notin ["", "team"]:
     raise newException(ValueError, "Unknown Paintbot vision mode: " & result.vision)
