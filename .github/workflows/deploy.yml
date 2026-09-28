@@ -47,7 +47,7 @@ env:
   COWORLD_CLI_VERSION: "0.1.47" # PyPI `coworld`; pinned so CI never depends on a metta checkout
   COWORLD_NAME: paintbot-pw
   COWORLD_PROJECT: coworld/paintbot
-  NIM_VERSION: "2.2.10" # matches coworld/paintbot/Dockerfile and coworld/integration.md
+  NIM_VERSION: "2.2.10" # matches build.yml, coworld/paintbot/Dockerfile and coworld/integration.md
   EMSDK_VERSION: "4.0.15" # paintbot-pw pins no emsdk; same pin as cogame-parley's viewer build
   SOFTMAX_API_SERVER: https://softmax.com/api
 
