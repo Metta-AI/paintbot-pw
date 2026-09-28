@@ -261,7 +261,7 @@
     pov = false,
     bars = true,
     eventToasts = false,
-    speechBubbles = true,
+    speechBubbles = false, // off by default: a crowd's chatter covers the field
     trails = false,
     lastTick = -1,
     ended = false,
@@ -1106,6 +1106,70 @@
     strip.setAttribute("aria-label", `Territory hearts: Ember ${hearts.filter(h => h.owner === 0).length}, Azure ${hearts.filter(h => h.owner === 1).length}, unclaimed ${hearts.filter(h => h.owner < 0).length}`);
   }
 
+  let minimapCache = null;
+  const cssRgb = (() => {
+    const probe = document.createElement("canvas").getContext("2d"), memo = new Map();
+    return (css) => {
+      if (!memo.has(css)) {
+        probe.clearRect(0, 0, 1, 1); probe.fillStyle = css; probe.fillRect(0, 0, 1, 1);
+        memo.set(css, probe.getImageData(0, 0, 1, 1).data.slice(0, 3));
+      }
+      return memo.get(css);
+    };
+  })();
+  function minimapLayers(w, bounds) {
+    const hearts = w.controlHearts || [];
+    const geometry = [bounds.join(","), hearts.map((h) => h.pos.x + "," + h.pos.z).join(";"),
+      (w.cover || []).length, landMask ? landMask.length : 0, w.rulesVersion].join("|");
+    if (!minimapCache || minimapCache.geometry !== geometry) {
+      const spanX = bounds[2] - bounds[0], spanZ = bounds[3] - bounds[1];
+      const nearest = new Int16Array(320 * 200).fill(-1);
+      for (let py = 0; py < 200; py++)
+        for (let px = 0; px < 320; px++) {
+          const x = bounds[0] + (px + 0.5) * spanX / 320, z = bounds[1] + (py + 0.5) * spanZ / 200;
+          if (landMask) {
+            const cols = spanX / 100;
+            if (landMask[Math.floor((z - bounds[1]) / 100) * cols + Math.floor((x - bounds[0]) / 100)] !== "1") continue;
+          } else if (w.rulesVersion >= 16 && islandMargin(x, z) < 40) continue;
+          let best = -1, distance = Infinity;
+          hearts.forEach((h, k) => {
+            const d = (h.pos.x - x) ** 2 + (h.pos.z - z) ** 2;
+            if (d < distance) { best = k; distance = d; }
+          });
+          nearest[py * 320 + px] = best;
+        }
+      const cover = document.createElement("canvas");
+      cover.width = 320; cover.height = 200;
+      const cc = cover.getContext("2d");
+      cc.scale(6400 / spanX, 4000 / spanZ);
+      cc.translate(-bounds[0] / 20, -bounds[1] / 20);
+      cc.fillStyle = "#c0b68b";
+      for (const c of w.cover || []) {
+        if (c.h === 0) {
+          cc.beginPath();
+          cc.arc((c.x + c.w / 2) / 20, (c.z + c.w / 2) / 20, c.w / 40, 0, Math.PI * 2);
+          cc.fill();
+        } else cc.fillRect(c.x / 20, c.z / 20, c.w / 20, c.h / 20);
+      }
+      minimapCache = { geometry, nearest, cover, owners: null, territory: null };
+    }
+    const owners = hearts.map((h) => h.owner).join(",") + (ffaOn() ? "|ffa" : "");
+    if (hearts.length && minimapCache.owners !== owners) {
+      const territory = minimapCache.territory || Object.assign(document.createElement("canvas"), { width: 320, height: 200 });
+      const tc = territory.getContext("2d"), image = tc.createImageData(320, 200);
+      const palette = hearts.map((h) => cssRgb(h.owner < 0 ? "#747e80" : ffaOn() ? seatColor(h.owner) : colors[h.owner]));
+      for (let k = 0; k < minimapCache.nearest.length; k++) {
+        const n = minimapCache.nearest[k];
+        if (n < 0) continue;
+        const [r, g, b] = palette[n];
+        image.data[4 * k] = r; image.data[4 * k + 1] = g; image.data[4 * k + 2] = b; image.data[4 * k + 3] = 115;
+      }
+      tc.putImageData(image, 0, 0);
+      minimapCache.territory = territory;
+      minimapCache.owners = owners;
+    }
+    return minimapCache;
+  }
   function minimap() {
     const canvas = $("minimap"),
       ctx = canvas.getContext("2d"),
@@ -1113,47 +1177,12 @@
     ctx.fillStyle = w.rulesVersion >= 16 ? "#398b96" : "#294835";
     ctx.fillRect(0, 0, 320, 200);
     const bounds = state.bounds || [0, 0, 6400, 4000];
-    ctx.save();
-    ctx.scale(6400 / (bounds[2] - bounds[0]), 4000 / (bounds[3] - bounds[1]));
-    ctx.translate(-bounds[0] / 20, -bounds[1] / 20);
-    if ((w.controlHearts || []).length) {
-      for (let z = bounds[1]; z < bounds[3]; z += 100)
-        for (let x = bounds[0]; x < bounds[2]; x += 100) {
-          if (landMask) {
-            const cols = (bounds[2] - bounds[0]) / 100;
-            if (landMask[((z - bounds[1]) / 100) * cols + (x - bounds[0]) / 100] !== "1") continue;
-          } else if (w.rulesVersion >= 16 && islandMargin(x + 50, z + 50) < 40)
-            continue;
-          let nearest = w.controlHearts[0],
-            distance = Infinity;
-          for (const h of w.controlHearts) {
-            const d = (h.pos.x - x - 50) ** 2 + (h.pos.z - z - 50) ** 2;
-            if (d < distance) {
-              nearest = h;
-              distance = d;
-            }
-          }
-          ctx.fillStyle = nearest.owner < 0 ? "#747e80" : ffaOn() ? seatColor(nearest.owner) : colors[nearest.owner];
-          ctx.globalAlpha = 0.45;
-          ctx.fillRect(x / 20, z / 20, 5, 5);
-          ctx.globalAlpha = 1;
-        }
-    }
-    ctx.fillStyle = "#c0b68b";
-    for (const c of w.cover) {
-      if (c.h === 0) {
-        ctx.beginPath();
-        ctx.arc(
-          (c.x + c.w / 2) / 20,
-          (c.z + c.w / 2) / 20,
-          c.w / 40,
-          0,
-          Math.PI * 2,
-        );
-        ctx.fill();
-      } else ctx.fillRect(c.x / 20, c.z / 20, c.w / 20, c.h / 20);
-    }
-    ctx.restore();
+    // Territory and cover are cached as canvas-resolution layers: the territory is repainted
+    // only when a heart changes hands, the cover only when the map does. (Drawing them per
+    // metre every frame cost hundreds of thousands of fills on a large map.)
+    const layers = minimapLayers(w, bounds);
+    if (layers.territory) ctx.drawImage(layers.territory, 0, 0);
+    ctx.drawImage(layers.cover, 0, 0);
     ctx.save();
     const mapX = x => (x - bounds[0]) * 320 / (bounds[2] - bounds[0]);
     const mapY = z => (z - bounds[1]) * 200 / (bounds[3] - bounds[1]);
@@ -1583,7 +1612,18 @@
     $("verification").title = isPlayPage ? "Local simulation, recorded as it runs" : "Replay hash verified";
     $("verification").setAttribute("aria-label", isPlayPage ? "Local simulation, recorded as it runs" : "Replay hash verified");
   };
+  // Index of the first item at or after tick in a tick-ordered list (events, messages).
+  const firstFrom = (items, tick) => {
+    let lo = 0, hi = items.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (items[mid].tick < tick) lo = mid + 1; else hi = mid; }
+    return lo;
+  };
   Module.paintbotState = (data) => {
+    if (data && data.staticOmitted && state) {
+      // The engine sends the kinship tables and cover once; later states reuse them.
+      for (const key of ["family", "genes", "rPct", "kinHue"]) data[key] = state[key];
+      if (data.world && state.world) data.world.cover = state.world.cover;
+    }
     state = data;
     if (data && data.land) landMask = data.land;
     if (!index) return;
@@ -1700,12 +1740,14 @@
     }
     bubbles.hidden = !speechBubbles;
     const canvasRect = $("canvas").getBoundingClientRect();
-    bubbles.replaceChildren();
+    // Messages and events are recorded in tick order: read only the recent window, and reuse
+    // bubble elements, so a crowd's chatter costs its visible bubbles, not the whole match.
     const latestSpeech = new Map();
-    for (const message of index.communications || []) {
-      if (message.tick <= t && message.tick > t - 72)
-        latestSpeech.set(message.slot, message);
-    }
+    const comms = index.communications || [];
+    if (speechBubbles)
+      for (let k = firstFrom(comms, t - 71); k < comms.length && comms[k].tick <= t; k++)
+        latestSpeech.set(comms[k].slot, comms[k]);
+    let shownBubbles = 0;
     for (const [slot, message] of latestSpeech) {
       const p = data.screen[slot];
       if (
@@ -1718,14 +1760,18 @@
         p[1] > 1
       )
         continue;
-      const bubble = document.createElement("div");
-      bubble.textContent = message.text;
+      let bubble = bubbles.children[shownBubbles];
+      if (!bubble) { bubble = document.createElement("div"); bubbles.appendChild(bubble); }
+      shownBubbles++;
+      bubble.hidden = false;
+      if (bubble.textContent !== message.text) bubble.textContent = message.text;
       bubble.style.cssText = `position:absolute;left:${canvasRect.left + p[0] * canvasRect.width}px;top:${canvasRect.top + p[1] * canvasRect.height}px;transform:translate(-50%,-130%);max-width:160px;padding:5px 8px;border-radius:12px;background:${team(slot) === 0 ? "#ffe3dd" : "#dff3ff"};color:#263c30;font:12px sans-serif;box-shadow:0 2px 5px #0005`;
-      bubbles.appendChild(bubble);
     }
-    const recent = index.events
-      .filter((e) => e.tick <= t && e.tick > t - 120 && e.kind !== "down")
-      .slice(-4);
+    for (let k = shownBubbles; k < bubbles.children.length; k++) bubbles.children[k].hidden = true;
+    const recent = [];
+    for (let k = firstFrom(index.events, t - 119); k < index.events.length && index.events[k].tick <= t; k++)
+      if (index.events[k].kind !== "down") recent.push(index.events[k]);
+    recent.splice(0, Math.max(0, recent.length - 4));
     $("feed").innerHTML = recent
       .map(
         (e) =>
@@ -1753,7 +1799,9 @@
     renderGraphs();
     minimap();
     if (skip && !data.paused) {
-      const next = index.events.find((e) => e.tick > t && e.kind !== "down");
+      let next;
+      for (let k = firstFrom(index.events, t + 1); k < index.events.length; k++)
+        if (index.events[k].kind !== "down") { next = index.events[k]; break; }
       if (next && next.tick - t > 120) {
         $("skipping").textContent = "SKIPPING LULL";
         seek(next.tick - 48);

@@ -196,6 +196,13 @@ proc beginCharacters*(
   toon.cameraPosition = cameraEye
   scene.renderer.beginFrame(window, window.size)
 
+var
+  posedRoot: pointer ## the model tree drawCharacter last posed, and at what clip and time
+  posedClip: int
+  posedTime: float32
+proc invalidateCharacterPose*() =
+  ## Call after posing a model tree outside drawCharacter.
+  posedRoot = nil
 proc drawCharacter*(
     scene: CharacterScene, model: CharacterModel,
     position: Vec3, facing: float32, clip: int, animTime: float32,
@@ -214,11 +221,16 @@ proc drawCharacter*(
     for node in model.shownParts:
       node.baseVisible = true
       node.visible = true
-  if root.activeClips.len != 1:
-    root.activeClips.setLen(1)
-  root.activeClips[0] = clip
-  root.animTime = animTime
-  root.updateAnimation(0)
+  # Posing walks the node tree on the CPU. Consecutive draws of the same model at the same clip
+  # and time (every pass of a crowd frame, or all the cogs rolling in step) reuse the pose.
+  if not (posedRoot == cast[pointer](root) and posedClip == clip and posedTime == animTime and
+      root.activeClips.len == 1):
+    if root.activeClips.len != 1:
+      root.activeClips.setLen(1)
+    root.activeClips[0] = clip
+    root.animTime = animTime
+    root.updateAnimation(0)
+    posedRoot = cast[pointer](root); posedClip = clip; posedTime = animTime
   let transform =
     translate(position) * rotateY(facing) *
     scale(vec3(sizeFactor, sizeFactor, sizeFactor)) * model.baseTransform
@@ -317,6 +329,7 @@ proc pickCharacter*(
   root.activeClips[0] = clip
   root.animTime = animTime
   root.updateAnimation(0)
+  posedRoot = nil # posed here, outside drawCharacter
   let transform =
     translate(position) * rotateY(facing) *
     scale(vec3(sizeFactor, sizeFactor, sizeFactor)) * model.baseTransform
