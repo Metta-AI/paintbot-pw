@@ -83,9 +83,10 @@ proc sampleGrid(m: PaintbotMap, margins: bool, x, z: int, outside: int): int =
   let i = min(fx div m.step, m.nx-2); let j = min(fz div m.step, m.nz-2)
   let tx = int64(fx-i*m.step); let tz = int64(fz-j*m.step); let s = int64(m.step)
   let k = j*m.nx+i
-  template grid: untyped = (if margins: m.margins else: m.heights)
-  let h00 = grid[k].int64; let h10 = grid[k+1].int64
-  let h01 = grid[k+m.nx].int64; let h11 = grid[k+m.nx+1].int64
+  # Index the grid in place: an expression choosing between the two seqs would copy one.
+  template at(n: int): int64 = (if margins: m.margins[n].int64 else: m.heights[n].int64)
+  let h00 = at(k); let h10 = at(k+1)
+  let h01 = at(k+m.nx); let h11 = at(k+m.nx+1)
   int((h00*(s-tx)*(s-tz)+h10*tx*(s-tz)+h01*(s-tx)*tz+h11*tx*tz) div (s*s))
 
 proc mapHeight*(x, z: int): int =
