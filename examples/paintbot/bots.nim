@@ -171,12 +171,10 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
   if ffa():
     proc seatIndex(value: int32): bool = value >= 0 and value < Seats
     proc inMatch(i: int): bool = active.cogs[i].hp > 0 or active.equipment[i].lives > 0
-    discard result.addFunction("gameMode",0,proc(a:openArray[int32]):int32 = int32(ffa()),4)
+    discard result.addFunction("gameMode",0,proc(a:openArray[int32]):int32 = 1,4)
     discard result.addFunction("kin",1,proc(a:openArray[int32]):int32 =
       if not seatIndex(a[0]): -1'i32
-      elif ffa(): activeKinship.rPercent(slot, a[0].int)
-      elif a[0] == slot: 100'i32
-      else: 0'i32,4)
+      else: activeKinship.rPercent(slot, a[0].int),4)
     discard result.addFunction("gene",2,proc(a:openArray[int32]):int32 =
       if not seatIndex(a[0]) or a[1] < 0 or a[1] >= Loci or not inMatch(a[0].int): -1'i32
       else: int32((activeKinship.genes[a[0]] shr a[1].uint32) and 1'u32),4)
@@ -187,10 +185,10 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
     discard result.addFunction("heartOwner",1,proc(a:openArray[int32]):int32 =
       if a[0] >= 0 and a[0] < active.controlHearts.len: active.controlHearts[a[0]].owner else: -1'i32,4)
     discard result.addFunction("greatHeartCount",0,proc(a:openArray[int32]):int32 =
-      (if ffa(): active.greatHearts.len.int32 else: 0'i32),4)
+      active.greatHearts.len.int32,4)
     proc getGreatHeart(field:int):HostProc =
       result = proc(a:openArray[int32]):int32 =
-        if not ffa() or a[0] < 0 or a[0] >= active.greatHearts.len: return -1
+        if a[0] < 0 or a[0] >= active.greatHearts.len: return -1
         let heart = active.greatHearts[a[0]]
         case field
         of 0: heart.pos.x
