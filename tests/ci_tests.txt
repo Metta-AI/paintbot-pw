@@ -8,11 +8,19 @@
 # Optional tags go in square brackets before the command:
 #   cwd=<dir>    run in <dir> (relative to the repository root) instead of the root
 #   posix-only   skip on Windows
+#   serial       never run alongside another command (wall-clock-sensitive tests)
+#
+# A std/unittest file may be split over several lines by passing test-name filters (std/unittest
+# globs: one `*`, or an exact name). --check then requires every `test "..."` in it to be run by
+# exactly one line and every filter to match a test, since std/unittest runs nothing, and still
+# passes, when a filter matches nothing.
 #
 # Shards are balanced with the per-command seconds in tests/ci_durations.json. A new command
 # without an entry there counts as 60 s; add its measured time when you know it. Each command
 # must be self-contained: shards run on separate machines, so a command cannot rely on files
-# another command wrote. Check the plan with: python tests/run_ci_shard.py --check --of 5
+# another command wrote, and a shard runs several commands at once (build.yml's --jobs), so a
+# command must not write a fixed path another command also uses (getTempDir() / "<test name>..."
+# is fine). Check the plan with: python tests/run_ci_shard.py --check --of 4
 
 nim r tests/tests.nim
 nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2 tests/test_profiles.nim
@@ -81,7 +89,9 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
 nim r -d:headless tests/test_paintbot_neural_host.nim
-nim r -d:headless tests/test_paintbot_neural_basic_io.nim
+nim r -d:headless tests/test_paintbot_neural_basic_io.nim "neuralDecode + neuralIssue*"
+nim r -d:headless tests/test_paintbot_neural_basic_io.nim "neuralMask forbids*" "the grenade mask in BASIC*"
+nim r -d:headless tests/test_paintbot_neural_basic_io.nim "#101's spray gate*" "the command buffer*" "call-order and range errors*" "neuralObs reads*" "user inputs: init*" "a user-input actor reads*" "user-input actors above*" "user-input bundles*"
 nim r -d:headless tests/test_paintbot_neural_net2.nim
 nim r -d:headless tests/test_paintbot_neural_joint.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim
@@ -96,7 +106,7 @@ node tests/test_paintbot_kinhud.js
 python coworld/paintbot/tools/make_jev_baseline.py --check
 
 # The hosted runtime is Linux-only; its file-URI handling is POSIX, so skip Windows here.
-[posix-only cwd=coworld/paintbot] python -m unittest test_runtime
+[posix-only serial cwd=coworld/paintbot] python -m unittest test_runtime
 [posix-only cwd=coworld/paintbot] python -m unittest test_semantic_trajectory
 [posix-only] python coworld/paintbot/test_training_bridge.py
 # Heartland kinship evals: ffa_blind.bas is current, every kin_eval.py suite runs (2 short
