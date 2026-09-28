@@ -70,6 +70,7 @@ nim r -d:headless tests/test_paintbot_neural_obs_v2.nim
 nim r -d:headless tests/test_paintbot_neural_obs_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim
+nim r tests/test_paintbot_geometry_cache.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_seat_stats.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_scripts.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_command.nim
