@@ -181,7 +181,11 @@ suite "Native per-handle rules and game config":
     check pw_map(handle) == mapIndex("crater")
     check handle.setConfig("""{"seed": 1, "max_ticks": 9, "tokens": [], "players": [], "slots": []}""", message) == 0
     check pw_reset(handle, 6, 60) == 0
-    check pw_map(handle) == -1 and pw_game_mode(handle) == 0 # absent keys: the host's defaults
+    # Absent keys take the host's defaults, except "map": the handle keeps crater.
+    check pw_map(handle) == mapIndex("crater") and pw_game_mode(handle) == 0
+    check handle.setConfig("""{"map": ""}""", message) == 0            # "" is the island
+    check pw_reset(handle, 6, 60) == 0
+    check pw_map(handle) == -1
     check pw_set_config_json(nil, nil, 0, nil, 0) == -1
     check pw_set_config_json(handle, nil, 3, nil, 0) == -1
     # A config the host refuses is refused with the host's words, and changes nothing.
@@ -280,6 +284,32 @@ suite "Native per-handle rules and game config":
     for i in 0..<specs.len:
       checkSame("spec " & $i, runs[i].hashes, alone[i].hashes)
       pw_destroy(handles[i])
+
+  test "a config without \"map\" keeps the handle's pw_set_map map":
+    for name in ["crater", "atoll", "big-deep-forest"]:
+      checkpoint name
+      let league = """{"glory": {"behind_lives": 5}}"""
+      let named = """{"map": "$1", "glory": {"behind_lives": 5}}""" % name
+      # pw_set_map then a map-less config, in either order, == the config naming the map.
+      var message: string
+      let expected = nativeRun(named, LiveRules, 61, 200)
+      for configFirst in [false, true]:
+        let handle = pw_create(61, 200)
+        require handle != nil
+        check pw_set_rules(handle, LiveRules) == 0
+        if configFirst: check handle.setConfig(league, message) == 0
+        check pw_set_map(handle, mapIndex(name).cint) == 0
+        if not configFirst: check handle.setConfig(league, message) == 0
+        check pw_reset(handle, 61, 200) == 0
+        check pw_map(handle) == mapIndex(name)
+        let source = readFile(Base)
+        for slot in 0..<Seats:
+          check pw_set_seat_script(handle, slot.cint, cbuf(source), source.len.int32) == 0
+        var got: Run
+        while handle.nativeStep(got): discard
+        checkSame(name & (if configFirst: " config first" else: " map first"), got.hashes, expected.hashes)
+        check got.hashes != nativeRun(league, LiveRules, 61, 200).hashes # not Heartwick
+        pw_destroy(handle)
 
   test "rules and config set mid-game leave the current world alone until the next reset":
     let seed = 41'i32
