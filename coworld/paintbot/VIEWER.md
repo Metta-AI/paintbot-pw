@@ -41,7 +41,7 @@ seat badge, paint and owned hearts take its family's hue (`examples/paintbot/kin
 siblings share a hue, cousin families are neighbours, loners are grey). Clicking a cog turns on
 kin view: kin get a halo scaled by r and a ½ / ¼ badge, unrelated cogs fade to 40%. Esc or a
 click on empty ground clears it; it persists through scrubbing. The header keeps its height:
-clock, one chip per family (summed raw score) and the two great hearts (n/3 charging, dormant
+clock, one chip per family (hearts held now and summed raw score) and the two great hearts (n/3 charging, dormant
 countdown, or ready). Click it or press Tab for the per-cog table (hearts held, heart-seconds,
 great-heart shares, s and R, sorted by R, dead cogs greyed); a row click selects that cog, and
 Esc collapses the table before clearing the selection. The end card reads "Match ended" with the
