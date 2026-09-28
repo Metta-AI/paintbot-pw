@@ -55,6 +55,7 @@ nim r tests/test_paintbot_glory_hearts.nim
 nim r tests/test_paintbot_nearby.nim
 nim r tests/test_paintbot_team_vision.nim
 nim r tests/test_paintbot_maps.nim
+nim r tests/test_paintbot_map_modes.nim
 nim r tests/test_paintbot_glory_behind.nim
 nim r tests/test_paintbot_glory_config.nim
 nim r tests/test_paintbot_weapon_buff.nim

@@ -3,7 +3,9 @@
 ## islandMargin, and its hearts, pickups, trenches and cover replace the fixed layout. Every
 ## map is its own image under the rules-35 half turn about (3200, 2000).
 const MapNames* = ["twin-mesas", "archipelago", "serpent-river", "crater", "terraces",
-  "deep-forest", "badlands", "atoll", "highlands", "delta"]
+  "deep-forest", "badlands", "atoll", "highlands", "delta",
+  # Ten times the area (mapgen --scale 3.1623 --prefix big-): the same layouts, stretched.
+  "big-twin-mesas", "big-deep-forest"]
 
 const MapBlobs = block:
   var blobs: array[MapNames.len, string]

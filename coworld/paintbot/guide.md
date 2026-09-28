@@ -355,6 +355,12 @@ Rules 41 add ten generated maps beside Heartwick island. Each map has its own va
 `delta`. A config with no map (every existing variant) still plays on Heartwick. Replays
 record the map name, and the viewer draws each map's terrain, scenery and coastline.
 
+Two big maps stretch the same layouts over ten times the area: `big-twin-mesas` and
+`big-deep-forest` (variants `map-big-twin-mesas` and `map-big-deep-forest`; the
+`heartland-big` variant plays FFA-kin on `big-twin-mesas`). The world spans about
+50,000 x 30,000 units instead of 16,000 x 9,600, still centred on (3200, 2000); the item
+set is the same, so hearts and pickups sit farther apart and the trip home is long.
+
 A map keeps the rules you already play under: 16 cogs, 10 control hearts (two homes, then
 four neutral pairs), 4 grenades, 2 sprays, 2 armors, 4 medkits, 2 uniforms and 6 trenches.
 Everything is mirrored under the same half turn about (3200, 2000). What changes is the
