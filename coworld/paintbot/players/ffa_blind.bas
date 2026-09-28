@@ -116,8 +116,9 @@ sub planLeg(minTicks, maxTicks)
 end sub
 
 ' Would our shot at (ex, ey) touch a relative (kin >= 25) we can see or hear? A gun ray: one
-' within 130 units of the segment (a little past the target too, and a little behind us, since
-' the ray leaves five ticks after the order). A spray can: one inside the whole cone, which
+' within 150 units of the ray plus a tenth of the distance along it (spread, and five ticks of
+' their walking before the ray leaves), out to its full 20 m (a miss flies on past the target),
+' and a little behind us. A spray can: one inside the whole cone, which
 ' reaches 850 (+ a body radius) and is along * 4/5 + a body radius wide on each side, plus a
 ' 40-unit margin for movement during the burst. Into blocked.
 sub kinAt(ox, oy)
@@ -131,7 +132,7 @@ sub kinAt(ox, oy)
       blocked = 1
     end if
   else
-    if along > -40 and along < reach + 120 and across < 130 then
+    if along > -40 and along < 2120 and across < 150 + along / 10 then
       blocked = 1
     end if
   end if
@@ -155,8 +156,17 @@ sub kinInLine(ex, ey)
     ' the past six ticks, stands in for where they are.
     k = 0
     while k < 16
-      if k <> selfId and worldTick - spokeTick(k) <= 6 and blindKin(k) >= 25 and not visible(k) then
+      if k <> selfId and spokeTick(k) > 0 and worldTick - spokeTick(k) <= 6 and blindKin(k) >= 25 and not visible(k) then
         kinAt(spokeX(k) - selfX, spokeY(k) - selfY)
+      end if
+      k = k + 1
+    wend
+    ' And where we last saw them, in the past second (they walk under 900 units in that time,
+    ' so this only catches the ones who just left the cone).
+    k = 0
+    while k < 16
+      if k <> selfId and lastSeen(k) > 0 and worldTick - lastSeen(k) <= 24 and blindKin(k) >= 25 and not visible(k) then
+        kinAt(oldX(k) - selfX, oldY(k) - selfY)
       end if
       k = k + 1
     wend
