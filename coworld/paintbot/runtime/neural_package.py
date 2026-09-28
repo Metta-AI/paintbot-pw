@@ -368,6 +368,11 @@ def pointer_ops(tokens, z, width):
     return width + tokens * (2 * z + 2)
 
 
+def segment_near_ops(inputs, tokens):
+    """SEGMENT_NEAR's published cost: the copy of the input, 12 per token pair, 8 per token."""
+    return inputs + tokens * tokens * 12 + tokens * 8
+
+
 def validate_pwnet2(model, observation_contract=None, action_contract=None):
     """Validate a PWNET002 model.bin; returns its summary dict (operations, state, layers, parameters).
     Raises ValueError with the loader's reason otherwise."""
@@ -408,6 +413,10 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
     def positive_f32(bits):
         value = struct.unpack("<f", struct.pack("<I", bits))[0]
         return math.isfinite(value) and value > 0
+
+    def nonnegative_f32(bits):
+        value = struct.unpack("<f", struct.pack("<I", bits))[0]
+        return math.isfinite(value) and value >= 0
 
     if len(model) > MAX_MODEL_BYTES or model[:8] != PWNET2_MAGIC:
         raise ValueError("invalid neural actor magic")
@@ -602,6 +611,28 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
             weights(z + 1)
             out = width
             operations += pointer_ops(tokens, z, width)
+        elif code == 10:  # SEGMENT_NEAR
+            tokens, base, stride, xi, zi, vi, ei, ci = q
+            scale_x, scale_z, radius, dst, dst_stride = u32(), u32(), u32(), u32(), u32()
+            if k != 0:
+                bad(where + "SEGMENT_NEAR must be layer 0")
+            if not 1 <= tokens <= lim["tokens"]:
+                bad(where + "SEGMENT_NEAR tokens must be 1..%d" % lim["tokens"])
+            if not 1 <= stride <= inputs:
+                bad(where + "SEGMENT_NEAR stride must be 1..%d" % inputs)
+            if base > inputs or tokens * stride > inputs - base:
+                bad(where + "SEGMENT_NEAR tokens outside the input")
+            if any(i >= stride for i in (xi, zi, vi, ci)) or (ei != ATTN_ALWAYS_VALID and ei >= stride):
+                bad(where + "SEGMENT_NEAR index outside the token")
+            if not positive_f32(scale_x) or not positive_f32(scale_z):
+                bad(where + "SEGMENT_NEAR scales must be finite and positive")
+            if not nonnegative_f32(radius):
+                bad(where + "SEGMENT_NEAR radius must be finite and >= 0")
+            if not (0 if tokens == 1 else 1) <= dst_stride <= inputs or dst >= inputs or \
+                    (tokens - 1) * dst_stride >= inputs - dst:
+                bad(where + "SEGMENT_NEAR flags outside the input")
+            out = inputs
+            operations += segment_near_ops(inputs, tokens)
         else:
             bad(where + "unknown layer type %d" % code)
         widths.append(out)
