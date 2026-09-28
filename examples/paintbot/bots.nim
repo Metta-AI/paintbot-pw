@@ -19,6 +19,20 @@ type Bot* = ref object
 # carried to the next decision. Training builds run many worlds on many threads: there
 # the same variables are thread-local and the native host copies `heard` in and out
 # around each step, so a handle may migrate between threads.
+type
+  NearAgent = object
+    identity, body: int32
+    d2: int64
+  NearGrid = object
+    ## Living cogs bucketed by NearCell squares, rebuilt on the first query of a tick.
+    tick: int32
+    built: bool
+    originX, originZ, nx, nz: int
+    cellStart, items: seq[int32]
+const
+  NearCell = 500
+  NearMaxRadius = 20000
+  NearMaxAgents = 64
 when defined(pwTraining):
   var
     shouts* {.threadvar.}: array[Seats,seq[string]]
@@ -26,6 +40,8 @@ when defined(pwTraining):
     active* {.threadvar.}: World
     commands* {.threadvar.}: array[Seats, Command]
   var visionCache {.threadvar.}: array[Seats, array[Seats, int8]]
+  var nearGrid {.threadvar.}: NearGrid
+  var nearLists {.threadvar.}: array[Seats, seq[NearAgent]]
 else:
   var
     shouts*: array[Seats,seq[string]]
@@ -33,6 +49,8 @@ else:
     active*: World
     commands*: array[Seats, Command]
   var visionCache: array[Seats, array[Seats, int8]]
+  var nearGrid: NearGrid
+  var nearLists: array[Seats, seq[NearAgent]]
 proc bodyForSeat(observer, identity: int): int =
   if identity notin 0..<Seats: return -1
   if identity == observer: return observer
@@ -47,6 +65,77 @@ proc bodyForSeat(observer, identity: int): int =
     if result < 0 or distance2(active.cogs[observer].pos, active.cogs[body].pos) <
         distance2(active.cogs[observer].pos, active.cogs[result].pos): result = body
 proc visibleToBot(slot, other: int): bool = bodyForSeat(slot, other) >= 0
+proc buildNearGrid() =
+  let g = addr nearGrid
+  g.originX = minX(); g.originZ = minZ()
+  g.nx = (maxX()-minX()) div NearCell+1; g.nz = (maxZ()-minZ()) div NearCell+1
+  g.cellStart = newSeq[int32](g.nx*g.nz+1)
+  var cells: array[Seats, int]
+  for b in 0..<Seats:
+    cells[b] = -1
+    let c = active.cogs[b]
+    if c.hp <= 0: continue
+    let cx = clamp((c.pos.x.int-g.originX) div NearCell, 0, g.nx-1)
+    let cz = clamp((c.pos.z.int-g.originZ) div NearCell, 0, g.nz-1)
+    cells[b] = cz*g.nx+cx
+    inc g.cellStart[cells[b]+1]
+  for i in 1..g.nx*g.nz: g.cellStart[i] += g.cellStart[i-1]
+  g.items = newSeq[int32](g.cellStart[^1])
+  var fill = g.cellStart
+  for b in 0..<Seats:
+    if cells[b] < 0: continue
+    g.items[fill[cells[b]]] = b.int32; inc fill[cells[b]]
+  g.tick = active.tick; g.built = true
+proc nearAgents(slot, radius: int): int =
+  ## The agents `slot` can see within `radius`, nearest first, under the identities it
+  ## observes (a disguised body reports its disguise; of two bodies sharing an identity the
+  ## nearer is kept, as playerX does). Visits only grid cells the circle touches, so the
+  ## cost follows the neighbourhood, not the roster.
+  nearLists[slot].setLen(0)
+  let me = active.cogs[slot]
+  if me.hp <= 0: return 0
+  if not nearGrid.built or nearGrid.tick != active.tick: buildNearGrid()
+  let g = addr nearGrid
+  let r = clamp(radius, 0, NearMaxRadius)
+  let r2 = r.int64*r
+  let x0 = clamp((me.pos.x.int-r-g.originX) div NearCell, 0, g.nx-1)
+  let x1 = clamp((me.pos.x.int+r-g.originX) div NearCell, 0, g.nx-1)
+  let z0 = clamp((me.pos.z.int-r-g.originZ) div NearCell, 0, g.nz-1)
+  let z1 = clamp((me.pos.z.int+r-g.originZ) div NearCell, 0, g.nz-1)
+  for cz in z0..z1:
+    for cx in x0..x1:
+      let cell = cz*g.nx+cx
+      for k in g.cellStart[cell]..<g.cellStart[cell+1]:
+        let b = g.items[k].int
+        if b == slot: continue
+        let d2 = distance2(me.pos, active.cogs[b].pos)
+        if d2 > r2: continue
+        if visionCache[slot][b] == 0:
+          visionCache[slot][b] = if active.visible(slot, b): 1 else: -1
+        if visionCache[slot][b] != 1: continue
+        let identity = active.observedSeat(slot, b).int32
+        var dup = -1
+        for i, e in nearLists[slot]:
+          if e.identity == identity: dup = i; break
+        if dup < 0: nearLists[slot].add NearAgent(identity: identity, body: b.int32, d2: d2)
+        elif d2 < nearLists[slot][dup].d2 or (d2 == nearLists[slot][dup].d2 and b < nearLists[slot][dup].body):
+          nearLists[slot][dup] = NearAgent(identity: identity, body: b.int32, d2: d2)
+  # Nearest first; ties by identity, so the order never depends on the grid's scan order.
+  let list = addr nearLists[slot]
+  for i in 1..<list[].len:
+    let e = list[][i]; var j = i-1
+    while j >= 0 and (list[][j].d2 > e.d2 or (list[][j].d2 == e.d2 and list[][j].identity > e.identity)):
+      list[][j+1] = list[][j]; dec j
+    list[][j+1] = e
+  if list[].len > NearMaxAgents: list[].setLen(NearMaxAgents)
+  list[].len
+proc nearAgentsFor*(w: World, slot, radius: int): seq[tuple[identity, body: int]] =
+  ## Test hook: the nearAgents answer for one seat against a fresh tick of `w`.
+  active = w
+  visionCache = default(array[Seats, array[Seats, int8]])
+  nearGrid.built = false
+  discard nearAgents(slot, radius)
+  for e in nearLists[slot]: result.add (e.identity.int, e.body.int)
 const DataNames = ["selfId","selfTeam","selfX","selfY","selfHp","carrying","homeX","homeY","heartX","heartY","worldTick","ownHeartX","ownHeartY","ownHeartStolen","hasGrenade","hasSpray","armorHp","livesLeft","grenadeCharge","trenchId"]
 proc limits*(): Limits =
   # An advised seat drafts a structured request and, with the terrain prompt on, probes water
@@ -110,6 +199,23 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
     if not visibleToBot(slot,a[0].int): -1'i32
     elif ffa(): bodyForSeat(slot,a[0].int).int32
     else: active.observedTeam(slot,bodyForSeat(slot,a[0].int)).int32,4)
+  # Nearby agents: nearAgents(radius) lists the agents this seat can see within radius
+  # (clamped to 20000), nearest first, at most 64; nearAgentId/X/Y/Hp/Team(k) read entry k,
+  # -1 (Hp 0) past the end. Cost follows the neighbourhood, so large games stay cheap.
+  discard result.addFunction("nearAgents",1,proc(a:openArray[int32]):int32 = nearAgents(slot,a[0].int).int32,16)
+  proc nearField(field:int):HostProc =
+    result = proc(a:openArray[int32]):int32 =
+      let k=a[0].int
+      if k<0 or k>=nearLists[slot].len: return (if field==3: 0'i32 else: -1'i32)
+      let e=nearLists[slot][k];let c=active.cogs[e.body]
+      case field
+      of 0: e.identity
+      of 1: c.pos.x
+      of 2: c.pos.z
+      of 3: c.hp
+      else: (if ffa(): e.body else: active.observedTeam(slot,e.body.int).int32)
+  for field in 0..4:
+    discard result.addFunction(["nearAgentId","nearAgentX","nearAgentY","nearAgentHp","nearAgentTeam"][field],1,nearField(field),4)
   discard result.addFunction("hasUniform",0,proc(a:openArray[int32]):int32 = active.uniforms[slot].int32,4)
   discard result.addFunction("playerX",1,proc(a:openArray[int32]):int32 =
     if visibleToBot(slot,a[0].int):active.cogs[bodyForSeat(slot,a[0].int)].pos.x else: -1,4)
@@ -321,6 +427,8 @@ proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
   shouts=default(array[Seats,seq[string]])
   active=w;commands=default(array[Seats,Command])
   visionCache=default(array[Seats,array[Seats,int8]])
+  nearGrid.built=false
+  for l in nearLists.mitems: l.setLen(0)
   beginOracleTick(w.tick)
   for slot in 0..<Seats:
     let b=bots[slot];let cog=w.cogs[slot]

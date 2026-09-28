@@ -52,6 +52,7 @@ nim r -d:headless tests/test_paintbot_live_rules.nim --bot:examples/paintbot/pla
 nim r tests/test_paintbot_oracle.nim
 nim r tests/test_paintbot_glory.nim
 nim r tests/test_paintbot_glory_hearts.nim
+nim r tests/test_paintbot_nearby.nim
 nim r tests/test_paintbot_maps.nim
 nim r tests/test_paintbot_glory_behind.nim
 nim r tests/test_paintbot_weapon_buff.nim
