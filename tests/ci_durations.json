@@ -1,5 +1,5 @@
 {
-  "_source": "Seconds per tests/ci_tests.txt command on ubuntu-latest, from the step timings of build.yml run 36367115579 (job 108755620015, main 5e51c5a, before sharding). Only used to balance shards; refresh from a recent run's per-command summary when the plan drifts. test_paintbot_neural_joint.nim (added by #118) is from run 36369860533 (job 108763696540, main 3f660a3). The three jev_baseline parts are estimates from run 36371842751 (220 s whole: ~140 s of arms at ~4.1 s each, 12 arms in part 0, 11 in parts 1 and 2); refresh when measured.",
+  "_source": "Seconds per tests/ci_tests.txt command on ubuntu-latest, from the step timings of build.yml run 36367115579 (job 108755620015, main 5e51c5a, before sharding). Only used to balance shards; refresh from a recent run's per-command summary when the plan drifts. test_paintbot_neural_joint.nim (added by #118) is from run 36369860533 (job 108763696540, main 3f660a3). The three jev_baseline parts are estimates from run 36371842751 (220 s whole: ~140 s of arms at ~4.1 s each, 12 arms in part 0, 11 in parts 1 and 2); refresh when measured. The three neural_basic_io lines are estimated from per-test timings in run 36375639553 (PR #123).",
   "seconds": {
     "nim r tests/tests.nim": 35.0,
     "nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2 tests/test_profiles.nim": 3.0,
@@ -56,7 +56,9 @@
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim": 12.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim": 28.0,
     "nim r -d:headless tests/test_paintbot_neural_host.nim": 45.0,
-    "nim r -d:headless tests/test_paintbot_neural_basic_io.nim": 167.0,
+    "nim r -d:headless tests/test_paintbot_neural_basic_io.nim \"neuralDecode + neuralIssue*\"": 61.0,
+    "nim r -d:headless tests/test_paintbot_neural_basic_io.nim \"neuralMask forbids*\" \"the grenade mask in BASIC*\"": 49.0,
+    "nim r -d:headless tests/test_paintbot_neural_basic_io.nim \"#101's spray gate*\" \"the command buffer*\" \"call-order and range errors*\" \"neuralObs reads*\" \"user inputs: init*\" \"a user-input actor reads*\" \"user-input actors above*\" \"user-input bundles*\"": 58.0,
     "nim r -d:headless tests/test_paintbot_neural_net2.nim": 14.0,
     "nim r -d:headless tests/test_paintbot_neural_joint.nim": 12.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim": 62.0,

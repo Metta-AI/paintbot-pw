@@ -23,10 +23,12 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +47,7 @@ class Command:
     command: str
     cwd: str  # relative to the repo root; "" for the root
     posix_only: bool
+    serial: bool = False  # never runs alongside another command (timing-sensitive)
 
 
 def load_manifest(path=MANIFEST):
@@ -53,12 +56,14 @@ def load_manifest(path=MANIFEST):
         text = raw.strip()
         if not text or text.startswith("#"):
             continue
-        cwd, posix_only = "", False
+        cwd, posix_only, serial = "", False, False
         if text.startswith("["):
             end = text.index("]")
             for tag in text[1:end].split():
                 if tag == "posix-only":
                     posix_only = True
+                elif tag == "serial":
+                    serial = True
                 elif tag.startswith("cwd="):
                     cwd = tag[len("cwd="):]
                 else:
@@ -66,7 +71,7 @@ def load_manifest(path=MANIFEST):
             text = text[end + 1:].strip()
         if not text:
             sys.exit(f"{path}:{number}: tags without a command")
-        commands.append(Command(len(commands), number, text, cwd, posix_only))
+        commands.append(Command(len(commands), number, text, cwd, posix_only, serial))
     return commands
 
 
@@ -107,6 +112,79 @@ def legacy_steps(workflow):
     return steps
 
 
+def unittest_glob(name, pattern):
+    """std/unittest's filter glob: at most one `*`; no `*` means an exact match."""
+    if not pattern:
+        return True
+    if "*" not in pattern:
+        return name == pattern
+    before, after = pattern.split("*", 1)
+    return len(name) >= len(before) + len(after) and name.startswith(before) and name.endswith(after)
+
+
+def unittest_match(suite, name, pattern):
+    """std/unittest's matchFilter for one command-line filter."""
+    if pattern == name:
+        return True
+    if "::" not in pattern:
+        return unittest_glob(name, pattern)
+    suite_pattern, test_pattern = pattern.split("::", 1)
+    return unittest_glob(suite, suite_pattern) and unittest_glob(name, test_pattern)
+
+
+def unittest_tests(source):
+    """(suite, test) names declared with literal strings in a std/unittest file."""
+    tests, suite = [], ""
+    for line in source.splitlines():
+        m = re.match(r'^suite "((?:[^"\\]|\\.)*)":\s*$', line)
+        if m:
+            suite = m.group(1)
+        m = re.match(r'^\s+test "((?:[^"\\]|\\.)*)":\s*$', line)
+        if m:
+            tests.append((suite, m.group(1)))
+    return tests
+
+
+def check_splits(commands):
+    """A std/unittest file listed on several manifest lines (same cwd and flags), each line
+    passing test-name filters, must have every test matched by exactly one line, and every
+    filter must match a test: std/unittest silently runs nothing for a filter that matches
+    nothing, so a renamed test would otherwise drop out of CI."""
+    ok = True
+    groups = {}
+    for c in commands:
+        args = shlex.split(c.command)
+        if args[:2] != ["nim", "r"]:
+            continue
+        i = next(i for i, a in enumerate(args) if i >= 2 and not a.startswith("-") and a.endswith(".nim"))
+        groups.setdefault((c.cwd, tuple(args[2:i]), args[i]), []).append((c, args[i + 1:]))
+    for (cwd, _, src), lines in groups.items():
+        if len(lines) < 2:
+            continue
+        tests = unittest_tests((ROOT / cwd / src).read_text(encoding="utf-8"))
+        if not tests:
+            print(f"{src}: on {len(lines)} lines but has no literal unittest tests")
+            ok = False
+            continue
+        for c, filters in lines:
+            if not filters:
+                print(f"{src}: manifest line {c.line} has no test filter, so it repeats every test")
+                ok = False
+            for f in filters:
+                if not any(unittest_match(suite, name, f) for suite, name in tests):
+                    print(f"{src}: filter {f!r} (manifest line {c.line}) matches no test")
+                    ok = False
+        for suite, name in tests:
+            owners = [c.line for c, filters in lines
+                      if any(unittest_match(suite, name, f) for f in filters)]
+            if len(owners) != 1:
+                print(f"{src}: test {name!r} is run by manifest lines {owners}, not exactly one")
+                ok = False
+        print(f"{src}: {len(tests)} tests split across {len(lines)} lines "
+              f"(lines {', '.join(str(c.line) for c, _ in lines)})")
+    return ok
+
+
 def check(commands, shards, durations, workflow):
     ok = True
     seen = {}
@@ -115,6 +193,7 @@ def check(commands, shards, durations, workflow):
             print(f"duplicate command on lines {seen[c.command]} and {c.line}: {c.command}")
             ok = False
         seen[c.command] = c.line
+    ok = check_splits(commands) and ok
     bins, loads = plan(commands, shards, durations)
     assigned = [c.index for b in bins for c in b]
     if sorted(assigned) != list(range(len(commands))):
@@ -152,12 +231,14 @@ def check(commands, shards, durations, workflow):
 
 
 def command_env(c, args):
-    """The environment for one command. With CI_NIMCACHE_ROOT set (POSIX only), a `nim` command
+    """The environment for one command. With CI_NIMCACHE_ROOT set (POSIX only), each command
     gets its own XDG_CACHE_HOME under it, so Nim keeps that command's nimcache in a directory no
-    other command (or flag set) shares, and CI can cache the whole root between runs. The
-    command's text and flags are unchanged."""
+    other command (or flag set) shares, including nim builds a python test starts itself; CI
+    caches the whole root between runs, and concurrent commands (--jobs) never build into the
+    same directory. The command's text and flags are unchanged. Without it (Windows), commands
+    share Nim's default nimcache, so run them with --jobs 1."""
     root = os.environ.get("CI_NIMCACHE_ROOT")
-    if not root or os.name == "nt" or args[0] != "nim":
+    if not root or os.name == "nt":
         return None
     key = hashlib.sha1(f"{c.cwd}\0{c.command}".encode()).hexdigest()[:16]
     return {**os.environ, "XDG_CACHE_HOME": str(Path(root) / key)}
@@ -172,40 +253,97 @@ def endgroup():
         print("::endgroup::", flush=True)
 
 
-def run_shard(commands, shard, shards, durations):
+def run_one(c, label, capture):
+    """Run one command; returns (status, seconds, captured output or None)."""
+    args = shlex.split(c.command)
+    exe = shutil.which(args[0])
+    start = time.monotonic()
+    output = None
+    try:
+        if capture:
+            p = subprocess.run([exe or args[0], *args[1:]], cwd=ROOT / c.cwd,
+                               env=command_env(c, args), stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, errors="replace")
+            output = p.stdout
+        else:
+            p = subprocess.run([exe or args[0], *args[1:]], cwd=ROOT / c.cwd,
+                               env=command_env(c, args))
+        code = p.returncode
+    except OSError as error:
+        output = (output or "") + f"could not start: {error}\n"
+        code = -1
+    return ("ok" if code == 0 else f"FAIL({code})"), time.monotonic() - start, output
+
+
+def report(status, elapsed, c):
+    if status.startswith("FAIL") and IN_ACTIONS:
+        print(f"::error title=CI test failed::{c.command} ({status}, manifest line {c.line})")
+    print(f"{status} {elapsed:6.1f}s  {c.command}", flush=True)
+
+
+def run_shard(commands, shard, shards, durations, jobs=1):
+    """Run one shard. With jobs > 1, up to `jobs` commands run at once, longest (by the
+    duration table) first, each command's output printed as one block when it finishes;
+    `serial` commands then run one at a time. With jobs == 1, commands run in manifest order
+    with their output streamed."""
     bins, loads = plan(commands, shards, durations)
     mine = bins[shard]
     print(f"shard {shard} of {shards}: {len(mine)} of {len(commands)} commands, "
-                f"estimated {loads[shard]:.0f}s", flush=True)
-    results = []
-    for n, c in enumerate(mine, 1):
-        label = f"[{n}/{len(mine)}] {c.command}" + (f"  (in {c.cwd})" if c.cwd else "")
+          f"estimated {loads[shard]:.0f}s, {jobs} at a time", flush=True)
+    results = {}
+    runnable = []
+    for c in mine:
         if c.posix_only and os.name == "nt":
-            print(f"skip (posix-only) {label}", flush=True)
-            results.append(("skip", 0.0, c))
-            continue
-        group(label)
-        args = shlex.split(c.command)
-        exe = shutil.which(args[0])
-        start = time.monotonic()
-        try:
-            code = subprocess.run([exe or args[0], *args[1:]], cwd=ROOT / c.cwd,
-                                  env=command_env(c, args)).returncode
-        except OSError as error:
-            print(f"could not start: {error}", flush=True)
-            code = -1
-        elapsed = time.monotonic() - start
+            print(f"skip (posix-only) {c.command}", flush=True)
+            results[c.index] = ("skip", 0.0, c)
+        else:
+            runnable.append(c)
+    label = lambda c: c.command + (f"  (in {c.cwd})" if c.cwd else "")
+    if jobs > 1 and (os.name == "nt" or not os.environ.get("CI_NIMCACHE_ROOT")):
+        print("no per-command nimcache (CI_NIMCACHE_ROOT unset or Windows): running one at a time",
+              flush=True)
+        jobs = 1
+    if jobs > 1:
+        pool = sorted((c for c in runnable if not c.serial),
+                      key=lambda c: (-durations.get(c.command, DEFAULT_SECONDS), c.index))
+        serial = [c for c in runnable if c.serial]
+        lock = threading.Lock()
+        queue = list(pool)
+
+        def worker():
+            while True:
+                with lock:
+                    if not queue:
+                        return
+                    c = queue.pop(0)
+                    print(f"start {label(c)}", flush=True)
+                status, elapsed, output = run_one(c, label(c), capture=True)
+                with lock:
+                    group(f"{status} {elapsed:.1f}s {label(c)}")
+                    sys.stdout.write(output or "")
+                    endgroup()
+                    report(status, elapsed, c)
+                    results[c.index] = (status, elapsed, c)
+
+        threads = [threading.Thread(target=worker) for _ in range(min(jobs, len(pool)))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    else:
+        serial = runnable
+    for n, c in enumerate(serial, 1):
+        group(f"[{n}/{len(serial)}] {label(c)}" + ("  (serial)" if jobs > 1 else ""))
+        status, elapsed, _ = run_one(c, label(c), capture=False)
         endgroup()
-        status = "ok" if code == 0 else f"FAIL({code})"
-        if code != 0 and IN_ACTIONS:
-            print(f"::error title=CI test failed::{c.command} (exit {code}, manifest line {c.line})")
-        print(f"{status} {elapsed:6.1f}s  {c.command}", flush=True)
-        results.append((status, elapsed, c))
-    failed = [r for r in results if r[0].startswith("FAIL")]
-    total = sum(r[1] for r in results)
-    print(f"\nsummary: shard {shard} of {shards}, {len(results)} commands, "
-                f"{len(failed)} failed, {total:.0f}s")
-    for status, elapsed, c in results:
+        report(status, elapsed, c)
+        results[c.index] = (status, elapsed, c)
+    ordered = [results[c.index] for c in mine]
+    failed = [r for r in ordered if r[0].startswith("FAIL")]
+    total = sum(r[1] for r in ordered)
+    print(f"\nsummary: shard {shard} of {shards}, {len(ordered)} commands, "
+          f"{len(failed)} failed, {total:.0f}s of command time")
+    for status, elapsed, c in ordered:
         print(f"  {status:9} {elapsed:6.1f}s  {c.command}")
     sys.stdout.flush()
     return not failed
@@ -217,6 +355,8 @@ def main():
     parser.add_argument("--of", type=int, required=True, dest="shards")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--legacy-workflow")
+    parser.add_argument("--jobs", type=int, default=1,
+                        help="commands to run at once within the shard (default 1)")
     args = parser.parse_args()
     if args.shards < 1:
         parser.error("--of must be at least 1")
@@ -225,7 +365,7 @@ def main():
         sys.exit(0 if check(commands, args.shards, durations, args.legacy_workflow) else 1)
     if args.shard is None or not 0 <= args.shard < args.shards:
         parser.error("--shard must be in [0, --of)")
-    sys.exit(0 if run_shard(commands, args.shard, args.shards, durations) else 1)
+    sys.exit(0 if run_shard(commands, args.shard, args.shards, durations, max(1, args.jobs)) else 1)
 
 
 if __name__ == "__main__":
