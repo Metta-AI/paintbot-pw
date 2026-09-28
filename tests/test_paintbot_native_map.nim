@@ -124,14 +124,17 @@ else:
     joinThread(thread)
     job.hashes
 
-  proc checkSame(label: string, got, expected: seq[uint32]) =
-    ## The first differing tick, if any, names the failure.
-    check got.len == expected.len
+  proc firstDifference(got, expected: seq[uint32]): int =
+    ## The first tick (1-based) whose state hash differs, or a length mismatch; 0 if none.
     for t in 0..<min(got.len, expected.len):
-      if got[t] != expected[t]:
-        checkpoint label & ": first difference at tick " & $(t+1)
-        check got[t] == expected[t]
-        return
+      if got[t] != expected[t]: return t+1
+    if got.len != expected.len: return min(got.len, expected.len)+1
+
+  template checkSame(label: string, got, expected: seq[uint32]) =
+    ## A template, so the check fails the enclosing test.
+    let tick = firstDifference(got, expected)
+    if tick != 0: checkpoint label & ": first difference at tick " & $tick
+    check tick == 0
 
   suite "Native per-handle maps":
     test "map ABI: count, names, arguments":
