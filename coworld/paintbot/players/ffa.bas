@@ -153,7 +153,7 @@ sub kinInLine(ex, ey)
     ' the past six ticks, stands in for where they are.
     k = 0
     while k < 16
-      if k <> selfId and worldTick - spokeTick(k) <= 6 and kin(k) >= 25 and not visible(k) then
+      if k <> selfId and spokeTick(k) > 0 and worldTick - spokeTick(k) <= 6 and kin(k) >= 25 and not visible(k) then
         kinAt(spokeX(k) - selfX, spokeY(k) - selfY)
       end if
       k = k + 1
@@ -162,7 +162,7 @@ sub kinInLine(ex, ey)
     ' so this only catches the ones who just left the cone).
     k = 0
     while k < 16
-      if k <> selfId and worldTick - lastSeen(k) <= 24 and kin(k) >= 25 and not visible(k) then
+      if k <> selfId and lastSeen(k) > 0 and worldTick - lastSeen(k) <= 24 and kin(k) >= 25 and not visible(k) then
         kinAt(oldX(k) - selfX, oldY(k) - selfY)
       end if
       k = k + 1
