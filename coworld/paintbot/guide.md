@@ -345,6 +345,13 @@ players, but some are related, and a cog's score counts its relatives' points.
   16 loci by descent, so their relatedness r is 1/2; linked cousins share 8 (r = 1/4); clones
   share all 32 (r = 1); strangers 0. A cog's r to itself is 1. Other matching bits are chance
   and do not count. Families spawn together around one anchor each, spread over the map.
+- **Kin layout.** The optional `"kin_layout"` config key pins every match to one layout:
+  `"fours"`, `"pairs"`, `"trios_loner"`, `"cousins"`, `"strangers"` or `"clones"`
+  (`"sampled"` or absent draws one per seed, as above). Which seats form which family and
+  every genome still come from the seed. The key is FFA-kin only; a teams config that sets it
+  is rejected. The Heartland league (the `heartland` variant) sets `"kin_layout": "cousins"`,
+  so every league match has four families of four in two cousin-linked pairs, with r = 1, 1/2,
+  1/4 and 0 all present.
 - **Rules.** Every hit is an ordinary hit (there are no teams, so no friendly fire, and no
   uniforms). Cogs carry 10 base HP instead of 3 (a medkit restores all 10; `selfHp` and
   `playerHp` read 0-10), and gun rays stop at 20 m (2,000 units) instead of 52.5 m. Grenades,

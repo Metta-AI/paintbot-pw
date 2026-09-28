@@ -30,11 +30,15 @@ static: doAssert LayoutWeights.sum == 100
 when defined(pwTraining):
   var activeKinship* {.threadvar.}: Kinship
   var kinshipOverride* {.threadvar.}: Option[Kinship]
+  var kinLayoutPin* {.threadvar.}: Option[KinLayout]
 else:
   var activeKinship*: Kinship ## Set at world creation in FFA; unused in the teams game.
   ## When set, FFA worlds use this kinship instead of sampling one from the seed (training
   ## overrides, tests, and replays whose kinship is recorded).
   var kinshipOverride*: Option[Kinship]
+  ## When set (the coworld config's "kin_layout"), FFA worlds without an override play this
+  ## layout, with families and genes still drawn from the seed (kinshipFor).
+  var kinLayoutPin*: Option[KinLayout]
 
 proc r*(k: Kinship, i, j: int): float =
   ## Relatedness as a float, for scoring and reward only. Engine and hashed code must use
@@ -134,5 +138,8 @@ proc sampleKinship*(seed: int32): Kinship =
   build(layout, rng)
 
 proc matchKinship*(seed: int32): Kinship =
-  ## The kinship an FFA world created with this seed plays: the override, else the sample.
-  if kinshipOverride.isSome: kinshipOverride.get else: sampleKinship(seed)
+  ## The kinship an FFA world created with this seed plays: the override, else the pinned
+  ## layout, else the sample.
+  if kinshipOverride.isSome: kinshipOverride.get
+  elif kinLayoutPin.isSome: kinshipFor(kinLayoutPin.get, seed)
+  else: sampleKinship(seed)

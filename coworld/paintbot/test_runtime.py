@@ -897,9 +897,10 @@ class ManifestTests(unittest.TestCase):
         competition = self._config("competition")
         self.assertEqual(heartland["mode"], "ffa_kin")
         self.assertEqual(heartland["max_ticks"], 8640)
+        self.assertEqual(heartland["kin_layout"], "cousins")
         self.assertNotIn("slots", heartland)
         self.assertEqual(
-            {k: v for k, v in heartland.items() if k not in ("mode", "max_ticks")},
+            {k: v for k, v in heartland.items() if k not in ("mode", "max_ticks", "kin_layout")},
             {k: v for k, v in competition.items() if k not in ("slots", "max_ticks")},
         )
         # The validator refuses what the schema refuses.
@@ -907,6 +908,13 @@ class ManifestTests(unittest.TestCase):
         self.assertTrue(_schema_errors(schema, dict(heartland, mode="ffa")))
         self.assertTrue(_schema_errors(schema, dict(heartland, max_ticks=28801)))
         self.assertTrue(_schema_errors(schema, dict(heartland, extra=1)))
+        self.assertTrue(_schema_errors(schema, dict(heartland, kin_layout="triples")))
+        for layout in ("sampled", "fours", "pairs", "trios_loner", "cousins", "strangers", "clones"):
+            self.assertEqual(_schema_errors(schema, dict(heartland, kin_layout=layout)), [])
+        # Only the heartland variant pins a layout.
+        for variant in self.manifest["variants"]:
+            if variant["id"] != "heartland":
+                self.assertNotIn("kin_layout", variant["game_config"])
         # The certifier seats every declared player in its (teams) fixture and fails one that has
         # no slot. players/ffa.bas calls FFA-only host functions, so it cannot run there and is
         # not a declared player; it is submitted as a policy for the heartland league instead.
