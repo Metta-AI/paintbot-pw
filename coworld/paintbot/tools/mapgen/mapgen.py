@@ -620,6 +620,50 @@ def heart_target(m: Map) -> int:
     return max(10, 2 * int(round(land_m2 / HEART_AREA / 2)))
 
 
+def item_copies(m: Map) -> int:
+    """Each item kind and the trenches scale with the hearts: a 100-heart map carries ten
+    times the rules-40 set."""
+    return max(1, int(round(heart_target(m) / 10)))
+
+
+def cover_clear(m: Map, clearance: int):
+    """Cells at least `clearance` beyond every cover object's radius (validate's rule)."""
+    blocked = np.zeros((NZ, NX), bool)
+    for c in m.cover:
+        reach = c.r + clearance
+        k = int(reach / STEP) + 1
+        i, j = cell((c.x, c.z))
+        i0, i1, j0, j1 = max(0, i - k), min(NZ, i + k + 1), max(0, j - k), min(NX, j + k + 1)
+        zz, xx = np.mgrid[i0:i1, j0:j1]
+        blocked[i0:i1, j0:j1] |= np.hypot(XS[xx] - c.x, ZS[zz] - c.z) < reach
+    return ~blocked
+
+
+def spread_pick(P: Placer, lo, hi, same, sep, self_sep, clear, need_pad=False):
+    """Another copy of an item: the open spot in its ratio band farthest from its own kind."""
+    base = (P.ok & P.clear & P.flat & P.dry & P.inland & np.isfinite(P.ratio)
+            & (P.ratio >= lo) & (P.ratio <= hi) & clear)
+    if need_pad:
+        base &= P.pad
+    empty = np.ones((NZ, NX), bool)
+    for x, z in same:
+        empty[cell((x, z))] = False
+    score = np.where(base, ndimage.distance_transform_edt(empty) * STEP + P.noise(40), -np.inf)
+    for flat in np.argsort(score, axis=None)[::-1][:20000]:
+        i, j = divmod(int(flat), NX)
+        if not np.isfinite(score[i, j]):
+            break
+        p = (int(XS[j]), int(ZS[i]))
+        if not first_half(p):
+            p = mirror(p)
+        q = mirror(p)
+        if math.hypot(p[0] - q[0], p[1] - q[1]) < self_sep or not (P.free(p, sep) and P.free(q, sep)):
+            continue
+        P.taken += [(p[0], p[1], 0), (q[0], q[1], 0)]
+        return p
+    raise RuntimeError(f"no spot for another copy in ratio {lo}-{hi}")
+
+
 def place_extra_hearts(m: Map, P: Placer, hearts, pairs: int):
     """Extra neutral pairs by farthest-point sampling: each goes on the open, reachable pad
     farthest from every heart so far, so the nearest-heart territories stay about even."""
@@ -694,6 +738,17 @@ def populate(m: Map, rng):
     for k in range(3):
         p = P.pick(0.22, 0.48, openness / 4 + n(0.3), sep=520, self_sep=900, need_pad=True)
         m.trenches += [p, mirror(p)]
+    # Bigger maps (--heart-area): more copies of every item, each spread from its own kind.
+    if item_copies(m) > 1:
+        item_clear, trench_clear = cover_clear(m, 110), cover_clear(m, 170)
+    for _ in range(item_copies(m) - 1):
+        for kind, lo, hi, _, role in spec:
+            same = [(x, z) for x, z, k, _ in m.pickups if k == kind]
+            p = spread_pick(P, lo, hi, same, sep=380, self_sep=700, clear=item_clear)
+            m.pickups += [(p[0], p[1], kind, role), (*mirror(p), kind, role)]
+        for _ in range(3):
+            p = spread_pick(P, 0.22, 0.48, m.trenches, sep=520, self_sep=900, clear=trench_clear, need_pad=True)
+            m.trenches += [p, mirror(p)]
 
 
 # ---- validation -----------------------------------------------------------------------
@@ -704,10 +759,11 @@ def validate(m: Map):
     kinds = {}
     for _, _, k, _ in m.pickups:
         kinds[k] = kinds.get(k, 0) + 1
-    want = {"grenade": 4, "spray": 2, "armor": 2, "medkit": 4, "uniform": 2}
+    copies = item_copies(m)
+    want = {k: v * copies for k, v in {"grenade": 4, "spray": 2, "armor": 2, "medkit": 4, "uniform": 2}.items()}
     if kinds != want:
         bad.append(f"pickup counts {kinds}")
-    if len(m.hearts) != heart_target(m) or len(m.trenches) != 6:
+    if len(m.hearts) != heart_target(m) or len(m.trenches) != 6 * copies:
         bad.append("heart/trench counts")
     for seq in (m.hearts, m.pickups, [(x, z) for x, z in m.trenches], [(c.x, c.z) for c in m.cover]):
         for a, b in zip(seq[0::2], seq[1::2]):

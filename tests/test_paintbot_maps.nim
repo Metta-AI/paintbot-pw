@@ -33,8 +33,10 @@ suite "Paintbot generated maps":
       check home(1) == mirrored(home(0))
       var kinds: array[PickupKind, int]
       for p in w.pickups: inc kinds[p.kind]
-      check kinds == [4, 2, 4, 2, 2] # grenade, spray, medkit, armor, uniform
-      check w.trenches.len == 6
+      # Items and trenches scale with the hearts: one rules-40 set per ten hearts.
+      let copies = max(1, (w.controlHearts.len+5) div 10)
+      check kinds == [4*copies, 2*copies, 4*copies, 2*copies, 2*copies] # grenade, spray, medkit, armor, uniform
+      check w.trenches.len == 6*copies
       check w.cover.len == currentMap().cover.len
       for i in countup(0, w.controlHearts.len-2, 2):
         check w.controlHearts[i+1].pos == mirrored(w.controlHearts[i].pos)

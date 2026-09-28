@@ -921,10 +921,13 @@ proc updateGloryHearts*(w: var World) =
     w.gloryPickups.add GloryPickup(tick: w.tick, seat: taker.int32, amount: award, pos: heart.pos)
   w.gloryHearts = remaining
   if w.tick >= w.nextGloryHeart:
-    let (found, p) = w.gloryHeartSpot()
-    if found:
-      for spot in [p, point(Width-p.x.int, Height-p.z.int)]:
-        w.gloryHearts.add GloryHeart(pos: spot, expiresAt: w.tick+GloryHeartTicks)
+    # One mirrored pair per ten control hearts: a big map (mapgen --heart-area) keeps the
+    # glory-heart density of the ten-heart maps, which still spawn exactly one pair.
+    for pair in 0..<max(1, w.controlHearts.len div 10):
+      let (found, p) = w.gloryHeartSpot()
+      if found:
+        for spot in [p, point(Width-p.x.int, Height-p.z.int)]:
+          w.gloryHearts.add GloryHeart(pos: spot, expiresAt: w.tick+GloryHeartTicks)
     w.nextGloryHeart = w.tick+w.rng.between(GloryHeartMinGap, GloryHeartMaxGap)
 
 proc settleGlory*(w: var World) =

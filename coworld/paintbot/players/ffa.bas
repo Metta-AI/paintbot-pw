@@ -31,10 +31,10 @@ dim spokeTick(16)
 dim capBy(16)
 dim taken(128)
 dim avoidUntil(128)
-dim pickupMemoryX(32)
-dim pickupMemoryY(32)
-dim pickupMemoryKind(32)
-dim pickupMemoryTick(32)
+dim pickupMemoryX(256)
+dim pickupMemoryY(256)
+dim pickupMemoryKind(256)
+dim pickupMemoryTick(256)
 dim drF(6)
 
 ' Integer square root by Newton's method from above. 23170^2 exceeds any squared map distance.
@@ -616,7 +616,7 @@ wend
 
 ' Remember seen supplies for ten seconds; equip when nothing is close.
 i = 0
-while i < pickupCount() and i < 32
+while i < pickupCount() and i < 256
   if pickupVisible(i) then
     pickupMemoryX(i) = pickupX(i)
     pickupMemoryY(i) = pickupY(i)
@@ -629,7 +629,7 @@ if mode <> 2 and controlCaptureTeam(objective) <> selfId then
   nearest = -1
   nearestCost = 4840000
   j = 0
-  while j < pickupCount() and j < 32
+  while j < pickupCount() and j < 256
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
       kind = pickupMemoryKind(j)
       wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < kMaxHp) or (kind = 3 and armorHp < 3 and selfHp = kMaxHp)
