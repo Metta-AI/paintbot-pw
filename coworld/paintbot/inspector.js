@@ -19,7 +19,10 @@
     if (cog.carrying) items.push('Carrying enemy heart');
     return items.length ? items.join(' · ') : 'None';
   }
-  function bonuses(cog, terrain, e = {}, rules = 27) {
+  function territoryText(boost) {
+    return boost > 0 ? `Territory boost +${boost}%: ${boost}% faster, ${boost}% less gun spread.` : 'Territory boost +0% (neutral or unrelated ground).';
+  }
+  function bonuses(cog, terrain, e = {}, rules = 27, ffa = false) {
     if (cog.hp <= 0) return 'None while respawning or eliminated.';
     const items = [];
     if (cog.shield > 0) items.push(`Spawn protection · ${seconds(cog.shield)} remaining.`);
@@ -29,6 +32,8 @@
       const delta = terrain.spread - 100;
       items.push(delta === 0 ? 'Aim: normal gun spread.' : `Aim: ${Math.abs(delta)}% ${delta < 0 ? 'less' : 'more'} gun spread (${delta < 0 ? 'downhill' : 'uphill'}).`);
     }
+    // FFA-kin: 30% x r(me, territory owner) faster and less gun spread (sim.territoryBoost).
+    if (ffa && terrain) items.push(territoryText(terrain.territoryBoost ?? 0));
     if (rules >= 6 && (e.armor > 0 || cog.carrying || terrain?.trench >= 0)) items.push('Gun cooldown: 3s (normally 1s).');
     return items.join(' ') || 'None';
   }
@@ -69,7 +74,7 @@
     }
     return best;
   }
-  const api = {equipment, bonuses, objectDetails, objectAt};
+  const api = {equipment, bonuses, territoryText, objectDetails, objectAt};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaintbotInspector = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

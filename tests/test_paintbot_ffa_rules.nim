@@ -1,8 +1,10 @@
 ## FFA-kin rules (mode "ffa_kin" on rules 40): sixteen separate players, one life, neutral
 ## control hearts captured by a lone cog, great hearts that need three cogs, and kin-weighted
-## scores. The engine reads only the family grouping (spawn); the kin invariance test proves it.
+## scores. The engine reads only the family grouping (spawn) and r (territory boost), never
+## genes; the kin invariance test proves it.
 import std/unittest
 import ../examples/paintbot/[sim, kinship]
+import polyworld/rngs
 
 proc ffaWorld(seed = 2026'i32, endTick = 0'i32): World =
   gameMode = gmFfaKin
@@ -267,25 +269,30 @@ suite "FFA-kin rules":
     t.spawnAnchor[2] = point(1, 1)
     check t.stateHash() == teams
 
-  test "kin invariance: same families, different genes and r, identical hashes":
+  test "kin invariance: same families and r, different genes, identical hashes":
+    # The engine reads the family grouping (spawns) and r (the territory boost), never genes.
     for seed in [1'i32, 2026]:
       for layout in [klFours, klCousins, klTriosLoner]:
         let a = kinshipFor(layout, seed)
         var b = a
         b.genes = kinshipFor(layout, seed+1).genes
-        for i in 0..<KinSeats:
-          for j in 0..<KinSeats:
-            # Clones inside each family, and no cousin links: r changes, grouping does not.
-            if i == j or (a.family[i] >= 0 and a.family[i] == a.family[j]): b.ibd[i][j] = Loci.int8
-            else: b.ibd[i][j] = 0
-        check a.family == b.family
-        check a.ibd != b.ibd and a.genes != b.genes
+        check a.family == b.family and a.ibd == b.ibd
+        check a.genes != b.genes
         let ha = hashes(a, seed, 1440)
         check ha.len == 1440
         check ha == hashes(b, seed, 1440)
-    # The test can fail: a different family grouping moves the spawns.
+    # The test can fail: a different family grouping moves the spawns...
     let fours = kinshipFor(klFours, 1)
     check hashes(fours, 1, 24) != hashes(kinshipFor(klPairs, 1), 1, 24)
+    # ...and a different r (clones instead of siblings, same grouping) changes the territory
+    # boost on kin ground, so the match diverges.
+    var clones = fours
+    for i in 0..<KinSeats:
+      for j in 0..<KinSeats:
+        if i == j or (fours.family[i] >= 0 and fours.family[i] == fours.family[j]): clones.ibd[i][j] = Loci.int8
+        else: clones.ibd[i][j] = 0
+    check clones.family == fours.family and clones.ibd != fours.ibd
+    check hashes(fours, 1, 1440) != hashes(clones, 1, 1440)
 
   test "FFA cogs spawn with 10 HP and a medkit restores 10; teams cogs keep 3":
     var w = ffaWorld()
@@ -366,3 +373,115 @@ suite "FFA-kin rules":
     w.seatScore[3] = 420
     check w.scores()[3] == 42.0
     check w.scores()[4] == 0.0
+
+proc ownAll(w: var World, owner: int32) =
+  ## Every control heart owned by `owner` (-1 neutral), so every point is that seat's territory.
+  for h in w.controlHearts.mitems: h.owner = owner
+
+proc openLane(w: World, length: int): Point =
+  ## A start point with `length` units of walkable, dry-looking, trench-free ground to its east.
+  for z in countup(minZ()+400, maxZ()-400, 100):
+    for x in countup(minX()+400, maxX()-400-length, 100):
+      var clear = true
+      for d in countup(0, length, 10):
+        let p = point(x+d, z)
+        if w.blocked(p) or w.trenchAt(p) >= 0: clear = false; break
+      if clear: return point(x, z)
+  doAssert false, "no open lane"
+
+suite "FFA-kin territory boost":
+  setup:
+    visionRulesVersion = 40
+    gameMode = gmFfaKin
+    kinshipOverride = some(kinshipFor(klCousins, 7))
+  teardown:
+    gameMode = gmTeams
+    kinshipOverride = none(Kinship)
+
+  test "boost is 30 x r(me, owner of the nearest heart): own 30, sibling 15, cousin 7, stranger and neutral 0":
+    var w = emptyFfa()
+    let k = activeKinship
+    var sibling, cousin, stranger = -1
+    for j in 1..<Seats:
+      case k.rPercent(0, j)
+      of 50: sibling = j
+      of 25: cousin = j
+      of 0: stranger = j
+      else: discard
+    check sibling >= 0 and cousin >= 0 and stranger >= 0
+    let heart = w.controlHearts[3].pos
+    w.place(0, heart)
+    check w.territoryOwner(heart) == -1
+    check w.territoryBoost(0) == 0 # neutral
+    for (owner, boost) in [(0, 30), (sibling, 15), (cousin, 7), (stranger, 0)]:
+      w.controlHearts[3].owner = owner.int32
+      check w.territoryOwner(heart) == owner.int32
+      check w.territoryBoost(0) == boost
+    # The nearest heart decides, ties to the lower index; a far heart's owner does not count.
+    w.controlHearts[3].owner = -1
+    for i, h in w.controlHearts.mpairs:
+      if i != 3: h.owner = 0
+    check w.territoryBoost(0) == 0
+    gameMode = gmTeams
+    check w.territoryBoost(0) == 0
+
+  test "own territory moves a cog 30% faster than neutral ground":
+    const Ticks = 10
+    proc run(owner: int32): int =
+      var w = emptyFfa()
+      let start = w.openLane(40*Ticks + 200)
+      w.place(0, start)
+      w.place(1, point(if start.x > Width div 2: minX()+300 else: maxX()-300, start.z.int))
+      var cmds = idle()
+      cmds[0] = Command(walk: true, direct: true, goal: point(start.x.int + 40*Ticks + 150, start.z.int))
+      for t in 0..<Ticks:
+        w.ownAll(owner)
+        w.step(cmds)
+      w.cogs[0].pos.x - start.x
+    var sibling = -1
+    for j in 1..<Seats:
+      if activeKinship.rPercent(0, j) == 50: sibling = j
+    check run(-1) == MoveSpeed*Ticks
+    check run(0) == (MoveSpeed*130 div 100)*Ticks # 36 a tick
+    check run(sibling.int32) == (MoveSpeed*115 div 100)*Ticks # 32 a tick
+
+  test "own territory narrows gun spread by 30%":
+    # The same world twice, differing only in who owns the hearts: the same RNG draws give the
+    # same jitter, which the boost scales by 70/100. Measured on the ray's lateral offset.
+    var total: array[2, float]
+    var shots = 0
+    for seed in 1..12:
+      var ends: array[2, Point]
+      for arm, owner in [-1'i32, 0]:
+        var w = emptyFfa()
+        let start = w.openLane(2200)
+        w.place(0, start)
+        w.place(1, point(start.x.int, if start.z > Height div 2: minZ()+300 else: maxZ()-300))
+        w.rng = initRng(seed.int32)
+        var cmds = idle()
+        cmds[0] = Command(shoot: true, aim: point(start.x.int + 1500, start.z.int))
+        var fired = false
+        for t in 0..<30:
+          w.ownAll(owner)
+          w.step(cmds)
+          cmds[0].shoot = false
+          for b in w.balls:
+            if b.owner == 0 and b.velocity.x > 0:
+              ends[arm] = b.velocity; fired = true
+          if fired: break
+        check fired
+      # Lateral angle (z offset per unit x); the lane is flat, so the elevation factor is 100.
+      let neutral = ends[0].z.float / ends[0].x.float
+      let boosted = ends[1].z.float / ends[1].x.float
+      check abs(boosted) <= abs(neutral) + 0.002
+      total[0] += abs(neutral); total[1] += abs(boosted)
+      inc shots
+    check shots == 12 and total[0] > 0
+    check abs(total[1] / total[0] - 0.7) < 0.05
+
+  test "the teams game has no territory boost":
+    gameMode = gmTeams
+    kinshipOverride = none(Kinship)
+    var w = newWorld(2026)
+    for h in w.controlHearts.mitems: h.owner = 0
+    for i in 0..<Seats: check w.territoryBoost(i) == 0

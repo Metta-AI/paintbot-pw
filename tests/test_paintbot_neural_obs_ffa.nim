@@ -124,6 +124,52 @@ suite "Observation contract ffa.v1":
     check o[FfaTerrainOffset+56] == 0 and o[FfaTerrainOffset+57] == 0
     for v in o: check v.classify notin {fcNan, fcInf, fcNegInf}
 
+  test "own row column 40 is the territory boost / 30; plannedStep moves at the boosted speed":
+    let k = kinshipFor(klPairs, 7)
+    var w = handSetWorld(k)
+    var sibling = -1
+    for j in 1..<Seats:
+      if k.rPercent(0, j) == 50: sibling = j
+    check sibling >= 0
+    for h in w.controlHearts.mitems: h.owner = -1
+    var o = newSeq[float32](ObservationSizeFfaV1)
+    proc col40(w: World, slot: int, o: var seq[float32]): float32 =
+      encodeObservation(w, slot, o, ocFfaV1)
+      o[FfaIdentityOffset + slot*FfaIdentityRowSize + 40]
+    check w.col40(0, o) == 0
+    let far = w.cogs[0].pos.near(2000)
+    # plannedStep follows the waypoint, so compare step lengths (direction() rounds per axis).
+    proc stepLen(w: World, sneak: bool): int =
+      let v = w.plannedStep(0, far, sneak)
+      int(round(sqrt(float(v.x*v.x + v.z*v.z))))
+    check abs(w.stepLen(false) - MoveSpeed) <= 1
+    for h in w.controlHearts.mitems: h.owner = 0
+    check w.col40(0, o) == 1
+    for j in 1..<Seats: check o[FfaIdentityOffset + j*FfaIdentityRowSize + 40] == 0
+    check abs(w.stepLen(false) - MoveSpeed*130 div 100) <= 1
+    check abs(w.stepLen(true) - (MoveSpeed*130 div 100) div 2) <= 1 # sneaking halves after the boost
+    for h in w.controlHearts.mitems: h.owner = sibling.int32
+    check w.col40(0, o) == 0.5
+    check abs(w.stepLen(false) - MoveSpeed*115 div 100) <= 1
+    # The prediction is what the world does: one real step makes exactly that move.
+    block:
+      var s = w
+      s.cogs[0].shield = 0
+      let before = s.cogs[0].pos
+      let planned = s.plannedStep(0, far, false)
+      var cmds: array[Seats, Command]
+      cmds[0] = Command(walk: true, goal: far)
+      s.step(cmds)
+      check s.cogs[0].pos == Point(x: before.x + planned.x, z: before.z + planned.z)
+    # The kin mask hides it (it is r to the local owner).
+    var masked = newSeq[float32](ObservationSizeFfaV1)
+    encodeFfaObservation(w, 0, masked, w.observedBodies(0), k, FfaObsMaskKin)
+    check masked[FfaIdentityOffset + 40] == 0
+    # Teams: column 40 stays 0 and plannedStep is unboosted.
+    gameMode = gmTeams
+    check w.col40(0, o) == 0
+    check abs(w.stepLen(false) - MoveSpeed) <= 1
+
   test "no map flip: an odd seat sees the same absolute frame":
     let k = kinshipFor(klPairs, 7)
     var w = handSetWorld(k)
@@ -163,7 +209,7 @@ suite "Observation contract ffa.v1":
     var o = newSeq[float32](ObservationSizeFfaV1)
     encodeObservation(w, 0, o, ocFfaV1)
     for j in 0..<Seats:
-      for c in 5..39: check o[FfaIdentityOffset + j*FfaIdentityRowSize + c] == 0
+      for c in 5..40: check o[FfaIdentityOffset + j*FfaIdentityRowSize + c] == 0
     for i in 0..<10:
       check o[FfaHeartOffset + i*FfaHeartRowSize + 2] in [-1'f32, 0'f32]
       check o[FfaHeartOffset + i*FfaHeartRowSize + 5] == 0

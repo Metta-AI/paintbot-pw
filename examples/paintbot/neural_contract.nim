@@ -78,7 +78,8 @@ const
   ObservationContractFfaV1* = "paintbot-pw.rules40.obs.ffa.v1.float810"
   ObservationContractFfaV1Hash* = "6b19dc324386542eb915d30c2ce1707a8f8e192a0425ee8b2ae9145969583fc7"
   ## encodeFfaObservation mask bit 0 (training ABI only, pw_set_obs_mask): zero every
-  ## r-to-me column, the genes-only ablation.
+  ## r-to-me column (and the territory-boost column, which is r to the local owner), the
+  ## genes-only ablation.
   FfaObsMaskKin* = 1'u32
 static:
   doAssert FfaIdentityRowSize == 2 + 1 + 1 + 1 + Loci + 1 + 1 + 1 + 2
@@ -333,8 +334,8 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   ## (FfaMaxHp = 10 in FFA-kin, 3 in the teams game); alive, genes, r, score and hearts held are
   ## public. Outside FFA the kin, score and seat-ownership columns and the great-heart rows
   ## are zero (the teams game has no kinship). mask bit 0 (FfaObsMaskKin) zeroes every
-  ## r-to-me column: identity column 37 (the own row too, which then reads 0, not 1), and a
-  ## heart owned by another seat reads 0. Normalisations that can exceed 1: the score
+  ## r-to-me column: identity column 37 (the own row too, which then reads 0, not 1), the
+  ## own row's territory-boost column 40, and a heart owned by another seat reads 0. Normalisations that can exceed 1: the score
   ## columns (raw score / 1000; a strong seat passes 1000 points over a match). Every other
   ## column stays within [-1, 1] (armor is at most 3, cooldown at most 72, dx/dz within the
   ## map span).
@@ -344,7 +345,9 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   ##             0 dx/xspan, 1 dz/zspan (0 unless visible; own row 0), 2 visible (own 1),
   ##             3 alive, 4 hp/maxHp (0 unless visible), 5..36 gene bits 0..31 (+1 set, -1
   ##             clear), 37 r(me, j) (own row 1), 38 score/1000, 39 hearts held/10,
-  ##             40..41 reserved 0
+  ##             40 own row only: territory boost / TerritoryBoostPercent (1 on own
+  ##             territory, 0.5 a sibling's, 7/30 a cousin's, 0 neutral or a stranger's;
+  ##             computed from `kin`, zeroed by FfaObsMaskKin; other rows 0), 41 reserved 0
   ##   680+6i    control heart row i (0..9): 0 centred x, 1 centred z, 2 owner's r to me
   ##             (-1 neutral, 1 mine), 3 capture ticks/HeartCaptureTicks, 4 contested,
   ##             5 owned by me (absent heart: all 0)
@@ -400,6 +403,10 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
     output[o+37] = rTo(j)
     output[o+38] = points(j)
     output[o+39] = float32(held[j])/10
+  # Own row, column 40: the territory boost where I stand, as a fraction of the maximum.
+  if kinOn and not hideKin:
+    output[FfaIdentityOffset + slot*FfaIdentityRowSize + 40] =
+      float32(w.territoryBoost(slot, kin))/float32(TerritoryBoostPercent)
   # Control hearts.
   for i in 0..<FfaHeartRows:
     if i >= w.controlHearts.len: continue
@@ -487,13 +494,14 @@ proc oneTickStep(a, b: Point): Point =
 proc plannedStep*(w: World, slot: int, goal: Point, sneak: bool): Point =
   ## The move the world will make for the seat on the coming tick towards `goal` (the
   ## command's goal, clamped as the step clamps it): the same waypoint, speed (carrying,
-  ## sneaking, wading) and trench damping as mechanics.nim, before any blocking or
-  ## yielding. Zero when the seat is already there.
+  ## FFA-kin territory boost, sneaking, wading) and trench damping as mechanics.nim, before
+  ## any blocking or yielding. Zero when the seat is already there.
   let me = w.cogs[slot]
   let clamped = Point(x: clamp(goal.x, (minX()+100).int32, (maxX()-100).int32),
                       z: clamp(goal.z, (minZ()+100).int32, (maxZ()-100).int32))
   let dest = w.waypointFor(slot, me.pos, clamped)
   var speed = if me.carrying: MoveSpeed*7 div 10 else: MoveSpeed
+  speed = boostedSpeed(speed, w.territoryBoost(slot))
   if visionRulesVersion >= 26 and sneak: speed = speed div 2
   if visionRulesVersion >= 30 and riverBlend(me.pos.x.int, me.pos.z.int) > 0 and
       terrainHeight(me.pos.x.int, me.pos.z.int) < RiverWaterHeight:

@@ -60,6 +60,10 @@ const
   # 20 m instead of GunRange, so fights last long enough to leave and to come to a relative's aid.
   FfaMaxHp* = 10
   FfaGunRange* = 2000
+  ## FFA-kin territory boost: a cog standing in territory owned by seat j (the owner of the
+  ## nearest control heart) moves up to this much faster and has this much less gun spread,
+  ## scaled by rPercent(me, j): own 30, sibling 15, cousin 7 (7.5 floored), stranger 0.
+  TerritoryBoostPercent* = 30
   ControlHeartRadius* = 140 # A cog within this (and a traversable line) touches a control heart.
   TeamsMaxHp = 3
   # Compile-time exponential table keeps native/WASM sampling integer-only.
@@ -1060,6 +1064,31 @@ proc waypoint*(w:World,start,goal:Point):Point =
     if not w.walkClear(start,p):break
     if pullDry and not navSegmentDry(start,p,nx,nz):break
     result=p;anchor=next
+proc territoryOwner*(w: World, p: Point): int32 =
+  ## Who owns the territory at p: the owner of the nearest control heart (distance2, ties
+  ## to the lower index; the viewer's territory overlay uses the same rule), -1 when that
+  ## heart is neutral or there are no hearts.
+  if w.controlHearts.len == 0: return -1
+  var nearest = 0
+  for i, h in w.controlHearts:
+    if distance2(p, h.pos) < distance2(p, w.controlHearts[nearest].pos): nearest = i
+  w.controlHearts[nearest].owner
+proc territoryBoost*(w: World, slot: int, kin: Kinship): int =
+  ## The FFA-kin territory boost for the seat where it stands, in percent:
+  ## TerritoryBoostPercent * rPercent(slot, owner) div 100. 0 in the teams game, on neutral
+  ## ground and on a stranger's. Movement speed is multiplied by (100 + boost) / 100 and gun
+  ## spread by (100 - boost) / 100. This and spawn grouping are the only places the engine
+  ## reads kinship; it reads r (ibd), never genes.
+  if not ffa() or slot notin 0..<Seats: return 0
+  let owner = w.territoryOwner(w.cogs[slot].pos)
+  if owner notin 0'i32..<Seats.int32: return 0
+  TerritoryBoostPercent * kin.rPercent(slot, owner.int).int div 100
+proc territoryBoost*(w: World, slot: int): int =
+  ## territoryBoost under the match's kinship (activeKinship).
+  w.territoryBoost(slot, activeKinship)
+proc boostedSpeed*(speed, boost: int): int =
+  ## A move speed under a territory boost; exact identity at boost 0 (the teams game).
+  speed * (100 + boost) div 100
 proc stepEquipment(w: var World, commands: array[Seats, Command])
 proc step*(w: var World, commands: array[Seats, Command],
     rulesVersion = visionRulesVersion) =
@@ -1085,7 +1114,8 @@ proc step*(w: var World, commands: array[Seats, Command],
       w.cogs[i].aim = cmd.goal
     let dest = if cmd.direct: w.cogs[i].goal else: w.waypoint(w.cogs[i].pos,
         w.cogs[i].goal)
-    let speed = if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed
+    let speed = boostedSpeed(if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed,
+      w.territoryBoost(i))
     if distance2(w.cogs[i].pos, dest) > speed.int64*speed:
       let v = direction(w.cogs[i].pos, dest, speed)
       var p = w.cogs[i].pos; p.x+=v.x

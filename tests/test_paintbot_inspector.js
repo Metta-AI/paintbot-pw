@@ -1,10 +1,15 @@
 const assert = require('node:assert/strict');
-const {equipment, bonuses, objectDetails, objectAt} = require('../coworld/paintbot/inspector.js');
+const {equipment, bonuses, territoryText, objectDetails, objectAt} = require('../coworld/paintbot/inspector.js');
 assert.equal(equipment({}), 'None');
 assert.match(equipment({}, {sprayCan: true, sprayCooldown: 48, armor: 2}, true), /ready in 2.0s.*Armor · 2 \/ 3.*Uniform/);
 assert.match(bonuses({hp: 3}, {elevation: 200, trench: 0, spread: 50}), /70%.*Elevation 2.0 m.*50% less.*cooldown: 3s/);
 assert.match(bonuses({hp: 3}, {elevation: 0, trench: -1, spread: 125}), /25% more.*uphill/);
 assert.doesNotMatch(bonuses({hp: 0}, {elevation: 200, trench: 0, spread: 50}), /70%|less/);
+// FFA-kin territory boost: shown only in FFA, from terrain.territoryBoost.
+assert.match(bonuses({hp: 3}, {elevation: 0, trench: -1, spread: 100, territoryBoost: 15}, {}, 40, true), /Territory boost \+15%: 15% faster, 15% less gun spread/);
+assert.match(bonuses({hp: 3}, {elevation: 0, trench: -1, spread: 100, territoryBoost: 0}, {}, 40, true), /Territory boost \+0%/);
+assert.doesNotMatch(bonuses({hp: 3}, {elevation: 0, trench: -1, spread: 100, territoryBoost: 0}, {}, 40, false), /Territory/);
+assert.equal(territoryText(30), 'Territory boost +30%: 30% faster, 30% less gun spread.');
 const state = {world: {tick: 120, controlHearts: [{owner: 1}], heartCaptures: [{team: 0, ticks: 24}], pickups: [{kind: 'armorPickup', readyAt: 240}]}, heartHeld: [48], heartValues: [5]};
 let info = objectDetails({kind: 'heart', id: 0}, state);
 assert.equal(info.title, 'Big heart 1');

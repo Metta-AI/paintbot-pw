@@ -412,7 +412,7 @@ suite "Native FFA-kin ABI":
         check (envOf(knobs).world.spawnAnchor[i] == envOf(knobs).world.spawnAnchor[j]) == (i mod 4 == j mod 4)
     pw_destroy(plain); pw_destroy(knobs)
 
-  test "kin invariance through the ABI: one spawn grouping, two kinships, identical hashes":
+  test "kin invariance through the ABI: one spawn grouping and r, two genomes, identical hashes":
     proc run(genesSalt: uint32, r: int8): seq[uint32] =
       let h = pw_create(41, 24)
       var family: array[Seats, int8]
@@ -435,9 +435,13 @@ suite "Native FFA-kin ABI":
         if pw_step(h, ip(actions), fp(rewards), fp(terminals)) != 0: break
         result.add pw_state_hash(h)
       pw_destroy(h)
+    # The engine never reads genes; it reads r only through the territory boost.
     let a = run(2654435761'u32, 16)
-    let b = run(40503'u32, 8)
+    let b = run(40503'u32, 16)
     check a.len > 0 and a == b
+    # Negative control: a different r (cousins instead of siblings in each family) changes
+    # the boost on kin ground, so the hashes diverge.
+    check run(2654435761'u32, 8) != a
     # Negative control: without the grouping override the families (i div 4) place spawns.
     let h = pw_create(41, 24)
     doAssert pw_set_game_mode(h, 1) == 0 and pw_set_kin_layout(h, 0) == 0

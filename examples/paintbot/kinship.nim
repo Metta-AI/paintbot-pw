@@ -1,7 +1,8 @@
 ## FFA-kin relatedness: families, 32-locus genomes and loci shared by descent, drawn from the
 ## match seed on a private stream. Kinship lives outside World and never touches its RNG; the
-## engine reads only the family grouping (for spawn placement), and scoring, reward,
-## observations and the viewer read the rest. r(i,j) = loci shared by descent / 32; chance
+## engine reads the family grouping (for spawn placement) and r (ibd, for the territory boost:
+## sim.territoryBoost) and never the genes; scoring, reward, observations and the viewer read
+## the rest. r(i,j) = loci shared by descent / 32; chance
 ## matches between independent random bits never count.
 import std/[math, options]
 export options

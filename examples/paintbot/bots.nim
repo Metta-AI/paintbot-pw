@@ -184,6 +184,8 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
       if seatIndex(a[0]): int32(inMatch(a[0].int)) else: -1'i32,4)
     discard result.addFunction("heartOwner",1,proc(a:openArray[int32]):int32 =
       if a[0] >= 0 and a[0] < active.controlHearts.len: active.controlHearts[a[0]].owner else: -1'i32,4)
+    discard result.addFunction("territoryBoost",0,proc(a:openArray[int32]):int32 =
+      active.territoryBoost(slot).int32,4)
     discard result.addFunction("greatHeartCount",0,proc(a:openArray[int32]):int32 =
       active.greatHearts.len.int32,4)
     proc getGreatHeart(field:int):HostProc =

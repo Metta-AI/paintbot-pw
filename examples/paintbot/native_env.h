@@ -414,9 +414,11 @@ int pw_net_infer(void *net, const float *observation, float *state, float *logit
  * pw_set_spawn_grouping int8[16] spawn groups (0..15, -1 alone) independent of the
  * kinship, NULL clears; pw_set_kin_override an exact kinship: family int8[16] (-1..15),
  * genes uint32[16], ibd int8[256] (0..32, symmetric, 32 on the diagonal; r = ibd/32),
- * family NULL clears, wins over the layout (the override's layout is a label only). Both apply at the NEXT pw_reset and stay until
+ * family NULL clears, wins over the layout (the override's layout is a label only). The engine
+ * reads the ibd matrix (the FFA territory boost, sim.territoryBoost) but never the genes. Both apply at the NEXT pw_reset and stay until
  * cleared. pw_set_obs_mask: bit 0 zeroes every r-to-me column of ffa.v1 (the genes-only
- * ablation; the own row reads 0 too), read by the next pw_observe, kept across resets;
+ * ablation; the own row reads 0 too, as does the own row's territory-boost column), read
+ * by the next pw_observe, kept across resets;
  * other bits rejected. pw_set_pair_stats_enabled(h, 0/1): pair counters off/on (default
  * on; off skips their per-tick work, from the next pw_step, kept across resets); the
  * reward, its split, the returns and death ticks are always kept.

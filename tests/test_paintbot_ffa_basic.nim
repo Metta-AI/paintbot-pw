@@ -1,5 +1,5 @@
 ## FFA-kin BASIC host functions: kinship, genes, raw scores, who is still in the match, heart
-## owners and great hearts; selfTeam and playerTeam read the seat. In the teams game the new
+## owners, great hearts and the territory boost; selfTeam and playerTeam read the seat. In the teams game the new
 ## functions read "no FFA" and the old data is unchanged.
 import std/[unittest, os, strutils]
 import polyworld/[cli, basic]
@@ -79,6 +79,21 @@ suite "FFA-kin BASIC host":
     check w.ask(0, "greatHeartPresent(1)", "greatHeartProgress(1)") == (3'i32, 40'i32)
     check w.ask(0, "greatHeartDormant(1)", "greatHeartDormant(0)") == (100'i32, 0'i32)
     check w.ask(0, "greatHeartPresent(-1)", "greatHeartDormant(2)") == (-1'i32, -1'i32)
+    # territoryBoost(): 30 x r(me, owner of the nearest heart) where I stand, in percent.
+    for h in w.controlHearts.mitems: h.owner = -1
+    w.cogs[9].hp = FfaMaxHp.int32 # seat 9 was out of the match above; dead seats do not decide
+    w.equipment[9].lives = 1
+    let spot = w.controlHearts[1].pos
+    w.cogs[0].pos = spot
+    w.cogs[sibling].pos = spot
+    w.cogs[cousin].pos = spot
+    w.cogs[stranger].pos = spot
+    check w.ask(0, "territoryBoost()", "0") == (0'i32, 0'i32)
+    w.controlHearts[1].owner = 0
+    check w.ask(0, "territoryBoost()", "0") == (30'i32, 0'i32)
+    check w.ask(sibling, "territoryBoost()", "0") == (15'i32, 0'i32)
+    check w.ask(cousin, "territoryBoost()", "0") == (7'i32, 0'i32)
+    check w.ask(stranger, "territoryBoost()", "0") == (0'i32, 0'i32)
 
   test "selfTeam, playerTeam and home read the seat in FFA":
     var w = ffaWorld()
@@ -98,7 +113,7 @@ suite "FFA-kin BASIC host":
     # Submitted teams scripts may use any of the FFA names as plain variables.
     let names = ["kin", "gene", "heartOwner", "gameMode", "greatHeartCount", "greatHeartX",
       "greatHeartY", "greatHeartPresent", "greatHeartProgress", "greatHeartDormant",
-      "seatScore", "seatAlive"]
+      "seatScore", "seatAlive", "territoryBoost"]
     let path = getTempDir() / "paintbot-ffa-basic-names.bas"
     defer: removeFile(path)
     var source = ""

@@ -573,6 +573,8 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
     let dest = if cmd.direct: w.cogs[i].goal else: w.waypointFor(i, w.cogs[i].pos,
         w.cogs[i].goal)
     var speed = if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed
+    # FFA-kin territory boost (0 in the teams game, where this is the identity).
+    speed = boostedSpeed(speed, w.territoryBoost(i))
     if visionRulesVersion >= 26 and cmd.sneak: speed = speed div 2
     if visionRulesVersion >= 30 and riverBlend(w.cogs[i].pos.x.int, w.cogs[i].pos.z.int) > 0 and
         terrainHeight(w.cogs[i].pos.x.int, w.cogs[i].pos.z.int) < RiverWaterHeight:
@@ -642,7 +644,9 @@ proc stepEquipment(w: var World, commands: array[Seats, Command]) =
           var jitter = w.rng.between(-32, 32)+w.rng.between(-32, 32)
           if visionRulesVersion >= 10:
             let target = Point(x: origin.x+aim.x, z: origin.z+aim.z)
-            jitter = jitter*w.gunSpreadPercent(origin, target).int32 div 100
+            # FFA-kin territory boost narrows the spread (identity at boost 0).
+            let spread = w.gunSpreadPercent(origin, target)*(100-w.territoryBoost(i)) div 100
+            jitter = jitter*spread.int32 div 100
             aim = direction(Point(), aim, GunRange)
           aim = Point(x: aim.x-int32(int64(aim.z)*jitter div GunRange),
               z: aim.z+int32(int64(aim.x)*jitter div GunRange))

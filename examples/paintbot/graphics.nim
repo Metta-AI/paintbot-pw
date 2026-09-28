@@ -17,6 +17,7 @@ type
     seed: int32
   CogTerrain = object
     elevation, trench, spread: int
+    territoryBoost: int # FFA-kin territory boost in percent (sim.territoryBoost); 0 in teams
   Inspectable = object
     kind: string
     id: int
@@ -1228,7 +1229,8 @@ proc runGraphics*() =
                 z: cog.pos.z+world.equipment[i].gunAim.z)
             else: cog.aim
           terrain[i] = CogTerrain(elevation: world.elevation(cog.pos),
-            trench: world.trenchAt(cog.pos), spread: world.gunSpreadPercent(cog.pos, aim))
+            trench: world.trenchAt(cog.pos), spread: world.gunSpreadPercent(cog.pos, aim),
+            territoryBoost: world.territoryBoost(i))
         var objects: seq[Inspectable]
         var heartHeld: seq[int]
         var heartValues: seq[int32]

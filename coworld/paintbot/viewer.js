@@ -1142,7 +1142,7 @@
       $("cog-lives").textContent = w.equipment?.[inspected]?.lives ?? "—";
       $("cog-captures").textContent = cog.captures;
       $("cog-equipment").textContent = inspector.equipment(cog, w.equipment?.[inspected], w.uniforms?.[inspected]);
-      $("cog-bonuses").textContent = inspector.bonuses(cog, state.terrain?.[inspected], w.equipment?.[inspected], state.rulesVersion);
+      $("cog-bonuses").textContent = inspector.bonuses(cog, state.terrain?.[inspected], w.equipment?.[inspected], state.rulesVersion, ffaOn());
       $("cog-status").hidden = cog.hp > 0;
       $("cog-status").textContent = w.equipment?.[inspected]?.lives === 0
         ? "Eliminated" : `Respawning in ${Math.ceil(cog.respawn / 24)}s`;

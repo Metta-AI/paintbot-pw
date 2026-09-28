@@ -119,8 +119,8 @@ Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `gloryHeartTicksLeft(id)` (rules 38). Hidden player, pickup and glory-heart coordinates are
 not disclosed (-1). Available in FFA-kin mode only (Heartland): `gameMode()`, `kin(slot)`, `gene(slot,i)`,
 `seatScore(slot)`, `seatAlive(slot)`, `heartOwner(i)`, `greatHeartCount()`, `greatHeartX(i)`,
-`greatHeartY(i)`, `greatHeartPresent(i)`, `greatHeartProgress(i)` and `greatHeartDormant(i)`;
-see "FFA-kin mode (Heartland)". In the teams game these names are not defined, so scripts may
+`greatHeartY(i)`, `greatHeartPresent(i)`, `greatHeartProgress(i)`, `greatHeartDormant(i)` and
+`territoryBoost()`; see "FFA-kin mode (Heartland)". In the teams game these names are not defined, so scripts may
 use them as ordinary variables.
 
 Actions: `walkTo(x,y)`, `lookAt(x,y)`, `shootAt(x,y)`, `chargeGrenade(held)`.
@@ -334,6 +334,12 @@ players, but some are related, and a cog's score counts its relatives' points.
   a heart; any second cog in range, relatives included, pauses the capture, and the heart's
   owner standing on it blocks capture entirely. An owned heart pays its owner 1 point per
   second.
+- **Territory boost.** The ground belongs to the owner of the nearest control heart (the
+  territory overlay; a neutral heart's ground belongs to nobody). A cog on ground owned by
+  seat j moves faster and shoots straighter by 30% × r(me, j): +30% on its own ground, +15% on
+  a sibling's, +7% on a cousin's (7.5 rounded down), nothing on a stranger's or neutral ground.
+  Speed is multiplied by (100 + boost)/100 (before sneaking or wading halve or quarter it) and
+  gun spread by (100 - boost)/100.
 - **Great hearts.** Two great hearts sit at mirrored spots. Three or more living cogs inside
   200 units for 5 seconds (120 ticks) capture one; progress falls one tick per tick while
   fewer than three are present. A capture pays 60 points split equally among every cog in the
@@ -363,6 +369,8 @@ same names as ordinary variables (a script that calls them fails to compile ther
   position. `greatHeartPresent(i)`: living cogs in its zone. `greatHeartProgress(i)`: capture
   ticks (0-119). `greatHeartDormant(i)`: ticks until it is ready again, 0 if ready. Invalid
   indices return -1.
+- `territoryBoost()`: your territory boost where you stand, in percent (30 own, 15 sibling,
+  7 cousin, 0 stranger or neutral).
 
 `seatScore` and `seatAlive` are named that way because `score` and `alive` are common variable
 names in existing bots. The baseline for this mode is `players/ffa.bas` (submit it as a policy; it calls FFA-only
