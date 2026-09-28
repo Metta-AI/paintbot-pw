@@ -997,6 +997,7 @@ proc waypoint*(w:World,start,goal:Point):Point =
     nav.weighted==wetRouting and
     ((nav.payload==payload and defined(pwTraining)) or nav.cover==w.cover)
   if not same:
+    benchEnter(bkNavBuild)
     nav.cover=w.cover;nav.bounds=bounds;nav.fields.clear();nav.recent.setLen(0);nav.targets.clear()
     nav.weighted=wetRouting;nav.water.setLen(0)
     nav.edges=newSeq[seq[int]](nx*nz)
@@ -1017,16 +1018,20 @@ proc waypoint*(w:World,start,goal:Point):Point =
       let c=navigationPoint(n,nx)
       nav.water[n]=riverBlend(c.x.int,c.z.int)>0 and terrainHeight(c.x.int,c.z.int)<RiverWaterHeight
   let dryOnly=wetRouting and (let c=navCellOf(start,nx,nz); c<0 or not nav.water[c])
-  if wetRouting and w.walkClear(start,goal) and (not dryOnly or navSegmentDry(start,goal,nx,nz)):
-    return goal
+  block direct:
+    benchEnter(bkNavDirect)
+    if wetRouting and w.walkClear(start,goal) and (not dryOnly or navSegmentDry(start,goal,nx,nz)):
+      return goal
   var target = -1
   if goal in nav.targets:target=nav.targets[goal]
   else:
+    benchEnter(bkNavTarget)
     target=nearestConnectedCell(goal,nx,nz)
     if nav.targets.len>=NavTargetLimit:nav.targets.clear()
     nav.targets[goal]=target
   if target<0:return start
   if target notin nav.fields:
+    benchEnter(bkNavField)
     var distances=newSeq[int32](nx*nz)
     for d in distances.mitems:d = -1
     if wetRouting:
@@ -1069,7 +1074,9 @@ proc waypoint*(w:World,start,goal:Point):Point =
   let sz=(start.z.int-minZ()) div NavCell
   # From dry land the anchor must be reachable without wading; if that leaves nothing - a cog
   # on a shore whose every open neighbour is wet - fall back to the old rule, never stand still.
-  for pass in 0..1:
+  block anchorSearch:
+   benchEnter(bkNavAnchor)
+   for pass in 0..1:
     if pass==1 and (anchor>=0 or not dryOnly):break
     let needDry=dryOnly and pass==0
     for z in max(0,sz-3)..min(nz-1,sz+3):
@@ -1083,6 +1090,7 @@ proc waypoint*(w:World,start,goal:Point):Point =
   if anchor<0:return
   let pullDry=dryOnly and navSegmentDry(start,navigationPoint(anchor,nx),nx,nz)
   result=navigationPoint(anchor,nx)
+  benchEnter(bkNavPull)
   for step in 0..<8:
     var next = -1
     for j in nav.edges[anchor]:

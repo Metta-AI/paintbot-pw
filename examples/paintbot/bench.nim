@@ -1,7 +1,8 @@
 ## Opt-in inclusive timers for the simulation's hot spots (`-d:pwBench`). Without the
 ## define every probe compiles to nothing, so shipped builds and replays are unaffected.
 type BenchKind* = enum
-  bkStep, bkDecide, bkVisible, bkLineClear, bkBlocked, bkWalkClear, bkTraversable, bkWaypoint
+  bkStep, bkDecide, bkVisible, bkLineClear, bkBlocked, bkWalkClear, bkTraversable, bkWaypoint,
+  bkNavBuild, bkNavDirect, bkNavTarget, bkNavField, bkNavAnchor, bkNavPull
 
 when defined(pwBench):
   import std/[monotimes, strutils, strformat]
