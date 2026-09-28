@@ -686,6 +686,32 @@ Neural canaries, seed 2026 against the plain BASIC filler, all 16 seats exit 0 w
   through `neuralSample`/`neuralDecode`/`neuralIssue` ran as `ereq_b00a4c6f` (2972 ticks, hash 938676042, the same as
   the local run).
 
+## Generated maps (rules 41) — 0.3.49
+
+#122 adds ten generated maps (`coworld/paintbot/tools/mapgen/`), shipped as `cow_c9591194-7fce-4424-b954-606750e2d83c`
+(0.3.49, deployed automatically with main at `c63a4f2`).
+
+- Rules 41: a game config may name `"map"`, and each map has its own `map-<name>` variant. `competition`, `1v1` and
+  `2v2` set no map and still play Heartwick. Without a map, rules 41 play exactly like rules 40; the version bump
+  exists only because replays now record the map name. Replays at rules 26-40 load unchanged.
+- The engine and the WASM viewer both embed the maps (`examples/paintbot/maps/*.pbmap`, about 250 KB each).
+
+Showcase episodes on 0.3.49, one per map: jevbot-v2 v14 against `paintbot-pw-basic-v22:v1`, sides alternating
+between maps. The champion won all ten:
+
+| Variant | Episode | Glory |
+| --- | --- | --- |
+| `map-twin-mesas` | `ereq_4f97c421-50f7-4957-b1b7-7c6829709682` | jevbot-v2 v14 575 - basic 0 |
+| `map-archipelago` | `ereq_1f5cc384-d4ec-40b8-90ea-9d56be4e3f7e` | jevbot-v2 v14 567 - basic 0 |
+| `map-serpent-river` | `ereq_d2bf0500-7ef0-4b06-9695-ab295f46de19` | jevbot-v2 v14 549 - basic 0 |
+| `map-crater` | `ereq_0c78b073-79ab-4964-9655-275ad8b16a77` | jevbot-v2 v14 535 - basic 0 |
+| `map-terraces` | `ereq_1ca1637b-1e1d-43ac-ad67-c62739f31130` | jevbot-v2 v14 556 - basic 0 |
+| `map-deep-forest` | `ereq_cec2106c-9e95-4628-9416-d3fbb26bd81d` | jevbot-v2 v14 568 - basic 0 |
+| `map-badlands` | `ereq_06fe63dc-5de8-4b2e-ab84-04d130d4b29f` | jevbot-v2 v14 547 - basic 0 |
+| `map-atoll` | `ereq_b1d41efa-5a54-4ff8-be95-a45f7f7e0587` | jevbot-v2 v14 563 - basic 0 |
+| `map-highlands` | `ereq_5e560db4-0e32-42b1-8cb8-fb4c642f16dc` | jevbot-v2 v14 580 - basic 0 |
+| `map-delta` | `ereq_911b2c35-1fd5-495a-ab92-69f6350e9bec` | jevbot-v2 v14 555 - basic 0 |
+
 ## Stronger grenades and spray (rules 40) — 0.3.47
 
 #114 makes both pickups worth taking. League replays from 0.3.46 showed the top three teams almost never use
