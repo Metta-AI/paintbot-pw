@@ -91,13 +91,13 @@ proc variants(): seq[Variant] =
     if only.len > 0 and v["id"].getStr notin only.split(','): continue
     result.add Variant(id: v["id"].getStr, config: $v["game_config"])
 
-proc hostRun(config: string, seed: int32, ticks: int): Run =
-  ## The hosted game's live path (game.setup, game.advance): applyGameConfig, the live rules,
-  ## the config's map and vision (CoworldConfig), its glory, newLiveWorld, BASIC seats
-  ## deciding on the pre-step world, speech, step.
+proc hostRun(config: string, seed: int32, ticks: int, rules = LiveRules): Run =
+  ## The hosted game's live path (game.setup, game.advance): applyGameConfig, the live rules
+  ## (or `rules`), the config's map and vision (CoworldConfig), its glory, newLiveWorld, BASIC
+  ## seats deciding on the pre-step world, speech, step.
   applyGameConfig(config)
   let node = parseJson(config)
-  configureRules(replayRulesVersion)
+  configureRules(rules)
   configureMap(node{"map"}.getStr(""))
   configureVision(node{"vision"}.getStr(""))
   configureGlory(gloryChoice)
@@ -240,6 +240,22 @@ suite "Native per-handle rules and game config":
             "native_last_hash": (if got.hashes.len > 0: got.hashes[^1] else: 0'u32),
             "identical": firstDifference(got.hashes, expected.hashes) == 0})
     if report.len > 0: writeFile(report, lines.join("\n") & "\n")
+
+  test "configs beyond the manifest's, and older rules, == the hosted game's live path":
+    # Keys and values no variant uses today (team vision, other awards, a sampled FFA layout),
+    # and the host at older rules against a handle set to them.
+    let ticks = parseInt(getEnv("PW_CONFIG_TICKS", "300"))
+    for (config, rules) in [("""{"vision": "team", "glory": {"behind_lives": 5}}""", LiveRules),
+        ("""{"map": "crater", "vision": "team", "glory": {"quiet_supplies": 0, "heart": 50}}""", LiveRules),
+        ("""{"glory": {"quiet_supplies": 40, "quiet_supplies_seconds": 7, "behind_lives_seconds": 2}}""", LiveRules),
+        ("""{"mode": "ffa_kin"}""", LiveRules), ("""{"mode": "ffa_kin"}""", NativeRules),
+        ("""{"mode": "ffa_kin", "map": "atoll"}""", 43),
+        ("""{"map": "highlands", "glory": {"behind_lives": 5}}""", NativeRules)]:
+      checkpoint config & " at rules " & $rules
+      let expected = hostRun(config, 77, ticks, rules)
+      let got = nativeRun(config, rules, 77, ticks)
+      checkSame(config, got.hashes, expected.hashes)
+      if "ffa_kin" notin config: check got.results[0..3] == expected.results[0..3]
 
   test "handles with different rules and configs interleaved on one thread == each alone":
     let ticks = 250
