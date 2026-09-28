@@ -74,6 +74,18 @@ const
       weights[i] = int32(exp(-float(i) / 100.0) * 1000000.0)
     weights
 
+# A set of seats. Up to 32 seats it is the uint32 bitmask the state hash has always carried,
+# so recordings stay bit-identical; larger (benchmark) rosters use 64-bit words. A plain
+# `1'u32 shl j` is undefined for j >= 32 and wraps differently on ARM and WASM.
+when Seats <= 32:
+  type SeatMask* = uint32
+  template hasSeat*(m: SeatMask, j: int): bool = (m and (1'u32 shl j)) != 0
+  template addSeat*(m: var SeatMask, j: int) = m = m or (1'u32 shl j)
+else:
+  type SeatMask* = array[(Seats+63) div 64, uint64]
+  template hasSeat*(m: SeatMask, j: int): bool = (m[j shr 6] and (1'u64 shl (j and 63))) != 0
+  template addSeat*(m: var SeatMask, j: int) = m[j shr 6] = m[j shr 6] or (1'u64 shl (j and 63))
+
 type
   Point* = object
     x*, z*: int32
@@ -103,7 +115,7 @@ type
     grenade*, sprayCan*: bool
     charge*, armor*, lives*, burst*, sprayCooldown*, windup*: int32
     sprayAim*, gunAim*: Point
-    sprayHits*: uint32
+    sprayHits*: SeatMask
   Lob* = object
     start*, target*: Point
     owner*, releasedAt*, landsAt*: int32
