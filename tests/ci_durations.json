@@ -1,5 +1,5 @@
 {
-  "_source": "Seconds per tests/ci_tests.txt command on ubuntu-latest, from the step timings of build.yml run 36367115579 (job 108755620015, main 5e51c5a, before sharding). Only used to balance shards; refresh from a recent run's per-command summary when the plan drifts. test_paintbot_neural_joint.nim (added by #118) is from run 36369860533 (job 108763696540, main 3f660a3).",
+  "_source": "Seconds per tests/ci_tests.txt command on ubuntu-latest, from the step timings of build.yml run 36367115579 (job 108755620015, main 5e51c5a, before sharding). Only used to balance shards; refresh from a recent run's per-command summary when the plan drifts. test_paintbot_neural_joint.nim (added by #118) is from run 36369860533 (job 108763696540, main 3f660a3). The three jev_baseline parts are estimates from run 36371842751 (220 s whole: ~140 s of arms at ~4.1 s each, 12 arms in part 0, 11 in parts 1 and 2); refresh when measured.",
   "seconds": {
     "nim r tests/tests.nim": 35.0,
     "nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2 tests/test_profiles.nim": 3.0,
@@ -61,12 +61,14 @@
     "nim r -d:headless tests/test_paintbot_neural_joint.nim": 12.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim": 62.0,
     "python -m unittest discover -s coworld/paintbot -p test_neural_package.py": 1.0,
-    "nim r tests/test_paintbot_jev_baseline.nim": 220.0,
     "node tests/test_paintbot_inspector.js": 1.0,
     "node tests/test_paintbot_webinputs.js": 1.0,
     "python coworld/paintbot/tools/make_jev_baseline.py --check": 1.0,
     "python -m unittest test_runtime": 16.0,
     "python -m unittest test_semantic_trajectory": 1.0,
-    "python coworld/paintbot/test_training_bridge.py": 10.0
+    "python coworld/paintbot/test_training_bridge.py": 10.0,
+    "nim r -d:jevArmShards=3 -d:jevArmShard=0 tests/test_paintbot_jev_baseline.nim": 130.0,
+    "nim r -d:jevArmShards=3 -d:jevArmShard=1 tests/test_paintbot_jev_baseline.nim": 52.0,
+    "nim r -d:jevArmShards=3 -d:jevArmShard=2 tests/test_paintbot_jev_baseline.nim": 52.0
   }
 }
