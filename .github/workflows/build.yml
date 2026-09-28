@@ -2,7 +2,7 @@
 #
 # Every test command lives in tests/ci_tests.txt. Each OS runs the list split across SHARDS
 # parallel jobs; tests/run_ci_shard.py assigns commands to shards by greedy longest-first bin
-# packing over tests/ci_durations.json, runs its shard 3 commands at a time (longest first;
+# packing over tests/ci_durations.json, runs its shard 2 or 3 commands at a time (longest first;
 # `serial` commands alone), keeps going after a failure, and fails the job at the end if any
 # command failed.
 name: Github Actions
@@ -31,6 +31,14 @@ on:
         description: JSON list of runner labels to build on.
         required: false
         type: string
+      shards:
+        description: JSON list of shard indexes, 0..N-1 (N shards per OS). Default 8.
+        required: false
+        type: string
+      jobs:
+        description: Commands each shard runs at once. Default 2.
+        required: false
+        type: number
 jobs:
   build:
     name: build (${{ matrix.os }}, shard ${{ matrix.shard }})
@@ -38,11 +46,11 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON(inputs.os || '["ubuntu-latest"]') }}
-        # SHARDS = 4, keep this list and every "of4"/--of 4 below in sync. Each shard runs 3
-        # commands at once (--jobs 3; hosted runners have 3-4 cores and most tests use one), so
-        # four shards finish in about as long as their longest command. More shards would mostly
-        # add queueing on macOS (macos.yml), whose org runners are the bottleneck.
-        shard: [0, 1, 2, 3]
+        # Per OS (measured warm on #132): Linux 8 shards x 2 commands at once = 2.3 min, against
+        # 3.1 min for 4 x 3 at the same runner-minutes. macos.yml passes 4 x 3: the org's macOS
+        # runners are few, so more macOS shards only queue. windows.yml passes 4 x 1 (Windows has
+        # no per-command nimcache, see run_ci_shard.command_env).
+        shard: ${{ fromJSON(inputs.shards || '[0, 1, 2, 3, 4, 5, 6, 7]') }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -67,26 +75,28 @@ jobs:
       # shard and command set. Nim recompiles a C file only when its content hash changes, so a
       # warm cache cuts compile time without changing what any test runs. Restored on every run;
       # saved only from pushes to main, so PR builds cannot write it. Windows builds uncached.
-      - name: Nim version
+      - name: Nim version and shard count
         id: nim
-        if: runner.os != 'Windows'
         shell: bash
-        run: echo "version=$(nim --version | head -1 | awk '{print $4}')" >> "$GITHUB_OUTPUT"
+        env:
+          SHARDS: ${{ inputs.shards || '[0, 1, 2, 3, 4, 5, 6, 7]' }}
+        run: |
+          echo "version=$(nim --version | head -1 | awk '{print $4}')" >> "$GITHUB_OUTPUT"
+          echo "of=$(python -c 'import json, sys; print(len(json.loads(sys.argv[1])))' "$SHARDS")" >> "$GITHUB_OUTPUT"
       - name: Restore nimcache
         if: runner.os != 'Windows'
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/nimcache
-          key: nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of4-${{ hashFiles('polyworld/tests/ci_tests.txt', 'polyworld/tests/ci_durations.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of${{ steps.nim.outputs.of }}-${{ hashFiles('polyworld/tests/ci_tests.txt', 'polyworld/tests/ci_durations.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of4-${{ hashFiles('polyworld/tests/ci_tests.txt', 'polyworld/tests/ci_durations.json') }}-
-            nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of4-
+            nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of${{ steps.nim.outputs.of }}-${{ hashFiles('polyworld/tests/ci_tests.txt', 'polyworld/tests/ci_durations.json') }}-
+            nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of${{ steps.nim.outputs.of }}-
       - name: Check shard plan
-        run: python tests/run_ci_shard.py --check --of 4
-      - name: Run shard ${{ matrix.shard }} of 4
-        # Windows has no per-command nimcache (see run_ci_shard.command_env), so it runs one
-        # command at a time; the runner also falls back to that on its own.
-        run: python tests/run_ci_shard.py --shard ${{ matrix.shard }} --of 4 --jobs ${{ runner.os == 'Windows' && 1 || 3 }}
+        run: python tests/run_ci_shard.py --check --of ${{ steps.nim.outputs.of }}
+      - name: Run shard ${{ matrix.shard }} of ${{ steps.nim.outputs.of }}
+        # Without a per-command nimcache (Windows) the runner runs one command at a time anyway.
+        run: python tests/run_ci_shard.py --shard ${{ matrix.shard }} --of ${{ steps.nim.outputs.of }} --jobs ${{ inputs.jobs || 2 }}
         env:
           CI_NIMCACHE_ROOT: ${{ github.workspace }}/nimcache
       - name: Save nimcache
@@ -96,4 +106,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ github.workspace }}/nimcache
-          key: nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of4-${{ hashFiles('polyworld/tests/ci_tests.txt', 'polyworld/tests/ci_durations.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: nimcache-v1-${{ runner.os }}-nim${{ steps.nim.outputs.version }}-${{ hashFiles('polyworld/nimby.lock') }}-shard${{ matrix.shard }}of${{ steps.nim.outputs.of }}-${{ hashFiles('polyworld/tests/ci_tests.txt', 'polyworld/tests/ci_durations.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
