@@ -64,6 +64,7 @@ nim r tests/test_paintbot_rules41_golden.nim
 nim r tests/test_paintbot_ffa_config.nim
 nim r tests/test_paintbot_kinship.nim
 nim r tests/test_paintbot_ffa_rules.nim
+nim r tests/test_paintbot_ffa_lake_hearts.nim
 nim r tests/test_paintbot_ffa_replay.nim
 nim r tests/test_paintbot_kinhue.nim
 nim r tests/test_paintbot_ffa_basic.nim

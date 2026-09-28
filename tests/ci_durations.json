@@ -40,6 +40,7 @@
     "nim r tests/test_paintbot_ffa_config.nim": 1.6,
     "nim r tests/test_paintbot_kinship.nim": 1.0,
     "nim r tests/test_paintbot_ffa_rules.nim": 9.7,
+    "nim r tests/test_paintbot_ffa_lake_hearts.nim": 6.0,
     "nim r tests/test_paintbot_ffa_replay.nim": 6.0,
     "nim r tests/test_paintbot_kinhue.nim": 1.5,
     "nim r tests/test_paintbot_ffa_basic.nim": 19.8,

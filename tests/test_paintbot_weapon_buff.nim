@@ -23,11 +23,11 @@ proc blastAt(rules, distance: int): int32 =
 
 suite "Stronger grenades and spray (rules 40)":
   teardown:
-    visionRulesVersion = 43
-    replayRulesVersion = 43
-  test "live rules are 43 (rules 40 weapons, generated maps, opt-in team vision and glory awards)":
-    check visionRulesVersion == 43
-    check replayRulesVersion == 43
+    visionRulesVersion = 44
+    replayRulesVersion = 44
+  test "live rules are 44 (rules 40 weapons, generated maps, opt-in team vision, glory awards, FFA lake routing)":
+    check visionRulesVersion == 44
+    check replayRulesVersion == 44
   test "an open-ground blast deals 3 from rules 40, 2 before":
     check blastAt(39, 100) == 1
     check blastAt(40, 100) == 0
