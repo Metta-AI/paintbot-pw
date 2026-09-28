@@ -177,8 +177,20 @@ candidates and the contract hashes are the same with or without them.
   teammates. The native training ABI's `pw_set_seat_spray_aim` / `pw_set_seat_spray_gate`
   are the same rules. The telemetry line gains ` spray_aim=r<max_range> spray_aims=<n>` and
   ` spray_gate=t<max_teammates>,e<min_enemies> spray_gates=<n>`.
+- `"decoder": {"joint_sampling": {"when": {"head": h, "value": v}, "head": g, "offsets":
+  [...]}}` (default absent = byte-identical; h and g distinct head indices, v a choice of
+  head h, `offsets` exactly one number per choice of head g, each within -1000..1000):
+  a head's selection conditioned on another's (`neural_contract.jointSelect`). After the
+  tick's selection (forbid, BASIC masks, argmax or sampling, BASIC temperatures), when head
+  h was selected as v, head g is selected again from its logits plus `offsets`, under the
+  exclusions and temperature it was selected with: argmax at temperature 0, else exactly
+  one more draw from the seat's sampling stream. Otherwise nothing changes and no draw is
+  taken. For example `{"when": {"head": 2, "value": 1}, "head": 0, "offsets": [1000, 0,
+  ...]}` stands the seat still on every shoot draw, the network's own choice of when to
+  shoot, instead of a rule that overrides it. The telemetry line gains
+  ` joint_sampling=h<h>=<v>->h<g> held=<n>` (decisions the condition held on).
 - Order of every option within one decision: forbid and sampling (or argmax) select the
-  heads; the aim retarget, the aim snap, then the spray aim rewrite the aim head; the shot
+  heads; joint sampling may re-select its head; the aim retarget, the aim snap, then the spray aim rewrite the aim head; the shot
   gate may drop the shot (undoing the snap and spray aim), then the spray gate may; the
   strafe, then the steady shot, rewrite the movement head (a steadied decision overrides
   the strafe's leg for that tick); the heads are decoded under the contract; the fire hold

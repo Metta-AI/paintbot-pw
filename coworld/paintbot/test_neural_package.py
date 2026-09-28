@@ -142,6 +142,27 @@ class PackageTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, message, msg=repr(sampling)):
                 unpack_package(package({**schema2, "decoder": {"sampling": sampling}}))
 
+    def test_joint_sampling_option(self):
+        schema2 = {"schema": "paintbot-neural-basic/2"}
+        stand = [1000] + [0] * 50
+        for joint in ({"when": {"head": 2, "value": 1}, "head": 0, "offsets": stand},
+                      {"when": {"head": 0, "value": 50}, "head": 1, "offsets": [0.5] * 25},
+                      {"head": 4, "offsets": [-1000, 1000], "when": {"value": 0, "head": 3}}):
+            _, _, manifest = unpack_package(package({**schema2, "decoder": {"joint_sampling": joint}}))
+            self.assertEqual(manifest["decoder"]["joint_sampling"], joint)
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {"joint_sampling": {"when": {"head": 2, "value": 1}, "head": 0, "offsets": stand}}}))
+        good = {"when": {"head": 2, "value": 1}, "head": 0, "offsets": stand}
+        for joint, message in (({**good, "head": 2}, "differ"), ({**good, "when": {"head": 2, "value": 2}}, "choice of head"),
+                               ({**good, "offsets": [0] * 25}, "must list 51"), ({**good, "offsets": [1001] + [0] * 50}, "within"),
+                               ({**good, "offsets": ["0"] * 51}, "numbers"), ({**good, "offsets": [True] * 51}, "numbers"),
+                               ({"when": good["when"], "head": 0}, "needs"), ({**good, "when": {"head": 2}}, "needs head and value"),
+                               ({**good, "t": 1}, "unknown decoder.joint_sampling field"), ({**good, "when": {"head": 5, "value": 1}}, "head index"),
+                               ({**good, "head": True}, "head index"), ({**good, "when": [2, 1]}, "must be an object"),
+                               ([], "must be a dict")):
+            with self.assertRaisesRegex(ValueError, message, msg=repr(joint)):
+                unpack_package(package({**schema2, "decoder": {"joint_sampling": joint}}))
+
     def test_forbid_objectives_option(self):
         schema2 = {"schema": "paintbot-neural-basic/2"}
         for forbid in ([9, 10], [0], [50, 1], list(range(50))):

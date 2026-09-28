@@ -1,20 +1,50 @@
+# To add a new CI test, add it to tests/ci_tests.txt, not to this file.
+#
+# Every test command lives in tests/ci_tests.txt. Each OS runs the list split across SHARDS
+# parallel jobs; tests/run_ci_shard.py assigns commands to shards by greedy longest-first bin
+# packing over tests/ci_durations.json, runs its shard in manifest order, keeps going after a
+# failure, and fails the job at the end if any command failed.
 name: Github Actions
 on:
   push:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
+    # PRs that change only *.md files (outside .github/) skip CI: no code or test reads a .md
+    # file. Pushes to main are NOT filtered: deploy.yml runs after this workflow passes on main,
+    # and its plan expects every main commit to get a build. `paths` with `!` rather than
+    # paths-ignore, so the later .github/** entry re-includes workflow docs.
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '.github/**'
   workflow_dispatch:
+  # windows.yml reuses these steps for Windows. Windows runs separately so that deploy.yml,
+  # which triggers when this workflow ("Github Actions") passes on main, waits only for the
+  # Linux and macOS builds. The hosted game runs on Linux; Windows is about 15 minutes slower
+  # and its setup-nim step flakes, so it no longer holds up a release.
+  workflow_call:
+    inputs:
+      os:
+        description: JSON list of runner labels to build on.
+        required: false
+        type: string
 jobs:
   build:
+    name: build (${{ matrix.os }}, shard ${{ matrix.shard }})
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: ${{ fromJSON(inputs.os || '["ubuntu-latest", "macos-latest"]') }}
+        # SHARDS = 5: keep this list and the --of below in sync. Five puts every shard at about
+        # 5 minutes of tests on ubuntu-latest (setup and install add about 10 s).
+        shard: [0, 1, 2, 3, 4]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: polyworld
+    env:
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -27,90 +57,7 @@ jobs:
           nimby create
           nimby install "polyworld/polyworld.nimble"
           nimby sync "polyworld/nimby.lock"
-      - run: nim r tests/tests.nim
-      - run: >-
-          nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2
-          tests/test_profiles.nim
-      - run: >-
-          nim r -d:mapProfileTracePath=tmp/map-profile-test.json -d:profileFrames=2
-          tests/test_profiles.nim
-      - run: nim r tests/test_gota_sim.nim -- --bot:examples/gods_of_the_arena/players/base.bas:10
-      - run: nim r -d:headless tests/test_recordings.nim --bot examples/call_to_adventure/players/base.bas:4
-      - run: nim r -d:headless -d:recordGota tests/test_recordings.nim --bot examples/gods_of_the_arena/players/base.bas:10
-      - run: nim r -d:headless -d:recordHlf tests/test_recordings.nim --bot examples/heartleaf/players/base.bas:9
-      - run: nim r -d:headless -d:recordLvd tests/test_recordings.nim --bot examples/light_vs_dark/players/base.bas:2
-      - run: nim c -d:headless examples/gods_of_the_arena/gota.nim
-      - run: nim c -d:headless examples/call_to_adventure/cta.nim
-      - run: nim c -d:headless examples/light_vs_dark/lvd.nim
-      - run: nim c -d:headless examples/heartleaf/heartleaf.nim
-      - run: nim r tests/test_paintbot_river.nim
-      - run: nim r tests/test_paintbot_respawns.nim
-      - run: nim r tests/test_paintbot_barrage.nim
-      - run: nim r tests/test_paintbot_scoring.nim
-      - run: nim r tests/test_paintbot_heart_meter.nim
-      - run: nim r tests/test_paintbot_elimination.nim
-      - run: nim r tests/test_paintbot_celebration.nim
-      - run: nim r tests/test_paintbot_capture.nim
-      - run: nim r tests/test_paintbot_big_hearts.nim
-      - run: nim r tests/test_paintbot_sound.nim
-      - run: nim r tests/test_paintbot_heart_spawns.nim
-      - run: nim r tests/test_paintbot_uniform.nim
-      - run: nim r tests/test_paintbot_human.nim
-      - run: nim r tests/test_paintbot_replay.nim
-      - run: nim r -d:headless tests/test_paintbot_live_rules.nim --bot:examples/paintbot/players/base.bas:16
-      - run: nim r tests/test_paintbot_oracle.nim
-      - run: nim r tests/test_paintbot_glory.nim
-      - run: nim r tests/test_paintbot_glory_hearts.nim
-      - run: nim r tests/test_paintbot_glory_behind.nim
-      - run: nim r tests/test_paintbot_weapon_buff.nim
-      - run: nim r tests/test_paintbot_rules40_golden.nim
-      - run: nim r tests/test_paintbot_ffa_config.nim
-      - run: nim r tests/test_paintbot_kinship.nim
-      - run: nim r tests/test_paintbot_ffa_rules.nim
-      - run: nim r tests/test_paintbot_ffa_replay.nim
-      - run: nim r tests/test_paintbot_kinhue.nim
-      - run: nim r tests/test_paintbot_ffa_basic.nim
-      - run: nim r tests/test_paintbot_ffa_baseline.nim
-      - run: nim r tests/test_paintbot_projection.nim
-      - run: nim r -d:headless tests/test_paintbot_neural_contract.nim
-      - run: nim r -d:headless tests/test_paintbot_neural_obs_v2.nim
-      - run: nim r -d:headless tests/test_paintbot_neural_obs_ffa.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_seat_stats.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_scripts.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_command.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_curriculum.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_contract_v2.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_respawn_memory.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold_radius.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_sampling.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_river_strafe.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_snap_steady.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_retarget_gate.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_spray.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_weapon_stats.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
-      - run: nim r -d:headless tests/test_paintbot_neural_host.nim
-      - run: nim r -d:headless tests/test_paintbot_neural_basic_io.nim
-      - run: nim r -d:headless tests/test_paintbot_neural_net2.nim
-      - run: nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim
-      - run: python -m unittest discover -s coworld/paintbot -p test_neural_package.py
-      - run: nim r tests/test_paintbot_jev_baseline.nim
-      - run: node tests/test_paintbot_inspector.js
-      - run: node tests/test_paintbot_webinputs.js
-      - run: node tests/test_paintbot_kinhud.js
-      - run: python coworld/paintbot/tools/make_jev_baseline.py --check
-      # The hosted runtime is Linux-only; its file-URI handling is POSIX, so skip Windows here.
-      - run: python -m unittest test_runtime
-        if: runner.os != 'Windows'
-        working-directory: polyworld/coworld/paintbot
-      - run: python -m unittest test_semantic_trajectory
-        if: runner.os != 'Windows'
-        working-directory: polyworld/coworld/paintbot
-      - run: python coworld/paintbot/test_training_bridge.py
-        if: runner.os != 'Windows'
+      - name: Check shard plan
+        run: python tests/run_ci_shard.py --check --of 5
+      - name: Run shard ${{ matrix.shard }} of 5
+        run: python tests/run_ci_shard.py --shard ${{ matrix.shard }} --of 5

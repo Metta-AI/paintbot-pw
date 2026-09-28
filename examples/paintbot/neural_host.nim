@@ -40,6 +40,8 @@ type
     # slot the first time the seat sees the world; never part of the world or its hash),
     # the options, and how many decisions were drawn. Off = argmax, no stream, no draw.
     sampling*: SamplingOptions
+    joint*: JointSampling      # decoder.joint_sampling (disabled = absent)
+    jointDraws*: int           # decisions the joint condition held on
     sampleRng: Rng
     sampleSeeded: bool
     sampleDraws*: int
@@ -123,6 +125,11 @@ proc samplingTelemetry*(options: SamplingOptions, seed: uint64, draws: int): str
     if on: result.add $head
   result.add " seed=0x" & toHex(seed, 16).toLowerAscii & " draws=" & $draws
 
+proc jointTelemetry*(joint: JointSampling, held: int): string =
+  ## The joint-sampling part of the seat log line: the condition, the head re-selected and
+  ## how many decisions the condition held on.
+  " joint_sampling=h" & $joint.whenHead & "=" & $joint.whenValue & "->h" & $joint.head & " held=" & $held
+
 proc forbidTelemetry*(forbidden: ObjectiveMask, hits: int): string =
   ## The forbid part of the seat log line: the forbidden indices and how many decisions
   ## the mask changed the argmax objective of.
@@ -199,7 +206,8 @@ proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
     (if seat.aimRetarget.enabled: aimRetargetTelemetry(seat.aimRetarget, seat.aimRetargets) else: "") &
     (if seat.shotGate.enabled: shotGateTelemetry(seat.shotGate, seat.shotGates) else: "") &
     (if seat.sprayAim.enabled: sprayAimTelemetry(seat.sprayAim, seat.sprayAims) else: "") &
-    (if seat.sprayGate.enabled: sprayGateTelemetry(seat.sprayGate, seat.sprayGates) else: ""),
+    (if seat.sprayGate.enabled: sprayGateTelemetry(seat.sprayGate, seat.sprayGates) else: "") &
+    (if seat.joint.enabled: jointTelemetry(seat.joint, seat.jointDraws) else: ""),
     seat.fireHoldRadius)
 
 proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
@@ -234,6 +242,52 @@ proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
         result.heads[item.getInt] = true
     else: raise newException(ValueError, "unknown decoder.sampling field: " & key)
   if not sawMode: raise newException(ValueError, "decoder.sampling.mode is required")
+
+proc parseJointSampling*(value: JsonNode): JointSampling =
+  ## decoder.joint_sampling: {"when": {"head": h, "value": v}, "head": g, "offsets": [...]}.
+  ## h and g are distinct head indices, v a choice of head h, and offsets exactly
+  ## ActionSizes[g] finite numbers within [-1000, 1000]. Anything else rejects the bundle.
+  if value.kind != JObject: raise newException(ValueError, "decoder.joint_sampling must be an object")
+  var sawWhen, sawHead, sawOffsets = false
+  var offsets: JsonNode
+  for key, field in value:
+    case key
+    of "when":
+      if field.kind != JObject: raise newException(ValueError, "decoder.joint_sampling.when must be an object")
+      var sawH, sawV = false
+      for k, f in field:
+        case k
+        of "head":
+          if f.kind != JInt or f.getInt notin 0..<ActionSizes.len:
+            raise newException(ValueError, "decoder.joint_sampling.when.head must be a head index 0 .. " & $(ActionSizes.len-1))
+          result.whenHead = f.getInt; sawH = true
+        of "value":
+          if f.kind != JInt: raise newException(ValueError, "decoder.joint_sampling.when.value must be an integer")
+          result.whenValue = f.getInt; sawV = true
+        else: raise newException(ValueError, "unknown decoder.joint_sampling.when field: " & k)
+      if not (sawH and sawV): raise newException(ValueError, "decoder.joint_sampling.when needs head and value")
+      sawWhen = true
+    of "head":
+      if field.kind != JInt or field.getInt notin 0..<ActionSizes.len:
+        raise newException(ValueError, "decoder.joint_sampling.head must be a head index 0 .. " & $(ActionSizes.len-1))
+      result.head = field.getInt; sawHead = true
+    of "offsets":
+      offsets = field; sawOffsets = true
+    else: raise newException(ValueError, "unknown decoder.joint_sampling field: " & key)
+  if not (sawWhen and sawHead and sawOffsets):
+    raise newException(ValueError, "decoder.joint_sampling needs when, head and offsets")
+  if result.whenHead == result.head: raise newException(ValueError, "decoder.joint_sampling.head must differ from when.head")
+  if result.whenValue notin 0..<ActionSizes[result.whenHead]:
+    raise newException(ValueError, "decoder.joint_sampling.when.value must be a choice of head " & $result.whenHead)
+  if offsets.kind != JArray or offsets.len != ActionSizes[result.head]:
+    raise newException(ValueError, "decoder.joint_sampling.offsets must list " & $ActionSizes[result.head] & " numbers")
+  for i, x in offsets.elems:
+    if x.kind notin {JFloat, JInt}: raise newException(ValueError, "decoder.joint_sampling.offsets must be numbers")
+    let v = x.getFloat
+    if v != v or v < -float(MaxJointOffset) or v > float(MaxJointOffset):
+      raise newException(ValueError, "decoder.joint_sampling.offsets must be within [-1000, 1000]")
+    result.offsets[i] = float32(v)
+  result.enabled = true
 
 proc parseForbidObjectives*(value: JsonNode): ObjectiveMask =
   ## decoder.forbid_objectives: a non-empty array of distinct movement-head candidate
@@ -404,6 +458,7 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int) =
   var fireHold = false
   var fireHoldRadius = FireHoldRadius.int32
   var sampling: SamplingOptions
+  var joint: JointSampling
   var forbidden: ObjectiveMask
   var strafe: StrafeOptions
   var aimSnap: AimSnapOptions
@@ -428,6 +483,8 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int) =
           (fireHold, fireHoldRadius) = parseFireHold(value)
         of "sampling":
           sampling = parseSamplingOptions(value)
+        of "joint_sampling":
+          joint = parseJointSampling(value)
         of "forbid_objectives":
           forbidden = parseForbidObjectives(value)
         of "strafe_legs":
@@ -463,6 +520,7 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int) =
   seat.fireHoldTeammates = fireHold
   seat.fireHoldRadius = fireHoldRadius
   seat.sampling = sampling
+  seat.joint = joint
   seat.forbidden = forbidden
   seat.forbidAny = forbidden.forbidsAny
   seat.strafe = strafe
@@ -644,11 +702,25 @@ proc samplePhase(seat: NeuralSeat) =
     var draws = 0
     actions = sampleHeads(seat.logits, temperatures, masks, seat.sampleRng, draws)
     if draws > 0: inc seat.sampleDraws
+    if seat.joint.enabled and jointSelect(seat.logits, seat.joint, masks[seat.joint.head],
+        temperatures[seat.joint.head], seat.sampleRng, actions):
+      inc seat.jointDraws
     seat.appliedMasks = masks
   else:
     actions = if seat.sampling.enabled: sampleActions(seat.logits, seat.sampling, seat.sampleRng, seat.forbidden)
               else: argmaxActions(seat.logits, seat.forbidden)
     if seat.sampling.enabled: inc seat.sampleDraws
+    if seat.joint.enabled:
+      let jointTemperature = if seat.sampling.enabled and seat.sampling.heads[seat.joint.head]:
+                               seat.sampling.temperature else: 0'f32
+      if jointTemperature > 0 and not seat.sampleSeeded:
+        seat.sampleRng = samplingRng(seat.world[].seed, seat.slot)
+        seat.sampleSeeded = true
+      let held = if seat.joint.head == 0 and seat.forbidAny:
+                   jointSelect(seat.logits, seat.joint, seat.forbidden, jointTemperature, seat.sampleRng, actions)
+                 else:
+                   jointSelect(seat.logits, seat.joint, default(array[0, bool]), jointTemperature, seat.sampleRng, actions)
+      if held: inc seat.jointDraws
     seat.appliedMasks = default(HeadMasks)
     seat.appliedMasks[0] = seat.forbidden
     for head in 0..<ActionSizes.len:

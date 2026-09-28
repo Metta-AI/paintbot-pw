@@ -389,6 +389,9 @@ training ABI's `pw_set_seat_aim_retarget` / `pw_set_seat_shot_gate` are the same
 can by the cone it would produce (`neural_basic.md`); the training ABI's
 `pw_set_seat_spray_aim` / `pw_set_seat_spray_gate` are the same rules, and
 `pw_seat_spray_stats` (training library only) counts spray damage and kills per seat.
+`decoder.joint_sampling` re-selects one head when another was selected as a given value,
+from its logits plus the bundle's offsets (`neural_basic.md`); candidates and hashes are
+unchanged.
 
 Movement (heart, visible pickup or `pos+200*compass`), directional aim
 (`pos+5000*compass`), fire, grenade and sneak decode identically under both.
