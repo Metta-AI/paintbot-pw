@@ -10,13 +10,20 @@
 #                              coworld/assets.json. `coworld build` always runs that hook.
 #   SOFTMAX_TOKEN              Softmax platform bearer token. Only read when dry_run is false.
 #
+# Triggers: a manual dispatch (version typed in, dry run by default), or automatically when
+# build.yml ("Github Actions") passes on a push to main. The automatic path deploys the next
+# platform version unless every file changed since the last deploy is outside the shipped game
+# (tests, CI, the deploy log, the other Polyworld games). Every successful upload tags the
+# commit it shipped as coworld-v<version>; the newest such tag is "the last deploy".
+#
 # Layout mirrors build.yml: this repo is checked out into ./paintbot-pw so the art repo can sit
 # beside it at ./polyworld_data, which is where the hook and build_round_village.py look for it
 # (build_round_village.py hard-codes <repo>/../polyworld_data and ignores POLYWORLD_DATA).
 name: Deploy Coworld
 # The display title carries the inputs (the runs API does not expose them), so the duplicate
 # guard below and `gh run list` can tell "0.3.36 upload" from "0.3.36 dry run" without opening logs.
-run-name: "Deploy Coworld ${{ inputs.version }} (${{ inputs.dry_run && 'dry run' || 'upload' }})"
+# Automatic runs are titled by commit; their version is only known once the platform is asked.
+run-name: "${{ github.event_name == 'workflow_run' && format('Deploy Coworld auto @{0}', github.event.workflow_run.head_sha) || format('Deploy Coworld {0} ({1})', inputs.version, inputs.dry_run && 'dry run' || 'upload') }}"
 
 on:
   workflow_dispatch:
@@ -30,9 +37,13 @@ on:
         required: false
         default: true
         type: boolean
+  workflow_run:
+    workflows: ["Github Actions"] # build.yml
+    types: [completed]
+    branches: [main]
 
 permissions:
-  contents: read
+  contents: write # read the tree, and push the coworld-v<version> tag after an upload
   actions: read # to confirm build.yml passed on this commit before a real upload
 
 concurrency:
@@ -48,9 +59,76 @@ env:
   SOFTMAX_API_SERVER: https://softmax.com/api
 
 jobs:
+  # Decides whether and what to deploy. The workflow-level concurrency group serializes whole
+  # runs, so the last-deploy tag read here is never stale behind an upload still in flight.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    outputs:
+      deploy: ${{ steps.plan.outputs.deploy }}
+      sha: ${{ steps.plan.outputs.sha }}
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            { echo "deploy=true"; echo "sha=$GITHUB_SHA"; echo "dry_run=$DRY_RUN"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sha="$RUN_SHA"
+          { echo "sha=$sha"; echo "dry_run=false"; } >> "$GITHUB_OUTPUT"
+          # A newer commit on main gets its own build and its own run; deploying this older one
+          # first would only be superseded, so leave it to the newer run.
+          head="$(git rev-parse origin/main)"
+          if [ "$head" != "$sha" ]; then
+            echo "main moved on to $head; its own build deploys it. Skipping $sha."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          last="$(git tag -l 'coworld-v*' --sort=-v:refname | head -1)"
+          if [ -z "$last" ]; then
+            echo "No coworld-v* tag yet; deploying $sha."
+            echo "deploy=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          base="$(git rev-list -n 1 "$last")"
+          if [ "$base" = "$sha" ]; then
+            echo "$sha is already deployed as $last."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # Paths that never reach the paintbot-pw image or its manifest. Anything else deploys.
+          ignore='^(tests/|\.github/|coworld/paintbot/DEPLOYMENT\.md$|examples/(call_to_adventure|gods_of_the_arena|heartleaf|light_vs_dark)/|coworld/(cta|gota|lvd)/)'
+          shipped="$(git diff --name-only "$base" "$sha" | grep -Ev "$ignore" || true)"
+          if [ -z "$shipped" ]; then
+            echo "Nothing shipped changed since $last ($base); not deploying."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "Changed since $last:"; echo "$shipped"
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+
   deploy:
+    needs: plan
+    if: needs.plan.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 150
+    env:
+      # Manual runs name the version; automatic runs take the platform's next version (set below).
+      VERSION: ${{ inputs.version }}
+      DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+      SHA: ${{ needs.plan.outputs.sha }}
     defaults:
       run:
         shell: bash
@@ -59,17 +137,16 @@ jobs:
       - uses: actions/checkout@v5
         with:
           path: paintbot-pw
+          ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
 
       - name: Validate inputs
         env:
-          VERSION: ${{ inputs.version }}
-          DRY_RUN: ${{ inputs.dry_run }}
           POLYWORLD_DATA_DEPLOY_KEY: ${{ secrets.POLYWORLD_DATA_DEPLOY_KEY }}
           SOFTMAX_TOKEN: ${{ secrets.SOFTMAX_TOKEN }}
         run: |
           set -euo pipefail
-          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
             echo "::error::version must be dotted numbers (e.g. 0.3.20), got: $VERSION"
             exit 1
           fi
@@ -87,7 +164,7 @@ jobs:
               exit 1
             fi
           fi
-          echo "Deploying $COWORLD_NAME $VERSION from $GITHUB_SHA (dry_run=$DRY_RUN)"
+          echo "Deploying $COWORLD_NAME ${VERSION:-<next>} from $SHA (dry_run=$DRY_RUN, $GITHUB_EVENT_NAME)"
 
       # 2026-09-22: two sessions dispatched 0.3.36 for the same SHA (d529636) within minutes
       # (dry runs 35776537613 19:52Z and 35776637751 19:53Z, then uploads 35776950564 19:55Z and
@@ -99,11 +176,12 @@ jobs:
       # or completed successfully in the last 30 minutes. A later queued duplicate does not fail
       # this run: it fails itself when its turn comes and it sees this run's success. Runs from
       # before this title format have the bare title "Deploy Coworld" and are not matched.
+      # Automatic runs cannot duplicate: the concurrency group serializes them and the plan job
+      # skips a commit the newest coworld-v* tag already points at.
       - name: Refuse a duplicate upload of this SHA and version
-        if: ${{ !inputs.dry_run }}
+        if: ${{ github.event_name == 'workflow_dispatch' && env.DRY_RUN != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           title="Deploy Coworld $VERSION (upload)"
@@ -125,14 +203,14 @@ jobs:
           echo "No other upload of $VERSION from $GITHUB_SHA is in flight or recently succeeded."
 
       - name: Require green build.yml on this commit
-        if: ${{ !inputs.dry_run }}
+        if: ${{ env.DRY_RUN != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs?head_sha=$GITHUB_SHA&status=success" --jq '.total_count')"
+          runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs?head_sha=$SHA&status=success" --jq '.total_count')"
           if [ "$runs" = "0" ]; then
-            echo "::error::build.yml has no successful run for $GITHUB_SHA. Wait for CI to pass (or use dry_run)."
+            echo "::error::build.yml has no successful run for $SHA. Wait for CI to pass (or use dry_run)."
             exit 1
           fi
 
@@ -187,7 +265,7 @@ jobs:
       # yaml.safe_load and looks up tokens["https://softmax.com/api"]. JSON is valid YAML, and
       # json.dump quotes any token characters. The token only travels via env, never argv/stdout.
       - name: Write Softmax credentials
-        if: ${{ !inputs.dry_run }}
+        if: ${{ env.DRY_RUN != 'true' }}
         env:
           SOFTMAX_TOKEN: ${{ secrets.SOFTMAX_TOKEN }}
         run: |
@@ -205,13 +283,16 @@ jobs:
           PY
 
       - name: Check token and version against the platform
-        if: ${{ !inputs.dry_run }}
-        env:
-          VERSION: ${{ inputs.version }}
+        if: ${{ env.DRY_RUN != 'true' }}
         run: |
           set -euo pipefail
           next="$(coworld next-version "$COWORLD_NAME" --server "$SOFTMAX_API_SERVER")"
           echo "Platform suggests next version: $next"
+          if [ -z "$VERSION" ]; then
+            VERSION="$next"
+            echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+            echo "Automatic deploy: using $VERSION"
+          fi
           "$(uv tool dir)/coworld/bin/python" - "$VERSION" "$next" <<'PY'
           import sys
           from packaging.version import Version
@@ -221,8 +302,6 @@ jobs:
           PY
 
       - name: coworld build
-        env:
-          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           # shellcheck disable=SC1091
@@ -242,7 +321,7 @@ jobs:
           grep -q "Replay liveness: skipped (static replay bundle declared" "$RUNNER_TEMP/certify.log"
 
       - name: coworld upload-coworld
-        if: ${{ !inputs.dry_run }}
+        if: ${{ env.DRY_RUN != 'true' }}
         run: |
           set -euo pipefail
           # Exit 2 = certification failure we control; exit 3 = platform failure/timeout (retryable).
@@ -254,7 +333,7 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/upload.log"
 
       - name: Verify canonical promotion
-        if: ${{ !inputs.dry_run }}
+        if: ${{ env.DRY_RUN != 'true' }}
         run: |
           set -euo pipefail
           cow_id="$(sed -n 's/^Coworld: \(cow_[0-9a-f-]*\)$/\1/p' "$RUNNER_TEMP/upload.log" | tail -1)"
@@ -275,6 +354,17 @@ jobs:
           echo "::error::$cow_id uploaded but is not canonical"
           exit 1
 
+      # The automatic path diffs against the newest coworld-v* tag, so every upload records one.
+      - name: Tag the deployed commit
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/coworld-v$VERSION" -f sha="$SHA" >/dev/null
+          echo "Tagged $SHA as coworld-v$VERSION"
+          echo "Tagged \`$SHA\` as \`coworld-v$VERSION\`." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Remove Softmax credentials
         if: ${{ always() }}
         working-directory: ${{ github.workspace }}
@@ -284,7 +374,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: coworld-${{ inputs.version }}
+          name: coworld-${{ env.VERSION || 'auto' }}
           # Deliberately not the replay-viewer bundle: it embeds art from the private polyworld-data repo.
           path: |
             paintbot-pw/coworld/paintbot/dist/coworld_manifest.json
