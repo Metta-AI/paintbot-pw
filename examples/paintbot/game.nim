@@ -220,9 +220,28 @@ proc parseGameMode*(config: JsonNode): GameMode =
   of "teams": gmTeams
   of "ffa_kin": gmFfaKin
   else: raise newException(ValueError, "Unknown Paintbot mode: " & mode.getStr)
+proc parseKinLayout*(config: JsonNode, mode: GameMode): Option[KinLayout] =
+  ## The coworld config's optional "kin_layout": absent or "sampled" draws a layout per seed;
+  ## a layout name pins every match to it. FFA-kin only: a teams config may not set it.
+  let layout = config{"kin_layout"}
+  if layout.isNil or layout.kind == JNull: return none(KinLayout)
+  if layout.kind != JString: raise newException(ValueError, "Paintbot kin_layout must be a string")
+  if mode != gmFfaKin:
+    raise newException(ValueError, "Paintbot kin_layout requires \"mode\": \"ffa_kin\"")
+  case layout.getStr
+  of "sampled": none(KinLayout)
+  of "fours": some(klFours)
+  of "pairs": some(klPairs)
+  of "trios_loner": some(klTriosLoner)
+  of "cousins": some(klCousins)
+  of "strangers": some(klStrangers)
+  of "clones": some(klClones)
+  else: raise newException(ValueError, "Unknown Paintbot kin_layout: " & layout.getStr)
 proc applyGameConfig*(text: string) =
   ## Reads the keys CoworldConfig skips. An FFA-kin match lasts at most six minutes.
-  gameMode = parseGameMode(parseJson(text))
+  let config = parseJson(text)
+  gameMode = parseGameMode(config)
+  kinLayoutPin = parseKinLayout(config, gameMode)
   if ffa():
     options.maximumTicks = min(options.maximumTicks, FfaMatchTicks.int32)
     options.seconds = options.maximumTicks div TickRate

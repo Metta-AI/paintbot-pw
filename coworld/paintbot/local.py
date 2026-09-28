@@ -15,6 +15,11 @@ p.add_argument("--seed", type=int, default=2026)
 p.add_argument("--output", type=Path, required=True)
 p.add_argument("--port", type=int, default=8088)
 p.add_argument("--mode", choices=["teams", "ffa_kin"], default="teams")
+p.add_argument(
+    "--kin-layout",
+    choices=["sampled", "fours", "pairs", "trios_loner", "cousins", "strangers", "clones"],
+    help='FFA-kin only: the config\'s "kin_layout" (absent: a layout is sampled per seed)',
+)
 a = p.parse_args()
 root = Path(__file__).resolve().parents[2]
 out = a.output.resolve()
@@ -47,17 +52,16 @@ for i, file in enumerate(policies):
         )
     )
 )
-(out / "config.json").write_text(
-    json.dumps(
-        dict(
-            players=[dict(name=f"Player {i}") for i in range(16)],
-            tokens=[str(i) for i in range(16)],
-            seed=a.seed,
-            max_ticks=a.ticks,
-            mode=a.mode,
-        )
-    )
+config = dict(
+    players=[dict(name=f"Player {i}") for i in range(16)],
+    tokens=[str(i) for i in range(16)],
+    seed=a.seed,
+    max_ticks=a.ticks,
+    mode=a.mode,
 )
+if a.kin_layout is not None:
+    config["kin_layout"] = a.kin_layout
+(out / "config.json").write_text(json.dumps(config))
 env = dict(
     os.environ,
     COGAME_CONFIG_URI=(out / "config.json").as_uri(),
