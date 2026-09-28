@@ -685,3 +685,44 @@ Neural canaries, seed 2026 against the plain BASIC filler, all 16 seats exit 0 w
 - user inputs: a K=3 bundle (observation contract v2u3) whose script writes `neuralInput` each tick and decodes
   through `neuralSample`/`neuralDecode`/`neuralIssue` ran as `ereq_b00a4c6f` (2972 ticks, hash 938676042, the same as
   the local run).
+
+## Stronger grenades and spray (rules 40) — 0.3.47
+
+#114 makes both pickups worth taking. League replays from 0.3.46 showed the top three teams almost never use
+them: the champion throws no grenades and never sprays, and grenades plus spray are about 2% of the Aaron bots'
+kills. Rules 40, all gated on `visionRulesVersion >= 40`:
+
+- Grenade blast radius 270 -> 360 (`grenadeBlastRadius()`). Damage in the open 2 -> 3, a kill at full health.
+  Damage to a victim in a different trench 1 -> 2; same trench stays 6.
+- Spray recovery 20 -> 8 ticks (`sprayRecoveryTicks()`). Spray cone half width along * 3/5 -> along * 4/5
+  (`sprayHalfWidth`, which the neural decoder's spray gate shares).
+- Unchanged on purpose: grenade charge (24 ticks), because every BASIC bot converts charge to throw distance with
+  24; spray reach (850), because the neural contract pins it.
+
+Live and replay rules, the loader list and `NativeRules` are 40. Rules 39 and earlier replay unchanged, and
+existing BASIC files and neural bundles load and run unchanged. The league was not paused.
+
+Deployed from main `aecb1d4`. build.yml run 36356927177 was green on all three OSes. One Deploy Coworld run,
+36359228545 (`Deploy Coworld 0.3.47 (upload)`), was dispatched only after that build succeeded, with no other
+deploy run in flight and main still at `aecb1d4`. `next-version` had returned 0.3.47. Version 0.3.47 is
+certified and canonical as `cow_47e279cc-b8be-41c1-a08d-54ff5e8792e4`
+(manifest `sha256:4409ad2a85840592188abab09c29693bce557d4447ea786ea9bf09fe1755d6d5`). Hosted smoke passed
+(`ereq_12451b53`, `ereq_2358fcb1`, `ereq_567902a5`, `ereq_56be9fb6`, `ereq_915e54b8`). The league's game now
+points at `cow_47e279cc`. The commit is tagged `coworld-v0.3.47`.
+
+No neural canaries were run for this release (earlier releases ran them). Neural bundles are expected to load
+unchanged, because no contract changed, but their replays will differ from 0.3.46 because the rules changed.
+
+## Automatic deploys (#116)
+
+From `4ae8ec7`, Deploy Coworld also runs when build.yml passes on a push to main. It ships the next platform
+version unless one of these holds:
+
+- main has already moved past that commit (the newer commit's own build deploys it);
+- the newest `coworld-v*` tag already points at the commit;
+- every file changed since that tag is outside the shipped game (`tests/`, `.github/`, this file, the other
+  Polyworld games).
+
+Each successful upload, manual or automatic, tags the commit it shipped as `coworld-v<version>`. Manual dispatch
+works as before. An automatic deploy does not write an entry here; add one when a release needs its own notes.
+Editing this file never triggers a deploy.
