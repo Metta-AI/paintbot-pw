@@ -3,7 +3,8 @@ import std/[math, times, algorithm]
 when defined(emscripten) and defined(workerReplayIndex): import flatty
 import windy, opengl, vmath, chroma, jsony
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam, selectionoutlines]
-import game, sim, analysis, villagegraphics, controls, celebration, projection
+import game, sim, analysis, villagegraphics, controls, celebration, projection, kinhue
+from kinship import activeKinship, rPercent
 import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
 else: {.emit: "#define EMSCRIPTEN_KEEPALIVE".}
@@ -41,7 +42,15 @@ type
     screen: array[Seats, array[2, float32]]
     visible: array[Seats, bool]
     footprint: array[4, array[2, float32]]
+    # FFA-kin (mode "ffa_kin"); empty in the teams game. Raw scores, heart-seconds, great-heart
+    # shares and great hearts travel inside world.
+    mode: string
+    family: seq[int] # family id per seat, -1 = loner
+    genes: seq[uint32]
+    rPct: seq[array[Seats, int32]] # round(100 r), row = seat
+    kinHue: seq[float32] # family hue in degrees, -1 = loner (grey)
 var
+  kinHues: array[Seats, float32] # FFA-kin family hue per seat; set once the match is loaded.
   transport: Player
   victory: Celebration
   playbackRate = 1'f32
@@ -497,6 +506,7 @@ proc startupPhase(label: string) =
 proc runGraphics*() =
   startupPhase("Preparing replay")
   setup()
+  if ffa(): kinHues = familyHues(activeKinship)
   var index: ReplayIndex
   if replayMode:
     when defined(emscripten) and defined(workerReplayIndex):
@@ -1159,7 +1169,21 @@ proc runGraphics*() =
           if item.readyAt > world.tick or not pointSeen(item.pos): continue
           objects.add Inspectable(kind: "pickup", id: i,
             bottom: projected(vp, position(item.pos, 0.1)), top: projected(vp, position(item.pos, 1.7)))
-        let payload = ViewerState(terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
+        var mode = "teams"
+        var family: seq[int]
+        var genes: seq[uint32]
+        var rPct: seq[array[Seats, int32]]
+        var kinHue: seq[float32]
+        if ffa():
+          mode = "ffa_kin"
+          for i in 0..<Seats:
+            family.add activeKinship.family[i].int
+            genes.add activeKinship.genes[i]
+            kinHue.add kinHues[i]
+            var row: array[Seats, int32]
+            for j in 0..<Seats: row[j] = activeKinship.rPercent(i, j)
+            rPct.add row
+        let payload = ViewerState(mode: mode, family: family, genes: genes, rPct: rPct, kinHue: kinHue, terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, world: world, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
             paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint).toJson()
         let data = payload.cstring
