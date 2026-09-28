@@ -8,8 +8,8 @@ proc mirrored(p: Point): Point = point(Width-p.x.int, Height-p.z.int)
 
 suite "Paintbot generated maps":
   setup:
-    visionRulesVersion = 42
-    replayRulesVersion = 42
+    visionRulesVersion = 43
+    replayRulesVersion = 43
   teardown:
     configureMap("")
 
@@ -80,7 +80,7 @@ suite "Paintbot generated maps":
         recording.frames.add Frame(commands: commands, hash: world.stateHash())
       let path = getTempDir()/("paintbot-map-" & name & ".replay")
       defer: removeFile(path)
-      saveReplayFile(path, "paintbot_pw", 42, recording)
+      saveReplayFile(path, "paintbot_pw", 43, recording)
       configureMap("")
       let loaded = loadRecording(path)
       check loaded.map == name
