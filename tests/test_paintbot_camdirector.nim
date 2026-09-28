@@ -85,7 +85,8 @@ suite "inset and instant replay":
     check back == 100-2*TickRate
     check r.active
     check r.update(110, 1/60, calm = true) == -1
-    check r.update(100+TickRate*3 div 2, 1/60, calm = true) == 120
+    # It ends past where it started from, so playback carries on with no seek.
+    check r.update(100+TickRate*3 div 2, 1/60, calm = true) == -1
     check not r.active
     # Cooldown: a fresh miss right away must wait.
     r.noteMissed(130, vec3(0, 0, 0))
@@ -96,3 +97,21 @@ suite "inset and instant replay":
     r.noteMissed(100, vec3(0, 0, 0))
     check r.update(100+9*TickRate, 1/60, calm = true) == -1
     check not r.active
+
+  test "fast playback ends a replay and returns only forward":
+    var r: InstantReplay
+    r.noteMissed(200, vec3(0, 0, 0))
+    check r.update(230, 1/60, calm = true) == 200-2*TickRate
+    check r.update(170, 1/60, calm = true, allowed = false) == 230
+    check not r.active
+    var late: InstantReplay
+    late.noteMissed(200, vec3(0, 0, 0))
+    discard late.update(230, 1/60, calm = true)
+    check late.finish(231) == -1
+
+  test "a manual seek holds off the next replay":
+    var r: InstantReplay
+    r.cancel()
+    r.noteMissed(300, vec3(0, 0, 0))
+    check r.update(301, 1, calm = true) == -1
+    check r.update(302, 10, calm = true) != -1

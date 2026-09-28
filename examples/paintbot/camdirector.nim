@@ -42,6 +42,11 @@ const
   ReplayMaxAgeTicks = 8*TickRate
     ## A missed highlight older than this is no longer worth rewinding for.
   ReplayCooldownSeconds* = 45'f32
+  SeekQuietSeconds = 10'f32
+    ## After a manual seek or skip, no instant replay for this long.
+  MissScanTicks* = 12
+    ## Ticks passed in one frame beyond this are a seek, not playback: nothing
+    ## jumped over counts as missed.
   ReplayFocusId* = 1_700_000_000'i32
   CalmScore* = 100'f32
     ## An instant replay waits until the held shot scores below this.
@@ -333,14 +338,22 @@ proc noteMissed*(r: var InstantReplay, tick: int32, position: Vec3) =
   ## Remembers a highlight the main camera did not have on screen.
   if not r.active: r.missed.add (tick, position)
 
-proc update*(r: var InstantReplay, tick: int32, dt: float32, calm: bool): int32 =
-  ## Advances the replay state. Returns a tick to seek to, or -1.
+proc finish*(r: var InstantReplay, tick: int32): int32 =
+  ## Ends a running replay. Returns the tick to seek forward to, or -1 when
+  ## playback has already reached the moment the replay started from.
+  result = -1
+  if not r.active: return
+  r.active = false
+  r.cooldown = ReplayCooldownSeconds
+  if tick < r.resumeTick: result = r.resumeTick
+
+proc update*(r: var InstantReplay, tick: int32, dt: float32, calm: bool,
+    allowed = true): int32 =
+  ## Advances the replay state. Returns a tick to seek to, or -1. A running
+  ## replay ends as soon as it is no longer `allowed` (fast playback).
   result = -1
   if r.active:
-    if tick >= r.endTick:
-      r.active = false
-      r.cooldown = ReplayCooldownSeconds
-      return r.resumeTick
+    if tick >= r.endTick or not allowed: return r.finish(tick)
     return
   r.cooldown = max(0, r.cooldown-max(dt, 0))
   var n = 0
@@ -349,7 +362,7 @@ proc update*(r: var InstantReplay, tick: int32, dt: float32, calm: bool): int32 
       r.missed[n] = m
       inc n
   r.missed.setLen(n)
-  if r.missed.len == 0 or r.cooldown > 0 or not calm: return
+  if not allowed or r.missed.len == 0 or r.cooldown > 0 or not calm: return
   let m = r.missed[^1]
   r.missed.setLen(0)
   r.active = true
@@ -359,9 +372,11 @@ proc update*(r: var InstantReplay, tick: int32, dt: float32, calm: bool): int32 
   result = max(0, m.tick-ReplayLeadTicks)
 
 proc cancel*(r: var InstantReplay) =
-  ## Drops a running replay and anything queued, as after a manual seek.
+  ## Drops a running replay and anything queued, as after a manual seek, and
+  ## holds off the next one so a skip is never followed by a rewind.
   r.active = false
   r.missed.setLen(0)
+  r.cooldown = max(r.cooldown, SeekQuietSeconds)
 
 iterator eventsBetween*(index: ReplayIndex, after, upTo: int): Moment =
   ## Yields the index events with after < tick <= upTo.

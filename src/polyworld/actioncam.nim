@@ -64,6 +64,10 @@ type
     interests: seq[Interest]
     effective: seq[float32]
       ## Ranking score per interest this frame: cluster share and fatigue.
+    clusterExtra: seq[float32]
+      ## Cached neighbour share per interest; rebuilt when interests change.
+    clusterGather: float32
+    clusterDirty: bool
     dwell: float32
     dwellCenter: Vec3
     locked*: bool
@@ -135,6 +139,7 @@ proc toggle*(cam: var ActionCam, followSelection: var bool) =
 
 proc beginFrame*(cam: var ActionCam, tick: int32) =
   ## Drops interests whose tick lifetime has ended.
+  cam.clusterDirty = true
   var n = 0
   for i in 0 ..< cam.interests.len:
     if cam.interests[i].expireTick >= tick:
@@ -157,6 +162,7 @@ proc noteInterest*(
   ## An existing interest keeps its highest score unless `replace` is set.
   if id == 0 or score <= 0:
     return
+  cam.clusterDirty = true
   let expire = tick + max(lastTicks, 1)
   for i in 0 ..< cam.interests.len:
     if cam.interests[i].id != id:
@@ -220,14 +226,23 @@ proc rank(cam: var ActionCam, gather: float32) =
   ## Scores each interest for ranking: its own score, a share of its
   ## neighbours', and the fatigue of a place watched too long.
   cam.effective.setLen(cam.interests.len)
-  for i, subject in cam.interests:
-    var score = subject.score
-    if cam.clusterShare > 0:
+  # Neighbour sums are quadratic, so they are rebuilt only when interests change
+  # (once a simulation tick), not every rendered frame.
+  if cam.clusterShare > 0 and (cam.clusterDirty or gather != cam.clusterGather or
+      cam.clusterExtra.len != cam.interests.len):
+    cam.clusterExtra.setLen(cam.interests.len)
+    for i, subject in cam.interests:
       var extra = 0.0'f32
       for j, other in cam.interests:
         if j != i and xzDist(subject.x, subject.z, other.x, other.z) <= gather:
           extra += other.score * cam.clusterShare
-      score += min(extra, subject.score)
+      cam.clusterExtra[i] = min(extra, subject.score)
+    cam.clusterDirty = false
+    cam.clusterGather = gather
+  for i, subject in cam.interests:
+    var score = subject.score
+    if cam.clusterShare > 0:
+      score += cam.clusterExtra[i]
     if cam.fatigueSeconds > 0 and cam.dwell > cam.fatigueSeconds and
         xzDist(subject.x, subject.z, cam.dwellCenter.x, cam.dwellCenter.z) <= gather:
       score *= max(FatigueFloor,

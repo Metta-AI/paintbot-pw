@@ -928,13 +928,16 @@ proc runGraphics*() =
       insetView = if firstPerson or instant.active: (false, vec3(0, 0, 0), 0'f32)
         else: director.insetShot(dt.float32)
       # Replays at up to 2x: rewind to a highlight both views missed once the action is calm.
-      if replayMode and transport.playing and playbackRate <= 2:
+      if replayMode and (transport.playing or instant.active):
         let calm = director.cam.interestScore(director.cam.lockId) < CalmScore
-        let back = instant.update(world.tick, dt.float32, calm)
+        let back = instant.update(world.tick, dt.float32, calm,
+          allowed = transport.playing and playbackRate <= 2)
         if back >= 0: transport.seekTo(back, play = true)
     else:
       insetView = (false, vec3(0, 0, 0), 0'f32)
-      if not autoCamera: instant.cancel()
+      # The action camera was turned off or the match ended: return from a replay.
+      let back = instant.finish(world.tick)
+      if back >= 0 and not cameraFinished: transport.seekTo(back, play = transport.playing)
     # A slow sway while the action camera holds a shot; it fades out when a
     # person takes the camera so the view never snaps.
     let swaying = autoCamera and not cameraFinished and director.cam.locked and playbackRate < 16
@@ -951,7 +954,8 @@ proc runGraphics*() =
       else: mat4()
     # Highlights neither view showed become instant-replay candidates.
     if world.tick < missCheckTick: missCheckTick = world.tick
-    if replayMode and autoCamera and world.tick != missCheckTick:
+    if replayMode and autoCamera and world.tick != missCheckTick and
+        world.tick-missCheckTick <= MissScanTicks:
       for event in index.eventsBetween(missCheckTick, world.tick):
         if (event.slot >= 0 and not seen(event.slot)) or not world.isHighlight(event): continue
         let at = position(point(event.x, event.z), 1)
@@ -960,7 +964,7 @@ proc runGraphics*() =
           q[0] in 0.03'f32..0.97'f32 and q[1] in 0.03'f32..0.97'f32
         if not inView(vp) and not (insetView.show and inView(insetVp)):
           instant.noteMissed(event.tick.int32, at)
-      missCheckTick = world.tick
+    missCheckTick = world.tick
     proc onScreen(p: Vec3, margin = 1.15'f32, view = vp): bool =
       ## Near the camera view; crowd decorations and characters off screen are skipped.
       let q = view * vec4(p.x, p.y+1, p.z, 1)
