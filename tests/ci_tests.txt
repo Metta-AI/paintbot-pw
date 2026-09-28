@@ -74,7 +74,10 @@ nim r -d:headless tests/test_paintbot_neural_net2.nim
 nim r -d:headless tests/test_paintbot_neural_joint.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim
 python -m unittest discover -s coworld/paintbot -p test_neural_package.py
-nim r tests/test_paintbot_jev_baseline.nim
+# The jev.bas switch-combination arms are split three ways; part 0 also runs the file's other tests.
+nim r -d:jevArmShards=3 -d:jevArmShard=0 tests/test_paintbot_jev_baseline.nim
+nim r -d:jevArmShards=3 -d:jevArmShard=1 tests/test_paintbot_jev_baseline.nim
+nim r -d:jevArmShards=3 -d:jevArmShard=2 tests/test_paintbot_jev_baseline.nim
 node tests/test_paintbot_inspector.js
 node tests/test_paintbot_webinputs.js
 python coworld/paintbot/tools/make_jev_baseline.py --check

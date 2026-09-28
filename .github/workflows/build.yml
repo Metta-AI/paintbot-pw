@@ -42,6 +42,20 @@ jobs:
         with:
           path: polyworld
       - uses: treeform/setup-nim-action@v6
+      # Nim's build cache (generated C, objects, binaries). Nim decides what to recompile by
+      # content hash, not timestamp, so a restored cache is safe: a stale entry just recompiles.
+      # One cache line per OS and shard, since each shard compiles different tests. The key ends
+      # in the commit so every run saves; restore takes the newest entry for the same OS, shard
+      # and dependency lock. Windows keeps it in ~/nimcache, everywhere else in ~/.cache/nim.
+      - name: Restore Nim build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/nim
+            ~/nimcache
+          key: nimcache-${{ runner.os }}-shard${{ matrix.shard }}-${{ hashFiles('polyworld/nimby.lock', 'polyworld/polyworld.nimble') }}-${{ github.sha }}
+          restore-keys: |
+            nimcache-${{ runner.os }}-shard${{ matrix.shard }}-${{ hashFiles('polyworld/nimby.lock', 'polyworld/polyworld.nimble') }}-
       - name: Install dependencies
         shell: bash
         run: |
