@@ -93,15 +93,15 @@ METRICS = {
              lambda v: _ratio(v[DAMAGE], v[IN_RANGE], 1000)),
     "defend": ("defend: defend damage per 1000 opportunity ticks", True, False,
                lambda v: _ratio(v[DEFEND], v[DEFEND_OPP], 1000)),
-    "kills": ("kills per 100 pair-episodes", False, False, lambda v: _ratio(v[KILLS], v[N_PAIRS], 100)),
-    "yield": ("yield: 1 - contest / yield opportunity", False, True,
-              lambda v: None if v[YIELD_OPP] <= 0 else 1 - v[CONTEST] / v[YIELD_OPP]),
+    "kills": ("kills per 100 ordered pair-episodes", False, False, lambda v: _ratio(v[KILLS], v[N_PAIRS], 100)),
+    "yield": ("yield: share of near-capture ticks not contested", False, True,
+              lambda v: _ratio(v[YIELD_OPP], v[YIELD_OPP] + v[CONTEST])),
     "near": ("near: fraction of ticks within 400u", False, True, lambda v: _ratio(v[NEAR], v[PAIR_TICKS])),
-    "co_capture": ("great-heart co-captures per 100 pair-episodes", False, False,
+    "co_capture": ("great-heart co-captures per 100 ordered pair-episodes", False, False,
                    lambda v: _ratio(v[CO_CAPTURE], v[N_PAIRS], 100)),
     "costly_defend": ("costly-defend share of defend damage", False, False,
                       lambda v: _ratio(v[COSTLY_DEFEND], v[DEFEND])),
-    "death_after_defend": ("deaths after defending, per 100 pair-episodes", False, False,
+    "death_after_defend": ("deaths after defending, per 100 ordered pair-episodes", False, False,
                            lambda v: _ratio(v[DEATH_AFTER_DEFEND], v[N_PAIRS], 100)),
 }
 HEADLINE = ["harm", "defend"]
@@ -373,6 +373,8 @@ def run_episode(job):
                 net, inputs, outputs, state_size = _net(spec)
                 if outputs != LOGITS:
                     raise RuntimeError(f"{spec['name']}: model has {outputs} outputs, expected {LOGITS}")
+                if obs_size is not None and inputs != obs_size:
+                    raise RuntimeError("neural seats disagree on the observation size")
                 obs_size = inputs
                 nets[s] = (net, (ctypes.c_float * max(1, state_size))())
             obs = (ctypes.c_float * (SEATS * obs_size))()
@@ -452,16 +454,19 @@ def bootstrap(units, stat, reps, seed):
     """Point estimate and 95% percentile CI of stat(units) over resampled units (episodes)."""
     point = stat(units)
     if not units or point is None:
-        return {"value": point, "lo": None, "hi": None, "n": len(units)}
+        return {"value": point, "lo": None, "hi": None, "n": len(units), "dropped": 0}
     rng = random.Random(seed)
-    draws = []
     n = len(units)
-    for _ in range(reps):
-        v = stat([units[rng.randrange(n)] for _ in range(n)])
-        if v is not None:
-            draws.append(v)
-    draws.sort()
-    return {"value": point, "lo": percentile(draws, 0.025), "hi": percentile(draws, 0.975), "n": n}
+    draws = [stat([units[rng.randrange(n)] for _ in range(n)]) for _ in range(reps)]
+    return interval(point, draws, n)
+
+
+def interval(point, draws, n):
+    """{value, lo, hi, n, dropped}: the 95% percentile interval of the defined draws; dropped counts
+    resamples where the statistic was undefined (an empty denominator in a sparse bucket)."""
+    vals = sorted(v for v in draws if v is not None)
+    return {"value": point, "lo": percentile(vals, 0.025), "hi": percentile(vals, 0.975), "n": n,
+            "dropped": len(draws) - len(vals)}
 
 
 def slope(points):
@@ -517,32 +522,102 @@ def summed(units, k):
     return tot
 
 
-def curve_table(units, keys, reps, seed, xs=None):
-    """For each metric, value + CI per key; with numeric keys xs, the slope against x with a CI.
-    One set of episode resamples serves every metric and key (the CIs are jointly drawn)."""
+def resample(units, keys, reps, seed):
+    """Per-key vector totals over all units (the point) and over `reps` resamples of the units
+    (episodes). One set of resamples serves every metric and key, so their CIs are jointly drawn."""
     zero = [0] * VEC
     cols = {k: [u.get(k, zero) for u in units] for k in keys}
 
     def totals(idx):
         return {k: [sum(c) for c in zip(*[cols[k][i] for i in idx])] if idx else list(zero) for k in keys}
     n = len(units)
-    point = totals(list(range(n)))
     rng = random.Random(seed)
-    draws = [totals([rng.randrange(n) for _ in range(n)]) for _ in range(reps if n else 0)]
+    return n, totals(list(range(n))), [totals([rng.randrange(n) for _ in range(n)]) for _ in range(reps if n else 0)]
+
+
+def curve_table(units, keys, reps, seed, xs=None):
+    """For each metric, value + CI per key; with numeric keys xs, the OLS slope of the bucket
+    values against x, with a CI."""
+    n, point, draws = resample(units, keys, reps, seed)
     out = {}
     for m, (_, _, _, fn) in METRICS.items():
         row = {"by": {}}
         for k in keys:
-            vals = sorted(v for v in (fn(d[k]) for d in draws) if v is not None)
-            row["by"][str(k)] = {"value": fn(point[k]), "lo": percentile(vals, 0.025),
-                                 "hi": percentile(vals, 0.975), "n": n, "count": point[k][N_PAIRS]}
+            row["by"][str(k)] = interval(fn(point[k]), [fn(d[k]) for d in draws], n)
+            row["by"][str(k)]["count"] = point[k][N_PAIRS]
         if xs is not None:
             def sl(t):
                 return slope([(x, fn(t[k])) for k, x in zip(keys, xs)])
-            vals = sorted(v for v in (sl(d) for d in draws) if v is not None)
-            row["slope"] = {"value": sl(point), "lo": percentile(vals, 0.025), "hi": percentile(vals, 0.975), "n": n}
+            row["slope"] = interval(sl(point), [sl(d) for d in draws], n)
         out[m] = row
     return out
+
+
+def by_layout_r(ep, i, j):
+    return (ep["layout"], r_bucket(ep["r"][i][j]))
+
+
+def layered_curve(units, layers, reps, seed, xs=R_BUCKETS):
+    """Hamilton curves when r buckets span layouts (units keyed (layout, r bucket)).
+
+    Every layout offers different r values (fours/pairs/trios: 0 and .5; cousins: 0, .25, .5), so
+    a slope over buckets pooled across layouts mixes layout effects into r. The headline "slope"
+    is therefore WITHIN-layout: the OLS slope over each layout's bucket values, averaged across
+    layouts weighted by the layout's ordered pair-episodes, all inside the same episode resample.
+    "slope_pooled" and the pooled "by" are the secondary view; "per_layout" has each layout's
+    buckets and own slope. Slopes are OLS over bucket values (ratio-of-sums), not over pairs."""
+    keys = [(lay, x) for lay in layers for x in xs]
+    n, point, draws = resample(units, keys, reps, seed)
+    zero = [0] * VEC
+
+    def pooled(t, x):
+        v = list(zero)
+        for lay in layers:
+            add_vec(v, t[(lay, x)])
+        return v
+    out = {}
+    for m, (_, _, _, fn) in METRICS.items():
+        def layer_slope(t, lay):
+            return slope([(x, fn(t[(lay, x)])) for x in xs])
+
+        def within(t):
+            num = den = 0.0
+            for lay in layers:
+                b = layer_slope(t, lay)
+                if b is None:
+                    continue
+                w = sum(t[(lay, x)][N_PAIRS] for x in xs if fn(t[(lay, x)]) is not None)
+                num, den = num + w * b, den + w
+            return num / den if den > 0 else None
+
+        def pooled_slope(t):
+            return slope([(x, fn(pooled(t, x))) for x in xs])
+        row = {"by": {}, "per_layout": {}}
+        for x in xs:
+            row["by"][str(x)] = interval(fn(pooled(point, x)), [fn(pooled(d, x)) for d in draws], n)
+            row["by"][str(x)]["count"] = pooled(point, x)[N_PAIRS]
+        row["slope"] = interval(within(point), [within(d) for d in draws], n)
+        row["slope_pooled"] = interval(pooled_slope(point), [pooled_slope(d) for d in draws], n)
+        for lay in layers:
+            per = {"by": {}}
+            for x in xs:
+                per["by"][str(x)] = interval(fn(point[(lay, x)]), [fn(d[(lay, x)]) for d in draws], n)
+                per["by"][str(x)]["count"] = point[(lay, x)][N_PAIRS]
+            per["slope"] = interval(layer_slope(point, lay), [layer_slope(d, lay) for d in draws], n)
+            row["per_layout"][lay] = per
+        out[m] = row
+    return out
+
+
+def split_layers(table):
+    """layered_curve's per-layout rows as one curve_table-shaped table per layout."""
+    layers = next(iter(table.values()))["per_layout"]
+    return {lay: {m: table[m]["per_layout"][lay] for m in table} for lay in layers}
+
+
+def hamilton_curve(eps, reps, seed, key=by_layout_r):
+    layers = sorted({e["layout"] for e in eps}, key=lambda x: ALL_LAYOUTS.index(x) if x in ALL_LAYOUTS else 99)
+    return layered_curve([pair_vectors(e, key) for e in eps], layers, reps, seed)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -649,8 +724,15 @@ def analyse_incentive(eps, args):
         res["welfare"][layout] = bootstrap(w, mean, args.bootstrap, 14)
     gate_layouts = {k: (v["aware_minus_blind"]["lo"] is not None and v["aware_minus_blind"]["lo"] > 0)
                     for k, v in res["mixed"].items()}
-    cw, sw = res["welfare"]["clones"]["value"], res["welfare"]["strangers"]["value"]
-    welfare_ok = cw is not None and sw is not None and cw > sw
+    # Clone minus stranger welfare, paired by seed (the welfare layouts share their seeds).
+    by_seed = {}
+    for e in eps:
+        if e["cond"]["part"] == "welfare":
+            by_seed.setdefault(e["seed"], {})[e["cond"]["layout"]] = sum(e["s"])
+    paired = [w["clones"] - w["strangers"] for w in by_seed.values() if "clones" in w and "strangers" in w]
+    res["welfare_clone_minus_stranger"] = bootstrap(paired, mean, args.bootstrap, 15)
+    diff = res["welfare_clone_minus_stranger"]["value"]
+    welfare_ok = diff is not None and diff > 0
     res["gate"] = {"aware_beats_blind": gate_layouts, "clone_welfare_gt_stranger": welfare_ok,
                    "pass": bool(gate_layouts) and all(gate_layouts.values()) and welfare_ok}
     return res
@@ -665,7 +747,10 @@ def analyse_hamilton(eps, args):
     res = {"layouts": sorted({e["layout"] for e in eps}, key=ALL_LAYOUTS.index)}
     kin = [e for e in eps if e["layout"] not in ("strangers", "clones")]
     if kin:
-        res["curve"] = curve_table(hamilton_units(kin), R_BUCKETS, args.bootstrap, 21, xs=R_BUCKETS)
+        res["curve"] = hamilton_curve(kin, args.bootstrap, 21)
+        per_layout = split_layers(res["curve"])
+        for layer in res["curve"].values():
+            del layer["per_layout"]
     for ctl in ("strangers", "clones"):
         c = [e for e in eps if e["layout"] == ctl]
         if c:
@@ -673,8 +758,11 @@ def analyse_hamilton(eps, args):
                                                 args.bootstrap, 22)
     res["per_layout"] = {}
     for layout in res["layouts"]:
-        sub = [e for e in eps if e["layout"] == layout]
-        res["per_layout"][layout] = curve_table(hamilton_units(sub), R_BUCKETS, args.bootstrap, 23)
+        if kin and layout in per_layout:
+            res["per_layout"][layout] = per_layout[layout]
+        else:
+            sub = [e for e in eps if e["layout"] == layout]
+            res["per_layout"][layout] = curve_table(hamilton_units(sub), R_BUCKETS, args.bootstrap, 23)
     return res
 
 
@@ -703,10 +791,21 @@ def analyse_rsweep(eps, args):
         t = curve_table(units_by[lv], ["within", "across"], args.bootstrap, 41)
         res["within"][str(lv)] = {m: t[m]["by"]["within"] for m in METRICS}
         res["across"][str(lv)] = {m: t[m]["by"]["across"] for m in METRICS}
-    # Dose-response: within-family metric against r = ibd / 32, episodes resampled per level.
+    # Dose-response: OLS slope of the within-family metric against r = ibd / 32, with a CI from
+    # resampling episodes independently within each level.
+    rng = random.Random(42)
+    cols = {lv: [u.get("within", [0] * VEC) for u in units_by[lv]] for lv in levels}
+
+    def tot(rows):
+        return [sum(c) for c in zip(*rows)] if rows else [0] * VEC
+    point = {lv: tot(cols[lv]) for lv in levels}
+    draws = []
+    for _ in range(args.bootstrap):
+        draws.append({lv: tot([cols[lv][rng.randrange(len(cols[lv]))] for _ in cols[lv]]) for lv in levels})
     for m, (_, _, _, fn) in METRICS.items():
-        pts = [(lv / 32, res["within"][str(lv)][m]["value"]) for lv in levels]
-        res["dose_slope"][m] = slope(pts)
+        def sl(t):
+            return slope([(lv / 32, fn(t[lv])) for lv in levels])
+        res["dose_slope"][m] = interval(sl(point), [sl(d) for d in draws], len(eps))
     return res
 
 
@@ -762,9 +861,11 @@ def analyse_selfish(eps, args, policies):
     for which in ("main", "second"):
         sub = [e for e in eps if e["cond"]["policy"] == which]
         kin = [e for e in sub if e["layout"] not in ("strangers", "clones")]
-        units = hamilton_units(kin)
+        curve = hamilton_curve(kin, args.bootstrap, 61)
+        for layer in curve.values():
+            del layer["per_layout"]
         res[which] = {
-            "curve": curve_table(units, R_BUCKETS, args.bootstrap, 61, xs=R_BUCKETS),
+            "curve": curve,
             "mean_R": bootstrap([mean(e["R"]) for e in sub], mean, args.bootstrap, 62),
             "welfare": bootstrap([sum(e["s"]) for e in sub], mean, args.bootstrap, 63),
         }
@@ -807,6 +908,7 @@ def analyse_gini(eps, args):
         res["hazard"][str(k)] = {"deaths": deaths.get(k, 0), "seat_minutes": minutes,
                                  "per_minute": deaths.get(k, 0) / minutes if minutes > 0 else None}
     res["survival_seconds_by_close_kin_at_start"] = {str(k): mean(v) for k, v in sorted(by_start.items())}
+    res["survival_note"] = "censored at the episode end: a seat alive at the end counts its episode length"
     return res
 
 
@@ -902,9 +1004,11 @@ def fmt(v, digits=3):
 def ci(b):
     if not isinstance(b, dict):
         return fmt(b)
+    drop = (f" <span class=muted title='resamples where the statistic was undefined'>({b['dropped']} "
+            f"dropped)</span>" if b.get("dropped") else "")
     if b.get("lo") is None:
-        return fmt(b.get("value"))
-    return f"{fmt(b['value'])} <span class=muted>[{fmt(b['lo'])}, {fmt(b['hi'])}]</span>"
+        return fmt(b.get("value")) + drop
+    return f"{fmt(b['value'])} <span class=muted>[{fmt(b['lo'])}, {fmt(b['hi'])}]</span>{drop}"
 
 
 def svg_curve(title, series, xlabel="r", width=330, height=210, confounded=False, xlabels=None):
@@ -992,11 +1096,17 @@ def metric_table(table, keys, key_label="r", slope_row=True):
                (" <span class=tag>confounded</span>" if confounded else "")
         cells = "".join(f"<td>{ci(table[m]['by'].get(str(k)))}</td>" for k in keys)
         sl = f"<td>{ci(table[m].get('slope'))}</td>" if slope_row and "slope" in table[m] else ""
+        if slope_row and "slope_pooled" in table[m]:
+            sl += f"<td>{ci(table[m]['slope_pooled'])}</td>"
         rows.append(f"<tr><td>{html.escape(label)}{tags}</td>{cells}{sl}</tr>")
     counts = "".join(f"<td class=muted>{fmt(table['harm']['by'].get(str(k), {}).get('count'))}</td>" for k in keys)
-    sl_head = "<th>slope vs r [95% CI]</th>" if slope_row and "slope" in table.get("harm", {}) else ""
+    pooled = "slope_pooled" in table.get("harm", {})
+    sl_head = ("<th>" + ("within-layout slope" if pooled else "slope vs r") + " [95% CI]</th>"
+               if slope_row and "slope" in table.get("harm", {}) else "")
+    if slope_row and pooled:
+        sl_head += "<th>pooled slope (secondary)</th>"
     return (f"<table><tr><th>{key_label}</th>{head}{sl_head}</tr>{''.join(rows)}"
-            f"<tr><td class=muted>pair-episodes</td>{counts}</tr></table>")
+            f"<tr><td class=muted>ordered pair-episodes</td>{counts}</tr></table>")
 
 
 def render_hamilton(res):
@@ -1015,17 +1125,24 @@ def render_hamilton(res):
             charts.append(svg_curve(METRICS[m][0].split(":")[0], series, confounded=METRICS[m][2]))
         parts.append("<p>Harm and defend are the headline curves. <b>Near and yield are mechanically "
                      "confounded</b>: the territory kin boost makes a relative's ground better for you, so "
-                     "closeness and yielding to kin rise with r without any altruism. Yield is the plan's "
-                     "1 &minus; contest/yield-opportunity; contest ticks mostly fall outside the uncontested "
-                     "opportunity ticks, so it is not bounded to [0, 1] and can go negative.</p>")
+                     "closeness and yielding to kin rise with r without any altruism. Yield is the share of "
+                     "near-capture ticks not contested, yield_opp / (yield_opp + contest); it counts only the "
+                     "pair's own contests and misses captures paused by a third cog.</p>"
+                     "<p>Slopes are OLS fits over bucket values (each a ratio of summed counters), with 95% "
+                     "bootstrap CIs from resampling episodes. The <b>headline slope is within-layout</b>: fitted "
+                     "per layout and averaged across layouts weighted by ordered pair-episodes, because each "
+                     "layout offers different r values and pooling buckets across layouts mixes layout "
+                     "effects into r. The pooled curve and slope are a secondary view.</p>")
         parts.append(f"<div class=charts>{''.join(charts)}</div>")
-        parts.append("<h3>Kin layouts pooled: metric by r bucket, slope against r</h3>")
+        parts.append("<h3>Kin layouts: pooled metric by r bucket; within-layout and pooled slopes</h3>")
         parts.append(metric_table(res["curve"], R_BUCKETS))
     for c, x in (("strangers", 0.0), ("clones", 1.0)):
         if "control_" + c in res:
             parts.append(f"<h3>Control: {c}</h3>" + metric_table(res["control_" + c], [x], slope_row=False))
     for layout, t in res.get("per_layout", {}).items():
-        parts.append(f"<details><summary>per layout: {layout}</summary>{metric_table(t, R_BUCKETS, slope_row=False)}</details>")
+        has_slope = "slope" in t.get("harm", {})
+        parts.append(f"<details><summary>per layout: {layout}</summary>"
+                     f"{metric_table(t, R_BUCKETS, slope_row=has_slope)}</details>")
     return "".join(parts)
 
 
@@ -1041,12 +1158,17 @@ def render(suite, res, meta):
             f"<td>{'<span class=pass>yes</span>' if g['aware_beats_blind'].get(k) else '<span class=fail>no</span>'}</td></tr>"
             for k, v in res["mixed"].items())
         wrows = "".join(f"<tr><td>{k}</td><td>{ci(v)}</td></tr>" for k, v in res["welfare"].items())
+        wrows += (f"<tr><td>clones &minus; strangers (paired by seed)</td>"
+                  f"<td>{ci(res['welfare_clone_minus_stranger'])}</td></tr>")
         out = [f"<p>Gate: {verdict} &mdash; aware R &gt; blind R with the 95% CI above 0 on every mixed "
-               f"layout, and clone welfare &gt; stranger welfare "
+               f"layout, and mean clone &minus; stranger welfare (paired by seed) &gt; 0 "
                f"({'yes' if g['clone_welfare_gt_stranger'] else 'no'}).</p>"]
         if not g["pass"]:
             out.append("<p class=fail>Do not launch the league as \"kinship working\". Propose a rules tune "
                        "(great-heart bounty or capture radius) as a separate decision.</p>")
+        out.append("<p>Aware &minus; blind measures whether <b>kin recognition pays</b>, including the "
+                   "coordination it enables (siblings ranking hearts so they never pause each other, holding "
+                   "fire through relatives, answering a relative's hurt shout), not altruism alone.</p>")
         out.append("<h3>Mixed families: ffa.bas (aware) vs ffa_blind.bas (blind)</h3>"
                    "<table><tr><th>layout</th><th>aware R/seat</th><th>blind R/seat</th><th>aware &minus; blind</th>"
                    f"<th>aware raw s</th><th>blind raw s</th><th>CI &gt; 0</th></tr>{rows}</table>")
@@ -1079,7 +1201,7 @@ def render(suite, res, meta):
                                     res["across"][str(lv)][m]["hi"]) for lv in levels])],
                 xlabel="within-family r = ibd/32", confounded=METRICS[m][2]))
         rows = "".join(f"<tr><td>{METRICS[m][0]}</td>" + "".join(
-            f"<td>{ci(res['within'][str(lv)][m])}</td>" for lv in levels) + f"<td>{fmt(res['dose_slope'][m])}</td></tr>"
+            f"<td>{ci(res['within'][str(lv)][m])}</td>" for lv in levels) + f"<td>{ci(res['dose_slope'][m])}</td></tr>"
             for m in METRICS)
         return (f"<div class=charts>{''.join(charts)}</div><table><tr><th>within family</th>"
                 + "".join(f"<th>ibd {lv}</th>" for lv in levels) + f"<th>slope vs r</th></tr>{rows}</table>")
@@ -1111,7 +1233,7 @@ def render(suite, res, meta):
                        f"<td>{ci(res[w]['curve']['harm']['slope'])}</td><td>{ci(res[w]['curve']['defend']['slope'])}</td></tr>"
                        for w in ("main", "second"))
         return (f"<div class=charts>{charts}</div><table><tr><th>policy</th><th>mean R</th><th>welfare &Sigma;s</th>"
-                f"<th>harm slope</th><th>defend slope</th></tr>{rows}</table>")
+                f"<th>harm slope (within-layout)</th><th>defend slope (within-layout)</th></tr>{rows}</table>")
     if suite == "gini":
         rows = "".join(f"<tr><td>{k}</td><td>{ci(v)}</td></tr>" for k, v in res["per_layout"].items())
         hz = "".join(f"<tr><td>{k}{'+' if k == '3' else ''}</td><td>{v['deaths']}</td><td>{fmt(v['seat_minutes'])}</td>"
@@ -1120,7 +1242,8 @@ def render(suite, res, meta):
         return (f"<h3>Within-family Gini of raw score</h3><table><tr><th>layout</th><th>Gini [95% CI]</th></tr>{rows}</table>"
                 "<h3>Death hazard against living close kin (r &ge; .5)</h3><table><tr><th>living close kin</th>"
                 f"<th>deaths</th><th>seat-minutes</th><th>deaths per seat-minute</th></tr>{hz}</table>"
-                "<h3>Mean survival (s) by close kin at the start</h3><table><tr><th>close kin</th><th>seconds</th></tr>"
+                "<h3>Mean survival (s) by close kin at the start (censored: a seat alive at the end counts its "
+                f"episode length)</h3><table><tr><th>close kin</th><th>seconds</th></tr>"
                 f"{sv}</table>")
     if suite == "crossplay":
         out = [f"<p>Half of every family runs <b>{html.escape(res['second_name'])}</b>. Rows are the focal policy's "

@@ -18,6 +18,7 @@ Policy keys are the seat names; --name-regex keeps only the first capture group 
 import argparse
 import gzip
 import json
+import os
 import re
 import subprocess
 import sys
@@ -53,12 +54,14 @@ def replay_files(inputs):
 def counters(tool: Path, paths, scratch: Path):
     """Run the Nim tool over some replays; gunzip first where needed. One JSON object per replay."""
     args, back = [], {}
-    for n, p in enumerate(paths):
+    for p in paths:
         with open(p, "rb") as f:
             gz = f.read(2) == b"\x1f\x8b"
         if gz:
-            plain = scratch / f"{n}-{p.stem}.raw"
-            with gzip.open(p, "rb") as src, open(plain, "wb") as dst:
+            # A unique name per file: several threads decompress into the same scratch directory.
+            fd, name = tempfile.mkstemp(suffix=".raw", prefix=p.stem + "-", dir=scratch)
+            plain = Path(name)
+            with gzip.open(p, "rb") as src, os.fdopen(fd, "wb") as dst:
                 dst.write(src.read())
             back[str(plain)] = str(p)
             args.append(str(plain))
@@ -100,14 +103,14 @@ def per_policy(eps, reps):
     out = {}
     for name in sorted({n for e in eps for n in e["policy"]}):
         def key(ep, i, j, name=name):
-            return kin_eval.r_bucket(ep["r"][i][j]) if ep["policy"][i] == name else None
-        units = kin_eval.hamilton_units(eps, key)
+            return kin_eval.by_layout_r(ep, i, j) if ep["policy"][i] == name else None
         seats = [(e, s) for e in eps for s in range(16) if e["policy"][s] == name]
         out[name] = {
             "episodes": len({id(e) for e, _ in seats}), "seats": len(seats),
             "mean_R": kin_eval.mean([e["R"][s] for e, s in seats]),
             "mean_s": kin_eval.mean([e["s"][s] for e, s in seats]),
-            "curve": kin_eval.curve_table(units, kin_eval.R_BUCKETS, reps, 101, xs=kin_eval.R_BUCKETS),
+            # Within-layout slope headline (r buckets span layouts), pooled as the secondary view.
+            "curve": kin_eval.hamilton_curve(eps, reps, 101, key),
         }
     return out
 
@@ -115,8 +118,8 @@ def per_policy(eps, reps):
 def render(res, meta):
     parts = [f"<h2 id=all>All episodes ({res['episodes']})</h2>", kin_eval.render_hamilton(res["hamilton"])]
     parts.append("<h2 id=policies>Per policy (focal seat i runs the policy)</h2><table><tr><th>policy</th>"
-                 "<th>episodes</th><th>seats</th><th>mean R</th><th>mean raw s</th><th>harm slope</th>"
-                 "<th>defend slope</th></tr>")
+                 "<th>episodes</th><th>seats</th><th>mean R</th><th>mean raw s</th><th>harm slope (within-layout)</th>"
+                 "<th>defend slope (within-layout)</th></tr>")
     for name, v in res["per_policy"].items():
         parts.append(f"<tr><td>{kin_eval.html.escape(name)}</td><td>{v['episodes']}</td><td>{v['seats']}</td>"
                      f"<td>{kin_eval.fmt(v['mean_R'])}</td><td>{kin_eval.fmt(v['mean_s'])}</td>"
