@@ -84,96 +84,95 @@ proc heartHeldTicks*(index: ReplayIndex, heart, tick: int): int =
 
 proc advanceIndexed*(index: var ReplayIndex) =
   ## Keep spectator counters outside World so rules and replay hashes are unchanged.
+  ## Detects this tick's events too, so a live match's index fills like a replay's.
   if index.combat.len == 0:
     index.combat.add default(array[Seats, CombatStats])
   doAssert index.combat.len == world.tick + 1
   index.sampleHeartTenures(world)
+  let previous = world.cogs
+  let equipment = world.equipment
+  let hearts = world.hearts
+  var owners: seq[int32]
+  for h in world.controlHearts: owners.add h.owner
+  let greats = world.greatHearts
   var counters = index.combat[^1]
-  var hits: seq[Moment]
+  var hits, tags: seq[Moment]
   observeShot = proc(tick: int32, slot: int) =
     inc counters[slot].shots
   observeHit = proc(tick: int32, victim, attacker: int, pos: Point) =
     inc counters[attacker].hits
     hits.add Moment(tick: tick+1, slot: attacker, side: team(attacker),
         victim: victim, kind: "hit", x: pos.x, z: pos.z)
+  observeTag = proc(tick: int32, victim, attacker: int, pos: Point) =
+    tags.add Moment(tick: tick + 1, slot: attacker, side: team(attacker),
+        victim: victim, kind: "tag", x: pos.x, z: pos.z)
   defer:
     observeShot = nil
     observeHit = nil
+    observeTag = nil
   advance()
   index.sampleHeartTenures(world)
   index.combat.add counters
   index.hits.add hits
+  if ffa():
+    # FFA-kin great hearts: a charge starting and a capture are events (slot = the first cog
+    # in the zone, victim = the heart), so the feed and lull skipping see stag hunts.
+    for n, g in world.greatHearts:
+      let captured = g.dormantUntil > greats[n].dormantUntil
+      let charging = greats[n].progress == 0 and g.progress > 0
+      if not captured and not charging: continue
+      var first = -1
+      for i, c in world.cogs:
+        if c.hp > 0 and distance2(c.pos, g.pos) <= GreatHeartRadius.int64*GreatHeartRadius:
+          first = i
+          break
+      index.events.add Moment(tick: world.tick, slot: first, side: max(first, 0),
+        kind: (if captured: "great heart" else: "great heart charge"), victim: n,
+        x: g.pos.x, z: g.pos.z)
+  for i,h in world.controlHearts:
+    if h.owner!=owners[i] and h.owner>=0:
+      index.events.add Moment(tick:world.tick,slot: -1,side:h.owner.int,
+        kind:"territory",victim:i,x:h.pos.x,z:h.pos.z)
+  index.events.add tags
+  for i, cog in world.cogs:
+    template event(label: string) =
+      index.events.add Moment(tick: world.tick, slot: i, side: team(i),
+          kind: label, x: cog.pos.x, z: cog.pos.z)
+    if world.equipment[i].grenade and not equipment[i].grenade: event("grenade pickup")
+    if world.equipment[i].sprayCan and not equipment[i].sprayCan: event("spray pickup")
+    if world.equipment[i].armor > equipment[i].armor: event("shield pickup")
+    if world.equipment[i].burst > equipment[i].burst: event("spray")
+    if cog.hp > previous[i].hp and previous[i].hp > 0: event("heal")
+    if cog.hp == 0 and previous[i].hp > 0:
+      event("down")
+    if visionRulesVersion<13 and cog.captures > previous[i].captures: event("capture")
+    if cog.carrying and not previous[i].carrying: event("pickup")
+  for g in world.grenades:
+    if g.releasedAt == world.tick-1:
+      index.events.add Moment(tick: world.tick, slot: g.owner, side: team(
+          g.owner.int), kind: "grenade throw", x: g.target.x, z: g.target.z)
+  for b in world.blasts:
+    if b.tick == world.tick-1:
+      index.events.add Moment(tick: world.tick, slot: b.owner, side: team(
+          b.owner.int), kind: "grenade blast", x: b.pos.x, z: b.pos.z)
+  for side in 0..1:
+    if hearts[side].carrier >= 0 and world.hearts[side].carrier < 0:
+      index.events.add Moment(tick: world.tick, slot: hearts[side].carrier,
+          side: side, kind: (if world.hearts[side].pos == home(
+          side): "return" else: "drop"), x: world.hearts[side].pos.x,
+          z: world.hearts[side].pos.z)
+    if hearts[side].returnAt > 0 and world.hearts[side].returnAt == 0 and
+        world.hearts[side].carrier < 0:
+      index.events.add Moment(tick: world.tick, slot: -1, side: side,
+          kind: "return", x: home(side).x, z: home(side).z)
 
 proc indexReplay*(progress: proc(tick, total: int) = nil): ReplayIndex =
-  var tags: seq[Moment]
-  observeTag = proc(tick: int32, victim, attacker: int, pos: Point) =
-    tags.add Moment(tick: tick + 1, slot: attacker, side: team(attacker),
-        victim: victim, kind: "tag", x: pos.x, z: pos.z)
-  defer: observeTag = nil
   world = newWorld(recording.seed, recording.endTick)
   result.combat.add default(array[Seats, CombatStats])
   result.checkpoints.add Checkpoint(state: snapshot(world))
   result.sampleGraphs(world)
   while world.tick < recording.frames.len:
-    let previous = world.cogs
-    let equipment = world.equipment
-    let hearts = world.hearts
-    var owners:seq[int32]
-    for h in world.controlHearts:owners.add h.owner
-    let greats = world.greatHearts
     result.advanceIndexed()
-    if ffa():
-      # FFA-kin great hearts: a charge starting and a capture are events (slot = the first cog
-      # in the zone, victim = the heart), so the feed and lull skipping see stag hunts.
-      for n, g in world.greatHearts:
-        let captured = g.dormantUntil > greats[n].dormantUntil
-        let charging = greats[n].progress == 0 and g.progress > 0
-        if not captured and not charging: continue
-        var first = -1
-        for i, c in world.cogs:
-          if c.hp > 0 and distance2(c.pos, g.pos) <= GreatHeartRadius.int64*GreatHeartRadius:
-            first = i
-            break
-        result.events.add Moment(tick: world.tick, slot: first, side: max(first, 0),
-          kind: (if captured: "great heart" else: "great heart charge"), victim: n,
-          x: g.pos.x, z: g.pos.z)
-    for i,h in world.controlHearts:
-      if h.owner!=owners[i] and h.owner>=0:
-        result.events.add Moment(tick:world.tick,slot: -1,side:h.owner.int,
-          kind:"territory",victim:i,x:h.pos.x,z:h.pos.z)
-    result.events.add tags
-    tags.setLen(0)
-    for i, cog in world.cogs:
-      template event(label: string) =
-        result.events.add Moment(tick: world.tick, slot: i, side: team(i),
-            kind: label, x: cog.pos.x, z: cog.pos.z)
-      if world.equipment[i].grenade and not equipment[i].grenade: event("grenade pickup")
-      if world.equipment[i].sprayCan and not equipment[i].sprayCan: event("spray pickup")
-      if world.equipment[i].armor > equipment[i].armor: event("shield pickup")
-      if world.equipment[i].burst > equipment[i].burst: event("spray")
-      if cog.hp > previous[i].hp and previous[i].hp > 0: event("heal")
-      if cog.hp == 0 and previous[i].hp > 0:
-        event("down")
-      if visionRulesVersion<13 and cog.captures > previous[i].captures: event("capture")
-      if cog.carrying and not previous[i].carrying: event("pickup")
-    for g in world.grenades:
-      if g.releasedAt == world.tick-1:
-        result.events.add Moment(tick: world.tick, slot: g.owner, side: team(
-            g.owner.int), kind: "grenade throw", x: g.target.x, z: g.target.z)
-    for b in world.blasts:
-      if b.tick == world.tick-1:
-        result.events.add Moment(tick: world.tick, slot: b.owner, side: team(
-            b.owner.int), kind: "grenade blast", x: b.pos.x, z: b.pos.z)
-    for side in 0..1:
-      if hearts[side].carrier >= 0 and world.hearts[side].carrier < 0:
-        result.events.add Moment(tick: world.tick, slot: hearts[side].carrier,
-            side: side, kind: (if world.hearts[side].pos == home(
-            side): "return" else: "drop"), x: world.hearts[side].pos.x,
-            z: world.hearts[side].pos.z)
-      if hearts[side].returnAt > 0 and world.hearts[side].returnAt == 0 and
-          world.hearts[side].carrier < 0:
-        result.events.add Moment(tick: world.tick, slot: -1, side: side,
-            kind: "return", x: home(side).x, z: home(side).z)
     result.sampleGraphs(world)
     if world.tick == recording.frames.len and result.momentum[^1].tick != world.tick:
       result.momentum.add graphSample(world)
