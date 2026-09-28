@@ -79,6 +79,23 @@ suite "pw_net ABI":
     check load(big, message) == nil
     check message == "neural actor exceeds native operation budget: " & $loadActor(big).operationCount & " > 4000000"
     check load("PWNET00", message) == nil and message == "invalid neural actor length"
+    # Token layers through the same entry points, bit for bit.
+    let tokens = encode2(ObservationSize, ActionSizes,
+      r.entityFactored(inputs = ObservationSize, segments = [[104'u32, 8, 8], [0'u32, 0, 24]]))
+    let tnet = load(tokens, message)
+    require tnet != nil
+    let tactor = loadActor(tokens)
+    check pw_net_info(tnet, i64buf(info)) == 0
+    check info[3] == 128 and info[7] == tactor.operationCount
+    var ts, hs = newSeq[float32](128)
+    var tl, hl = newSeq[float32](LogitSize)
+    for step in 0..<100:
+      let o = r.observation(ObservationSize)
+      tactor.infer(o, hs, hl)
+      var oc = o
+      check pw_net_infer(tnet, fbuf(oc), fbuf(ts), fbuf(tl)) == 0
+      check bits(ts) == bits(hs) and bits(tl) == bits(hl)
+    pw_net_destroy(tnet)
 
 const NeuralSource = """
 paintbot_observe(neuralObservation())
@@ -88,11 +105,11 @@ paintbot_act(neuralLogits())
 
 suite "Hosted PWNET002 seats and the native ABI":
   configureRules(NativeRules)
-  test "argmax over pw_net_infer with pw_observe's resets plays the hosted match hash for hash":
+  proc playsHashForHash(build: proc (r: var Rand): string, S: int) =
     var allDeaths = 0
     for seed in [5'i32, 6]:
       var r = initRand(seed)
-      let model = r.attentionNet()
+      let model = build(r)
       let path = getTempDir()/("paintbot-native-net2-" & $seed & ".bas")
       writeFile(path, NeuralSource)
       writeFile(path & ".model.bin", model)
@@ -106,7 +123,7 @@ suite "Hosted PWNET002 seats and the native ABI":
       require handle != nil
       var obs = newSeq[float32](Seats*ObservationSize)
       var resets: array[Seats, float32]
-      var states = newSeq[float32](Seats*144)
+      var states = newSeq[float32](Seats*S)
       var logits = newSeq[float32](LogitSize)
       var actions: array[Seats*ActionSizes.len, int32]
       var rewards, terminals: array[Seats, float32]
@@ -116,9 +133,9 @@ suite "Hosted PWNET002 seats and the native ABI":
         for slot in 0..<Seats:
           if resets[slot] != 0:
             inc stateResets
-            for i in 0..<144: states[slot*144+i] = 0
+            for i in 0..<S: states[slot*S+i] = 0
           require pw_net_infer(net, cast[Buffer](addr obs[slot*ObservationSize]),
-            cast[Buffer](addr states[slot*144]), fbuf(logits)) == 0
+            cast[Buffer](addr states[slot*S]), fbuf(logits)) == 0
           let picked = argmaxActions(logits)
           for head in 0..<ActionSizes.len: actions[slot*ActionSizes.len+head] = picked[head].int32
           if world.cogs[slot].hp <= 0: inc deaths
@@ -136,10 +153,18 @@ suite "Hosted PWNET002 seats and the native ABI":
         # happen to be alive at the end.
         for slot in 0..<Seats:
           if decided[slot]:
-            check bits(players[slot].neural.state) == bits(states[slot*144 ..< (slot+1)*144])
+            check bits(players[slot].neural.state) == bits(states[slot*S ..< (slot+1)*S])
       checkpoint "seed " & $seed & " steps " & $steps & " state resets " & $stateResets & " dead seat-ticks " & $deaths
       check steps > 300 and stateResets >= Seats
       allDeaths += deaths
       pw_destroy(handle)
       pw_net_destroy(net)
     check allDeaths > 0
+
+  test "argmax over pw_net_infer with pw_observe's resets plays the hosted match hash for hash":
+    playsHashForHash(proc (r: var Rand): string = r.attentionNet(), 144)
+
+  test "the same with token layers (TOKEN_MLP, TOKEN_MIX, POINTER): hash for hash":
+    playsHashForHash(proc (r: var Rand): string =
+      encode2(ObservationSize, ActionSizes,
+        r.entityFactored(inputs = ObservationSize, segments = [[104'u32, 8, 8], [0'u32, 0, 24]])), 128)

@@ -495,7 +495,7 @@ class Pwnet2Tests(unittest.TestCase):
             (pwnet2(64, heads, []), "layer count"),
             (pwnet2(64, heads, [(1, [64, 6, 2], [], 64 * 6)]), "must be 0 or 1"),
             (pwnet2(64, heads, [(1, [64, 6, 0, 0, 0, 0, 0, 1], [], 64 * 6)]), "unused parameter"),
-            (pwnet2(64, heads, [(9, [], [], 0)]), "unknown layer type"),
+            (pwnet2(64, heads, [(99, [], [], 0)]), "unknown layer type"),
             (pwnet2(64, heads, [(3, [64, 32, 1], [], 3 * 32 * 64), (1, [32, 6], [], 192)]), "highway"),
             (pwnet2(64, heads, [(1, [64, 6], [], 384), (4, [1], [], 0)]), "earlier layer"),
             (pwnet2(64, heads, [(1, [64, 2], [], 128), (6, [60, 5], [], 0)]), "outside the input"),
@@ -514,6 +514,57 @@ class Pwnet2Tests(unittest.TestCase):
         nonfinite[-4:] = struct.pack("<f", float("inf"))
         with self.assertRaisesRegex(ValueError, "nonfinite"):
             validate_pwnet2(bytes(nonfinite))
+
+    @staticmethod
+    def token_mlp(tokens, segments, valid, widths):
+        n, floats = sum(seg[2] for seg in segments), 0
+        for o in widths:
+            floats += o * n + o
+            n = o
+        return (7, [tokens, len(segments), valid[0], valid[1], len(widths)],
+                [x for seg in segments for x in seg] + list(widths), floats)
+
+    def entity_factored(self, inputs=538):
+        # neural_actor.md's entity-factored example over v2u32: 1,327,278 operations (test_paintbot_neural_net2).
+        segments = [(104, 8, 8), (470, 2, 2), (0, 0, 24), (448, 0, 2), (506, 1, 1), (522, 1, 1)]
+        return pwnet2(inputs, [51, 25, 2, 2, 2], [
+            self.token_mlp(16, segments, (0, 0), [128, 128]),
+            (6, [0, inputs], [], 0),
+            (1, [256 + inputs, 128], [], (256 + inputs) * 128),
+            (3, [128, 128, 1, 0], [], 3 * 128 * 128),
+            (8, [0, 64], [], 64 * 128 + 64 + 64 * 128),
+            (1, [256, 82, 1, 0], [], 256 * 82 + 82),
+            (9, [4, 52], [], 65)])
+
+    def test_token_layers_cost_and_structure(self):
+        info = validate_pwnet2(self.entity_factored())
+        self.assertEqual(info["operations"], 1327278)
+        self.assertEqual((info["state"], info["layers"]), (128, 7))
+        heads = [2, 2, 2, 3]
+        mlp = self.token_mlp(5, [(0, 8, 6), (50, 0, 3)], (0, 0), [8, 5])
+        mix = (8, [0, 4], [], 4 * 5 + 4 + 4 * 10)
+        good = [mlp, mix, (1, [18, 9, 1], [], 18 * 9 + 9), (9, [1, 3], [], 5)]
+        validate_pwnet2(pwnet2(64, heads, good))
+        cases = [
+            ([self.token_mlp(0, [(0, 8, 6)], (0, 0), [4]), (1, [8, 9], [], 72)], "tokens"),
+            ([self.token_mlp(9, [(0, 8, 6)], (0, 0), [4]), (1, [8, 9], [], 72)], "outside the input"),
+            ([self.token_mlp(5, [(0, 65, 6)], (0, 0), [4]), (1, [8, 9], [], 72)], "length/stride"),
+            ([self.token_mlp(5, [(0, 8, 6)], (1, 0), [4]), (1, [8, 9], [], 72)], "valid flag"),
+            ([self.token_mlp(5, [(0, 8, 6)], (0, 6), [4]), (1, [8, 9], [], 72)], "valid flag"),
+            ([self.token_mlp(5, [(0, 8, 6)], (0xFFFFFFFF, 1), [4]), (1, [8, 9], [], 72)], "valid index 0"),
+            ([self.token_mlp(5, [(0, 8, 6)], (0, 0), [300]), (1, [600, 9], [], 5400)], "widths"),
+            ([self.token_mlp(5, [(0, 8, 6)], (0, 0), [4, 4, 4, 4, 4]), (1, [8, 9], [], 72)], "layers"),
+            ([mlp, (8, [0, 4], [], 64), (1, [18, 9, 1], [], 171), (9, [0, 3], [], 5)], "earlier TOKEN_MIX"),
+            ([mlp, (8, [0, 4], [], 64), (1, [18, 9, 1], [], 171), (9, [1, 6], [], 5)], "exceeds width"),
+            ([(1, [64, 10], [], 640), (8, [0, 4], [], 60), (1, [18, 9], [], 162)], "earlier TOKEN_MLP"),
+            ([mlp, (8, [0, 0], [], 0), (1, [10, 9], [], 90)], "TOKEN_MIX width"),
+        ]
+        for layers, fragment in cases:
+            with self.assertRaisesRegex(ValueError, fragment):
+                validate_pwnet2(pwnet2(64, heads, layers))
+        wide = [self.token_mlp(1, [(0, 0, 200)] * 6, (0, 0), [4]), (1, [8, 9], [], 72)]
+        with self.assertRaisesRegex(ValueError, "token input"):
+            validate_pwnet2(pwnet2(200, heads, wide))
 
     def test_pwnet002_with_user_inputs(self):
         # A PWNET002 actor with obs contract v2u<K> (506 + K inputs): the header is read through validate_pwnet2 and
@@ -551,7 +602,10 @@ class Pwnet2Tests(unittest.TestCase):
                                              width=consts["MaxNet2Width"], state=consts["MaxNet2State"],
                                              mingru_hidden=consts["MaxMinGruHidden"], groups=consts["MaxAttnGroups"],
                                              tokens=consts["MaxAttnTokens"], d_model=consts["MaxAttnModel"],
-                                             blocks=consts["MaxAttnBlocks"], ff=consts["MaxAttnFeedForward"]))
+                                             blocks=consts["MaxAttnBlocks"], ff=consts["MaxAttnFeedForward"],
+                                             token_segments=consts["MaxTokenSegments"],
+                                             token_input=consts["MaxTokenInput"], token_model=consts["MaxTokenModel"],
+                                             token_mlp_layers=consts["MaxTokenMlpLayers"]))
         self.assertEqual((consts["TranscendentalOps"], consts["MinGruUnitOps"]), (8, 32))
         host = (Path(__file__).parents[2] / "examples/paintbot/neural_host.nim").read_text()
         self.assertIn("MaxNeuralOperations* = %s'i64" % format(MAX_NEURAL_OPERATIONS, "_"), host)

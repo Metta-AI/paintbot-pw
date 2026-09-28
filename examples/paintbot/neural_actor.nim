@@ -5,10 +5,13 @@ import std/[math, os]
 type
   LayerKind* = enum
     ## PWNET002 layer type codes (the u32 `type` of a layer record).
-    lkDense = 1, lkRmsNorm = 2, lkMinGru = 3, lkResidual = 4, lkEntityAttn = 5, lkConcatInput = 6
+    lkDense = 1, lkRmsNorm = 2, lkMinGru = 3, lkResidual = 4, lkEntityAttn = 5, lkConcatInput = 6,
+    lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9
   AttnGroup = object
     offset, stride, count, width, valid: int  # valid = -1: every token of the group is valid
     weight: int                               # E_g [d, width] then e_g [d], offsets into weights
+  TokenSegment = object
+    offset, stride, length: int               # token n reads input[offset + n*stride ..< +length]; stride 0 = shared
   NetLayer {.byref.} = object
     kind: LayerKind
     inWidth, outWidth: int
@@ -17,12 +20,19 @@ type
     gates: int             # MINGRU: 3 with highway, 2 without
     eps: float32
     stateOffset: int       # MINGRU: this layer's slice of the recurrent state
-    source: int            # RESIDUAL: the earlier layer added; CONCAT_INPUT: input offset
-    length: int            # CONCAT_INPUT: slice length
+    source: int            # RESIDUAL: the earlier layer added; CONCAT_INPUT: input offset;
+                           # TOKEN_MIX / POINTER: the TOKEN_MLP / TOKEN_MIX layer read
+    length: int            # CONCAT_INPUT: slice length; POINTER: the output offset of token 0
     output: int            # scratch offset of this layer's output (outWidth floats)
     groups: seq[AttnGroup] # ENTITY_ATTN
     dModel, heads, blocks, ff, passOffset, passLength, tokens: int
     blockWeight: int       # offset of block 0's tensors (blocks are contiguous)
+    segments: seq[TokenSegment]  # TOKEN_MLP: the per-token gather, concatenated in order
+    validSegment, validIndex: int  # TOKEN_MLP: the presence flag (validSegment -1 = every token valid)
+    mlpWidths: seq[int]    # TOKEN_MLP: the shared MLP's layer widths (input width first)
+    tokenWidth: int        # TOKEN_MLP / TOKEN_MIX: floats per token in this layer's token buffer
+    tokenBuffer: int       # TOKEN_MLP / TOKEN_MIX: scratch offset of the per-token outputs (tokens*tokenWidth)
+    validBuffer: int       # TOKEN_*/POINTER: scratch offset of the tokens' valid flags (1 / 0), written by TOKEN_MLP
     operations: int64
   Net2Object = object
     layers: seq[NetLayer]
@@ -108,8 +118,8 @@ proc interpolate(a, b, weight: float32): float32 =
 
 # ---------------------------------------------------------------------------------------
 # PWNET002: the architecture is data. A layer stack from a fixed menu (DENSE, RMSNORM,
-# MINGRU, RESIDUAL, ENTITY_ATTN, CONCAT_INPUT), FP32, fixed summation order, loaded and
-# validated once, run with bounded per-model scratch sized at load (no inference
+# MINGRU, RESIDUAL, ENTITY_ATTN, CONCAT_INPUT, TOKEN_MLP, TOKEN_MIX, POINTER), FP32, fixed
+# summation order, loaded and validated once, run with bounded per-model scratch sized at load (no inference
 # allocation). The format, equations and the published operation-count formula are in
 # neural_actor.md ("PWNET002"). The hosted seat and the native training library
 # (pw_net_*) run this same code.
@@ -128,6 +138,10 @@ const
   MaxAttnBlocks* = 8
   MaxAttnFeedForward* = 1024
   AttnAlwaysValid* = 0xFFFF_FFFF'u32
+  MaxTokenSegments* = 8
+  MaxTokenInput* = 1024     # TOKEN_MLP: floats gathered per token
+  MaxTokenModel* = 256      # TOKEN_MLP layer widths, TOKEN_MIX width
+  MaxTokenMlpLayers* = 4
   ## Published cost constants: a multiply-accumulate is 2 operations, an elementwise add,
   ## multiply, compare, max, relu or copy is 1, an exp, sqrt or division is 8, and a MINGRU
   ## unit's gates, interpolation and highway are 32 (PWNET001's 32 per hidden unit).
@@ -161,6 +175,22 @@ proc attentionOps*(groups: openArray[tuple[count, width: int]], d, heads, blocks
     T*(2*D*D + D) + T*D +                      # output projection with bias, residual
     T*(2*D*F + 2*F) + T*(2*F*D + D) + T*D      # relu MLP with biases, residual
   embed + int64(blocks)*perBlock + T + 2*T*D + D + TranscendentalOps + int64(passLength)
+
+proc tokenPoolOps(t, d: int): int64 = int64(t + 2*t*d + d + TranscendentalOps)
+
+proc tokenMlpOps*(tokens: int, widths: openArray[int]): int64 =
+  ## TOKEN_MLP's published cost: the gather, a biased relu DENSE per token per layer, the pools.
+  result = int64(tokens*widths[0])
+  for l in 1..<widths.len: result += int64(tokens)*int64(2*widths[l-1]*widths[l] + 2*widths[l])
+  result += tokenPoolOps(tokens, widths[^1])
+
+proc tokenMixOps*(tokens, tokenIn, width, z: int): int64 =
+  ## TOKEN_MIX's published cost: Uy x once, the copy of x, per token Ue e + b + u and relu, the pools.
+  int64(2*width*z + width) + int64(tokens)*int64(2*tokenIn*z + 3*z) + tokenPoolOps(tokens, z)
+
+proc pointerOps*(tokens, z, width: int): int64 =
+  ## POINTER's published cost: the copy, per token a dot product, its bias and the add.
+  int64(width) + int64(tokens)*int64(2*z + 2)
 
 proc readWeights(net: Net2, data: string, p: var int, n: int) =
   if n < 0 or net.weights.len + n > MaxNet2Parameters: net2Error("parameter count")
@@ -217,6 +247,7 @@ proc loadActor2(data: string): Actor =
       if not finite(e) or not (e > 0'f32): net2Error(where & "eps must be finite and positive")
       e
     var layer = NetLayer(inWidth: width, bias: -1)
+    var tokenSpace = 0  # TOKEN_MLP / TOKEN_MIX: token buffer floats reserved before the output
     case code
     of lkDense.uint32:
       layer.kind = lkDense
@@ -326,8 +357,91 @@ proc loadActor2(data: string): Actor =
       layer.outWidth = width + layer.length
       if layer.outWidth > MaxNet2Width: net2Error(where & "CONCAT_INPUT output exceeds " & $MaxNet2Width)
       layer.operations = int64(layer.length)
+    of lkTokenMlp.uint32:
+      layer.kind = lkTokenMlp
+      let t = int(q[0])
+      let segments = int(q[1])
+      let layers = int(q[4])
+      unused(5)
+      if t notin 1..MaxAttnTokens: net2Error(where & "TOKEN_MLP tokens must be 1.." & $MaxAttnTokens)
+      if segments notin 1..MaxTokenSegments: net2Error(where & "TOKEN_MLP segments must be 1.." & $MaxTokenSegments)
+      if layers notin 1..MaxTokenMlpLayers: net2Error(where & "TOKEN_MLP layers must be 1.." & $MaxTokenMlpLayers)
+      layer.tokens = t
+      var tokenIn = 0
+      for g in 0..<segments:
+        var s: TokenSegment
+        s.offset = int(readU32(data, p)); s.stride = int(readU32(data, p)); s.length = int(readU32(data, p))
+        if s.length notin 1..inputs or s.stride notin 0..inputs:
+          net2Error(where & "TOKEN_MLP segment " & $g & " length/stride")
+        if s.offset > inputs or (t-1)*s.stride + s.length > inputs - s.offset:
+          net2Error(where & "TOKEN_MLP segment " & $g & " outside the input")
+        tokenIn += s.length
+        layer.segments.add s
+      if tokenIn > MaxTokenInput: net2Error(where & "TOKEN_MLP token input exceeds " & $MaxTokenInput)
+      if q[2] == AttnAlwaysValid:
+        if q[3] != 0: net2Error(where & "TOKEN_MLP always-valid tokens need valid index 0")
+        layer.validSegment = -1
+      elif int(q[2]) < segments and int(q[3]) < layer.segments[int(q[2])].length:
+        layer.validSegment = int(q[2]); layer.validIndex = int(q[3])
+      else: net2Error(where & "TOKEN_MLP valid flag outside the token")
+      layer.mlpWidths = @[tokenIn]
+      for l in 0..<layers:
+        let o = int(readU32(data, p))
+        if o notin 1..MaxTokenModel: net2Error(where & "TOKEN_MLP widths must be 1.." & $MaxTokenModel)
+        layer.mlpWidths.add o
+      layer.weight = net.weights.len
+      for l in 1..layers:
+        net.readWeights(data, p, layer.mlpWidths[l]*layer.mlpWidths[l-1] + layer.mlpWidths[l])
+      let d = layer.mlpWidths[^1]
+      layer.tokenWidth = d
+      tokenSpace = t*d + t
+      layer.outWidth = 2*d
+      var widest = 0
+      for o in layer.mlpWidths: widest = max(widest, o)
+      work = max(work, tokenIn + 2*widest)
+      layer.operations = tokenMlpOps(t, layer.mlpWidths)
+    of lkTokenMix.uint32:
+      layer.kind = lkTokenMix
+      layer.source = int(q[0])
+      let z = int(q[1])
+      unused(2)
+      if layer.source >= k or net.layers[layer.source].kind != lkTokenMlp:
+        net2Error(where & "TOKEN_MIX source must name an earlier TOKEN_MLP layer")
+      if z notin 1..MaxTokenModel: net2Error(where & "TOKEN_MIX width must be 1.." & $MaxTokenModel)
+      let src = net.layers[layer.source]
+      layer.tokens = src.tokens
+      layer.tokenWidth = z
+      layer.weight = net.weights.len
+      net.readWeights(data, p, z*src.tokenWidth + z + z*width)
+      tokenSpace = layer.tokens*z
+      layer.outWidth = width + 2*z
+      if layer.outWidth > MaxNet2Width: net2Error(where & "TOKEN_MIX output exceeds " & $MaxNet2Width)
+      work = max(work, z)
+      layer.operations = tokenMixOps(layer.tokens, src.tokenWidth, width, z)
+    of lkPointer.uint32:
+      layer.kind = lkPointer
+      layer.source = int(q[0])
+      layer.length = int(q[1])  # the logit offset of token 0
+      unused(2)
+      if layer.source >= k or net.layers[layer.source].kind != lkTokenMix:
+        net2Error(where & "POINTER source must name an earlier TOKEN_MIX layer")
+      let src = net.layers[layer.source]
+      layer.tokens = src.tokens
+      if layer.length > width or layer.tokens > width - layer.length:
+        net2Error(where & "POINTER offset + tokens exceeds width " & $width)
+      layer.weight = net.weights.len
+      net.readWeights(data, p, src.tokenWidth + 1)
+      layer.outWidth = width
+      layer.operations = pointerOps(layer.tokens, src.tokenWidth, width)
     else:
       net2Error(where & "unknown layer type " & $code)
+    if tokenSpace > 0:
+      layer.tokenBuffer = scratch
+      scratch += tokenSpace
+    case layer.kind
+    of lkTokenMlp: layer.validBuffer = layer.tokenBuffer + layer.tokens*layer.tokenWidth
+    of lkTokenMix, lkPointer: layer.validBuffer = net.layers[layer.source].validBuffer
+    else: discard
     layer.output = scratch
     scratch += layer.outWidth
     width = layer.outWidth
@@ -515,6 +629,109 @@ proc entityAttention(layer: NetLayer, input, w, work, y: F32s) =
       y[d+c] = best
   for i in 0..<layer.passLength: y[2*d+i] = input[layer.passOffset+i]
 
+proc tokenPools(buffer, valid: F32s, t, d: int, y: F32s) =
+  ## [masked mean, masked max] over the valid tokens' rows of buffer [t, d] (ENTITY_ATTN's pools: the
+  ## mean is sum * (1/count), the max takes the first valid token first; zeros with no valid token).
+  var count = 0
+  for n in 0..<t:
+    if valid[n] != 0'f32: inc count
+  for c in 0..<2*d: y[c] = 0'f32
+  if count == 0: return
+  let inverse = 1'f32 / float32(count)
+  for c in 0..<d:
+    var total = 0'f32
+    var best = 0'f32
+    var first = true
+    for n in 0..<t:
+      if valid[n] == 0'f32: continue
+      let v = buffer[n*d + c]
+      total += v
+      if first or v > best:
+        best = v
+        first = false
+    y[c] = total*inverse
+    y[d+c] = best
+
+proc tokenMlp(layer: NetLayer, input, w, scratch, work, y: F32s) =
+  let t = layer.tokens
+  let d = layer.tokenWidth
+  let buffer = scratch.at(layer.tokenBuffer)
+  let valid = scratch.at(layer.validBuffer)
+  let gathered = work
+  var widest = 0
+  for o in layer.mlpWidths: widest = max(widest, o)
+  let a = work.at(layer.mlpWidths[0])
+  let b = a.at(widest)
+  for n in 0..<t:
+    var ok = true
+    if layer.validSegment >= 0:
+      let s = layer.segments[layer.validSegment]
+      ok = input[s.offset + n*s.stride + layer.validIndex] > 0.5'f32
+    valid[n] = if ok: 1'f32 else: 0'f32
+    let row = buffer.at(n*d)
+    if not ok:
+      for c in 0..<d: row[c] = 0'f32
+      continue
+    var k = 0
+    for s in layer.segments:
+      let start = s.offset + n*s.stride
+      for i in 0..<s.length:
+        gathered[k] = input[start+i]
+        inc k
+    var x = gathered
+    var off = layer.weight
+    for l in 1..<layer.mlpWidths.len:
+      let n0 = layer.mlpWidths[l-1]
+      let n1 = layer.mlpWidths[l]
+      let target = if l == layer.mlpWidths.len-1: row elif l mod 2 == 1: a else: b
+      dense(x, n0, w.at(off), w.at(off + n1*n0), n1, true, target)
+      off += n1*n0 + n1
+      x = target
+  checkFinite(buffer, t*d)
+  tokenPools(buffer, valid, t, d, y)
+
+proc tokenMix(layer: NetLayer, source: NetLayer, x, w, scratch, work, y: F32s) =
+  let t = layer.tokens
+  let z = layer.tokenWidth
+  let d = source.tokenWidth
+  let width = layer.inWidth
+  let tokens = scratch.at(source.tokenBuffer)
+  let valid = scratch.at(layer.validBuffer)
+  let buffer = scratch.at(layer.tokenBuffer)
+  let ue = w.at(layer.weight)
+  let bias = ue.at(z*d)
+  let uy = bias.at(z)
+  let u = work
+  dense(x, width, uy, nil, z, false, u)
+  for n in 0..<t:
+    let row = buffer.at(n*z)
+    if valid[n] == 0'f32:
+      for o in 0..<z: row[o] = 0'f32
+      continue
+    let e = tokens.at(n*d)
+    for o in 0..<z:
+      var sum = 0'f32
+      for i in 0..<d: sum += e[i]*ue[o*d+i]
+      sum = sum + bias[o]
+      sum = sum + u[o]
+      row[o] = if sum > 0'f32: sum else: 0'f32
+  checkFinite(buffer, t*z)
+  for i in 0..<width: y[i] = x[i]
+  tokenPools(buffer, valid, t, z, y.at(width))
+
+proc pointerHead(layer: NetLayer, source: NetLayer, x, w, scratch, y: F32s) =
+  let z = source.tokenWidth
+  let buffer = scratch.at(source.tokenBuffer)
+  let valid = scratch.at(layer.validBuffer)
+  let v = w.at(layer.weight)
+  let c = v[z]
+  for i in 0..<layer.outWidth: y[i] = x[i]
+  for n in 0..<layer.tokens:
+    if valid[n] == 0'f32: continue
+    var sum = 0'f32
+    for i in 0..<z: sum += buffer[n*z+i]*v[i]
+    y[layer.length+n] = y[layer.length+n] + (sum + c)
+
 proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
     logits: var seq[float32]) =
   let net = actor.net
@@ -551,6 +768,12 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
     of lkConcatInput:
       for i in 0..<layer.inWidth: y[i] = x[i]
       for i in 0..<layer.length: y[layer.inWidth+i] = input[layer.source+i]
+    of lkTokenMlp:
+      tokenMlp(layer[], input, w, scratch, scratch.at(net.work), y)
+    of lkTokenMix:
+      tokenMix(layer[], net.layers[layer.source], x, w, scratch, scratch.at(net.work), y)
+    of lkPointer:
+      pointerHead(layer[], net.layers[layer.source], x, w, scratch, y)
     checkFinite(y, layer.outWidth)
     x = y
   # Every result is validated before state or logits are committed.

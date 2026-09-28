@@ -95,7 +95,7 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 
 A PWNET002 actor may name any observation contract the host knows, including v2u<K>
 (`neural_basic.md`, manifest `user_inputs`): its input count is then 506 + K, the K user inputs are
-ordinary input columns 506.. (DENSE, CONCAT_INPUT and ENTITY_ATTN slices may read them), and the operation
+ordinary input columns 506.. (DENSE, CONCAT_INPUT, ENTITY_ATTN and TOKEN_MLP slices may read them), and the operation
 count includes them like any other input. Staging reads the input count and contract from the PWNET002
 header. The file length must be exact: no trailing bytes. The package manifest binds the SHA-256
 of the whole file, as for PWNET001. Every weight must be finite; every unused `param` word
@@ -115,9 +115,13 @@ concatenated in layer order (at most 4096 floats); a stack without MINGRU keeps 
 | 4 | RESIDUAL | `start` | none |
 | 5 | ENTITY_ATTN | `groups, d, heads, blocks, ff, pass_offset, pass_len, eps` | group descriptors, then tensors (below) |
 | 6 | CONCAT_INPUT | `offset, len` | none |
+| 7 | TOKEN_MLP | `tokens, segments, valid_segment, valid_index, layers` | segment descriptors, widths, then tensors (below) |
+| 8 | TOKEN_MIX | `source, z` | `Ue[z, d]`, `b[z]`, `Uy[z, width]` (d = the source's token width) |
+| 9 | POINTER | `source, offset` | `v[z]`, `c` (z = the source TOKEN_MIX's width) |
 
 Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1024;
-`act` 0 = none, 1 = relu; `eps` finite and > 0.
+`act` 0 = none, 1 = relu; `eps` finite and > 0; TOKEN_MLP tokens 1..64, segments 1..8, layers
+1..4, at most 1024 gathered floats per token, TOKEN_MLP widths and TOKEN_MIX `z` 1..256.
 
 ## Equations
 
@@ -168,6 +172,31 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
     tokens (`sum * (1/count)`), the masked max (first valid token first), then
     `input[pass_offset ..< pass_offset+pass_len]`. With no valid token both pools are 0.
 
+- **TOKEN_MLP** (per-token shared MLP): a shared-weight relu MLP run over `tokens` tokens
+  gathered from the raw observation (the current vector is not read; the output replaces it).
+  - After the 8 params come `segments` descriptors, three uint32 each: `offset, stride,
+    length`. Token n's input is the concatenation, in segment order, of
+    `input[offset + n*stride ..< offset + n*stride + length]`; `stride` 0 gives every token
+    the same slice (e.g. the seat's own features). Every slice must lie inside the input.
+    Then `layers` uint32 widths `d_1 .. d_L`, then for each layer `W_l[d_l, d_(l-1)]`,
+    `b_l[d_l]` (`d_0` = the summed segment lengths).
+  - Token n is valid when `input[offset_s + n*stride_s + valid_index] > 0.5` for
+    `s = valid_segment`, or always when `valid_segment` is `0xFFFFFFFF` (then `valid_index`
+    is 0). A valid token's row is `e_n = relu(W_L ... relu(W_1 x_n + b_1) ... + b_L)` (each a
+    DENSE with bias and relu); an invalid token's row is 0 and is not computed.
+  - Output (width `2*d_L`): the masked mean (`sum * (1/count)`) and the masked max (first
+    valid token first) of the valid rows, exactly ENTITY_ATTN's pools; 0 with no valid token.
+    The rows `e` and the valid flags stay available to later TOKEN_MIX layers for the tick.
+- **TOKEN_MIX** (per-token layer after the recurrence): `source` names an earlier TOKEN_MLP.
+  With the current vector x (width W): `u = Uy x` (no bias), then for each valid token
+  `z_n[o] = relu((sum_i e_n[i]*Ue[o,i] + b[o]) + u[o])`; an invalid token's `z_n` is 0.
+  Output (width `W + 2z`): `[x, masked mean of z, masked max of z]` (the same pools). The rows
+  `z` stay available to later POINTER layers.
+- **POINTER** (per-token scores into chosen outputs): `source` names an earlier TOKEN_MIX with
+  the same tokens. `y = x`, then for each valid token n: `y[offset + n] = x[offset + n] +
+  (sum_i z_n[i]*v[i] + c)`; invalid tokens add nothing. `offset + tokens` must not exceed the
+  width. E.g. the 16 identity aim logits of contract v1/v2 are outputs 52..67 (`offset` 52).
+
 Inference validates the observation and state (finite) first, checks every layer's output
 and every new state value is finite, and commits the new state and the logits only when
 all are; otherwise the seat fails as PWNET001's does. Scratch for every layer output, the
@@ -190,6 +219,9 @@ unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 | MINGRU | `2*in*G*hidden + G*hidden*bias + 32*hidden` |
 | RESIDUAL | `width` |
 | CONCAT_INPUT | `len` |
+| TOKEN_MLP | `T*d_0 + T*sum_l(2*d_(l-1)*d_l + 2*d_l) + pool(d_L)` |
+| TOKEN_MIX | `2*W*z + W + T*(2*d*z + 3*z) + pool(z)` |
+| POINTER | `W + T*(2*z + 2)` |
 | ENTITY_ATTN | `embed + blocks*block + pool` |
 
 with, for ENTITY_ATTN (T tokens, h heads, F = ff, P = pass_len):
@@ -205,6 +237,14 @@ block = 2*T*(4d + 16)                  pre-norms
       + T*d                            residual
 pool  = T + 2*T*d + d + 8 + P          valid flags, mean, max, reciprocal, passthrough
 ```
+
+and for the token layers `pool(d) = T + 2*T*d + d + 8` (T tokens; the counts, like every
+other, do not depend on which tokens are valid). Example (an entity-factored actor over
+contract v2u32): TOKEN_MLP over the 16 identities with segments (104, 8, 8), (470, 2, 2),
+(0, 0, 24), (448, 0, 2), (506, 1, 1), (522, 1, 1) (identity j's block, its terrain floats,
+the seat's own features for every token, two user inputs of its own), widths 128, 128; then
+CONCAT_INPUT(0, 538), DENSE(794, 128), MINGRU(128, 128, highway), TOKEN_MIX(0, 64),
+DENSE(256, 82, bias), POINTER(4, 52) costs 1,327,278 operations per tick.
 
 The model's count is the sum over its layers. PWNET001's `2*(I*H + 3H*H + O*H) + 32*H` is
 the same formula applied to its three layers. Example: ENTITY_ATTN over contract v2's 16

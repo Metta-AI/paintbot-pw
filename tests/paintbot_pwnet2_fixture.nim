@@ -74,6 +74,49 @@ proc attention*(r: var Rand, groups: openArray[array[5, uint32]], d, heads, bloc
     result.tensors.add r.weights(d*ff, 1.0/sqrt(ff.float))
     result.tensors.add r.weights(d, 0.1)
 
+proc tokenMlp*(r: var Rand, tokens: int, segments: openArray[array[3, uint32]], validSegment, validIndex: uint32,
+    widths: openArray[int]): Spec =
+  ## TOKEN_MLP: segments are (offset, stride, length); widths are the shared MLP's layer outputs.
+  result = Spec(code: 7, params: [tokens.uint32, segments.len.uint32, validSegment, validIndex, widths.len.uint32,
+    0, 0, 0])
+  var n = 0
+  for s in segments:
+    for x in s: result.extra.add x
+    n += s[2].int
+  for o in widths: result.extra.add o.uint32
+  for o in widths:
+    result.tensors.add r.weights(o*n, 1.0/sqrt(n.float))
+    result.tensors.add r.weights(o, 0.1)
+    n = o
+proc tokenMix*(r: var Rand, source, tokenIn, width, z: int): Spec =
+  ## TOKEN_MIX: Ue [z, tokenIn], b [z], Uy [z, width].
+  result = Spec(code: 8, params: [source.uint32, z.uint32, 0, 0, 0, 0, 0, 0])
+  result.tensors = r.weights(z*tokenIn, 1.0/sqrt(tokenIn.float))
+  result.tensors.add r.weights(z, 0.1)
+  result.tensors.add r.weights(z*width, 1.0/sqrt(width.float))
+proc pointerHead*(r: var Rand, source, offset, z: int): Spec =
+  ## POINTER: v [z], c [1].
+  result = Spec(code: 9, params: [source.uint32, offset.uint32, 0, 0, 0, 0, 0, 0])
+  result.tensors = r.weights(z, 1.0/sqrt(z.float))
+  result.tensors.add r.weights(1, 0.1)
+
+const
+  ## The per-identity token of an entity-factored actor over contract v2u32: identity j's 8 floats, its 2 terrain
+  ## floats, the seat's own 24 + 2 (shared: stride 0) and two user inputs of its own (506+j, 522+j).
+  IdentityTokenSegments* = [[104'u32, 8, 8], [470'u32, 2, 2], [0'u32, 0, 24], [448'u32, 0, 2], [506'u32, 1, 1],
+    [522'u32, 1, 1]]
+
+proc entityFactored*(r: var Rand, inputs = 538, d = 128, z = 64, hidden = 128,
+    segments: openArray[array[3, uint32]] = IdentityTokenSegments): seq[Spec] =
+  ## TOKEN_MLP -> CONCAT_INPUT -> DENSE -> MINGRU -> TOKEN_MIX -> DENSE -> POINTER into the 16 aim identities.
+  @[r.tokenMlp(16, segments, 0, 0, [d, d]),
+    concat(0, inputs),
+    r.dense(2*d + inputs, hidden),
+    r.mingru(hidden, hidden, highway = true),
+    r.tokenMix(0, d, hidden, z),
+    r.dense(hidden + 2*z, LogitSize, bias = true),
+    r.pointerHead(4, 52, z)]
+
 proc pwnet001*(r: var Rand, inputs, hidden: int): (string, seq[float32], seq[float32], seq[float32]) =
   let e = r.weights(inputs*hidden, 1.0/sqrt(inputs.float))
   let rec = r.weights(3*hidden*hidden, 1.0/sqrt(hidden.float))
