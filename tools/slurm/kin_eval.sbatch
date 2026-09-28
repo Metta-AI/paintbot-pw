@@ -68,7 +68,7 @@ trap 'cleanup; exit 143' TERM
 trap 'cleanup; exit 130' INT
 printf -v quoted '%q ' "${args[@]}"
 docker run --rm --name "$container" --pull=never --cpus="$CPUS" --memory=24g \
-  --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/work" -w /work "$image" bash -lc "
+  --user "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/work" -w /work "$image" bash -c "
     set -e
     nim c --app:lib --mm:arc --threads:on -d:pwTraining -d:headless -d:release --hints:off \
       --nimcache:tmp/nimcache-lib -o:tmp/libpaintbot_pw.so examples/paintbot/native_env.nim
