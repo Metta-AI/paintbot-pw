@@ -35,7 +35,16 @@
   const kinHue = (i) => state?.kinHue?.[i] ?? -1;
   const seatColor = (i) => ffaOn() ? kin.kinColor(kinHue(i)) : colors[i % 2];
   // With a cog selected in FFA-kin, cogs unrelated to it are dimmed.
-  const kinDim = (i) => ffaOn() && selected >= 0 && i !== selected && !(state.rPct?.[selected]?.[i] > 0);
+  // Families picked from the header chips (chip keys); Esc or a second click clears them.
+  let kinFocus = new Set();
+  const kinEmphasis = () => kin.cogEmphasis(state, selected, kin.focusMask(state, kinFocus));
+  const kinDim = (i) => ffaOn() && kinEmphasis()[i].dim;
+  function setKinFocus(next) {
+    kinFocus = next;
+    if (ready() && Module._pw_kin_focus) Module._pw_kin_focus(kin.focusMask(state, kinFocus));
+    kinChipsKey = "";
+    renderKin(state);
+  }
   const cogReadout = $("cog-readout");
   const soundReadout = $("sound-readout");
   window.addEventListener('keydown', e => {
@@ -448,6 +457,13 @@
       setKinExpanded(!kinExpanded);
     }
   });
+  // A chip click toggles that family in the selection; it must not also toggle the table.
+  $("kin-chips").addEventListener("click", (e) => {
+    const chip = e.target.closest(".kin-chip[data-key]");
+    if (!chip) return;
+    e.stopPropagation();
+    setKinFocus(kin.toggleFocus(kinFocus, chip.dataset.key));
+  });
   $("kin-table").addEventListener("click", (e) => {
     const row = e.target.closest("tr[data-seat]");
     if (row) select(Number(row.dataset.seat));
@@ -458,13 +474,18 @@
     const w = data.world;
     $("kin-clock").textContent = clock(w.tick);
     const chips = kin.familyChips(data);
-    const chipsKey = JSON.stringify(chips);
+    const chipsKey = JSON.stringify(chips) + ":" + [...kinFocus].join(",");
     if (chipsKey !== kinChipsKey) {
       kinChipsKey = chipsKey;
+      const compact = chips.length > kin.COMPACT_CHIPS;
+      $("kin-chips").classList.toggle("compact", compact);
       $("kin-chips").innerHTML = chips.map((c) => {
         const who = c.members.map((i) => i + 1).join(", ");
         const label = c.family >= 0 ? `Family: cogs ${who}` : `Loner: cog ${who}`;
-        return `<span class="kin-chip${c.alive ? "" : " out"}" style="--kin:${kin.kinColor(c.hue)}" title="${label} · ${c.alive}/${c.members.length} alive · ${c.hearts} hearts held · raw score ${c.score.toFixed(1)}"><span class="dot">${c.family >= 0 ? c.members.length : c.seat + 1}</span><span class="hearts">♥${c.hearts}</span> · ${Math.round(c.score)}</span>`;
+        const text = kin.chipText(c, compact);
+        const key = kin.chipKey(c);
+        const on = kinFocus.has(key);
+        return `<span class="kin-chip${text.out ? " out" : ""}${on ? " selected" : ""}" data-key="${key}" role="button" aria-pressed="${on}" style="--kin:${kin.kinColor(c.hue)}" title="${label} · ${text.badge} alive · ${c.hearts} hearts held · raw score ${c.score.toFixed(1)} · click to ${on ? "deselect" : "select"}"><span class="dot">${text.badge}</span><span class="hearts">${text.hearts}</span>${compact ? "" : '<span class="sep">·</span>'}<span class="score">${text.score}</span></span>`;
       }).join("");
     }
     const great = kin.greatStatus(data);
@@ -486,16 +507,18 @@
         }).join("");
       }
     }
-    // Seat numbers on the board, with the relatedness to the selected cog (½ sibling, ¼ cousin).
+    // Seat badges only on emphasised cogs: the selected cog and its kin (with ½ / ¼), or the
+    // cogs of the families picked in the header. Nothing selected, no badges.
     const marks = $("kin-marks");
     const rect = $("canvas").getBoundingClientRect();
     const html = [];
+    const emphasis = kin.cogEmphasis(data, selected, kin.focusMask(data, kinFocus));
     for (let i = 0; i < 16; i++) {
       const p = data.screen?.[i];
+      if (!emphasis[i].badge) continue;
       if (!(w.cogs[i].hp > 0) || !data.visible?.[i] || !p || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1) continue;
-      const pct = selected >= 0 && i !== selected ? data.rPct?.[selected]?.[i] ?? 0 : 0;
-      const cls = `kin-mark${kinDim(i) ? " dim" : ""}${i === selected ? " selected" : ""}`;
-      html.push(`<span class="${cls}" style="left:${rect.left + p[0] * rect.width}px;top:${rect.top + p[1] * rect.height - 30}px;--kin:${kin.kinColor(kinHue(i))}">${i + 1}${pct > 0 ? `<span class="r">${kin.kinLabel(pct)}</span>` : ""}</span>`);
+      const cls = `kin-mark${i === selected ? " selected" : ""}`;
+      html.push(`<span class="${cls}" style="left:${rect.left + p[0] * rect.width}px;top:${rect.top + p[1] * rect.height - 30}px;--kin:${kin.kinColor(kinHue(i))}">${i + 1}${emphasis[i].label ? `<span class="r">${emphasis[i].label}</span>` : ""}</span>`);
     }
     marks.innerHTML = html.join("");
   }
@@ -777,6 +800,7 @@
       else {
         select(-1);
         setLens(-1);
+        if (kinFocus.size) setKinFocus(new Set());
       }
     } else if (e.key === "Tab" && ffaOn() && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();

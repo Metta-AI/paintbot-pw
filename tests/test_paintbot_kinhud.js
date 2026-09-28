@@ -66,6 +66,45 @@ assert.equal(chips[3].members.length, 11);
 assert.equal(chips[3].alive, 10);
 for (let i = 1; i < chips.length; i++) assert.ok(chips[i - 1].score >= chips[i].score);
 
+// Chip text: alive/size badge, hearts and score; compact chips drop the separator.
+assert.deepEqual(kin.chipText(chips[1]), {badge: '1/2', hearts: '♥1', score: '40', text: '♥1 · 40', out: false});
+assert.equal(kin.chipText(chips[1], true).text, '♥1 40');
+assert.equal(kin.chipText(chips[0]).badge, '1/1'); // loner
+assert.equal(kin.chipText(chips[3]).badge, '10/11');
+assert.equal(kin.chipText({family: 5, seat: null, members: [6, 7], alive: 0, hearts: 0, score: 12.4}).badge, '0/2');
+assert.equal(kin.chipText({family: 5, seat: null, members: [6, 7], alive: 0, hearts: 0, score: 12.4}).out, true);
+assert.equal(kin.chipText({family: 5, seat: null, members: [6, 7], alive: 0, hearts: 0, score: 12.4}).text, '♥0 · 12');
+assert.deepEqual(chips.map(kin.chipKey), ['l4', 'f0', 'f1', 'f2']);
+assert.equal(kin.COMPACT_CHIPS, 6);
+
+// Family selection: chip clicks toggle keys; the mask covers the picked families' seats.
+let focus = new Set();
+focus = kin.toggleFocus(focus, 'f0');
+assert.deepEqual([...focus], ['f0']);
+assert.equal(kin.focusMask(state, focus), 0b11);
+focus = kin.toggleFocus(focus, 'l4');
+assert.equal(kin.focusMask(state, focus), 0b10011);
+const twice = kin.toggleFocus(focus, 'f0');
+assert.deepEqual([...twice], ['l4']);
+assert.equal(focus.has('f0'), true, 'toggleFocus returns a new set');
+assert.equal(kin.focusMask(state, new Set()), 0);
+
+// Emphasis: nothing selected -> no dimming, no halos, no badges.
+let em = kin.cogEmphasis(state, -1, 0);
+assert.ok(em.every(e => !e.dim && !e.halo && !e.badge));
+// Families picked: their cogs get badge + halo, the rest dim.
+em = kin.cogEmphasis(state, -1, kin.focusMask(state, focus));
+assert.deepEqual(em.map(e => e.badge ? 1 : 0).join(''), '1100100000000000');
+assert.deepEqual(em.map(e => e.dim ? 1 : 0).join(''), '0011011111111111');
+assert.equal(em[0].halo, true);
+// Kin view wins over picked families: the selected cog and its kin get badges (½ / ¼ labels).
+em = kin.cogEmphasis(state, 0, kin.focusMask(state, focus));
+assert.deepEqual(em.map(e => e.badge ? 1 : 0).join(''), '1111000000000000');
+assert.deepEqual(em.slice(0, 4).map(e => e.label), ['', '½', '¼', '¼']);
+assert.equal(em[0].halo, false);
+assert.equal(em[1].halo, true);
+assert.equal(em[4].dim, true);
+
 const great = kin.greatStatus(state);
 assert.deepEqual(great[0], {index: 0, state: 'charging', present: 3, quorum: 3, progress: 0.5, secondsLeft: 0});
 assert.equal(great[1].state, 'dormant');

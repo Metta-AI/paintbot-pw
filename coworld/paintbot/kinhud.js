@@ -61,6 +61,53 @@
       .map((c) => ({ ...c, score: points(c.score) }))
       .sort((a, b) => b.score - a.score || b.alive - a.alive || a.members[0] - b.members[0]);
   }
+  // A chip's selection key: "f<family>" for a family, "l<seat>" for a loner.
+  const chipKey = (chip) => chip.family >= 0 ? `f${chip.family}` : `l${chip.seat}`;
+  // Chip text: the badge is alive/size ("1/2"); the body is hearts held and raw score.
+  // Compact chips (many families) drop the separator.
+  function chipText(chip, compact = false) {
+    return {
+      badge: `${chip.alive}/${chip.members.length}`,
+      hearts: `♥${chip.hearts}`,
+      score: `${Math.round(chip.score)}`,
+      text: `♥${chip.hearts}${compact ? ' ' : ' · '}${Math.round(chip.score)}`,
+      out: chip.alive === 0,
+    };
+  }
+  const COMPACT_CHIPS = 6; // more chips than this switch the header strip to compact chips
+  // Toggle one chip in the family selection (a Set of chip keys); returns a new Set.
+  function toggleFocus(focus, key) {
+    const next = new Set(focus);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  }
+  // Seats belonging to the selected families, as a 16-bit mask (bit i = seat i).
+  function focusMask(state, focus) {
+    let mask = 0;
+    for (let seat = 0; seat < 16; seat++) {
+      const family = state.family?.[seat] ?? -1;
+      if (focus.has(family >= 0 ? `f${family}` : `l${seat}`)) mask |= 1 << seat;
+    }
+    return mask;
+  }
+  // How each cog is drawn. Kin view (a selected cog) takes precedence: the cog and its kin get
+  // badges (kin with ½ / ¼), kin get a halo, unrelated cogs dim. Otherwise, with families
+  // selected, their cogs get a badge and a halo and every other cog dims. With nothing selected
+  // no cog is dimmed and no badges are drawn.
+  function cogEmphasis(state, selected, mask) {
+    const out = [];
+    for (let i = 0; i < 16; i++) {
+      if (selected >= 0) {
+        const pct = i === selected ? 100 : state.rPct?.[selected]?.[i] ?? 0;
+        out.push({ dim: pct === 0, halo: i !== selected && pct > 0, badge: pct > 0,
+          label: i === selected ? '' : kinLabel(pct) });
+      } else if (mask) {
+        const on = (mask >> i & 1) === 1;
+        out.push({ dim: !on, halo: on, badge: on, label: '' });
+      } else out.push({ dim: false, halo: false, badge: false, label: '' });
+    }
+    return out;
+  }
   // Each great heart: dormant (countdown), charging (n/3 present, charge fraction) or ready.
   function greatStatus(state) {
     const w = state.world;
@@ -87,7 +134,8 @@
     const familyName = family.family >= 0 ? `family of ${family.members.map((i) => i + 1).join(', ')}` : `loner ${family.seat + 1}`;
     return { top, family, text: `Match ended · top cog ${nameOf(top.seat)} (R ${top.R.toFixed(1)}) · top ${familyName} (${family.score.toFixed(1)})` };
   }
-  const api = { kinColor, isFfa, kinLabel, kinScore, cogRows, familyChips, greatStatus, greatText, matchResult };
+  const api = { kinColor, isFfa, kinLabel, kinScore, cogRows, familyChips, greatStatus, greatText, matchResult,
+    chipKey, chipText, COMPACT_CHIPS, toggleFocus, focusMask, cogEmphasis };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaintbotKinHud = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

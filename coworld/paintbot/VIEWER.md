@@ -39,10 +39,15 @@ FFA-kin replays (version 1000 + rules: 1040, or 1041, which also records the map
 match's kinship, and the viewer state adds `mode`, `family`, `genes`, `rPct` and `kinHue`. Every cog uses one grey body; its ground disc,
 seat badge, paint and owned hearts take its family's hue (`examples/paintbot/kinhue.nim`:
 siblings share a hue, cousin families are neighbours, loners are grey). Clicking a cog turns on
-kin view: kin get a halo scaled by r and a ½ / ¼ badge, unrelated cogs fade to 40%. Esc or a
-click on empty ground clears it; it persists through scrubbing. The header keeps its height:
-clock, one chip per family (hearts held now and summed raw score) and the two great hearts (n/3 charging, dormant
-countdown, or ready). Click it or press Tab for the per-cog table (hearts held, heart-seconds,
+kin view: the cog and its kin get seat badges (kin with ½ / ¼), kin get a halo scaled by r,
+unrelated cogs fade to 40%. Esc or a click on empty ground clears it; it persists through scrubbing. The header keeps its height:
+clock, one chip per family (alive/size badge, hearts held now, summed raw score; a fully dead
+family's chip dims; more than six chips switch to compact chips, and the strip scrolls sideways
+rather than clipping) and the two great hearts (n/3 charging, dormant countdown, or ready).
+Clicking chips selects families (several at once; click again to deselect): their cogs get a
+halo and a seat badge and every other cog dims. Kin view of a selected cog takes precedence;
+a click on empty ground keeps the family selection, Esc clears it. With nothing selected the
+board shows no seat badges. Click the header elsewhere or press Tab for the per-cog table (hearts held, heart-seconds,
 great-heart shares, s and R, sorted by R, dead cogs greyed); a row click selects that cog, and
 Esc collapses the table before clearing the selection. The end card reads "Match ended" with the
 top cog and family. HUD maths live in `coworld/paintbot/kinhud.js`
