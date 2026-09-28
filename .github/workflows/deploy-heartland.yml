@@ -351,7 +351,7 @@ jobs:
           echo "::error::$cow_id uploaded but is not canonical"
           exit 1
 
-      # The automatic path diffs against the newest coworld-v* tag, so every upload records one.
+      # The automatic path diffs against the newest heartland-v* tag, so every upload records one.
       - name: Tag the deployed commit
         if: ${{ env.DRY_RUN != 'true' }}
         env:
