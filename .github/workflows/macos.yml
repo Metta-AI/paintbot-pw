@@ -18,3 +18,5 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       os: '["macos-latest"]'
+      shards: '[0, 1, 2, 3]'
+      jobs: 3

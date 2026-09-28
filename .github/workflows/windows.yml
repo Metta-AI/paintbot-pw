@@ -21,3 +21,5 @@ jobs:
     uses: ./.github/workflows/build.yml
     with:
       os: '["windows-latest"]'
+      shards: '[0, 1, 2, 3]'
+      jobs: 1

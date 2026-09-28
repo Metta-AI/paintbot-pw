@@ -20,7 +20,7 @@
 # must be self-contained: shards run on separate machines, so a command cannot rely on files
 # another command wrote, and a shard runs several commands at once (build.yml's --jobs), so a
 # command must not write a fixed path another command also uses (getTempDir() / "<test name>..."
-# is fine). Check the plan with: python tests/run_ci_shard.py --check --of 4
+# is fine). Check the plan with: python tests/run_ci_shard.py --check --of 8
 
 nim r tests/tests.nim
 nim r -d:profileTracePath=tmp/profile-test.json -d:profileFrames=2 tests/test_profiles.nim
