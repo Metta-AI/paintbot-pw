@@ -19,25 +19,25 @@ data file.
 ## Art library
 
 Examples, experiments, and tools load models, textures, fonts, and UI from
-`polyworld_data`. Clone it next to this folder. Each game ships the files it
+`polyworld_art`. Clone it next to this folder. Each game ships the files it
 needs as its own data file.
 
 ```
-git clone git@github.com:Metta-AI/polyworld-data.git ../polyworld_data
+git clone git@github.com:Metta-AI/polyworld_art.git ../polyworld_art
 ```
 
 The two folders should sit like this:
 
 ```
 polyworld/
-polyworld_data/
+polyworld_art/
 ```
 
-Games load files from `../polyworld_data/` when run from this repo root.
+Games load files from `../polyworld_art/` when run from this repo root.
 
 ## Commands
 
-Run these from the polyworld repo root after `polyworld_data` is cloned next
+Run these from the polyworld repo root after `polyworld_art` is cloned next
 to it.
 
 ### Games

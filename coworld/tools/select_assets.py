@@ -5,7 +5,7 @@ import re
 import struct
 
 ROOT = Path(__file__).resolve().parents[2]
-DATA = ROOT.parent / 'polyworld_data'
+DATA = ROOT.parent / 'polyworld_art'
 GAMES = {'gota': 'gods_of_the_arena', 'lvd': 'light_vs_dark', 'cta': 'call_to_adventure'}
 
 

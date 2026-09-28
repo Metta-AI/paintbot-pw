@@ -3,7 +3,7 @@ import std/[math, times, algorithm, strutils]
 when defined(emscripten) and defined(workerReplayIndex): import flatty
 import windy, opengl, vmath, chroma, jsony, gltf
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam, selectionoutlines]
-import game, sim, analysis, villagegraphics, controls, celebration, projection, kinhue
+import game, sim, analysis, scenery, villagegraphics, controls, celebration, projection, kinhue
 from kinship import activeKinship, rPercent
 import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
@@ -775,19 +775,20 @@ proc runGraphics*() =
   amplitude = 1.2
   treeHeight = 5.5
   startupPhase("Loading terrain textures")
-  initTerrain(MixedTrees, GeneratedTerrain, PaintedRocks)
+  initTerrain(NoTrees, GeneratedTerrain, NoRocks)
+  let scenery = createScenery()
+  scenery.placeForest()
   computeWalkable()
   scatterGrass(if deepWilderness: 1800 else: 1500, recording.seed, matchTerrain = true)
   startupPhase("Placing village and woodland")
   if activeMap() >= 0:
-    placeMapScenery()
+    placeMapScenery(scenery)
   elif replayRulesVersion >= 8:
-    placeRoundVillage()
+    placeRoundVillage(scenery)
   elif replayRulesVersion >= 7:
-    placeVillage(world)
+    placeVillage(world, scenery)
   else:
-    let coverPack = loadPropPack(when defined(
-        emscripten): "/paintbot-cover.glb" else: "tmp/paintbot-cover.glb",
+    let coverPack = loadPropPack(DataRoot & "/paintbot/models/paintbot-cover.glb",
         unitHeight = false, textured = true, repeatTexture = true)
     for c in world.cover:
       coverPack.placeProp("cover", vec3((c.x+c.w div 2).float32/100-32, 0, (
@@ -804,7 +805,7 @@ proc runGraphics*() =
   for side, head in ["red", "blue"]:
     for apparent, uniform in ["red", "blue"]:
       let name = if side == apparent: head else: head & "-" & uniform
-      let path = (when defined(emscripten): "/" else: "tmp/") &
+      let path = DataRoot & "/paintbot/models/" &
         "paintbot-cog-" & name & ".glb"
       models[side][apparent] = loadCharacterModel(path, 1.9)
       models[side][apparent].unlitParts = @["eye", "smile"]
@@ -816,7 +817,7 @@ proc runGraphics*() =
   var paintMaterials: seq[Material]
   var paintGrey: Color
   if ffa():
-    neutralModel = loadCharacterModel((when defined(emscripten): "/" else: "tmp/") &
+    neutralModel = loadCharacterModel(DataRoot & "/paintbot/models/" &
       "paintbot-cog-grey.glb", 1.9)
     neutralModel.unlitParts = @["eye", "smile"]
     # By node name (build_cog.py): the gltf reader gives each primitive its own unnamed Material.

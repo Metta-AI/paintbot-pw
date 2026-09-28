@@ -17,7 +17,7 @@ nimcache
 *.ilk
 *.out
 
-# Assets live in the sibling polyworld_data repo.
+# Assets live in the sibling polyworld_art repo.
 /data
 
 # Project specific ignores.
