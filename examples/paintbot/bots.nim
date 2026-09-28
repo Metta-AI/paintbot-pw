@@ -318,6 +318,7 @@ proc logNeuralTelemetry*(bots: array[Seats,Bot], ticks: int,
     let line = bots[slot].neural.telemetry(peakNativeWork[slot], ticks)
     if line.len > 0: log(slot, line & "\n")
 proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
+  benchEnter(bkDecide)
   shouts=default(array[Seats,seq[string]])
   active=w;commands=default(array[Seats,Command])
   visionCache=default(array[Seats,array[Seats,int8]])
