@@ -164,16 +164,24 @@ proc initializeEquipment(w: var World) =
     w.greatHearts[0] = GreatHeart(pos: q)
     w.greatHearts[1] = GreatHeart(pos: mirrorPoint(q))
 
+when defined(pwTraining):
+  # Eval-only (native pw_set_spawn_grouping): spawn groups independent of the kinship's
+  # families, -1 = alone. Training builds only, so hosted play can never reach it.
+  var spawnGroupingOverride* {.threadvar.}: Option[array[Seats, int8]]
+
 proc placeFfaSpawns(w: var World) =
   ## FFA-kin spawn: one anchor per family and per loner, spread over the open map by
   ## farthest-point sampling (World RNG), and every member spawns within HeartSpawnRadius of
   ## its group's anchor. This is the only place the engine reads kinship, and it reads only
   ## the family grouping.
+  var family = activeKinship.family
+  when defined(pwTraining):
+    if spawnGroupingOverride.isSome: family = spawnGroupingOverride.get
   var group: array[Seats, int]
   var groups = 0
-  for i in 0..<Seats: groups = max(groups, activeKinship.family[i].int+1)
+  for i in 0..<Seats: groups = max(groups, family[i].int+1)
   for i in 0..<Seats:
-    if activeKinship.family[i] >= 0: group[i] = activeKinship.family[i].int
+    if family[i] >= 0: group[i] = family[i].int
     else: group[i] = groups; inc groups
   var candidates: seq[Point]
   for attempt in 0..<64:
@@ -368,6 +376,9 @@ proc damage*(w: var World, victim, attacker, amount: int) =
           else:
             t[attacker].sprayDamageEnemy += removed
             if killed: inc t[attacker].sprayKillsEnemy
+  when defined(pwTraining):
+    if damageObserver != nil:
+      damageObserver(w, victim, attacker, hpBefore-w.cogs[victim].hp, w.cogs[victim].hp == 0)
   if w.equipment[victim].armor == 0 and not w.cogs[victim].carrying and
       w.trenchAt(w.cogs[victim].pos) < 0:
     w.cogs[victim].cooldown = min(w.cogs[victim].cooldown,

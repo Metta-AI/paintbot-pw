@@ -239,6 +239,12 @@ when defined(pwTraining):
   # Per-attacker damage scale in permille, pointed at by the host for one step; nil or
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
   var damageScale* {.threadvar.}: ptr array[Seats, int32]
+  # FFA-kin pair counters (native pw_pair_stats): the host points this at a proc for one
+  # step and damage() reports every damage event past the shield and life checks, with the
+  # health it removed. Telemetry only; never part of World, its hash or any decision.
+  type DamageObserver* = proc(w: World, victim, attacker: int, removed: int32,
+    killed: bool) {.nimcall, gcsafe.}
+  var damageObserver* {.threadvar.}: DamageObserver
 else:
   var visionRulesVersion* = 40
   var gameMode* = gmTeams

@@ -372,6 +372,57 @@ int pw_net_info(void *net, int64_t *eight);
 int pw_net_head_sizes(void *net, int32_t *sizes, int32_t capacity);
 int pw_net_contracts(void *net, char *out, int32_t capacity);
 int pw_net_infer(void *net, const float *observation, float *state, float *logits);
+/* FFA-kin (mode "ffa_kin"; additive). With none of these called a handle plays the teams
+ * game byte for byte as before.
+ * pw_set_game_mode: 0 teams (default), 1 FFA-kin; pw_set_kin_layout: -1 drawn from the seed
+ * (default), 0 fours, 1 pairs, 2 trios + loner, 3 cousins, 4 strangers, 5 clones. Both are
+ * kept across pw_reset and applied at the NEXT pw_reset (the current world keeps its
+ * mode); pw_game_mode reads the current world's mode (-1 NULL).
+ * In FFA, pw_step pays every seat, dead ones included, its kin-weighted score change each
+ * tick: (R_i(t) - R_i(t-1)) / 4320, R_i = sum_j r_ij s_j in points (s_j raw score), so a
+ * match's rewards sum to R_i / 4320. The teams reward is unchanged.
+ * Reads (current world): pw_kin float[256] r(i,j) at [16i+j] (zeros in teams);
+ * pw_genes uint32[16]; pw_scores float[16] = results.scores (R_i in FFA);
+ * pw_reward_split float[32] = {own_i, kin_i} per seat for the last step in reward units,
+ * own = r_ii ds_i / 4320, kin = sum_{j!=i} r_ij ds_j / 4320, own + kin = the step's reward;
+ * pw_kin_seat_stats float[48] = {death_tick (-1 alive), own-part return, kin-part return}
+ * per seat, cumulative since create/reset.
+ * pw_pair_stats int32[16*16*PW_PAIR_STAT_COUNT], cumulative since create/reset, at
+ * [(16i + j) * 13 + stat] = i's count about j; telemetry outside the world, never hashed,
+ * zero in teams. KinWindow = 72 ticks, near = 400 units:
+ *   0 visible: ticks i could see j (both alive)      1 in_range: ... and within ShotRange
+ *   2 damage: health i removed from j                3 kills: kills of j by i
+ *   4 defend: health i removed from a cog that removed health from j in the last 72 ticks
+ *   5 defend_opp: ticks such an attacker of j (alive, not i) was visible to i (j alive)
+ *   6 yield_opp: ticks j was capturing a heart uncontested and i was within 400 of it
+ *   7 contest: ticks i stood in the capture zone of a heart j was capturing
+ *   8 near: ticks the pair was within 400 (both alive)
+ *   9 co_capture: great-heart captures i and j shared
+ *  10 costly_defend: the part of defend dealt while i's hp <= 1
+ *  11 death_after_defend: i died within 72 ticks of a defend event for j
+ *  12 heart_pass: hearts whose ownership went directly from j to i
+ * Eval-only overrides (training library only; hosted play cannot reach them):
+ * pw_set_spawn_grouping int8[16] spawn groups (0..15, -1 alone) independent of the
+ * kinship, NULL clears; pw_set_kin_override an exact kinship: family int8[16] (-1..15),
+ * genes uint32[16], ibd int8[256] (0..32, symmetric, 32 on the diagonal; r = ibd/32),
+ * family NULL clears, wins over the layout. Both apply at the NEXT pw_reset and stay until
+ * cleared. pw_set_obs_mask: bit 0 zeroes every r-to-me column of ffa.v1 (the genes-only
+ * ablation), read by the next pw_observe, kept across resets; other bits rejected.
+ * All return 0, or -1 bad args. */
+#define PW_PAIR_STAT_COUNT 13
+int pw_set_game_mode(void *handle, int32_t mode);
+int pw_game_mode(void *handle);
+int pw_set_kin_layout(void *handle, int32_t layout);
+int pw_kin(void *handle, float *two_fifty_six);
+int pw_genes(void *handle, uint32_t *sixteen);
+int pw_scores(void *handle, float *sixteen);
+int pw_reward_split(void *handle, float *thirty_two);
+int pw_kin_seat_stats(void *handle, float *forty_eight);
+int pw_pair_stats(void *handle, int32_t *sixteen_sixteen_thirteen);
+int pw_set_spawn_grouping(void *handle, const int8_t *sixteen);
+int pw_set_kin_override(void *handle, const int8_t *family_sixteen, const uint32_t *genes_sixteen,
+                        const int8_t *ibd_two_fifty_six);
+int pw_set_obs_mask(void *handle, uint32_t flags);
 #ifdef __cplusplus
 }
 #endif
