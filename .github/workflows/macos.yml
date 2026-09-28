@@ -1,0 +1,20 @@
+# macOS build: the same steps as build.yml, run on macOS only. It runs on every push and PR
+# but is kept out of the "Github Actions" workflow that deploy.yml waits on, so the slower
+# macOS shards never delay a release. A red macOS run still shows on the commit and the PR.
+name: macOS build
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+    # Same filter as build.yml: PRs that change only *.md files (outside .github/) skip CI.
+    paths:
+      - '**'
+      - '!**/*.md'
+      - '.github/**'
+  workflow_dispatch:
+jobs:
+  macos:
+    uses: ./.github/workflows/build.yml
+    with:
+      os: '["macos-latest"]'
