@@ -1071,8 +1071,9 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
   ## handle keeps its map (pw_set_map's, or an earlier config's); "map": "" is the island. They
   ## replace the handle's mode, kin layout, map, vision and glory awards from its NEXT pw_reset
   ## on (the current world keeps its own), as pw_set_game_mode, pw_set_kin_layout and pw_set_map
-  ## do; the rules stay pw_set_rules'. 0; -1 bad args; -2 a config the host would refuse, with
-  ## its reason in `error` (NUL-terminated, truncated to capacity; "" on success; may be NULL).
+  ## do; the rules stay pw_set_rules'. 0; -1 bad args; -2 a config the host would refuse (or an
+  ## FFA-kin config on an observation contract v3 handle), with its reason in `error`
+  ## (NUL-terminated, truncated to capacity; "" on success; may be NULL).
   if handle == nil or length < 0 or (length > 0 and json == nil): return -1
   var text = newString(length.int)
   if length > 0: copyMem(addr text[0], json, length.int)
@@ -1082,6 +1083,10 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
       writeMessage(error, capacity, e.msg)
       return -2
   let env = cast[ptr NativeEnv](handle)
+  if config.mode == gmFfaKin and env.obsVersion == ocV3:
+    # Observation contract v3 is the teams game's, as pw_set_game_mode refuses it too.
+    writeMessage(error, capacity, "observation contract v3 is for the teams game only")
+    return -2
   env.nextMode = config.mode
   env.kinLayout = if config.kinLayout.isSome: config.kinLayout.get.ord.int32 else: -1
   # A config without "map" keeps the handle's map (pw_set_map), so a trainer can draw maps

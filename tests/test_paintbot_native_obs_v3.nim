@@ -117,6 +117,43 @@ suite "Native observation contract v3":
     check pw_set_game_mode(two, 1) == 0
     pw_destroy(three); pw_destroy(two)
 
+  test "pw_set_config_json: an FFA-kin config is refused on a v3 handle; the glory config reaches the block":
+    proc setConfig(handle: pointer, json: string): (cint, string) =
+      var message: array[256, char]
+      let code = pw_set_config_json(handle, cbuf(json), json.len.int32,
+        cast[ptr UncheckedArray[char]](addr message[0]), 256)
+      (code, $cast[cstring](addr message[0]))
+    for handle in [pw_create_observation(5, 480, 3), pw_create_observation_inputs_v(5, 480, 3, 2)]:
+      require handle != nil
+      check setConfig(handle, """{"mode": "ffa_kin"}""") == (-2.cint, "observation contract v3 is for the teams game only")
+      check pw_reset(handle, 5, 480) == 0 and pw_game_mode(handle) == 0
+      # A teams variant's glory config: the next world pays 5 per life behind, every 3 s, and
+      # the block's columns 510-512 say so, exactly as the reference encoder under that config.
+      check setConfig(handle, """{"glory": {"behind_lives": 5, "behind_lives_seconds": 3, "quiet_supplies": 25}}""") == (0.cint, "")
+      check pw_reset(handle, 5, 480) == 0
+      let n = pw_handle_observation_size(handle).int
+      var observations = newSeq[float32](Seats*n)
+      var resets: array[Seats, float32]
+      require pw_observe(handle, fbuf(observations), fbuf(resets)) == 0
+      for slot in 0..<Seats:
+        check observations[slot*n+510] == 0.5'f32
+        check observations[slot*n+511] == 3'f32/60
+        check observations[slot*n+512] == 0.25'f32
+      configureRules(NativeRules)
+      configureGlory(GloryConfig(quietSupplies: 25, quietSupplySeconds: 30, behindLives: 5,
+        behindLivesSeconds: 3, heart: 20))
+      let w = newWorld(5, 480)
+      var expected: array[ObservationSizeV3, float32]
+      for slot in 0..<Seats:
+        encodeObservation(w, slot, expected, ocV3)
+        for i in 0..<ObservationSizeV3: check observations[slot*n+i] == expected[i]
+      configureGlory(DefaultGloryConfig)
+      pw_destroy(handle)
+    # Other handles still take an FFA-kin config.
+    let two = pw_create_observation(5, 480, 2)
+    check setConfig(two, """{"mode": "ffa_kin"}""") == (0.cint, "")
+    pw_destroy(two)
+
   test "v3u<K> handles and hashes; version 2 is pw_create_observation_inputs":
     check pw_create_observation_inputs_v(1, 100, 1, 3) == nil
     check pw_create_observation_inputs_v(1, 100, 101, 3) == nil

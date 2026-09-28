@@ -475,7 +475,8 @@ int pw_map(void *handle);
  * earlier config's), so maps can be drawn per reset under one config; "map": "" is the island;
  * tokens, players, slots, seed and max_ticks are accepted and ignored (seats and match
  * length come from this ABI). It replaces the handle's mode, kin layout, map, vision and glory
- * awards. 0; -1 bad args; -2 a config the host would refuse, its reason written to `error`
+ * awards. 0; -1 bad args; -2 a config the host would refuse (or an FFA-kin config on an
+ * observation contract v3 handle), its reason written to `error`
  * (NUL-terminated, truncated to capacity, "" on success, may be NULL). Rules and config are
  * kept across pw_reset and apply at the NEXT pw_reset; the current world keeps its own. Each
  * handle carries its own, so handles on one thread may play different rules and configs. At
