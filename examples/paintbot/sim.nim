@@ -227,6 +227,9 @@ type GameMode* = enum
   gmTeams, gmFfaKin
 # Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
 # still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
+const LiveRules* = 45
+  ## The rules live games play and record (game.nim's replayRulesVersion starts here too). The
+  ## training library defaults to its own NativeRules and accepts NativeRules .. LiveRules.
 when defined(pwTraining):
   var visionRulesVersion* {.threadvar.}: int
   var gameMode* {.threadvar.}: GameMode
@@ -268,7 +271,7 @@ when defined(pwTraining):
     killed: bool) {.nimcall, gcsafe.}
   var damageObserver* {.threadvar.}: DamageObserver
 else:
-  var visionRulesVersion* = 45
+  var visionRulesVersion* = LiveRules
   var gameMode* = gmTeams
 proc ffa*(): bool = gameMode == gmFfaKin
 proc wadesToWetGoals*(): bool =

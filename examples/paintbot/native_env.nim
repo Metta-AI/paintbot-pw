@@ -1,9 +1,10 @@
 ## In-process training ABI. Build with --app:lib --mm:arc --threads:on -d:pwTraining.
 ## A handle may migrate between threads but must never be used concurrently.
 ## The caller owns flat buffers; no Nim-managed values cross the C boundary.
-import std/strutils
+import std/[strutils, options]
+from std/json import parseJson
 import jsony
-import sim, kinship, neural_contract, bots, neural_actor
+import sim, kinship, neural_contract, bots, neural_actor, match_config
 from neural_host import MaxNeuralOperations
 import polyworld/rngs
 import polyworld/basic
@@ -194,6 +195,13 @@ type
     # and ready() installs it on the calling thread like the mode and kinship; nextMapSlot is
     # kept across resets and applied at the next reset, so a live world never changes map.
     mapSlot, nextMapSlot: int32
+    # Rules and match config (pw_set_rules, pw_set_config_json), per handle like the map: rules
+    # 0 means NativeRules (the zero-init default); glory and vision are the current world's,
+    # ready() installs them, and the next* values apply at the next reset. createEnv starts
+    # both glories at DefaultGloryConfig, so an untouched handle plays exactly as before.
+    rules, nextRules: int32
+    glory, nextGlory: GloryConfig
+    vision, nextVision: bool
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -207,17 +215,28 @@ const
   KinHeartSlots = 16 # control hearts tracked for psHeartPass (rules 40 has 10)
 static: doAssert PairStatCount == 13 and KinWindow == 72
 
+proc rulesVersion(env: ptr NativeEnv): int =
+  ## The current world's rules.
+  if env.rules == 0: NativeRules else: env.rules.int
+
 proc ready(handle: pointer = nil) =
   ## Every entry point: the thread's GC, map and rules, and, for a handle, its game mode and
-  ## kinship. All are threadvars the engine reads (terrain, layout, ffa(), scores, the ffa.v1
-  ## encoder) and several handles may share a thread, so each call installs its own handle's;
-  ## without a handle, the rules' own island. The map goes first so configureRules binds the
+  ## kinship, and its rules, glory awards and vision. All are threadvars the engine reads
+  ## (terrain, layout, ffa(), scores, glory, sight, the ffa.v1 encoder) and several handles may
+  ## share a thread, so each call installs its own handle's; without a handle, NativeRules on
+  ## the rules' own island with the default awards. The map goes first so configureRules binds the
   ## terrain table once, for the right key (a key compare when nothing changed).
   setupForeignThreadGc()
   setActiveMap(if handle == nil: -1 else: cast[ptr NativeEnv](handle).mapSlot.int-1)
-  configureRules(NativeRules)
-  if handle != nil:
+  if handle == nil:
+    configureRules(NativeRules)
+    configureGlory(DefaultGloryConfig)
+    teamVision = false
+  else:
     let env = cast[ptr NativeEnv](handle)
+    configureRules(env.rulesVersion)
+    configureGlory(env.glory)
+    teamVision = env.vision
     gameMode = env.mode
     activeKinship = env.kinship
 
@@ -267,6 +286,9 @@ proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
   let mode = env.nextMode
   gameMode = mode
   setActiveMap(env.nextMapSlot.int-1)
+  configureRules(if env.nextRules == 0: NativeRules else: env.nextRules.int)
+  configureGlory(env.nextGlory)
+  teamVision = env.nextVision
   let savedKinship = kinshipOverride
   kinshipOverride =
     if env.kinOverride.isSome: env.kinOverride
@@ -279,6 +301,9 @@ proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
     kinshipOverride = savedKinship
     spawnGroupingOverride = none(array[Seats, int8])
   env.mapSlot = env.nextMapSlot
+  env.rules = env.nextRules
+  env.glory = env.nextGlory
+  env.vision = env.nextVision
   env.mode = mode
   env.kinship = if mode == gmFfaKin: activeKinship else: Kinship()
   activeKinship = env.kinship
@@ -583,6 +608,8 @@ proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): p
   try:
     env.obsVersion = obsVersion
     env.kinLayout = -1
+    env.glory = DefaultGloryConfig
+    env.nextGlory = DefaultGloryConfig
     env.newEnvWorld(seed, maxTicks)
     for i in 0..<Seats: env.resets[i] = 1
     env.invalidateBodies()
@@ -985,6 +1012,52 @@ proc pw_map*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   ## The current world's map: an index into MapNames, -1 for the rules' own island; -2 for nil.
   if handle == nil: return -2
   cint(cast[ptr NativeEnv](handle).mapSlot-1)
+
+proc writeMessage(output: ptr UncheckedArray[char], capacity: cint, message: string)
+proc pw_rules_latest*(): cint {.exportc, cdecl, dynlib.} =
+  ## The newest rules pw_set_rules accepts: the rules live games play (sim.LiveRules).
+  LiveRules.cint
+
+proc pw_set_rules*(handle: pointer, version: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The rules for this handle's worlds from its NEXT pw_reset on: NativeRules (40, the
+  ## default) .. pw_rules_latest(). Kept across resets; the current world keeps its rules.
+  ## 0, or -1 bad args.
+  if handle == nil or version notin NativeRules.cint..LiveRules.cint: return -1
+  cast[ptr NativeEnv](handle).nextRules = version
+  0
+
+proc pw_rules*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
+  ## The current world's rules; -1 for nil.
+  if handle == nil: return -1
+  cast[ptr NativeEnv](handle).rulesVersion.cint
+
+proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length: int32,
+    error: ptr UncheckedArray[char], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## A whole Coworld game config object (a manifest variant's game_config, verbatim), read by
+  ## the host's own parser (match_config.parseMatchConfig): mode, kin_layout, glory, map and
+  ## vision; its seating and length keys (tokens, players, slots, seed, max_ticks) are
+  ## accepted and ignored, since a handle's seats and match length come from its own calls.
+  ## Every match key it has not got takes the host's default. All of them replace the
+  ## handle's mode, kin layout, map, vision and glory awards from its NEXT pw_reset on (the
+  ## current world keeps its own), as pw_set_game_mode, pw_set_kin_layout and pw_set_map do;
+  ## the rules stay pw_set_rules'. 0; -1 bad args; -2 a config the host would refuse, with
+  ## its reason in `error` (NUL-terminated, truncated to capacity; "" on success; may be NULL).
+  if handle == nil or length < 0 or (length > 0 and json == nil): return -1
+  var text = newString(length.int)
+  if length > 0: copyMem(addr text[0], json, length.int)
+  let config =
+    try: parseMatchConfig(parseJson(text))
+    except CatchableError as e:
+      writeMessage(error, capacity, e.msg)
+      return -2
+  let env = cast[ptr NativeEnv](handle)
+  env.nextMode = config.mode
+  env.kinLayout = if config.kinLayout.isSome: config.kinLayout.get.ord.int32 else: -1
+  env.nextMapSlot = int32(mapIndex(config.map)+1)
+  env.nextVision = config.vision == "team"
+  env.nextGlory = config.glory
+  writeMessage(error, capacity, "")
+  0
 
 proc pw_set_kin_layout*(handle: pointer, layout: int32): cint {.exportc, cdecl, dynlib.} =
   ## FFA kin layout for the next resets: -1 = drawn from the seed by weight (default), else
@@ -1783,7 +1856,7 @@ proc pw_world_json*(handle: pointer, output: ptr UncheckedArray[char], capacity:
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   let snapshot = env.world.toJson()
-  let doc = "{\"rulesVersion\":" & $NativeRules & ",\"heard\":{}," & snapshot[1..^1]
+  let doc = "{\"rulesVersion\":" & $env.rulesVersion & ",\"heard\":{}," & snapshot[1..^1]
   if capacity >= doc.len and doc.len > 0:
     copyMem(output, unsafeAddr doc[0], doc.len)
   doc.len.cint

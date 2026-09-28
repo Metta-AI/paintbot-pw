@@ -451,6 +451,23 @@ int pw_map_count(void);
 int pw_map_name(int32_t index, char *out, int32_t capacity);
 int pw_set_map(void *handle, int32_t index);
 int pw_map(void *handle);
+/* Rules and game config (additive; training library only). With neither called a handle plays
+ * NativeRules (40) with the default awards byte for byte as before. pw_rules_latest: the rules
+ * live games play. pw_set_rules: NativeRules .. pw_rules_latest(), 0 or -1 bad args; pw_rules:
+ * the current world's (-1 NULL). pw_set_config_json takes a whole Coworld game config object
+ * (a manifest variant's game_config, verbatim; not NUL-terminated, `length` bytes) and reads it
+ * with the host's parser: mode, kin_layout, glory, map, vision, each absent key the host's
+ * default; tokens, players, slots, seed and max_ticks are accepted and ignored (seats and match
+ * length come from this ABI). It replaces the handle's mode, kin layout, map, vision and glory
+ * awards. 0; -1 bad args; -2 a config the host would refuse, its reason written to `error`
+ * (NUL-terminated, truncated to capacity, "" on success, may be NULL). Rules and config are
+ * kept across pw_reset and apply at the NEXT pw_reset; the current world keeps its own. Each
+ * handle carries its own, so handles on one thread may play different rules and configs. At
+ * pw_rules_latest() with a variant's game_config a handle plays that variant's hosted world. */
+int pw_rules_latest(void);
+int pw_set_rules(void *handle, int32_t version);
+int pw_rules(void *handle);
+int pw_set_config_json(void *handle, const char *json, int32_t length, char *error, int32_t capacity);
 #ifdef __cplusplus
 }
 #endif
