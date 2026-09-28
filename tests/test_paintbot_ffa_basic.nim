@@ -2,7 +2,7 @@
 ## owners and great hearts; selfTeam and playerTeam read the seat. In the teams game the new
 ## functions read "no FFA" and the old data is unchanged.
 import std/[unittest, os, strutils]
-import polyworld/cli
+import polyworld/[cli, basic]
 import ../examples/paintbot/[sim, bots, kinship]
 
 const Root = currentSourcePath().parentDir.parentDir
@@ -92,13 +92,31 @@ suite "FFA-kin BASIC host":
     check w.visible(0, 6)
     check w.ask(0, "visible(6)", "playerTeam(6)") == (1'i32, 6'i32)
 
-  test "the teams game: no great hearts, mode 0, team data unchanged":
+  test "the teams game keeps exactly the old host names and team data":
     gameMode = gmTeams
     var w = newWorld(2026)
-    check w.ask(0, "gameMode()", "greatHeartCount()") == (0'i32, 0'i32)
-    check w.ask(0, "greatHeartX(0)", "gene(1, 0)") == (-1'i32, -1'i32)
-    check w.ask(3, "selfTeam", "kin(3)") == (1'i32, 100'i32)
-    check w.ask(3, "kin(5)", "seatScore(5)") == (0'i32, 0'i32)
+    # Submitted teams scripts may use any of the FFA names as plain variables.
+    let names = ["kin", "gene", "heartOwner", "gameMode", "greatHeartCount", "greatHeartX",
+      "greatHeartY", "greatHeartPresent", "greatHeartProgress", "greatHeartDormant",
+      "seatScore", "seatAlive"]
+    let path = getTempDir() / "paintbot-ffa-basic-names.bas"
+    defer: removeFile(path)
+    var source = ""
+    for i, name in names: source.add name & " = " & $(i + 1) & "\n"
+    source.add "walkTo(kin + gene * 100, seatScore + greatHeartX * 100)\n"
+    writeFile(path, source)
+    var players = loadBots(@[BotGroup(path: path, count: Seats)])
+    let commands = players.decide(w)
+    for slot in 0..<Seats:
+      check not players[slot].failed
+    check commands[0].goal == point(1 + 2*100, 11 + 6*100)
+    # The same program is refused in FFA, where those names are host functions.
+    gameMode = gmFfaKin
+    var ffaW = newWorld(2026)
+    expect BasicError: discard loadBots(@[BotGroup(path: path, count: Seats)])
+    discard ffaW
+    gameMode = gmTeams
+    check w.ask(3, "selfTeam", "selfId") == (1'i32, 3'i32)
     check w.ask(2, "homeX", "homeY") == (home(0).x, home(0).z)
     check w.ask(3, "heartX", "heartY") == (w.hearts[0].pos.x, w.hearts[0].pos.z)
 
