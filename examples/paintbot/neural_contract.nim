@@ -1,8 +1,9 @@
 ## Versioned policy-visible float observations and categorical actuators.
 ## Used unchanged by BASIC deployment and native Puffer rollouts.
-import std/math
+import std/[math, algorithm]
 import polyworld/rngs
 import sim, kinship
+from neural_actor import ActorLayout, LayoutSection
 
 const
   ObservationSize* = 448
@@ -17,6 +18,11 @@ const
   ## Directional aim, movement, fire, grenade and sneak decode exactly as in v1.
   ActionContractV2* = "paintbot-pw.rules37.action.v2.51-25-2-2-2"
   ActionContractV2Hash* = "51f602ef167919ca825595f9d81777cb807afbb0938a20102457d0594e2b4317"
+  ## Action contract ffa.v2 pointer (observation contract ffa.v2 only): the same five heads,
+  ## sized by the match layout; the objective and aim heads point at the observation's rows
+  ## of the same tick (decodePointerActions documents every index).
+  ActionContractFfaV2Pointer* = "paintbot-pw.rules48.action.ffa.v2.pointer"
+  ActionContractFfaV2PointerHash* = "068fc9816d515cc7df281ce94c7ecb973ca83f8f268021ef06707f934d2d83a5"
   ## Observation contract v2: the v1 observation, unchanged in order and value, in
   ## columns 0 .. ObservationSize-1, followed by a public terrain block
   ## (TerrainBlockSize floats; encodeTerrainBlock documents every column). Selected per
@@ -98,13 +104,31 @@ const
   ObservationContractV3* = "paintbot-pw.rules43.obs.v3.float514"
   ObservationContractV3Hash* = "06f16d62adedda6995d393696c0d2ed257aa9380b86341e73d1d6a3c7ea374f1"
 static: doAssert ObservationSizeV3 == 514 and ObservationContractV3 == "paintbot-pw.rules43.obs.v3.float" & $ObservationSizeV3
+const
+  ## Observation contract ffa.v2 (FFA-kin at any seat count; encodeFfaV2Observation documents
+  ## every column): a fixed header, then three entity sections, each a run of fixed-width rows
+  ## sorted nearest first. The row counts follow the match (every other seat, every control
+  ## heart, the two great hearts), so the width is fixed per match, not per contract
+  ## (ffaV2Layout). The hash is the SHA-256 of the id, as for every contract.
+  FfaV2HeaderSize* = 24
+  FfaV2CogWidth* = 44
+  FfaV2HeartWidth* = 12
+  FfaV2GreatWidth* = 12
+  FfaV2GreatRows* = 2
+  FfaV2ValidColumn* = 0   # every section's row: column 0 is the valid flag
+  ObservationContractFfaV2* = "paintbot-pw.rules48.obs.ffa.v2"
+  ObservationContractFfaV2Hash* = "d0a10cee5ae4a3b73a13e018fc1904e40f943768483498d896b9915e6313c592"
+  ## Header scales (ffa.v2).
+  FfaV2SeatScale* = 64
+  FfaV2HeartScale* = 100
 
 type
   ObservationContractVersion* = enum
-    ## Version numbers are the native ABI's (pw_create_observation): ocFfaV1 is 101.
-    ocV1 = 1, ocV2 = 2, ocV3 = 3, ocFfaV1 = 101
+    ## Version numbers are the native ABI's (pw_create_observation): ocFfaV1 is 101,
+    ## ocFfaV2 (any seat count; the width follows the match) is 102.
+    ocV1 = 1, ocV2 = 2, ocV3 = 3, ocFfaV1 = 101, ocFfaV2 = 102
   ActionContractVersion* = enum
-    acV1 = 1, acV2 = 2
+    acV1 = 1, acV2 = 2, acFfaV2Pointer = 3
   AimMemory* = object
     ## What a seat saw one tick ago, kept by the host outside the World (never hashed,
     ## never serialized): the pre-step tick it was recorded on and, per apparent
@@ -118,14 +142,17 @@ proc actionContractHash*(version: ActionContractVersion): string =
   case version
   of acV1: ActionContractHash
   of acV2: ActionContractV2Hash
+  of acFfaV2Pointer: ActionContractFfaV2PointerHash
 proc actionContractId*(version: ActionContractVersion): string =
   case version
   of acV1: ActionContract
   of acV2: ActionContractV2
+  of acFfaV2Pointer: ActionContractFfaV2Pointer
 proc actionContractVersion*(hash: string): ActionContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ActionContractHash: acV1
   elif hash == ActionContractV2Hash: acV2
+  elif hash == ActionContractFfaV2PointerHash: acFfaV2Pointer
   else: raise newException(ValueError, "unknown neural action contract")
 
 proc observationContractHash*(version: ObservationContractVersion): string =
@@ -134,24 +161,30 @@ proc observationContractHash*(version: ObservationContractVersion): string =
   of ocV2: ObservationContractV2Hash
   of ocV3: ObservationContractV3Hash
   of ocFfaV1: ObservationContractFfaV1Hash
+  of ocFfaV2: ObservationContractFfaV2Hash
 proc observationContractId*(version: ObservationContractVersion): string =
   case version
   of ocV1: ObservationContract
   of ocV2: ObservationContractV2
   of ocV3: ObservationContractV3
   of ocFfaV1: ObservationContractFfaV1
+  of ocFfaV2: ObservationContractFfaV2
 proc observationSize*(version: ObservationContractVersion): int =
+  ## The fixed width of a contract. ffa.v2's width follows the match (ffaV2Layout):
+  ## ValueError here, so no caller can mistake it for a constant.
   case version
   of ocV1: ObservationSize
   of ocV2: ObservationSizeV2
   of ocV3: ObservationSizeV3
   of ocFfaV1: ObservationSizeFfaV1
+  of ocFfaV2: raise newException(ValueError, "observation contract ffa.v2 has a per-match width (ffaV2Layout)")
 proc observationContractVersion*(hash: string): ObservationContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ObservationContractHash: ocV1
   elif hash == ObservationContractV2Hash: ocV2
   elif hash == ObservationContractV3Hash: ocV3
   elif hash == ObservationContractFfaV1Hash: ocFfaV1
+  elif hash == ObservationContractFfaV2Hash: ocFfaV2
   else: raise newException(ValueError, "unknown neural observation contract")
 
 proc observedBodies*(w: World, slot: int): array[LegacySeats, int] =
@@ -507,11 +540,270 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   output[FfaTerrainOffset+56] = 0
   output[FfaTerrainOffset+57] = 0
 
+# ---------------------------------------------------------------------------------------
+# Observation contract ffa.v2: any seat count, variable-length entity sections.
+type
+  FfaV2Layout* = object
+    ## Where each section of an ffa.v2 observation lies for a match with `seats` seats and
+    ## `hearts` control hearts. Rows are `*Width` floats apart; column FfaV2ValidColumn of
+    ## every row is its valid flag.
+    seats*, hearts*: int
+    cogOffset*, cogRows*: int
+    heartOffset*, heartRows*: int
+    greatOffset*, greatRows*: int
+    size*: int
+  FfaV2Rows* = object
+    ## One seat's row -> entity map for one tick (the pre-step world its observation and
+    ## its action decode both read): the seat, body, control heart and great heart each
+    ## row describes.
+    cogs*: seq[int]    # row -> seat id: only the cogs the seat sees (the valid rows)
+    bodies*: seq[int]  # row -> the body the seat sees under that identity
+    hearts*: seq[int]  # row -> control heart index
+    greats*: array[FfaV2GreatRows, int]  # row -> great heart index
+
+proc ffaV2Layout*(seats, hearts: int): FfaV2Layout =
+  if seats notin 2..MaxSeats or hearts < 0:
+    raise newException(ValueError, "invalid ffa.v2 layout: " & $seats & " seats, " & $hearts & " hearts")
+  result.seats = seats
+  result.hearts = hearts
+  result.cogOffset = FfaV2HeaderSize
+  result.cogRows = seats - 1
+  result.heartOffset = result.cogOffset + result.cogRows*FfaV2CogWidth
+  result.heartRows = hearts
+  result.greatOffset = result.heartOffset + result.heartRows*FfaV2HeartWidth
+  result.greatRows = FfaV2GreatRows
+  result.size = result.greatOffset + result.greatRows*FfaV2GreatWidth
+proc ffaV2Layout*(w: World): FfaV2Layout =
+  ## The layout of `w`'s match: its seats and its control hearts.
+  ffaV2Layout(w.cogs.len, w.controlHearts.len)
+
+proc actorLayout*(l: FfaV2Layout, heads: openArray[int], targets = [-1, -1, -1, -1]): ActorLayout =
+  ## The match layout a PWNET002 model's layout words resolve against for an ffa.v2 seat:
+  ## section 0 the cog rows, 1 the control heart rows, 2 the great heart rows, 3 the control
+  ## and great heart rows as one run (they are contiguous and equally wide); `heads` the
+  ## action contract's head sizes and `targets` each section's pointer target (the logit
+  ## offset of its row 0; -1 none).
+  result.present = true
+  result.inputs = l.size
+  result.heads = @heads
+  for h in heads: result.outputs += h
+  result.sections[0] = LayoutSection(offset: l.cogOffset, rows: l.cogRows, width: FfaV2CogWidth, target: targets[0])
+  result.sections[1] = LayoutSection(offset: l.heartOffset, rows: l.heartRows, width: FfaV2HeartWidth, target: targets[1])
+  result.sections[2] = LayoutSection(offset: l.greatOffset, rows: l.greatRows, width: FfaV2GreatWidth, target: targets[2])
+  result.sections[3] = LayoutSection(offset: l.heartOffset, rows: l.heartRows + l.greatRows, width: FfaV2HeartWidth,
+    target: targets[3])
+static: doAssert FfaV2HeartWidth == FfaV2GreatWidth
+
+proc observedBodiesAll*(w: World, slot: int): seq[int] =
+  ## observedBodies for every seat of the match (the same rule: the nearest visible body
+  ## carrying each apparent identity; the seat's own identity is its own body).
+  let n = w.cogs.len
+  result = newSeq[int](n)
+  for i in 0..<n: result[i] = -1
+  result[slot] = slot
+  for body in 0..<n:
+    if body == slot or not w.visible(slot, body): continue
+    let identity = w.observedSeat(slot, body)
+    if identity notin 0..<n or identity == slot: continue
+    let previous = result[identity]
+    if previous < 0 or distance2(w.cogs[slot].pos, w.cogs[body].pos) <
+        distance2(w.cogs[slot].pos, w.cogs[previous].pos): result[identity] = body
+
+proc ffaV2Rows*(w: World, slot: int): FfaV2Rows =
+  ## The row order of the seat's ffa.v2 observation on this world. Cog rows: only the other
+  ## cogs the seat can see (sim.visible, the line-of-sight rule that sets ffa.v1's visible
+  ## column and BASIC's visible(); a visible cog is alive), nearest body first, ties by seat
+  ## id; a cog it cannot see has no row and no entry here. Control heart rows: every heart,
+  ## nearest first, ties by heart index; great heart rows likewise. Distances are integer
+  ## squared distances from the seat's own position.
+  let n = w.cogs.len
+  if slot notin 0..<n: raise newException(ValueError, "invalid ffa.v2 seat")
+  let me = w.cogs[slot].pos
+  let seen = w.observedBodiesAll(slot)
+  var keys: seq[(int64, int)]
+  for j in 0..<n:
+    if j == slot or seen[j] < 0: continue
+    keys.add (distance2(me, w.cogs[seen[j]].pos), j)
+  keys.sort()
+  result.cogs = newSeq[int](keys.len)
+  result.bodies = newSeq[int](keys.len)
+  for k, key in keys:
+    result.cogs[k] = key[1]
+    result.bodies[k] = seen[key[1]]
+  var hearts: seq[(int64, int)]
+  for h, heart in w.controlHearts: hearts.add (distance2(me, heart.pos), h)
+  hearts.sort()
+  result.hearts = newSeq[int](hearts.len)
+  for k, key in hearts: result.hearts[k] = key[1]
+  var greats: seq[(int64, int)]
+  for g in 0..<FfaV2GreatRows: greats.add (distance2(me, w.greatHearts[g].pos), g)
+  greats.sort()
+  for k, key in greats: result.greats[k] = key[1]
+
+proc encodeFfaV2Observation*(w: World, slot: int, output: var openArray[float32],
+    rows: FfaV2Rows, kin: Kinship, mask = 0'u32) =
+  ## Observation contract ffa.v2 (ffaV2Layout(w).size floats), for FFA-kin at any seat count.
+  ## No map flip. "Centred x" is (x - Width/2) / (maxX - minX), "centred z" likewise; dx, dz
+  ## are the entity's position minus the seat's over the same spans; "distance" is the
+  ## Euclidean distance over the map diagonal sqrt(spanX^2 + spanZ^2); "wet" is inWater and
+  ## "height" w.elevation / TerrainHeightScale, as the v2 terrain block reads them. hp and
+  ## armor are divided by maxHp().
+  ## Fog: the cog section holds ONLY the cogs the seat can see (`rows`, ffaV2Rows: sim.visible,
+  ## the line of sight that sets ffa.v1's visible column), packed first, nearest first; every
+  ## row after them is all zero (valid 0). Nothing about a cog the seat cannot see appears
+  ## anywhere: no position, hp, genes, r, score, hearts held or id, and no count or order that
+  ## depends on it. The header carries only the seat's own state and match constants.
+  ## Control hearts and great hearts are static map entities: full lists, every row valid.
+  ## Outside FFA the genes, r, score and ownership columns and the great heart rows are zero.
+  ## mask bit 0 (FfaObsMaskKin, training only) zeroes every column that reads r: cog column
+  ## 37, heart column 5 of a heart another seat owns, and header column 12. Scores (/ 1000)
+  ## and hearts held (/ 10) can exceed 1.
+  ##   Header (FfaV2HeaderSize = 24):
+  ##     0..7   ffa.v1's self block: centred x, centred z, hp/maxHp, armor/maxHp, cooldown/72,
+  ##            own score/1000, alive, ticks left/8640
+  ##     8      seats in the match / 64            9  control hearts / 100
+  ##     10     ticks remaining / max(1, end tick)  11 hearts owned by self / max(1, hearts)
+  ##     12     territory boost here / TerritoryBoostPercent
+  ##     13     self wet                           14 self height
+  ##     15     valid cog rows (cogs the seat sees) / 64
+  ##     16     cog rows (seats - 1) / 64          17 control heart rows / 100
+  ##     18     great heart rows / 2               19..23 reserved 0
+  ##   Cog rows (FfaV2CogWidth = 44), seats - 1 of them, from 24; the seen cogs first, in
+  ##   ffaV2Rows order, then zero rows:
+  ##     0 valid (seen, hence alive), 1 dx, 2 dz, 3 visible (1), 4 hp/maxHp, 5..36 gene bits
+  ##     0..31 (+1 set, -1 clear), 37 r(me, j), 38 score/1000, 39 hearts held/10, 40 distance,
+  ##     41 wet, 42 height minus self height, 43 seat id / 255
+  ##   Control heart rows (FfaV2HeartWidth = 12), one per heart, nearest first:
+  ##     0 valid (1), 1 dx, 2 dz, 3 centred x, 4 centred z, 5 owner's r to me (-1 neutral,
+  ##     1 mine), 6 capture ticks/HeartCaptureTicks, 7 contested, 8 owned by me, 9 distance,
+  ##     10 wet, 11 height minus self height
+  ##   Great heart rows (FfaV2GreatWidth = 12), two, nearest first (all 0 outside FFA):
+  ##     0 valid (1), 1 dx, 2 dz, 3 centred x, 4 centred z, 5 state (-1 dormant, 0 awake,
+  ##     1 charging), 6 cogs present/16, 7 progress/GreatHeartCaptureTicks, 8 dormant ticks
+  ##     left/1440, 9 distance, 10 wet, 11 height minus self height
+  let layout = w.ffaV2Layout()
+  if slot notin 0..<w.cogs.len or output.len != layout.size or
+      rows.cogs.len > layout.cogRows or rows.bodies.len != rows.cogs.len or
+      rows.hearts.len != layout.heartRows:
+    raise newException(ValueError, "invalid neural observation dimensions or seat")
+  for i in 0..<output.len: output[i] = 0
+  let kinOn = ffa()
+  let hideKin = (mask and FfaObsMaskKin) != 0
+  let me = w.cogs[slot]
+  let hpScale = float32(maxHp())
+  let spanX = float32(maxX()-minX())
+  let spanZ = float32(maxZ()-minZ())
+  let diag = sqrt(float64(spanX)*float64(spanX) + float64(spanZ)*float64(spanZ))
+  let own = w.elevation(me.pos)
+  const heightScale = TerrainHeightScale.float32
+  let heartCount = w.controlHearts.len
+  template cx(p: Point): float32 = float32(p.x-Width div 2)/spanX
+  template cz(p: Point): float32 = float32(p.z-Height div 2)/spanZ
+  template dist(p: Point): float32 = float32(sqrt(float64(distance2(me.pos, p))) / diag)
+  template rTo(j: int): float32 =
+    (if not kinOn or hideKin: 0'f32 else: float32(kin.r(slot, j)))
+  template points(j: int): float32 =
+    (if kinOn: float32(w.seatScore[j])/10000 else: 0'f32)
+  var held = newSeq[int](w.cogs.len)
+  if kinOn:
+    for heart in w.controlHearts:
+      if heart.owner in 0'i32..<w.cogs.len.int32: inc held[heart.owner]
+  # Header.
+  output[0] = cx(me.pos)
+  output[1] = cz(me.pos)
+  output[2] = float32(me.hp)/hpScale
+  output[3] = float32(w.equipment[slot].armor)/hpScale
+  output[4] = float32(me.cooldown)/72
+  output[5] = points(slot)
+  output[6] = float32((me.hp > 0).int)
+  output[7] = float32(max(0'i32, w.endTick-w.tick))/8640
+  output[8] = float32(w.cogs.len)/FfaV2SeatScale
+  output[9] = float32(heartCount)/FfaV2HeartScale
+  output[10] = float32(max(0'i32, w.endTick-w.tick))/max(1'i32, w.endTick).float32
+  output[11] = float32(held[slot])/float32(max(1, heartCount))
+  if kinOn and not hideKin:
+    output[12] = float32(w.territoryBoost(slot, kin))/float32(TerritoryBoostPercent)
+  output[13] = inWater(me.pos).float32
+  output[14] = float32(own)/heightScale
+  output[15] = float32(rows.cogs.len)/FfaV2SeatScale
+  output[16] = float32(layout.cogRows)/FfaV2SeatScale
+  output[17] = float32(layout.heartRows)/FfaV2HeartScale
+  output[18] = float32(layout.greatRows)/2
+  # Cogs: the seen ones only.
+  for k in 0..<rows.cogs.len:
+    let o = layout.cogOffset + k*FfaV2CogWidth
+    let j = rows.cogs[k]
+    let other = w.cogs[rows.bodies[k]]
+    output[o] = 1
+    output[o+1] = float32(other.pos.x-me.pos.x)/spanX
+    output[o+2] = float32(other.pos.z-me.pos.z)/spanZ
+    output[o+3] = 1
+    output[o+4] = float32(other.hp)/hpScale
+    if kinOn:
+      for b in 0..<Loci:
+        output[o+5+b] = if ((kin.genes[j] shr b) and 1'u32) == 1'u32: 1'f32 else: -1'f32
+    output[o+37] = rTo(j)
+    output[o+38] = points(j)
+    output[o+39] = float32(held[j])/10
+    output[o+40] = dist(other.pos)
+    output[o+41] = inWater(other.pos).float32
+    output[o+42] = float32(w.elevation(other.pos)-own)/heightScale
+    output[o+43] = float32(j)/float32(MaxSeats-1)
+  # Control hearts.
+  for k in 0..<layout.heartRows:
+    let o = layout.heartOffset + k*FfaV2HeartWidth
+    let i = rows.hearts[k]
+    let heart = w.controlHearts[i]
+    output[o] = 1
+    output[o+1] = float32(heart.pos.x-me.pos.x)/spanX
+    output[o+2] = float32(heart.pos.z-me.pos.z)/spanZ
+    output[o+3] = cx(heart.pos)
+    output[o+4] = cz(heart.pos)
+    output[o+5] =
+      if heart.owner < 0: -1'f32
+      elif not kinOn: 0'f32
+      elif heart.owner == slot.int32: 1'f32
+      else: rTo(heart.owner.int)
+    if i < w.heartCaptures.len:
+      output[o+6] = float32(w.heartCaptures[i].ticks)/HeartCaptureTicks
+      output[o+7] = float32(w.heartCaptures[i].contested.int)
+    output[o+8] = float32((kinOn and heart.owner == slot.int32).int)
+    output[o+9] = dist(heart.pos)
+    output[o+10] = inWater(heart.pos).float32
+    output[o+11] = float32(w.elevation(heart.pos)-own)/heightScale
+  # Great hearts.
+  if kinOn:
+    for k in 0..<FfaV2GreatRows:
+      let o = layout.greatOffset + k*FfaV2GreatWidth
+      let heart = w.greatHearts[rows.greats[k]]
+      output[o] = 1
+      output[o+1] = float32(heart.pos.x-me.pos.x)/spanX
+      output[o+2] = float32(heart.pos.z-me.pos.z)/spanZ
+      output[o+3] = cx(heart.pos)
+      output[o+4] = cz(heart.pos)
+      output[o+5] =
+        if w.tick < heart.dormantUntil: -1'f32
+        elif heart.progress > 0: 1'f32
+        else: 0'f32
+      output[o+6] = float32(heart.present)/16
+      output[o+7] = float32(heart.progress)/GreatHeartCaptureTicks
+      output[o+8] = float32(max(0'i32, heart.dormantUntil-w.tick))/GreatHeartDormantTicks
+      output[o+9] = dist(heart.pos)
+      output[o+10] = inWater(heart.pos).float32
+      output[o+11] = float32(w.elevation(heart.pos)-own)/heightScale
+static:
+  doAssert FfaV2CogWidth == 1 + 2 + 1 + 1 + Loci + 1 + 1 + 1 + 1 + 2 + 1
+  doAssert ObservationContractFfaV2 == "paintbot-pw.rules" & $FfaFogRules & ".obs.ffa.v2"
+
 proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
     bodies: array[LegacySeats, int], version: ObservationContractVersion) =
   ## The observation of the given contract. v1 is the encoder above, called unchanged;
   ## v2 writes the same v1 floats in columns 0 .. ObservationSize-1 and the terrain
-  ## block after them; v3 writes v2's floats and the scoreboard block after them.
+  ## block after them; v3 writes v2's floats and the scoreboard block after them. ffa.v2
+  ## reads its own row order (ffaV2Rows); `bodies` is not used for it.
+  if version == ocFfaV2:
+    w.encodeFfaV2Observation(slot, output, w.ffaV2Rows(slot), activeKinship)
+    return
   if slot notin 0..<LegacySeats or output.len != observationSize(version):
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   case version
@@ -526,8 +818,12 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
   of ocFfaV1:
     # Hosted and default callers: the match's kinship, no mask (masks are training-only).
     w.encodeFfaObservation(slot, output, bodies, activeKinship)
+  of ocFfaV2: discard # handled above
 proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
     version: ObservationContractVersion) =
+  if version == ocFfaV2:
+    w.encodeFfaV2Observation(slot, output, w.ffaV2Rows(slot), activeKinship)
+    return
   if slot notin 0..<LegacySeats or output.len != observationSize(version):
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   w.encodeObservation(slot, output, w.observedBodies(slot), version)
@@ -1879,3 +2175,155 @@ proc trainingBotActions*(w: World, slot, level: int, actions: var openArray[int3
     for i in 0..<actions.len: actions[i] = 0
     return
   w.trainingBotActions(slot, level, actions, w.observedBodies(slot))
+
+# ---------------------------------------------------------------------------------------
+# Action contract ffa.v2 pointer (observation contract ffa.v2 only). Five heads, sized by the
+# match layout (seats N, control hearts H):
+#   head 0 objective, 11 + H: 0 stay (the seat's position), 1..8 compass (pos + 200 * compass,
+#     clamped to the map), 9 .. 8+H control heart row k = index - 9, 9+H .. 10+H great heart
+#     row index - 9 - H: the heart that row of the tick's observation shows;
+#   head 1 aim, 8 + N: 0 keep the current aim, 1..8 compass (pos + 5000 * compass, clamped),
+#     9 .. 7+N cog row k = index - 9: the lead-compensated aim point (action contract v2's
+#     rule, leadAimPoint) of the cog that row shows; a row past the seen cogs keeps the aim;
+#   heads 2, 3, 4: fire, charge grenade, sneak (0 / 1), as every contract.
+# No map flip (FFA-kin mirrors nothing). Row k is the one the seat's observation of the same
+# pre-step world carries (ffaV2Rows): the host and the training library keep that map from
+# the observation to the decode. The lead's memory is keyed by seat id (PointerMemory).
+const
+  PointerCompass* = 8
+  PointerObjectiveFirstRow* = 1 + PointerCompass   # 9: control heart row 0
+  PointerAimFirstRow* = 1 + PointerCompass         # 9: cog row 0
+
+type PointerMemory* = object
+  ## What a pointer seat saw one tick ago, per seat id: the pre-step tick it was recorded on
+  ## (-1 none) and the positions of the cogs it saw. Kept by the host outside the World, reset
+  ## on death, respawn and a new match exactly as AimMemory is.
+  tick*: int32
+  seen*: seq[bool]
+  positions*: seq[Point]
+
+proc pointerHeads*(l: FfaV2Layout): seq[int] =
+  ## The head sizes of action contract ffa.v2 pointer for a match layout.
+  @[1 + PointerCompass + l.heartRows + l.greatRows, 1 + PointerCompass + l.cogRows, 2, 2, 2]
+
+proc pointerTargets*(l: FfaV2Layout): array[4, int] =
+  ## The logit offset of each observation section's row 0 (neural_actor layout words, field
+  ## 3): cogs in the aim head, control and great hearts in the objective head.
+  let aimHead = 1 + PointerCompass + l.heartRows + l.greatRows
+  [aimHead + PointerAimFirstRow, PointerObjectiveFirstRow, PointerObjectiveFirstRow + l.heartRows,
+   PointerObjectiveFirstRow]
+
+proc resetPointerMemory*(m: var PointerMemory, seats: int) =
+  m.tick = -1
+  m.seen = newSeq[bool](seats)
+  m.positions = newSeq[Point](seats)
+
+proc recordPointerMemory*(m: var PointerMemory, w: World, rows: FfaV2Rows) =
+  ## Record once per decided tick, on the pre-step world the decode read, the seen cogs.
+  if m.seen.len != w.cogs.len: m.resetPointerMemory(w.cogs.len)
+  m.tick = w.tick
+  for j in 0..<m.seen.len: m.seen[j] = false
+  for k, j in rows.cogs:
+    m.seen[j] = true
+    m.positions[j] = w.cogs[rows.bodies[k]].pos
+
+proc pointerGoal*(w: World, slot: int, objective: int, rows: FfaV2Rows): (bool, Point) =
+  ## Where objective index `objective` sends the seat on this world (false: no such target).
+  let me = w.cogs[slot]
+  if objective == 0: return (true, me.pos)
+  if objective in 1..PointerCompass:
+    let delta = Directions[objective-1]
+    return (true, point(clamp(me.pos.x.int+delta[0]*200, minX(), maxX()),
+                        clamp(me.pos.z.int+delta[1]*200, minZ(), maxZ())))
+  let k = objective - PointerObjectiveFirstRow
+  if k in 0..<rows.hearts.len: return (true, w.controlHearts[rows.hearts[k]].pos)
+  let g = k - rows.hearts.len
+  if g in 0..<FfaV2GreatRows: return (true, w.greatHearts[rows.greats[g]].pos)
+  (false, me.pos)
+
+proc pointerAim*(w: World, slot: int, aim: int, rows: FfaV2Rows, memory: PointerMemory,
+    ownStep: Point): (bool, Point) =
+  ## Where aim index `aim` points on this world (false: keep the current aim).
+  let me = w.cogs[slot]
+  if aim in 1..PointerCompass:
+    let delta = Directions[aim-1]
+    return (true, point(clamp(me.pos.x.int+delta[0]*5000, minX(), maxX()),
+                        clamp(me.pos.z.int+delta[1]*5000, minZ(), maxZ())))
+  let k = aim - PointerAimFirstRow
+  if k notin 0..<rows.cogs.len: return (false, me.aim)
+  let seat = rows.cogs[k]
+  let body = rows.bodies[k]
+  let now = w.cogs[body].pos
+  var p = now
+  if memory.tick == w.tick - 1 and seat < memory.seen.len and memory.seen[seat]:
+    let u = oneTickStep(memory.positions[seat], now)
+    p.x += u.x * LeadTargetMoves.int32
+    p.z += u.z * LeadTargetMoves.int32
+  p.x -= ownStep.x * LeadOwnMoves.int32
+  p.z -= ownStep.z * LeadOwnMoves.int32
+  (true, p)
+
+proc decodePointerActions*(w: World, slot: int, actions: openArray[int32], rows: FfaV2Rows,
+    memory: PointerMemory): Command =
+  ## Action contract ffa.v2 pointer: the five head indices of one seat on the pre-step world,
+  ## against the row map of the same tick's observation. ValueError for an index outside its
+  ## head (pointerHeads of this world's layout).
+  let heads = pointerHeads(w.ffaV2Layout)
+  if slot notin 0..<w.cogs.len or actions.len != heads.len:
+    raise newException(ValueError, "invalid neural action dimensions or seat")
+  for i, size in heads:
+    if actions[i] < 0 or actions[i] >= size.int32:
+      raise newException(ValueError, "neural action index out of range")
+  let me = w.cogs[slot]
+  result.goal = me.pos
+  result.aim = me.aim
+  if me.hp <= 0: return
+  result.walk = true
+  let (goalFound, goal) = w.pointerGoal(slot, actions[0].int, rows)
+  if goalFound: result.goal = goal
+  result.shoot = actions[2] != 0
+  result.chargeGrenade = actions[3] != 0
+  result.sneak = actions[4] != 0
+  let ownStep = if actions[1] >= PointerAimFirstRow.int32: w.plannedStep(slot, result.goal, result.sneak)
+                else: Point()
+  let (aimFound, aim) = w.pointerAim(slot, actions[1].int, rows, memory, ownStep)
+  if aimFound: result.aim = aim
+
+proc pointerSelect*(logits: openArray[float32], heads: openArray[int], temperatures: openArray[float32],
+    rng: var Rng, draws: var int): seq[int32] =
+  ## Headwise selection for a seat whose heads are sized by the match (action contract ffa.v2
+  ## pointer): argmax (the first maximum) at temperature 0, else one uniform53 draw from the
+  ## float64 softmax(logits / T), sampleActions' rule and order; `draws` counts the draws.
+  ## Non-finite logits are rejected.
+  var total = 0
+  for h in heads: total += h
+  if logits.len != total or temperatures.len != heads.len:
+    raise newException(ValueError, "invalid neural logit size")
+  for x in logits:
+    if classify(x) in {fcNan, fcInf, fcNegInf}: raise newException(ValueError, "non-finite neural logits")
+  var offset = 0
+  for head, size in heads:
+    var best = 0
+    for i in 0..<size:
+      if logits[offset+i] > logits[offset+best]: best = i
+    let t = temperatures[head]
+    if t <= 0'f32:
+      result.add best.int32
+    else:
+      if t < MinSamplingTemperature or t > MaxBasicTemperatureMilli.float32 / 1000'f32:
+        raise newException(ValueError, "invalid sampling temperature")
+      let top = float64(logits[offset+best])
+      let inverse = 1.0 / float64(t)
+      var sum = 0.0
+      for i in 0..<size: sum += exp((float64(logits[offset+i]) - top) * inverse)
+      let threshold = rng.uniform53() * sum
+      inc draws
+      var cumulative = 0.0
+      var pick = size-1
+      for i in 0..<size:
+        cumulative += exp((float64(logits[offset+i]) - top) * inverse)
+        if threshold < cumulative:
+          pick = i
+          break
+      result.add pick.int32
+    offset += size

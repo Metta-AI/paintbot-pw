@@ -5,7 +5,7 @@ import std/[strutils, options]
 from std/json import parseJson
 import jsony
 import sim, kinship, neural_contract, bots, neural_actor, match_config
-from neural_host import MaxNeuralOperations
+from neural_host import MaxNeuralOperations, neuralOperationBudget
 import polyworld/rngs
 import polyworld/basic
 
@@ -31,129 +31,141 @@ type
     psHeartPass        ## hearts whose ownership went directly from j to i
   KinCounters = object
     ## Per-match FFA-kin telemetry: never part of the world, its hash or any decision.
-    pair: array[LegacySeats, array[LegacySeats, array[PairStat, int32]]]
-    deathTick: array[LegacySeats, int32] # -1 while alive
-    ownReturn, kinReturn: array[LegacySeats, float64] # cumulative reward parts (reward units)
-    split: array[LegacySeats, array[2, float32]] # the last step's {own, kin} reward parts
-    lastHit: array[LegacySeats, array[LegacySeats, int32]] # [a][v]: tick a last removed health from v
-    lastDefend: array[LegacySeats, array[LegacySeats, int32]] # [i][j]: tick of i's last defend event for j
+    pair: seq[seq[array[PairStat, int32]]]
+    deathTick: seq[int32] # -1 while alive
+    ownReturn, kinReturn: seq[float64] # cumulative reward parts (reward units)
+    split: seq[array[2, float32]] # the last step's {own, kin} reward parts
+    lastHit: seq[seq[int32]] # [a][v]: tick a last removed health from v
+    lastDefend: seq[seq[int32]] # [i][j]: tick of i's last defend event for j
   NativeEnv* = object ## Exported by name only (tests use std/importutils.privateAccess).
     world: World
-    resets: array[LegacySeats,float32]
+    # Seats of the current world (LegacySeats unless pw_set_seats chose another count for an
+    # ffa.v2 handle) and the count the next pw_reset applies (0 = keep). Every per-seat seq
+    # below holds `n` entries; a reset that changes the count re-creates them all (every
+    # per-seat setting back to its default, every script removed).
+    n, nextSeats: int
+    # ffa.v2: each seat's row -> entity map for the current unchanged world (ffaV2Rows),
+    # computed at most once between steps like the apparent identities below.
+    rows: seq[FfaV2Rows]
+    rowsReady: seq[bool]
+    # Action contract ffa.v2 pointer (pw_set_action_contract(h, 3)): each seat's lead memory,
+    # keyed by seat id, under AimMemory's reset rule.
+    pmem: seq[PointerMemory]
+    resets: seq[float32]
     # Apparent identities per seat, valid for the current unchanged world only: the
     # observer, the action decoder and the training bot all resolve the same bodies on
     # one tick, so each seat's fog is computed at most once between steps.
-    bodies: array[LegacySeats,array[LegacySeats,int]]
-    bodiesReady: array[LegacySeats,bool]
+    bodies: seq[array[LegacySeats,int]]
+    bodiesReady: seq[bool]
     stats: CombatTelemetry # Cumulative since the last create/reset; see pw_seat_stats.
     # BASIC seats: the production interpreter, host functions, limits and per-decision
     # budget from bots.nim drive these slots instead of the caller's actions.
-    scripts: array[LegacySeats,string]
-    scriptBots: array[LegacySeats,Bot]
-    scriptStatus: array[LegacySeats,int32] # 0 none, 1 running, 2 compile failed, 3 disabled at runtime
-    scriptErrors: array[LegacySeats,string]
+    scripts: seq[string]
+    scriptBots: seq[Bot]
+    scriptStatus: seq[int32] # 0 none, 1 running, 2 compile failed, 3 disabled at runtime
+    scriptErrors: seq[string]
     scriptHeard: seq[seq[HeardMessage]] # Speech carried from the previous decision.
-    scriptOrders: array[LegacySeats,Command] # What each scripted seat ordered on the last step.
+    scriptOrders: seq[Command] # What each scripted seat ordered on the last step.
     scriptCount: int
     # Curriculum knobs, kept across resets like scripts. A fire period above 1 lets a
     # seat's shoot order through only once per that many cooldown windows; a damage
     # scale below or above 1000 permille changes what the seat deals.
-    firePeriod: array[LegacySeats,int32]
-    lastHonouredShot: array[LegacySeats,int32]
-    damagePermille: array[LegacySeats,int32]
+    firePeriod: seq[int32]
+    lastHonouredShot: seq[int32]
+    damagePermille: array[MaxSeats,int32] # damageScale points here
     # Action contract the caller's actions are decoded under (pw_set_action_contract;
     # v1 unless asked, kept across resets) and, for contract v2, each seat's one-tick
     # memory the lead-compensated identity aim reads (recorded after every decode,
     # cleared by create/reset; never part of the world or its hash).
     contract: ActionContractVersion
-    aimMemory: array[LegacySeats,AimMemory]
+    aimMemory: seq[AimMemory]
     # The hosted seat's reset rule for that memory (neural_host.beginTick): it is cleared
     # on every decided tick where the seat is dead, or alive after a tick it was dead, or
     # the tick went backwards. memAlive / memTick are the seat's state on its last decided
     # tick (false / -1 after create/reset).
-    memAlive: array[LegacySeats,bool]
-    memTick: array[LegacySeats,int32]
+    memAlive: seq[bool]
+    memTick: seq[int32]
     # Mapping-ceiling diagnostics (pw-bc): a scripted seat with a non-zero override mask
     # still runs its script every step (its orders are reported by pw_seat_orders) but
     # executes the caller's decoded action for the masked heads: 1 walk/goal/direct,
     # 2 aim, 4 shoot, 8 grenade, 16 sneak. pw_script_decide runs the scripts' decision
     # for the current tick ahead of pw_step so the caller can read the orders, map them
     # and hand the mapped action to the same step.
-    overrideMask: array[LegacySeats,int32]
+    overrideMask: seq[int32]
     # Decoder fire hold (pw_set_seat_fire_hold, kept across resets like the knobs): the
     # seat's final shoot order, whoever issued it (caller, Nim bot, script, override
     # mix), goes through neural_contract.holdFire; fireHeld counts the orders held since
     # the last create/reset. Off on every seat = byte-identical to a library without it.
-    fireHold: array[LegacySeats,bool]
+    fireHold: seq[bool]
     # Hold radius per seat (pw_set_seat_fire_hold_radius, kept across resets): 0 = the
     # default FireHoldRadius (55), so a zeroed handle is today's rule.
-    fireHoldRadius: array[LegacySeats,int32]
-    fireHeld: array[LegacySeats,int32]
+    fireHoldRadius: seq[int32]
+    fireHeld: seq[int32]
     # Decoder sampling (pw_set_seat_sampling, kept across resets like the knobs): the
     # seat's draw stream, seeded from the match seed and the slot exactly as the hosted
     # seat seeds its own (neural_contract.samplingRng) on every create/reset, so a probe
     # that feeds pw_sample_actions the logits the hosted actor would produce takes the
     # hosted seat's draws. Never part of the world or its hash; pw_step is untouched.
-    sampling: array[LegacySeats,SamplingOptions]
-    sampleRng: array[LegacySeats,Rng]
-    sampleDraws: array[LegacySeats,int32]
+    sampling: seq[SamplingOptions]
+    sampleRng: seq[Rng]
+    sampleDraws: seq[int32]
     # Decoder objective forbid (pw_set_seat_forbid_objectives, kept across resets): the
     # movement-head indices pw_sample_actions never selects for the seat and pw_step
     # refuses from the caller for it (the hosted bundle option decoder.forbid_objectives).
-    forbidden: array[LegacySeats,ObjectiveMask]
-    forbidAny: array[LegacySeats,bool]
+    forbidden: seq[ObjectiveMask]
+    forbidAny: seq[bool]
     # Decoder strafe legs (pw_set_seat_strafe, kept across resets): applied to the
     # caller's selected heads in pw_step before they are decoded, with the seat's own
     # stream seeded from the match seed and the slot exactly as the hosted seat seeds its
     # own (neural_contract.strafeRng) on every create/reset. strafeLast is the movement
     # index the strafe executed on the last pw_step (-1 = the caller's stood).
-    strafe: array[LegacySeats,StrafeOptions]
-    strafeState: array[LegacySeats,StrafeState]
-    strafeRng: array[LegacySeats,Rng]
-    strafeLast: array[LegacySeats,int32]
+    strafe: seq[StrafeOptions]
+    strafeState: seq[StrafeState]
+    strafeRng: seq[Rng]
+    strafeLast: seq[int32]
     # Decoder aim snap (pw_set_seat_aim_snap) and steady shot (pw_set_seat_steady_shot),
     # both kept across resets and both stateless rules applied to the caller's selected
     # heads in pw_step before they are decoded, in the hosted seat's order: aim snap,
     # strafe, steady shot. The counts belong to the match; *Last is the head index the
     # rule executed on the last pw_step (-1 = the caller's stood).
-    aimSnap: array[LegacySeats,AimSnapOptions]
-    aimSnaps: array[LegacySeats,int32]
-    aimSnapLast: array[LegacySeats,int32]
-    steadyShot: array[LegacySeats,bool]
-    steadyShots: array[LegacySeats,int32]
-    steadyTicks: array[LegacySeats,int32]
-    steadyLast: array[LegacySeats,int32]
+    aimSnap: seq[AimSnapOptions]
+    aimSnaps: seq[int32]
+    aimSnapLast: seq[int32]
+    steadyShot: seq[bool]
+    steadyShots: seq[int32]
+    steadyTicks: seq[int32]
+    steadyLast: seq[int32]
     # Decoder aim retarget (pw_set_seat_aim_retarget) and shot gate (pw_set_seat_shot_gate),
     # both kept across resets and both stateless rules applied to the caller's selected
     # heads in pw_step in the hosted seat's order: aim retarget, aim snap, shot gate,
     # strafe, steady shot. The counts belong to the match; aimRetargetLast is the aim index
     # the retarget executed on the last pw_step and shotGateLast the shoot head the gate
     # executed (0), -1 = the caller's stood.
-    aimRetarget: array[LegacySeats,AimRetargetOptions]
-    aimRetargets: array[LegacySeats,int32]
-    aimRetargetLast: array[LegacySeats,int32]
-    shotGate: array[LegacySeats,ShotGateOptions]
-    shotGates: array[LegacySeats,int32]
-    shotGateLast: array[LegacySeats,int32]
+    aimRetarget: seq[AimRetargetOptions]
+    aimRetargets: seq[int32]
+    aimRetargetLast: seq[int32]
+    shotGate: seq[ShotGateOptions]
+    shotGates: seq[int32]
+    shotGateLast: seq[int32]
     # Decoder spray aim (pw_set_seat_spray_aim) and spray gate (pw_set_seat_spray_gate):
     # stateless rules for a seat holding a ready spray can, in the hosted order (retarget,
     # snap, spray aim, shot gate, spray gate, strafe, steady). Counts belong to the match;
     # *Last as above (-1 = the caller's stood).
-    sprayAim: array[LegacySeats,SprayAimOptions]
-    sprayAims: array[LegacySeats,int32]
-    sprayAimLast: array[LegacySeats,int32]
-    sprayGate: array[LegacySeats,SprayGateOptions]
-    sprayGates: array[LegacySeats,int32]
-    sprayGateLast: array[LegacySeats,int32]
+    sprayAim: seq[SprayAimOptions]
+    sprayAims: seq[int32]
+    sprayAimLast: seq[int32]
+    sprayGate: seq[SprayGateOptions]
+    sprayGates: seq[int32]
+    sprayGateLast: seq[int32]
     # Raw commands (pw_set_seat_command): a seat with a pending command executes it on the
     # next pw_step instead of its decoded heads or its script's order (no forbid check, no
     # head decode or decoder option for it); commandShown marks an unscripted seat whose
     # pw_seat_orders echo holds a command, cleared on its next step without one. Nothing
     # here is part of the world or its hash; unused, every flag stays false.
-    commandPending: array[LegacySeats,bool]
-    commandNext: array[LegacySeats,Command]
-    commandShown: array[LegacySeats,bool]
-    decided: array[LegacySeats,Command]
+    commandPending: seq[bool]
+    commandNext: seq[Command]
+    commandShown: seq[bool]
+    decided: seq[Command]
     decidedTick: int32
     decidedValid: bool
     # Observation contract the handle encodes (chosen at create, kept across resets):
@@ -169,8 +181,8 @@ type
     # (pw_set_seat_policy_script), stepped only by pw_step_logits. Unused, nothing here
     # runs and every path is byte-identical.
     userInputs: int
-    policy: array[LegacySeats,bool]
-    policyManifests: array[LegacySeats,string]
+    policy: seq[bool]
+    policyManifests: seq[string]
     policyCount: int
     # FFA-kin. mode is the current world's game mode; nextMode (pw_set_game_mode) and
     # kinLayout (pw_set_kin_layout, -1 = sampled from the seed) are kept across resets and
@@ -220,6 +232,76 @@ proc rulesVersion(env: ptr NativeEnv): int =
   ## The current world's rules.
   if env.rules == 0: NativeRules else: env.rules.int
 
+proc initCurriculum(env: ptr NativeEnv)
+proc seatsOf(handle: pointer): int =
+  ## The seats of a non-nil handle's current world.
+  cast[ptr NativeEnv](handle).n
+proc allocSeats(env: ptr NativeEnv, n: int) =
+  ## Every per-seat seq, fresh, for `n` seats: each setting at its default (curriculum knobs
+  ## neutral, every decoder option off, no script). createEnv, and a reset that changes the
+  ## seat count, call it; a reset that keeps the count keeps every setting.
+  env.n = n
+  env.rows = newSeq[FfaV2Rows](n)
+  env.rowsReady = newSeq[bool](n)
+  env.pmem = newSeq[PointerMemory](n)
+  env.resets = newSeq[float32](n)
+  env.bodies = newSeq[array[LegacySeats,int]](n)
+  env.bodiesReady = newSeq[bool](n)
+  env.scripts = newSeq[string](n)
+  env.scriptBots = newSeq[Bot](n)
+  env.scriptStatus = newSeq[int32](n)
+  env.scriptErrors = newSeq[string](n)
+  env.scriptHeard = newSeq[seq[HeardMessage]](n)
+  env.scriptOrders = newSeq[Command](n)
+  env.scriptCount = 0
+  env.firePeriod = newSeq[int32](n)
+  env.lastHonouredShot = newSeq[int32](n)
+  for slot in 0..<MaxSeats: env.damagePermille[slot] = 0
+  env.aimMemory = newSeq[AimMemory](n)
+  env.memAlive = newSeq[bool](n)
+  env.memTick = newSeq[int32](n)
+  env.overrideMask = newSeq[int32](n)
+  env.fireHold = newSeq[bool](n)
+  env.fireHoldRadius = newSeq[int32](n)
+  env.fireHeld = newSeq[int32](n)
+  env.sampling = newSeq[SamplingOptions](n)
+  env.sampleRng = newSeq[Rng](n)
+  env.sampleDraws = newSeq[int32](n)
+  env.forbidden = newSeq[ObjectiveMask](n)
+  env.forbidAny = newSeq[bool](n)
+  env.strafe = newSeq[StrafeOptions](n)
+  env.strafeState = newSeq[StrafeState](n)
+  env.strafeRng = newSeq[Rng](n)
+  env.strafeLast = newSeq[int32](n)
+  env.aimSnap = newSeq[AimSnapOptions](n)
+  env.aimSnaps = newSeq[int32](n)
+  env.aimSnapLast = newSeq[int32](n)
+  env.steadyShot = newSeq[bool](n)
+  env.steadyShots = newSeq[int32](n)
+  env.steadyTicks = newSeq[int32](n)
+  env.steadyLast = newSeq[int32](n)
+  env.aimRetarget = newSeq[AimRetargetOptions](n)
+  env.aimRetargets = newSeq[int32](n)
+  env.aimRetargetLast = newSeq[int32](n)
+  env.shotGate = newSeq[ShotGateOptions](n)
+  env.shotGates = newSeq[int32](n)
+  env.shotGateLast = newSeq[int32](n)
+  env.sprayAim = newSeq[SprayAimOptions](n)
+  env.sprayAims = newSeq[int32](n)
+  env.sprayAimLast = newSeq[int32](n)
+  env.sprayGate = newSeq[SprayGateOptions](n)
+  env.sprayGates = newSeq[int32](n)
+  env.sprayGateLast = newSeq[int32](n)
+  env.commandPending = newSeq[bool](n)
+  env.commandNext = newSeq[Command](n)
+  env.commandShown = newSeq[bool](n)
+  env.decided = newSeq[Command](n)
+  env.decidedValid = false
+  env.policy = newSeq[bool](n)
+  env.policyManifests = newSeq[string](n)
+  env.policyCount = 0
+  env.initCurriculum()
+
 proc ready(handle: pointer = nil) =
   ## Every entry point: the thread's GC, map and rules, and, for a handle, its game mode and
   ## kinship, and its rules, glory awards and vision. All are threadvars the engine reads
@@ -240,12 +322,16 @@ proc ready(handle: pointer = nil) =
     teamVision = env.vision
     gameMode = env.mode
     activeKinship = env.kinship
+    configureSeats(env.n)
 
 proc invalidateBodies(env: ptr NativeEnv) =
-  for slot in 0..<LegacySeats: env.bodiesReady[slot] = false
+  for slot in 0..<env.n:
+    env.bodiesReady[slot] = false
+    env.rowsReady[slot] = false
 proc resetAimMemories(env: ptr NativeEnv) =
-  for slot in 0..<LegacySeats:
+  for slot in 0..<env.n:
     env.aimMemory[slot].resetAimMemory()
+    env.pmem[slot].resetPointerMemory(env.n)
     env.memAlive[slot] = false
     env.memTick[slot] = -1
 proc memoryStale(env: ptr NativeEnv, slot: int): bool =
@@ -255,7 +341,9 @@ proc memoryStale(env: ptr NativeEnv, slot: int): bool =
 proc syncAimMemory(env: ptr NativeEnv, slot: int) =
   ## Apply that rule once per decided tick, before the seat's heads are decoded, so the
   ## training library's contract-v2 lead after a death or respawn is the hosted seat's.
-  if env.memoryStale(slot): env.aimMemory[slot].resetAimMemory()
+  if env.memoryStale(slot):
+    env.aimMemory[slot].resetAimMemory()
+    env.pmem[slot].resetPointerMemory(env.n)
   env.memAlive[slot] = env.world.cogs[slot].hp > 0
   env.memTick[slot] = env.world.tick
 proc memoryFor(env: ptr NativeEnv, slot: int): AimMemory =
@@ -265,7 +353,7 @@ proc memoryFor(env: ptr NativeEnv, slot: int): AimMemory =
   else:
     result = env.aimMemory[slot]
 proc resetStats(env: ptr NativeEnv) =
-  for slot in 0..<LegacySeats:
+  for slot in 0..<env.n:
     env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
     env.fireHeld[slot] = 0
 proc recent(now, then: int32): bool =
@@ -274,10 +362,16 @@ proc recent(now, then: int32): bool =
   now - then < KinWindow
 proc resetKin(env: ptr NativeEnv) =
   ## The match's FFA-kin telemetry starts empty (settings and overrides persist).
-  env.kin = KinCounters()
-  for i in 0..<LegacySeats:
+  let n = env.n
+  env.kin = KinCounters(pair: newSeq[seq[array[PairStat, int32]]](n), deathTick: newSeq[int32](n),
+    ownReturn: newSeq[float64](n), kinReturn: newSeq[float64](n), split: newSeq[array[2, float32]](n),
+    lastHit: newSeq[seq[int32]](n), lastDefend: newSeq[seq[int32]](n))
+  for i in 0..<n:
+    env.kin.pair[i] = newSeq[array[PairStat, int32]](n)
+    env.kin.lastHit[i] = newSeq[int32](n)
+    env.kin.lastDefend[i] = newSeq[int32](n)
     env.kin.deathTick[i] = -1
-    for j in 0..<LegacySeats:
+    for j in 0..<n:
       env.kin.lastHit[i][j] = NoTick
       env.kin.lastDefend[i][j] = NoTick
 proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
@@ -285,17 +379,21 @@ proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
   ## layout and eval overrides fed to the engine through its threadvars for this call only,
   ## on the pending map (newWorld's configureRules binds its terrain table).
   let mode = env.nextMode
+  let seats = if env.nextSeats > 0: env.nextSeats else: env.n
   gameMode = mode
+  configureSeats(seats)
   setActiveMap(env.nextMapSlot.int-1)
   configureRules(if env.nextRules == 0: NativeRules else: env.nextRules.int)
   configureGlory(env.nextGlory)
   teamVision = env.nextVision
   let savedKinship = kinshipOverride
+  # The eval overrides (pw_set_kin_override, pw_set_spawn_grouping) are 16-seat tables: they
+  # apply to 16-seat worlds only.
   kinshipOverride =
-    if env.kinOverride.isSome: env.kinOverride
+    if env.kinOverride.isSome and seats == LegacySeats: env.kinOverride
     elif env.kinLayout >= 0: some(kinshipFor(KinLayout(env.kinLayout), seed))
     else: none(Kinship)
-  spawnGroupingOverride = env.spawnGrouping
+  spawnGroupingOverride = if seats == LegacySeats: env.spawnGrouping else: none(array[LegacySeats, int8])
   try:
     env.world = newWorld(seed, maxTicks)
   finally:
@@ -306,8 +404,10 @@ proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
   env.glory = env.nextGlory
   env.vision = env.nextVision
   env.mode = mode
-  env.kinship = if mode == gmFfaKin: activeKinship else: initKinship(LegacySeats)
+  env.kinship = if mode == gmFfaKin: activeKinship else: initKinship(seats)
   activeKinship = env.kinship
+  env.nextSeats = 0
+  if seats != env.n: env.allocSeats(seats)
   env.resetKin()
 
 var kinEnv {.threadvar.}: ptr NativeEnv # The handle an FFA step is counting for.
@@ -320,14 +420,14 @@ proc observeKinDamage(w: World, victim, attacker: int, removed: int32,
   let t = w.tick
   if killed:
     if env.kin.deathTick[victim] < 0: env.kin.deathTick[victim] = t
-    for j in 0..<LegacySeats:
+    for j in 0..<env.n:
       if j != victim and recent(t, env.kin.lastDefend[victim][j]):
         inc env.kin.pair[victim][j][psDeathAfterDefend]
-  if attacker notin 0..<LegacySeats or attacker == victim: return
+  if attacker notin 0..<env.n or attacker == victim: return
   env.kin.pair[attacker][victim][psDamage] += removed
   if killed: inc env.kin.pair[attacker][victim][psKills]
   if removed <= 0: return
-  for j in 0..<LegacySeats:
+  for j in 0..<env.n:
     if j == attacker or j == victim or not recent(t, env.kin.lastHit[victim][j]): continue
     env.kin.pair[attacker][j][psDefend] += removed
     if w.cogs[attacker].hp*3 <= maxHp(): env.kin.pair[attacker][j][psCostlyDefend] += removed
@@ -335,63 +435,67 @@ proc observeKinDamage(w: World, victim, attacker: int, removed: int32,
   env.kin.lastHit[attacker][victim] = t
 
 proc kinAfterStep(env: ptr NativeEnv, preScore, preGreat: openArray[int32],
-    preOwners: array[KinHeartSlots, int32], preDormant: array[2, int32], wasDead: array[LegacySeats, bool],
+    preOwners: array[KinHeartSlots, int32], preDormant: array[2, int32], wasDead: openArray[bool],
     rewards: FloatBuffer) =
   ## After an FFA step: the dense kin-weighted reward and its split, then the per-tick pair
   ## counters on the post-step world (events happened on tick w.tick - 1).
   template w: untyped = env.world
   let now = w.tick - 1
-  var ds: array[LegacySeats, float64]
-  for j in 0..<LegacySeats: ds[j] = float64(w.seatScore[j] - preScore[j]) / 10
-  for i in 0..<LegacySeats:
+  var ds = newSeq[float64](env.n)
+  for j in 0..<env.n: ds[j] = float64(w.seatScore[j] - preScore[j]) / 10
+  for i in 0..<env.n:
     let own = env.kinship.r(i, i) * ds[i]
     var kin = 0.0
-    for j in 0..<LegacySeats:
+    for j in 0..<env.n:
       if j != i: kin += env.kinship.r(i, j) * ds[j]
     env.kin.split[i] = [float32(own / FfaRewardScale), float32(kin / FfaRewardScale)]
     env.kin.ownReturn[i] += own / FfaRewardScale
     env.kin.kinReturn[i] += kin / FfaRewardScale
     rewards[i] = float32((own + kin) / FfaRewardScale)
-  var alive: array[LegacySeats, bool]
-  for i in 0..<LegacySeats:
+  var alive = newSeq[bool](env.n)
+  for i in 0..<env.n:
     alive[i] = w.cogs[i].hp > 0
     if not wasDead[i] and not alive[i] and env.kin.deathTick[i] < 0: env.kin.deathTick[i] = now
   if env.pairStatsOff: return # the trainer opted out of pair counters (pw_set_pair_stats_enabled)
-  var vis: array[LegacySeats, array[LegacySeats, bool]]
-  for i in 0..<LegacySeats:
+  var vis = newSeq[seq[bool]](env.n)
+  for i in 0..<env.n: vis[i] = newSeq[bool](env.n)
+  for i in 0..<env.n:
     if not alive[i]: continue
-    for j in 0..<LegacySeats:
+    for j in 0..<env.n:
       if j != i and alive[j]: vis[i][j] = w.visible(i, j)
   const near2 = KinNearRange.int64 * KinNearRange
   let gunRange = (if ffa(): FfaGunRange else: ShotRange).int64
   let shot2 = gunRange * gunRange
-  for i in 0..<LegacySeats:
+  for i in 0..<env.n:
     if not alive[i]: continue
-    for j in 0..<LegacySeats:
+    for j in 0..<env.n:
       if j == i or not alive[j]: continue
       let d2 = distance2(w.cogs[i].pos, w.cogs[j].pos)
       if vis[i][j]:
         inc env.kin.pair[i][j][psVisible]
         if d2 <= shot2: inc env.kin.pair[i][j][psInRange]
       if d2 <= near2: inc env.kin.pair[i][j][psNear]
-      for k in 0..<LegacySeats:
+      for k in 0..<env.n:
         if k != i and k != j and vis[i][k] and recent(now, env.kin.lastHit[k][j]):
           inc env.kin.pair[i][j][psDefendOpp]
           break
-  var yielded, contested: array[LegacySeats, array[LegacySeats, bool]]
+  var yielded, contested = newSeq[seq[bool]](env.n)
+  for i in 0..<env.n:
+    yielded[i] = newSeq[bool](env.n)
+    contested[i] = newSeq[bool](env.n)
   for h in 0..<min(w.controlHearts.len, w.heartCaptures.len):
     let capture = w.heartCaptures[h]
     let j = capture.team.int
-    if j notin 0..<LegacySeats: continue
+    if j notin 0..<env.n: continue
     let spot = w.controlHearts[h].pos
-    for i in 0..<LegacySeats:
+    for i in 0..<env.n:
       if i == j or not alive[i]: continue
       let d2 = distance2(w.cogs[i].pos, spot)
       if not capture.contested and d2 <= near2: yielded[i][j] = true
       if d2 <= ControlHeartRadius*ControlHeartRadius and w.traversable(w.cogs[i].pos, spot):
         contested[i][j] = true
-  for i in 0..<LegacySeats:
-    for j in 0..<LegacySeats:
+  for i in 0..<env.n:
+    for j in 0..<env.n:
       if yielded[i][j]: inc env.kin.pair[i][j][psYieldOpp]
       if contested[i][j]: inc env.kin.pair[i][j][psContest]
   for h in 0..<min(w.controlHearts.len, KinHeartSlots):
@@ -403,7 +507,7 @@ proc kinAfterStep(env: ptr NativeEnv, preScore, preGreat: openArray[int32],
   for g in 0..<2:
     if w.greatHearts[g].dormantUntil == preDormant[g]: continue
     var members: seq[int]
-    for i in 0..<LegacySeats:
+    for i in 0..<env.n:
       if w.greatShare[i] > preGreat[i] and distance2(w.cogs[i].pos, w.greatHearts[g].pos) <= great2:
         members.add i
     for i in members:
@@ -412,18 +516,18 @@ proc kinAfterStep(env: ptr NativeEnv, preScore, preGreat: openArray[int32],
 
 proc resetSampling(env: ptr NativeEnv) =
   ## Fresh streams for the new match (options persist); draw counts belong to the match.
-  for slot in 0..<LegacySeats:
+  for slot in 0..<env.n:
     env.sampleRng[slot] = samplingRng(env.world.seed, slot)
     env.sampleDraws[slot] = 0
 proc resetStrafe(env: ptr NativeEnv) =
   ## Fresh leg state and streams for the new match (options persist).
-  for slot in 0..<LegacySeats:
+  for slot in 0..<env.n:
     env.strafeState[slot] = initStrafeState(slot)
     env.strafeRng[slot] = strafeRng(env.world.seed, slot)
     env.strafeLast[slot] = -1
 proc resetSnapSteady(env: ptr NativeEnv) =
   ## Counts belong to the match (options persist).
-  for slot in 0..<LegacySeats:
+  for slot in 0..<env.n:
     env.aimSnaps[slot] = 0
     env.aimSnapLast[slot] = -1
     env.steadyShots[slot] = 0
@@ -439,11 +543,11 @@ proc resetSnapSteady(env: ptr NativeEnv) =
     env.sprayGateLast[slot] = -1
 proc resetCurriculum(env: ptr NativeEnv) =
   ## Knob values persist; the shot history belongs to the match.
-  for slot in 0..<LegacySeats:
+  for slot in 0..<env.n:
     env.lastHonouredShot[slot] = low(int32) div 2
     if env.firePeriod[slot] < 1: env.firePeriod[slot] = 1
 proc initCurriculum(env: ptr NativeEnv) =
-  for slot in 0..<LegacySeats:
+  for slot in 0..<env.n:
     env.firePeriod[slot] = 1
     env.damagePermille[slot] = 1000
   env.resetCurriculum()
@@ -487,12 +591,12 @@ proc installScript(env: ptr NativeEnv, slot: int) =
     env.scriptErrors[slot] = "policy manifest rejected: " & e.msg
 proc sizeHeard(env: ptr NativeEnv) =
   ## Carried speech, one list per seat (a zeroed handle starts with none).
-  if env.scriptHeard.len != LegacySeats: env.scriptHeard.setLen(LegacySeats)
+  if env.scriptHeard.len != env.n: env.scriptHeard.setLen(env.n)
 proc resetScripts(env: ptr NativeEnv) =
   env.scriptCount = 0
   env.decidedValid = false
-  env.scriptHeard = newSeq[seq[HeardMessage]](LegacySeats)
-  for slot in 0..<LegacySeats:
+  env.scriptHeard = newSeq[seq[HeardMessage]](env.n)
+  for slot in 0..<env.n:
     env.installScript(slot)
     if env.scripts[slot].len > 0: inc env.scriptCount
 proc scriptDecide(env: ptr NativeEnv) =
@@ -503,21 +607,41 @@ proc scriptDecide(env: ptr NativeEnv) =
   let decided = decide(env.scriptBots, env.world)
   deliverSpeech(env.world)
   env.scriptHeard = heard
-  for slot in 0..<LegacySeats:
+  for slot in 0..<env.n:
     if env.scripts[slot].len == 0: continue
     let b = env.scriptBots[slot]
     if b != nil and b.failed and env.scriptStatus[slot] == 1:
       env.scriptStatus[slot] = 3
       env.scriptErrors[slot] = b.error
     env.scriptOrders[slot] = decided[slot]
-  for slot in 0..<LegacySeats: env.decided[slot] = decided[slot]
+  for slot in 0..<env.n: env.decided[slot] = decided[slot]
   env.decidedTick = env.world.tick
   env.decidedValid = true
 proc bodiesFor(env: ptr NativeEnv, slot: int): array[LegacySeats,int] =
+  ## The seat's apparent identities under the 16-identity contracts (v1 / v2 decode, the
+  ## fixed-width encoders); only for seats below LegacySeats.
   if not env.bodiesReady[slot]:
     env.bodies[slot] = env.world.observedBodies(slot)
     env.bodiesReady[slot] = true
   env.bodies[slot]
+
+proc rowsFor(env: ptr NativeEnv, slot: int): FfaV2Rows =
+  ## The seat's ffa.v2 row -> entity map on the current unchanged world (ffaV2Rows).
+  if not env.rowsReady[slot]:
+    env.rows[slot] = env.world.ffaV2Rows(slot)
+    env.rowsReady[slot] = true
+  env.rows[slot]
+
+proc decodePointerSeat(env: ptr NativeEnv, slot: int, actions: ActionBuffer): Command =
+  ## Action contract ffa.v2 pointer: the caller's five head indices against the row map of
+  ## the observation pw_observe writes for this pre-step world (the per-seat decoder options
+  ## do not apply under this contract).
+  let offset = slot*ActionSizes.len
+  env.syncAimMemory(slot)
+  let rows = env.rowsFor(slot)
+  result = decodePointerActions(env.world, slot, actions.toOpenArray(offset, offset+ActionSizes.len-1), rows,
+    env.pmem[slot])
+  env.pmem[slot].recordPointerMemory(env.world, rows)
 
 proc decodeSeat(env: ptr NativeEnv, slot: int, actions: ActionBuffer): Command =
   ## The caller's five head indices for one seat through the selected contract. Under
@@ -527,6 +651,7 @@ proc decodeSeat(env: ptr NativeEnv, slot: int, actions: ActionBuffer): Command =
   ## decodes its heads after neural_contract.aimRetargetActions, aimSnapActions,
   ## shotGateActions, strafeActions and steadyShotActions, in that order, as the hosted
   ## seat does.
+  if env.contract == acFfaV2Pointer: return env.decodePointerSeat(slot, actions)
   let offset = slot*ActionSizes.len
   env.syncAimMemory(slot)
   if env.strafe[slot].enabled or env.aimSnap[slot].enabled or env.steadyShot[slot] or
@@ -598,14 +723,27 @@ proc pw_env_version*(): cint {.exportc, cdecl, dynlib.} = 1
 proc pw_observation_size*(): cint {.exportc, cdecl, dynlib.} = ObservationSize
 proc pw_action_count*(): cint {.exportc, cdecl, dynlib.} = ActionSizes.len
 
-const NativeObservationVersions = [ocV1.int32, ocV2.int32, ocV3.int32, ocFfaV1.int32]
+const NativeObservationVersions = [ocV1.int32, ocV2.int32, ocV3.int32, ocFfaV1.int32, ocFfaV2.int32]
 proc obsContract(version: int32): ObservationContractVersion =
-  ## A native observation version already checked to be 1, 2, 3 or 101.
+  ## A native observation version already checked to be 1, 2, 3, 101 or 102.
   case version
   of 1: ocV1
   of 2: ocV2
   of 3: ocV3
-  else: ocFfaV1
+  of 101: ocFfaV1
+  else: ocFfaV2
+proc rowWidth(env: ptr NativeEnv): int =
+  ## Floats per seat this handle's pw_observe writes: the contract's width (ffa.v2: the
+  ## current world's layout) plus the user inputs.
+  if env.obsVersion == ocFfaV2: ffaV2Layout(env.world).size
+  else: observationSize(env.obsVersion) + env.userInputs
+proc actionHeads(env: ptr NativeEnv): seq[int] =
+  ## The head sizes of the handle's action contract (v1 / v2: ActionSizes; ffa.v2 pointer:
+  ## the current world's layout).
+  if env.contract == acFfaV2Pointer: pointerHeads(ffaV2Layout(env.world)) else: @ActionSizes
+proc logitWidth(env: ptr NativeEnv): int =
+  ## Logits per seat under the handle's action contract (pw_step_logits' row stride).
+  for h in env.actionHeads: result += h
 
 proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): pointer =
   ready()
@@ -616,8 +754,9 @@ proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): p
     env.kinLayout = -1
     env.glory = DefaultGloryConfig
     env.nextGlory = DefaultGloryConfig
+    env.allocSeats(LegacySeats)
     env.newEnvWorld(seed, maxTicks)
-    for i in 0..<LegacySeats: env.resets[i] = 1
+    for i in 0..<env.n: env.resets[i] = 1
     env.invalidateBodies()
     env.resetStats()
     env.initCurriculum()
@@ -638,26 +777,29 @@ proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
 proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.exportc, cdecl, dynlib.} =
   ## pw_create with the observation contract chosen: 1 = v1 (identical to pw_create),
   ## 2 = v2 (v1 + terrain block), 3 = v3 (v2 + scoreboard block; the teams game only:
-  ## pw_set_game_mode refuses FFA-kin on the handle), 101 = ffa.v1 (FFA-kin, 810 floats).
-  ## nil for any other version or a bad max_ticks.
+  ## pw_set_game_mode refuses FFA-kin on the handle), 101 = ffa.v1 (FFA-kin, 810 floats),
+  ## 102 = ffa.v2 (any seat count, pw_set_seats; the width follows the match:
+  ## pw_handle_observation_size, pw_observation_layout). nil for any other version or a bad
+  ## max_ticks.
   if obsVersion notin NativeObservationVersions: return nil
   createEnv(seed, maxTicks, obsContract(obsVersion))
 
 proc pw_observation_size_for*(obsVersion: int32): cint {.exportc, cdecl, dynlib.} =
-  ## Floats per seat under observation contract `obsVersion`; -1 if unknown.
-  if obsVersion notin NativeObservationVersions: return -1
+  ## Floats per seat under observation contract `obsVersion`; -1 if unknown, and for 102
+  ## (ffa.v2), whose width follows the match (pw_handle_observation_size).
+  if obsVersion notin NativeObservationVersions or obsVersion == ocFfaV2.int32: return -1
   observationSize(obsContract(obsVersion)).cint
 
 proc pw_observation_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
-  ## The handle's observation contract version (1, 2, 3 or 101); -1 for a nil handle.
+  ## The handle's observation contract version (1, 2, 3, 101 or 102); -1 for a nil handle.
   if handle == nil: return -1
   cast[ptr NativeEnv](handle).obsVersion.cint
 
 proc pw_handle_observation_size*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
-  ## Floats per seat this handle's pw_observe writes (the row stride); -1 for nil.
+  ## Floats per seat this handle's pw_observe writes (the row stride; ffa.v2: the current
+  ## world's layout size, fixed for the match); -1 for nil.
   if handle == nil: return -1
-  let env = cast[ptr NativeEnv](handle)
-  cint(observationSize(env.obsVersion) + env.userInputs)
+  cint(cast[ptr NativeEnv](handle).rowWidth)
 
 proc pw_create_observation_inputs*(seed, maxTicks, userInputs: int32): pointer {.exportc, cdecl, dynlib.} =
   ## Observation contract v2u<K> (PLAN-neural-basic-io part A), K = userInputs within
@@ -683,6 +825,93 @@ proc pw_handle_user_inputs*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   ## The handle's K (0 unless created by pw_create_observation_inputs); -1 for nil.
   if handle == nil: return -1
   cast[ptr NativeEnv](handle).userInputs.cint
+
+proc pw_set_seats*(handle: pointer, seats: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The seat count of this handle's worlds from its NEXT pw_reset on, 2 .. 256 (kinship
+  ## MaxSeats; Heartland Big plays 50). Any count other than 16 needs an observation contract
+  ## ffa.v2 handle (version 102, no user inputs): every other contract lays out 16 seats.
+  ## Kept across resets. A reset that changes the count re-creates every per-seat setting
+  ## at its default (curriculum knobs, decoder options, scripts and policy seats removed);
+  ## one that keeps it keeps them. Every per-seat buffer is sized by the current world's
+  ## count (pw_seats): pw_observe rows, pw_step actions / rewards / terminals, pw_kin,
+  ## pw_scores, pw_reward_split, ... 0, or -1 bad args.
+  if handle == nil or seats notin 2'i32..MaxSeats.int32: return -1
+  let env = cast[ptr NativeEnv](handle)
+  if seats != LegacySeats.int32 and (env.obsVersion != ocFfaV2 or env.userInputs > 0): return -1
+  env.nextSeats = seats.int
+  0
+
+proc pw_seats*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
+  ## The current world's seat count; -1 for nil.
+  if handle == nil: return -1
+  cast[ptr NativeEnv](handle).n.cint
+
+const ObservationLayoutWords* = 16 ## pw_observation_layout's int32 count
+
+proc pw_observation_layout*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Where each section of this handle's observation row lies for the current world,
+  ## 16 int32: [row floats, header floats, cog offset, cog rows, cog width, heart offset,
+  ## heart rows, heart width, great offset, great rows, great width, valid column, seats,
+  ## control hearts, 0, 0]. ffa.v2: header 24, cog rows = seats - 1 (only the cogs the seat
+  ## sees are valid, packed first), heart rows = control hearts, great rows 2; every row's
+  ## valid flag is column 0 (neural_contract.encodeFfaV2Observation documents every column).
+  ## Any other contract has no sections: [row floats, row floats, 0 ..., seats, control
+  ## hearts, 0, 0] with the offsets, counts and widths 0 and valid column -1. Fixed for the
+  ## match; a reset may change it (map, seats). 0, or -1 bad args.
+  if handle == nil or output == nil: return -1
+  let env = cast[ptr NativeEnv](handle)
+  for i in 0..<ObservationLayoutWords: output[i] = 0
+  let width = env.rowWidth
+  output[0] = width.int32
+  output[12] = env.n.int32
+  output[13] = env.world.controlHearts.len.int32
+  if env.obsVersion != ocFfaV2:
+    output[1] = width.int32
+    output[11] = -1
+    return 0
+  let l = ffaV2Layout(env.world)
+  output[1] = FfaV2HeaderSize
+  output[2] = l.cogOffset.int32; output[3] = l.cogRows.int32; output[4] = FfaV2CogWidth
+  output[5] = l.heartOffset.int32; output[6] = l.heartRows.int32; output[7] = FfaV2HeartWidth
+  output[8] = l.greatOffset.int32; output[9] = l.greatRows.int32; output[10] = FfaV2GreatWidth
+  output[11] = FfaV2ValidColumn
+  0
+
+proc pw_observation_rows*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32],
+    capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## ffa.v2: the seat's row -> entity map for its observation of the current world (the one
+  ## pw_observe writes before the next pw_step), laid out like the sections: cog rows
+  ## (seats - 1 int32: the seat id each row describes, -1 for a row past the seen cogs),
+  ## then heart rows (control heart indices), then the 2 great heart rows (great heart
+  ## indices). Returns that count (seats - 1 + hearts + 2) and writes it only when capacity
+  ## holds it (capacity 0 sizes the buffer); -1 bad args or not an ffa.v2 handle.
+  if handle == nil or seat notin 0..<seatsOf(handle) or capacity < 0 or (capacity > 0 and output == nil): return -1
+  let env = cast[ptr NativeEnv](handle)
+  if env.obsVersion != ocFfaV2: return -1
+  ready(handle)
+  let l = ffaV2Layout(env.world)
+  let total = l.cogRows + l.heartRows + l.greatRows
+  if capacity < total: return total.cint
+  try:
+    let rows = env.rowsFor(seat)
+    for k in 0..<l.cogRows: output[k] = if k < rows.cogs.len: rows.cogs[k].int32 else: -1
+    for k in 0..<l.heartRows: output[l.cogRows+k] = rows.hearts[k].int32
+    for k in 0..<l.greatRows: output[l.cogRows+l.heartRows+k] = rows.greats[k].int32
+  except CatchableError: return -1
+  total.cint
+
+proc pw_action_layout*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## The handle's action heads for the current world, 8 int32: [heads (5), the five head
+  ## sizes, logits per seat (pw_step_logits' row stride), 0]. v1 / v2: [5, 51, 25, 2, 2, 2, 82,
+  ## 0]; ffa.v2 pointer: [5, 11 + control hearts, 8 + seats, 2, 2, 2, total, 0]. 0, or -1.
+  if handle == nil or output == nil: return -1
+  let env = cast[ptr NativeEnv](handle)
+  let heads = env.actionHeads
+  output[0] = heads.len.int32
+  for i, h in heads: output[1+i] = h.int32
+  output[6] = env.logitWidth.int32
+  output[7] = 0
+  0
 
 proc pw_user_inputs_contract_hash*(userInputs: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
@@ -730,7 +959,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
   let env = cast[ptr NativeEnv](handle)
   try:
     env.newEnvWorld(seed, maxTicks)
-    for i in 0..<LegacySeats: env.resets[i] = 1
+    for i in 0..<env.n: env.resets[i] = 1
     env.invalidateBodies()
     env.resetStats()
     env.resetScripts()
@@ -739,61 +968,81 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     env.resetSampling()
     env.resetStrafe()
     env.resetSnapSteady()
-    for slot in 0..<LegacySeats:
+    for slot in 0..<env.n:
       env.commandPending[slot] = false
       env.commandShown[slot] = false
     return 0
   except CatchableError: return -1
 
+proc observeSeats(env: ptr NativeEnv, chosen: proc(slot: int): bool, observations, resets: FloatBuffer) =
+  ## Encode the chosen seats' rows (row s at s * rowWidth), leaving the others as they are.
+  if env.userInputs > 0:
+    # v2u<K> / v3u<K>: the v2 or v3 row, then the seat's user inputs as its policy.bas
+    # left them (the values its next decision's observation reads); zeros for a seat
+    # without them.
+    let base = observationSize(env.obsVersion)
+    let n = base + env.userInputs
+    for slot in 0..<env.n:
+      if not chosen(slot): continue
+      let row = slot*n
+      encodeObservation(env.world,slot,observations.toOpenArray(row,row+base-1),
+        env.bodiesFor(slot),env.obsVersion)
+      let bot = env.scriptBots[slot]
+      let inputs = if env.policy[slot] and bot != nil and bot.neural != nil: bot.neural.userInputs else: @[]
+      for i in 0..<env.userInputs:
+        observations[row+base+i] = if i < inputs.len: userInputFeature(inputs[i]) else: 0'f32
+      resets[slot] = env.resets[slot]
+  elif env.obsVersion == ocFfaV2:
+    let n = ffaV2Layout(env.world).size
+    for slot in 0..<env.n:
+      if not chosen(slot): continue
+      encodeFfaV2Observation(env.world,slot,observations.toOpenArray(slot*n,(slot+1)*n-1),
+        env.rowsFor(slot),env.kinship,env.obsMask)
+      resets[slot] = env.resets[slot]
+  elif env.obsVersion == ocFfaV1:
+    for slot in 0..<env.n:
+      if not chosen(slot): continue
+      encodeFfaObservation(env.world,slot,
+        observations.toOpenArray(slot*ObservationSizeFfaV1,(slot+1)*ObservationSizeFfaV1-1),
+        env.bodiesFor(slot),env.kinship,env.obsMask)
+      resets[slot] = env.resets[slot]
+  elif env.obsVersion == ocV1:
+    for slot in 0..<env.n:
+      if not chosen(slot): continue
+      encodeObservation(env.world,slot,observations.toOpenArray(slot*ObservationSize,(slot+1)*ObservationSize-1),
+        env.bodiesFor(slot))
+      resets[slot] = env.resets[slot]
+  else:
+    let n = observationSize(env.obsVersion)
+    for slot in 0..<env.n:
+      if not chosen(slot): continue
+      encodeObservation(env.world,slot,observations.toOpenArray(slot*n,(slot+1)*n-1),
+        env.bodiesFor(slot),env.obsVersion)
+      resets[slot] = env.resets[slot]
+
 proc pw_observe_seats*(handle: pointer, seats: uint32, observations, resets: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
   ## Encode only the seats whose bit is set; the other seats' buffer rows are left as
   ## they are. A host training one side against built-in bots need not pay for the
-  ## bots' observations. Bit s is slot s. Same bytes as pw_observe for chosen seats.
+  ## bots' observations. Bit s is slot s (seats 0 .. 31; a seat from 32 on is never chosen
+  ## here: pw_observe encodes every seat). Same bytes as pw_observe for chosen seats.
   if handle == nil or observations == nil or resets == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   try:
-    if env.userInputs > 0:
-      # v2u<K> / v3u<K>: the v2 or v3 row, then the seat's user inputs as its policy.bas
-      # left them (the values its next decision's observation reads); zeros for a seat
-      # without them.
-      let base = observationSize(env.obsVersion)
-      let n = base + env.userInputs
-      for slot in 0..<LegacySeats:
-        if (seats and (1'u32 shl slot)) == 0: continue
-        let row = slot*n
-        encodeObservation(env.world,slot,observations.toOpenArray(row,row+base-1),
-          env.bodiesFor(slot),env.obsVersion)
-        let bot = env.scriptBots[slot]
-        let inputs = if env.policy[slot] and bot != nil and bot.neural != nil: bot.neural.userInputs else: @[]
-        for i in 0..<env.userInputs:
-          observations[row+base+i] = if i < inputs.len: userInputFeature(inputs[i]) else: 0'f32
-        resets[slot] = env.resets[slot]
-    elif env.obsVersion == ocFfaV1:
-      for slot in 0..<LegacySeats:
-        if (seats and (1'u32 shl slot)) == 0: continue
-        encodeFfaObservation(env.world,slot,
-          observations.toOpenArray(slot*ObservationSizeFfaV1,(slot+1)*ObservationSizeFfaV1-1),
-          env.bodiesFor(slot),env.kinship,env.obsMask)
-        resets[slot] = env.resets[slot]
-    elif env.obsVersion == ocV1:
-      for slot in 0..<LegacySeats:
-        if (seats and (1'u32 shl slot)) == 0: continue
-        encodeObservation(env.world,slot,observations.toOpenArray(slot*ObservationSize,(slot+1)*ObservationSize-1),
-          env.bodiesFor(slot))
-        resets[slot] = env.resets[slot]
-    else:
-      let n = observationSize(env.obsVersion)
-      for slot in 0..<LegacySeats:
-        if (seats and (1'u32 shl slot)) == 0: continue
-        encodeObservation(env.world,slot,observations.toOpenArray(slot*n,(slot+1)*n-1),
-          env.bodiesFor(slot),env.obsVersion)
-        resets[slot] = env.resets[slot]
+    env.observeSeats(proc(slot: int): bool = slot < 32 and (seats and (1'u32 shl slot)) != 0,
+      observations, resets)
     return 0
   except CatchableError: return -1
 
 proc pw_observe*(handle: pointer, observations, resets: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
-  pw_observe_seats(handle, 0xffff'u32, observations, resets)
+  ## Every seat's row (seat s at s * pw_handle_observation_size) and reset flag.
+  if handle == nil or observations == nil or resets == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  try:
+    env.observeSeats(proc(slot: int): bool = true, observations, resets)
+    return 0
+  except CatchableError: return -1
 
 proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: FloatBuffer,
     logits: FloatBuffer): cint
@@ -807,6 +1056,11 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
   ## its forbid mask lists (pw_set_seat_forbid_objectives); nothing is stepped.
   ## -4: a policy seat is installed (pw_set_seat_policy_script); step with
   ## pw_step_logits instead; nothing is stepped.
+  ## -5: the handle has more than 16 seats (pw_set_seats) and a seat would decode the
+  ## caller's heads: action contracts v1 and v2 address 16 identities, so there every seat
+  ## must be scripted (pw_set_seat_script) or given a raw command (pw_set_seat_command);
+  ## nothing is stepped. Buffers hold one row per seat of the current world (rewards and
+  ## terminals n floats, actions n x 5).
   if handle == nil or actions == nil or rewards == nil or terminals == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
@@ -815,7 +1069,7 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
 
 proc pw_step_logits*(handle: pointer, actions: ActionBuffer, logits, rewards,
     terminals: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
-  ## pw_step for a handle with policy seats: `logits` holds 16 x 82 floats in seat order,
+  ## pw_step for a handle with policy seats: `logits` holds n x 82 floats in seat order (n = pw_seats),
   ## and each policy seat's row is what run_neural_net yields to its policy.bas this tick
   ## (the trainer ran the actor on the seat's pw_observe row). Sampling, every decoder
   ## option, masks, temperatures and the command are the script's, on the seat's own
@@ -829,15 +1083,20 @@ proc pw_step_logits*(handle: pointer, actions: ActionBuffer, logits, rewards,
 proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: FloatBuffer,
     logits: FloatBuffer): cint =
   if env.world.winner != -1 or env.world.tick >= env.world.endTick: return -2
-  for slot in 0..<LegacySeats:
+  if env.n > LegacySeats and env.contract != acFfaV2Pointer:
+    for slot in 0..<env.n:
+      if not (env.commandPending[slot] or (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0)):
+        return -5
+  for slot in 0..<env.n:
+    if env.contract == acFfaV2Pointer: break  # forbid masks name the fixed contracts' movement indices
     if not env.forbidAny[slot] or env.world.cogs[slot].hp <= 0 or env.commandPending[slot] or
         (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
     let movement = actions[slot*ActionSizes.len]
     if movement in 0'i32..<ActionSizes[0].int32 and env.forbidden[slot][movement]: return -3
   try:
-    var commands: array[LegacySeats,Command]
-    var wasDead: array[LegacySeats,bool]
-    for slot in 0..<LegacySeats:
+    var commands = newSeq[Command](env.n)
+    var wasDead = newSeq[bool](env.n)
+    for slot in 0..<env.n:
       wasDead[slot] = env.world.cogs[slot].hp <= 0
       if env.commandPending[slot] or (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
       commands[slot] = env.decodeSeat(slot, actions)
@@ -848,18 +1107,21 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       # for this tick by pw_script_decide is used as it is.
       if not (env.decidedValid and env.decidedTick == env.world.tick):
         if logits != nil:
-          for slot in 0..<LegacySeats:
+          let stride = env.logitWidth
+          for slot in 0..<env.n:
             let bot = env.scriptBots[slot]
             if not env.policy[slot] or bot == nil or bot.neural == nil: continue
-            for i in 0..<LogitSize: bot.neural.fedLogits[i] = logits[slot*LogitSize+i]
+            if bot.neural.fedLogits.len != stride:
+              raise newException(ValueError, "policy seat logits do not match the handle's action layout")
+            for i in 0..<stride: bot.neural.fedLogits[i] = logits[slot*stride+i]
             bot.neural.logitsFed = true
         try: env.scriptDecide()
         finally:
-          for slot in 0..<LegacySeats:
+          for slot in 0..<env.n:
             let bot = env.scriptBots[slot]
             if env.policy[slot] and bot != nil and bot.neural != nil: bot.neural.logitsFed = false
       env.decidedValid = false
-      for slot in 0..<LegacySeats:
+      for slot in 0..<env.n:
         if env.scripts[slot].len == 0: continue
         let mask = env.overrideMask[slot]
         if mask == 0:
@@ -874,7 +1136,7 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
           if (mask and 8) != 0: cmd.chargeGrenade = caller.chargeGrenade
           if (mask and 16) != 0: cmd.sneak = caller.sneak
           commands[slot] = cmd
-    for slot in 0..<LegacySeats:
+    for slot in 0..<env.n:
       if env.commandPending[slot]:
         # The raw command replaces whatever the seat would have executed (a scripted
         # seat's script has still run and heard/shouted as usual), and is echoed.
@@ -885,7 +1147,7 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       elif env.commandShown[slot]:
         env.scriptOrders[slot] = Command()
         env.commandShown[slot] = false
-    for slot in 0..<LegacySeats:
+    for slot in 0..<env.n:
       # A policy seat's fire hold is its manifest's, applied inside its decode.
       if env.fireHold[slot] and not env.policy[slot] and env.world.holdFire(slot, commands[slot],
           if env.fireHoldRadius[slot] > 0: env.fireHoldRadius[slot] else: FireHoldRadius.int32):
@@ -916,7 +1178,7 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     if kinStep:
       # FFA-kin: the dense kin-weighted score reward, every seat, dead ones included.
       env.kinAfterStep(preScore, preGreat, preOwners, preDormant, wasDead, rewards)
-    for slot in 0..<LegacySeats:
+    for slot in 0..<env.n:
       if not kinStep:
         rewards[slot] = if done: float32(env.world.glory[team(slot)])/1000 else: 0
       terminals[slot] = float32(done.int)
@@ -936,7 +1198,8 @@ proc pw_results*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, d
   ## control hearts owned by any seat, great-heart bounty paid in total (points)].
   if handle == nil or output == nil: return -1
   ready(handle)
-  template w: untyped = cast[ptr NativeEnv](handle).world
+  let env = cast[ptr NativeEnv](handle)
+  template w: untyped = env.world
   output[0] = w.tick.float32
   output[1] = w.winner.float32
   if cast[ptr NativeEnv](handle).mode == gmFfaKin:
@@ -944,7 +1207,7 @@ proc pw_results*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, d
     var standing, owned = 0
     var raw, great = 0'i64
     var best = 0
-    for i in 0..<LegacySeats:
+    for i in 0..<env.n:
       if w.cogs[i].hp > 0 or w.equipment[i].lives > 0: inc standing
       raw += w.seatScore[i]
       great += w.greatShare[i]
@@ -974,8 +1237,8 @@ proc pw_bot_actions*(handle: pointer, side, level: cint,
   if handle == nil or actions == nil or side notin 0..1 or level notin 1..2: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
-  if env.mode == gmFfaKin: return -1
-  for slot in 0..<LegacySeats:
+  if env.mode == gmFfaKin or env.n != LegacySeats: return -1
+  for slot in 0..<env.n:
     if team(slot) == side:
       if level == 2 and env.world.cogs[slot].hp > 0:
         trainingBotActions(env.world,slot,level.int,
@@ -986,7 +1249,7 @@ proc pw_bot_actions*(handle: pointer, side, level: cint,
   return 0
 
 proc pw_seat_stats*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
-  ## Per-seat combat telemetry, 16 seats x 8 int32 in seat order:
+  ## Per-seat combat telemetry, n seats (pw_seats; 16 unless pw_set_seats) x 8 int32 in seat order:
   ## [damage_dealt_enemy, damage_dealt_team, hits_enemy, hits_taken, kills, deaths,
   ##  captures, first_friendly_fire_tick (-1 if none)]. Cumulative since the last
   ## create/reset. Damage is health removed (armor absorbs first); a hit is a damage
@@ -995,7 +1258,7 @@ proc pw_seat_stats*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.
   if handle == nil or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
-  for slot in 0..<LegacySeats:
+  for slot in 0..<env.n:
     let s = env.stats[slot]
     let o = slot*8
     output[o] = s.damageDealtEnemy; output[o+1] = s.damageDealtTeam
@@ -1110,61 +1373,63 @@ proc pw_set_kin_layout*(handle: pointer, layout: int32): cint {.exportc, cdecl, 
   0
 
 proc pw_kin*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
-  ## The current world's relatedness, 16 x 16 floats row-major: output[16i + j] = r(i, j)
-  ## (1 on the diagonal in FFA; all zero in the teams game). 0, or -1 bad args.
+  ## The current world's relatedness, n x n floats row-major (n = pw_seats, 16 unless
+  ## pw_set_seats): output[n*i + j] = r(i, j) (1 on the diagonal in FFA; all zero in the
+  ## teams game). 0, or -1 bad args.
   if handle == nil or output == nil: return -1
   let env = cast[ptr NativeEnv](handle)
-  for i in 0..<LegacySeats:
-    for j in 0..<LegacySeats: output[i*LegacySeats+j] = float32(env.kinship.r(i, j))
+  for i in 0..<env.n:
+    for j in 0..<env.n: output[i*env.n+j] = float32(env.kinship.r(i, j))
   0
 
 proc pw_genes*(handle: pointer, output: ptr UncheckedArray[uint32]): cint {.exportc, cdecl, dynlib.} =
-  ## The current world's genomes, 16 uint32 (bit b = locus b; zero in the teams game).
+  ## The current world's genomes, n uint32 (n = pw_seats; bit b = locus b; zero in the teams game).
   if handle == nil or output == nil: return -1
   let env = cast[ptr NativeEnv](handle)
-  for i in 0..<LegacySeats: output[i] = env.kinship.genes[i]
+  for i in 0..<env.n: output[i] = env.kinship.genes[i]
   0
 
 proc pw_scores*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
-  ## The world's results.scores, 16 floats: in FFA-kin R_i = sum_j r_ij s_j in points;
-  ## in the teams game each seat's team score (sim.scores). 0, or -1 bad args.
+  ## The world's results.scores, n floats (n = pw_seats): in FFA-kin R_i = sum_j r_ij s_j in
+  ## points; in the teams game each seat's team score (sim.scores). 0, or -1 bad args.
   if handle == nil or output == nil: return -1
   ready(handle)
-  let scores = cast[ptr NativeEnv](handle).world.scores()
-  for i in 0..<LegacySeats: output[i] = float32(scores[i])
+  let env = cast[ptr NativeEnv](handle)
+  let scores = env.world.scores()
+  for i in 0..<env.n: output[i] = float32(scores[i])
   0
 
 proc pw_reward_split*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
-  ## The last pw_step's FFA reward per seat in two parts, 32 floats {own_0, kin_0, own_1,
+  ## The last pw_step's FFA reward per seat in two parts, 2n floats (n = pw_seats) {own_0, kin_0, own_1,
   ## kin_1, ...}, in reward units: own = r_ii * delta s_i / 4320, kin = sum_{j != i} r_ij *
   ## delta s_j / 4320 (points); own + kin is the reward pw_step paid. Zeros before the first
   ## FFA step of a match and in the teams game. 0, or -1 bad args.
   if handle == nil or output == nil: return -1
   let env = cast[ptr NativeEnv](handle)
-  for i in 0..<LegacySeats:
+  for i in 0..<env.n:
     output[2*i] = env.kin.split[i][0]
     output[2*i+1] = env.kin.split[i][1]
   0
 
 proc pw_pair_stats*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
-  ## FFA-kin pair counters, cumulative since the last create/reset, 16 x 16 x PairStatCount
-  ## int32: output[(16i + j) * 13 + stat] is i's count about j, stats in PairStat order
+  ## FFA-kin pair counters, cumulative since the last create/reset, n x n x PairStatCount
+  ## int32 (n = pw_seats): output[(n*i + j) * 13 + stat] is i's count about j, stats in PairStat order
   ## (psVisible .. psHeartPass; native_env.h lists them). Telemetry only, never hashed;
   ## all zero in the teams game. 0, or -1 bad args.
   if handle == nil or output == nil: return -1
   let env = cast[ptr NativeEnv](handle)
-  for i in 0..<LegacySeats:
-    for j in 0..<LegacySeats:
+  for i in 0..<env.n:
+    for j in 0..<env.n:
       for stat in PairStat:
-        output[(i*LegacySeats+j)*PairStatCount+stat.ord] = env.kin.pair[i][j][stat]
+        output[(i*env.n+j)*PairStatCount+stat.ord] = env.kin.pair[i][j][stat]
   0
 
 proc pw_kin_seat_stats*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
-  ## FFA-kin per seat, 16 x 3 floats {death_tick (-1 alive), own-part return, kin-part
+  ## FFA-kin per seat, n x 3 floats (n = pw_seats) {death_tick (-1 alive), own-part return, kin-part
   ## return}; the returns are the match's cumulative pw_reward_split parts. 0, or -1.
   if handle == nil or output == nil: return -1
   let env = cast[ptr NativeEnv](handle)
-  for i in 0..<LegacySeats:
+  for i in 0..<env.n:
     output[3*i] = float32(env.kin.deathTick[i])
     output[3*i+1] = float32(env.kin.ownReturn[i])
     output[3*i+2] = float32(env.kin.kinReturn[i])
@@ -1173,7 +1438,7 @@ proc pw_kin_seat_stats*(handle: pointer, output: FloatBuffer): cint {.exportc, c
 proc pw_set_spawn_grouping*(handle: pointer, groups: ptr UncheckedArray[int8]): cint {.exportc, cdecl, dynlib.} =
   ## Eval only: FFA spawn groups independent of the kinship, 16 int8 (a group id 0..15,
   ## -1 = spawns alone); NULL clears. Applied at the next pw_reset and kept until cleared.
-  ## Only FFA spawn placement reads it. 0, or -1 bad args.
+  ## Only FFA spawn placement reads it, and only in a 16-seat world. 0, or -1 bad args.
   if handle == nil: return -1
   let env = cast[ptr NativeEnv](handle)
   if groups == nil:
@@ -1193,7 +1458,8 @@ proc pw_set_kin_override*(handle: pointer, family: ptr UncheckedArray[int8],
   ## family int8[16] (-1..15; spawn groups unless pw_set_spawn_grouping is set), genes
   ## uint32[16], ibd int8[256] row-major loci shared by descent (0..32, symmetric, 32 on the
   ## diagonal; r = ibd / 32). family NULL clears. Applied at the next pw_reset, kept until
-  ## cleared, wins over pw_set_kin_layout. 0, or -1 bad args.
+  ## cleared, wins over pw_set_kin_layout; a 16-seat table, applied to 16-seat worlds only.
+  ## 0, or -1 bad args.
   if handle == nil: return -1
   let env = cast[ptr NativeEnv](handle)
   if family == nil:
@@ -1242,7 +1508,7 @@ proc pw_set_seat_script*(handle: pointer, seat: cint, source: ptr UncheckedArray
   ## world's mode's (FFA-kin adds kin, gene, ...): the source is compiled now against the
   ## current world, and again at every pw_reset after the pending mode is applied, so an
   ## FFA script set before the reset that switches the mode compiles at that reset.
-  if handle == nil or seat notin 0..<LegacySeats or length < 0 or (length > 0 and source == nil): return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or length < 0 or (length > 0 and source == nil): return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if env.scripts[seat].len > 0: dec env.scriptCount
@@ -1263,7 +1529,7 @@ proc pw_seat_script_status*(handle: pointer, seat: cint, message: ptr UncheckedA
   ## 0 unscripted, 1 running, 2 compile failed, 3 disabled by a runtime error (budget
   ## overrun, bad host call, ...), exactly the errors that disable a hosted seat. The
   ## error text is copied, NUL-terminated and truncated to capacity, when given.
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if message != nil and capacity > 0:
@@ -1286,7 +1552,7 @@ proc pw_set_seat_policy_script*(handle: pointer, seat: cint, source: ptr Uncheck
   ## apply to a policy seat: its manifest governs. Returns 0 (running), 1 (compile
   ## failed), 2 (manifest rejected; the seat idles, as a hosted seat whose package fails),
   ## -1 (bad arguments); the error text is pw_seat_script_status's.
-  if handle == nil or seat notin 0..<LegacySeats or length < 0 or (length > 0 and source == nil) or
+  if handle == nil or seat notin 0..<seatsOf(handle) or length < 0 or (length > 0 and source == nil) or
       manifestLength < 0 or (manifestLength > 0 and manifest == nil): return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
@@ -1320,7 +1586,7 @@ proc pw_seat_policy_choices*(handle: pointer, seat: cint, output: ptr UncheckedA
   ## (rounded). mask bits: choice i of the head is excluded when bit i is set (head 0:
   ## choices 0 .. 31 in mask0_lo, 32 .. 50 in mask0_hi's bits 0 .. 18). Returns 0, -1 for
   ## bad arguments or a seat that is not a policy seat.
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if not env.policy[seat]: return -1
@@ -1351,7 +1617,7 @@ proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int
   ## each kind wins, as in the game). aim (0,0) means no aim order, as the game reads
   ## it. A seat given a raw command (pw_set_seat_command) for the last step reports that
   ## command instead. Other unscripted seats report zeros with scripted=0.
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   let c = env.scriptOrders[seat]
@@ -1375,7 +1641,7 @@ proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[
   ## again after a step without one). A later call before the step replaces it; pw_reset
   ## drops it. Never calling it is byte-identical to a library without it. Returns 0, -1
   ## for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or nine == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or nine == nil: return -1
   for i in [0, 3, 6, 7, 8]:
     if nine[i] notin 0'i32..1'i32: return -1
   ready(handle)
@@ -1393,9 +1659,10 @@ proc pw_set_action_contract*(handle: pointer, version: int32): cint {.exportc, c
   ## 2 = v2 (identity aim is the body's lead-compensated aim point, see
   ## neural_contract.nim). Kept across pw_reset; every seat's aim memory is cleared here
   ## and on every reset. Returns 0, -1 for a bad handle or version.
-  if handle == nil or version notin 1..2: return -1
+  if handle == nil or version notin 1..3: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
+  if version == acFfaV2Pointer.int32 and env.obsVersion != ocFfaV2: return -1
   env.contract = ActionContractVersion(version)
   env.resetAimMemories()
   0
@@ -1411,7 +1678,7 @@ proc pw_action_contract_hash*(version: int32, output: ptr UncheckedArray[char],
   ## The 64-hex SHA-256 contract hash an actor and its manifest must carry to be decoded
   ## under `version` (1 or 2), NUL-terminated into output (capacity >= 65). Returns 0,
   ## -1 for a bad version or buffer.
-  if version notin 1..2 or output == nil or capacity < 65: return -1
+  if version notin 1..3 or output == nil or capacity < 65: return -1
   let hash = actionContractHash(ActionContractVersion(version))
   copyMem(output, unsafeAddr hash[0], hash.len)
   output[hash.len] = '\0'
@@ -1428,10 +1695,11 @@ proc pw_action_candidates*(handle: pointer, seat: cint, movement, sneak: int32,
   ## A candidate that does not exist now (missing heart, unavailable or unseen pickup,
   ## identity nobody visible carries) and every entry of a dead seat is INT32_MIN in both
   ## coordinates. Reading changes no state. Returns 0, -1 on bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or goals == nil or aims == nil or
+  if handle == nil or seat notin 0..<seatsOf(handle) or goals == nil or aims == nil or
       movement notin 0..<ActionSizes[0].int32 or sneak notin 0..1: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
+  if env.n > LegacySeats or env.contract == acFfaV2Pointer: return -1  # v1 / v2 candidates only
   let slot = seat.int
   for i in 0..<ActionSizes[0]*2: goals[i] = low(int32)
   for i in 0..<ActionSizes[1]*2: aims[i] = low(int32)
@@ -1472,7 +1740,7 @@ proc pw_set_seat_override*(handle: pointer, seat: cint, mask: int32): cint {.exp
   ## Diagnostic: heads of a scripted seat taken from the caller's decoded action instead
   ## of the script's order (bits: 1 walk/goal/direct, 2 aim, 4 shoot, 8 grenade, 16
   ## sneak; 0 = exact script play). Kept across pw_reset like the curriculum knobs.
-  if handle == nil or seat notin 0..<LegacySeats or mask < 0 or mask > 31: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or mask < 0 or mask > 31: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   env.overrideMask[seat] = mask
@@ -1486,7 +1754,7 @@ proc pw_set_seat_fire_period*(handle: pointer, seat: cint, period: int32): cint 
   ## honoured shot per 96 ticks, the same unit as the adapter's fire-gated Nim bot.
   ## lookAt, movement and everything the script believes are untouched. 1 restores
   ## exact behaviour. Kept across pw_reset; the shot history is not.
-  if handle == nil or seat notin 0..<LegacySeats or period < 1: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or period < 1: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   env.firePeriod[seat] = period
@@ -1497,7 +1765,7 @@ proc pw_set_seat_damage_scale*(handle: pointer, seat: cint, permille: int32): ci
   ## 1-point gun hits, anything below 1000 means no damage; grenade 2/6 and spray 3
   ## scale in steps). Hits still land (shield, cooldown relief, telemetry, glory as
   ## before). 1000 restores exact behaviour. Kept across pw_reset.
-  if handle == nil or seat notin 0..<LegacySeats or permille < 0: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or permille < 0: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   env.damagePermille[seat] = permille
@@ -1512,7 +1780,7 @@ proc pw_set_seat_fire_hold*(handle: pointer, seat: cint, enabled: int32): cint {
   ## than the aim point (neural_contract.holdFire); the aim and everything else in the
   ## order stand. 0 (the default) is byte-identical to a library without this call.
   ## Kept across pw_reset. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or enabled notin 0..1: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or enabled notin 0..1: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   env.fireHold[seat] = enabled == 1
@@ -1525,7 +1793,7 @@ proc pw_set_seat_fire_hold_radius*(handle: pointer, seat: cint, radius: int32): 
   ## within `radius` of the line of fire instead of the gun's hit tolerance (55). 0 restores
   ## the default 55 (the default; byte-identical to a library without this call). It does
   ## not turn the hold on or off. Kept across pw_reset. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or radius < 0 or radius > MaxFireHoldRadius: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or radius < 0 or radius > MaxFireHoldRadius: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   env.fireHoldRadius[seat] = radius
@@ -1533,7 +1801,7 @@ proc pw_set_seat_fire_hold_radius*(handle: pointer, seat: cint, radius: int32): 
 
 proc pw_seat_fire_hold_radius*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
   ## The seat's effective fire-hold radius (55 unless set). Returns -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   ready(handle)
   let r = cast[ptr NativeEnv](handle).fireHoldRadius[seat]
   cint(if r > 0: r else: FireHoldRadius.int32)
@@ -1541,7 +1809,7 @@ proc pw_seat_fire_hold_radius*(handle: pointer, seat: cint): cint {.exportc, cde
 proc pw_seat_fire_held*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
   ## Shoot orders the fire hold dropped for the seat since the last create/reset (0 with
   ## the hold off). Pure telemetry. Returns -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   ready(handle)
   cint(cast[ptr NativeEnv](handle).fireHeld[seat])
 
@@ -1553,7 +1821,7 @@ proc pw_set_seat_sampling*(handle: pointer, seat: cint, temperaturePermille, hea
   ## with no draw. Only pw_sample_actions is affected: pw_step takes the caller's actions
   ## as before, so a library with this call is byte-identical when it is never made.
   ## Kept across pw_reset (the stream itself is reseeded). Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   if temperaturePermille < 0 or temperaturePermille > 10_000 or headMask < 0 or headMask >= (1 shl ActionSizes.len): return -1
   if temperaturePermille != 0 and temperaturePermille < 10: return -1
   ready(handle)
@@ -1572,10 +1840,12 @@ proc pw_sample_actions*(handle: pointer, seat: cint, logits: FloatBuffer, action
   ## stream (neural_contract.sampleActions; exactly one draw per sampled head, advancing
   ## the stream) or, with sampling off, deterministic argmax and no draw. The actions are
   ## what the caller then hands to pw_step for the seat. Returns 0, -1 for bad arguments
-  ## or non-finite logits.
-  if handle == nil or seat notin 0..<LegacySeats or logits == nil or actions == nil: return -1
+  ## or non-finite logits, and under action contract ffa.v2 pointer (the caller samples
+  ## its match-sized heads itself, or runs a policy seat).
+  if handle == nil or seat notin 0..<seatsOf(handle) or logits == nil or actions == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
+  if env.contract == acFfaV2Pointer: return -1
   try:
     var input: array[LogitSize, float32]
     for i in 0..<LogitSize: input[i] = logits[i]
@@ -1588,7 +1858,7 @@ proc pw_sample_actions*(handle: pointer, seat: cint, logits: FloatBuffer, action
 proc pw_seat_sample_draws*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
   ## Decisions pw_sample_actions drew for the seat since the last create/reset (0 with
   ## sampling off). Pure telemetry. Returns -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   ready(handle)
   cint(cast[ptr NativeEnv](handle).sampleDraws[seat])
 
@@ -1603,7 +1873,7 @@ proc pw_set_seat_forbid_objectives*(handle: pointer, seat: cint, indices: ptr Un
   ## be NULL). With no seat forbidding anything the library is byte-identical to one
   ## without this call. Kept across pw_reset. Returns 0, -1 for bad arguments (the mask
   ## is then unchanged).
-  if handle == nil or seat notin 0..<LegacySeats or count < 0 or count >= ActionSizes[0].int32: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or count < 0 or count >= ActionSizes[0].int32: return -1
   if count > 0 and indices == nil: return -1
   var mask: ObjectiveMask
   for i in 0..<count.int:
@@ -1621,7 +1891,7 @@ proc pw_seat_forbidden_objectives*(handle: pointer, seat: cint, mask: ptr Unchec
   ## The seat's forbid mask: mask (int32[51], may be NULL) gets 1 for each forbidden
   ## movement-head index and 0 otherwise, the logit mask a trainer applies before it
   ## samples. Returns the number forbidden, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   var n = 0
@@ -1647,7 +1917,7 @@ proc pw_set_seat_strafe*(handle: pointer, seat: cint, range, legMin, legMax, sho
   ## to a library without this call. Kept across pw_reset (the leg state and stream are
   ## reset). Returns 0, -1 for bad arguments (1 <= min <= max <= 72 for legs,
   ## 6 <= min <= max <= 72 for shot legs, range <= 20000, 0 <= permille <= 1000).
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   var options: StrafeOptions
   if range != 0:
     options = StrafeOptions(enabled: true, range: range, legTicks: [legMin, legMax],
@@ -1663,7 +1933,7 @@ proc pw_seat_strafe_stats*(handle: pointer, seat: cint, output: ptr UncheckedArr
   ## strafe replaced (both since the last create/reset), the movement index it executed
   ## on the last pw_step or -1 when the caller's index stood]. The third is what a
   ## trainer records as the executed movement. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   output[0] = env.strafeState[seat].legs
@@ -1680,7 +1950,7 @@ proc pw_set_seat_aim_snap*(handle: pointer, seat: cint, maxAngleMillideg: int32)
   ## nearer body, then the lower identity). 0 turns it off (the default; off on every seat
   ## is byte-identical to a library without this call). Kept across pw_reset. Returns 0,
   ## -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   var options: AimSnapOptions
   if maxAngleMillideg != 0:
     if aimSnapOptionsError(maxAngleMillideg).len > 0: return -1
@@ -1695,7 +1965,7 @@ proc pw_seat_aim_snap_stats*(handle: pointer, seat: cint, output: ptr UncheckedA
   ## aim index executed on the last pw_step or -1 when the caller's stood, the integer
   ## threshold round(cos(angle) * 32768) or 0 when off]. The second is what a trainer
   ## records as the executed aim. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   output[0] = env.aimSnaps[seat]
@@ -1711,7 +1981,7 @@ proc pw_set_seat_steady_shot*(handle: pointer, seat: cint, enabled: int32): cint
   ## windup is running (windup > 0), i.e. from the order until the ray leaves. 0 (the
   ## default) is byte-identical to a library without this call. Kept across pw_reset.
   ## Returns 0, -1 for bad arguments or when the seat's forbid mask lists index 0.
-  if handle == nil or seat notin 0..<LegacySeats or enabled notin 0..1: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or enabled notin 0..1: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if enabled == 1 and env.forbidden[seat][SteadyMovement]: return -1
@@ -1722,7 +1992,7 @@ proc pw_seat_steady_stats*(handle: pointer, seat: cint, output: ptr UncheckedArr
   ## Steady-shot telemetry, three int32: [order ticks held, decisions held (order and
   ## windup ticks), both since the last create/reset, the movement index executed on the
   ## last pw_step (0) or -1 when it did not hold]. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   output[0] = env.steadyShots[seat]
@@ -1742,7 +2012,7 @@ proc pw_set_seat_aim_retarget*(handle: pointer, seat: cint, enabled, maxRange, h
   ## rule, the bundle defaults). enabled 0 turns it off (the default; off on every seat is
   ## byte-identical to a library without this call; the other arguments are then
   ## ignored). Kept across pw_reset. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or enabled notin 0..1: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or enabled notin 0..1: return -1
   var options: AimRetargetOptions
   if enabled == 1:
     if aimRetargetOptionsError(maxRange, hpWeight, carryWeight).len > 0: return -1
@@ -1756,7 +2026,7 @@ proc pw_seat_aim_retarget_stats*(handle: pointer, seat: cint, output: ptr Unchec
   ## Aim-retarget telemetry, three int32: [decisions whose aim it replaced since the last
   ## create/reset, the aim index it executed on the last pw_step or -1 when the caller's
   ## stood, maxRange or 0 when off]. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   output[0] = env.aimRetargets[seat]
@@ -1773,7 +2043,7 @@ proc pw_set_seat_shot_gate*(handle: pointer, seat: cint, maxRange: int32): cint 
   ## aim candidate lies beyond maxRange; the dropped decision keeps its pre-snap aim. 0
   ## turns it off (the default; off on every seat is byte-identical to a library without
   ## this call). Kept across pw_reset. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   var options: ShotGateOptions
   if maxRange != 0:
     if shotGateOptionsError(maxRange).len > 0: return -1
@@ -1787,7 +2057,7 @@ proc pw_seat_shot_gate_stats*(handle: pointer, seat: cint, output: ptr Unchecked
   ## Shot-gate telemetry, three int32: [shoot orders dropped since the last create/reset,
   ## the shoot head it executed on the last pw_step (0) or -1 when the caller's stood,
   ## maxRange or 0 when off]. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   output[0] = env.shotGates[seat]
@@ -1802,7 +2072,7 @@ proc pw_set_seat_spray_aim*(handle: pointer, seat: cint, maxRange: int32): cint 
   ## the visible apparent enemy (within maxRange + Radius, clear line) whose cone holds the
   ## most enemies. 0 turns it off (the default; byte-identical). Kept across pw_reset.
   ## Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   var options: SprayAimOptions
   if maxRange != 0:
     if sprayAimOptionsError(maxRange).len > 0: return -1
@@ -1814,7 +2084,7 @@ proc pw_set_seat_spray_aim*(handle: pointer, seat: cint, maxRange: int32): cint 
 proc pw_seat_spray_aim_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## Spray-aim telemetry, three int32: [shoot orders re-aimed since the last create/reset,
   ## the aim index it executed on the last pw_step or -1, maxRange or 0 when off].
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   output[0] = env.sprayAims[seat]
@@ -1830,7 +2100,7 @@ proc pw_set_seat_spray_gate*(handle: pointer, seat: cint, maxTeammates, minEnemi
   ## minEnemies apparent enemies and at most maxTeammates apparent teammates the seat can
   ## see. maxTeammates -1 turns it off (the default; byte-identical; minEnemies is then
   ## ignored). Kept across pw_reset. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
   var options: SprayGateOptions
   if maxTeammates != -1:
     if sprayGateOptionsError(maxTeammates, minEnemies).len > 0: return -1
@@ -1843,7 +2113,7 @@ proc pw_seat_spray_gate_stats*(handle: pointer, seat: cint, output: ptr Unchecke
   ## Spray-gate telemetry, four int32: [shoot orders dropped since the last create/reset,
   ## the shoot head it executed on the last pw_step (0) or -1, maxTeammates or -1 when off,
   ## minEnemies or -1 when off].
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   let g = env.sprayGate[seat]
@@ -1859,7 +2129,7 @@ proc pw_seat_spray_stats*(handle: pointer, seat: cint, output: ptr UncheckedArra
   ## since the last create/reset. Damage is health removed (armor absorbs first), as in
   ## pw_seat_stats; attribution is the damage's owner and the spray burst. Pure telemetry.
   ## Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let s = cast[ptr NativeEnv](handle).stats[seat]
   output[0] = s.sprayDamageEnemy
@@ -1880,7 +2150,7 @@ proc pw_seat_weapon_stats*(handle: pointer, seat: cint, output: ptr UncheckedArr
   ## "to" the victim's: water = in the river's water (neural_contract.inWater, rules >= 30),
   ## high = terrainHeight >= 216, trench = inside a trench; the classes may overlap. Pure
   ## telemetry. Returns 0, -1 for bad arguments.
-  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let s = cast[ptr NativeEnv](handle).stats[seat]
   for i, v in [s.gunKills, s.grenadeKills, s.weaponSprayKills, s.hitsFromWater, s.hitsFromHigh,
@@ -1891,7 +2161,7 @@ proc pw_seat_weapon_stats*(handle: pointer, seat: cint, output: ptr UncheckedArr
 const SeatStateFloats* = 8 ## pw_seat_state floats per seat
 
 proc pw_seat_state*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
-  ## Every seat's public body state in one call (training library only), 16 seats x 8
+  ## Every seat's public body state in one call (training library only), n seats (pw_seats) x 8
   ## floats in seat order: [x, z (world units), hp, armor, lives, respawn (ticks until the
   ## seat respawns, 0 while alive), carrying (1 = holds a heart), equipment bits (1 =
   ## grenade, 2 = spray can)]. For training-side critics that need the whole match state
@@ -1900,7 +2170,7 @@ proc pw_seat_state*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl
   if handle == nil or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
-  for slot in 0..<LegacySeats:
+  for slot in 0..<env.n:
     let c = env.world.cogs[slot]
     let e = env.world.equipment[slot]
     let o = slot*SeatStateFloats
@@ -1972,6 +2242,45 @@ proc pw_net_load*(data: pointer, length: int64, error: ptr UncheckedArray[char],
     if actor.operationCount > MaxNeuralOperations:
       raise newException(ValueError, "neural actor exceeds native operation budget: " &
         $actor.operationCount & " > " & $MaxNeuralOperations)
+    let net = createShared(NativeNet)
+    net.actor = actor
+    net.state = newSeq[float32](actor.stateSize)
+    net.logits = newSeq[float32](actor.outputSize)
+    writeMessage(error, capacity, "")
+    net
+  except ValueError as e:
+    writeMessage(error, capacity, e.msg)
+    nil
+
+proc pw_net_load_layout*(handle: pointer, data: pointer, length: int64, error: ptr UncheckedArray[char],
+    capacity: cint): pointer {.exportc, cdecl, dynlib.} =
+  ## pw_net_load for an ffa.v2 handle's current match: the model's PWNET002 layout words
+  ## (neural_actor.md) resolve against the handle's observation layout (pw_observation_layout)
+  ## and its action contract's heads, so one model.bin loads at every seat and heart count.
+  ## The budget is the hosted seat's for the handle's seat count (4,000,000 operations per
+  ## seat per tick, times seats / 16 above 16 seats). NULL on rejection (a handle that is not
+  ## ffa.v2 included), with the reason in `error`, as pw_net_load.
+  if handle == nil:
+    writeMessage(error, capacity, "no handle")
+    return nil
+  let env = cast[ptr NativeEnv](handle)
+  if env.obsVersion != ocFfaV2:
+    writeMessage(error, capacity, "layout words need an observation contract ffa.v2 handle")
+    return nil
+  if data == nil or length < 8 or length > MaxNet2FileBytes:
+    writeMessage(error, capacity, "invalid neural actor length")
+    return nil
+  ready(handle)
+  var bytes = newString(length.int)
+  copyMem(addr bytes[0], data, length.int)
+  try:
+    let l = ffaV2Layout(env.world)
+    let targets = if env.contract == acFfaV2Pointer: pointerTargets(l) else: [-1, -1, -1, -1]
+    let actor = loadActor(bytes, actorLayout(l, env.actionHeads, targets))
+    let budget = neuralOperationBudget(env.n)
+    if actor.operationCount > budget:
+      raise newException(ValueError, "neural actor exceeds native operation budget: " &
+        $actor.operationCount & " > " & $budget)
     let net = createShared(NativeNet)
     net.actor = actor
     net.state = newSeq[float32](actor.stateSize)

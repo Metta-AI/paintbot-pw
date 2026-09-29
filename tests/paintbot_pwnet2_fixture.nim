@@ -1,6 +1,7 @@
 ## Synthetic PWNET002 builders for the tests (random weights; never trained weights).
 import std/[random, math]
 import ../examples/paintbot/neural_contract
+from ../examples/paintbot/neural_actor import layoutWord, LayoutGlobal
 
 proc u32*(s: var string, value: uint32) =
   for i in 0..3: s.add char((value shr (8*i)) and 255)
@@ -99,6 +100,37 @@ proc pointerHead*(r: var Rand, source, offset, z: int): Spec =
   result = Spec(code: 9, params: [source.uint32, offset.uint32, 0, 0, 0, 0, 0, 0])
   result.tensors = r.weights(z, 1.0/sqrt(z.float))
   result.tensors.add r.weights(1, 0.1)
+
+proc attnPool*(r: var Rand, source, width, tokenWidth, heads, keyWidth, valueWidth: int): Spec =
+  ## ATTN_POOL: Wq [h*k, width], bq [h*k], Wk [h*k, tokenWidth], bk [h*k], Wv [h*v, tokenWidth], bv [h*v].
+  result = Spec(code: 11, params: [source.uint32, heads.uint32, keyWidth.uint32, valueWidth.uint32, 0, 0, 0, 0])
+  let hk = heads*keyWidth
+  let hv = heads*valueWidth
+  result.tensors = r.weights(hk*width, 1.0/sqrt(width.float))
+  result.tensors.add r.weights(hk, 0.1)
+  result.tensors.add r.weights(hk*tokenWidth, 1.0/sqrt(tokenWidth.float))
+  result.tensors.add r.weights(hk, 0.1)
+  result.tensors.add r.weights(hv*tokenWidth, 1.0/sqrt(tokenWidth.float))
+  result.tensors.add r.weights(hv, 0.1)
+
+proc encodeWords*(inputs, outputs: uint32, heads: openArray[uint32], specs: openArray[Spec],
+    observationContract = ObservationContractHash, actionContract = ActionContractHash): string =
+  ## encode2 with the header's widths and head sizes given as raw words (layout words allowed).
+  result = "PWNET002"
+  for x in [2'u32, inputs, outputs, heads.len.uint32]: result.u32(x)
+  for h in heads: result.u32(h)
+  result.add observationContract
+  result.add actionContract
+  result.u32(specs.len.uint32)
+  for spec in specs:
+    result.u32(spec.code)
+    for p in spec.params: result.u32(p)
+    for x in spec.extra: result.u32(x)
+    for x in spec.tensors: result.f32(x)
+
+proc pad*(at, length: uint32): Spec =
+  ## PAD: `length` zeros inserted at `at` (either may be a layout word); no weights.
+  Spec(code: 12, params: [at, length, 0, 0, 0, 0, 0, 0])
 
 const NoExclude* = 0xFFFF_FFFF'u32
 
@@ -206,3 +238,32 @@ proc withNearFlags*(spec: Spec, obs: seq[float32]): seq[float32] =
   result = obs
   let flags = nearFlagsReference(spec, obs)
   for n, f in flags: result[spec.extra[3].int + n*spec.extra[4].int] = f
+
+proc pointerModel*(r: var Rand): string =
+  ## A layout-word model for observation contract ffa.v2 + action contract ffa.v2 pointer whose
+  ## weights never depend on the layout, so the same file loads at every seat and heart count:
+  ## heart and cog tokens (TOKEN_MLP), the header, an ATTN_POOL over the cogs, per-token mixes,
+  ## a DENSE to the 24 fixed logits, PADs that open the heart rows (objective head) and the cog
+  ## rows (aim head), and a POINTER into each.
+  var specs = @[r.tokenMlp(0, [[0'u32, 0, 12]], 0, 0, [8]),  # 0: control + great heart tokens -> 16
+    r.tokenMlp(0, [[0'u32, 0, 44]], 0, 0, [8]),             # 1: cog tokens -> 16
+    concat(0, 24),                                          # 2: + the header -> 40
+    r.attnPool(1, 40, 8, 2, 4, 4),                          # 3: -> 48
+    r.tokenMix(0, 8, 48, 6),                                # 4: heart rows z -> 60
+    r.tokenMix(1, 8, 60, 6),                                # 5: cog rows z -> 72
+    r.dense(72, 24, bias = true),                           # 6: 9 objective, 9 aim, 6 buttons
+    pad(9, layoutWord(3, 0)),                               # 7: the heart rows after the 9 objective logits
+    pad(layoutWord(0, 3), layoutWord(0, 0)),                # 8: the cog rows after the 9 aim logits
+    r.pointerHead(4, 0, 6),                                 # 9: heart rows
+    r.pointerHead(5, 0, 6)]                                 # 10: cog rows
+  specs[0].params[0] = layoutWord(3, 0)
+  specs[0].extra[0] = layoutWord(3, 1)
+  specs[0].extra[1] = layoutWord(3, 2)
+  specs[1].params[0] = layoutWord(0, 0)
+  specs[1].extra[0] = layoutWord(0, 1)
+  specs[1].extra[1] = layoutWord(0, 2)
+  specs[9].params[1] = layoutWord(3, 3)
+  specs[10].params[1] = layoutWord(0, 3)
+  encodeWords(layoutWord(LayoutGlobal, 0), layoutWord(LayoutGlobal, 1),
+    [layoutWord(LayoutGlobal, 2, 0), layoutWord(LayoutGlobal, 2, 1), 2'u32, 2, 2], specs,
+    ObservationContractFfaV2Hash, ActionContractFfaV2PointerHash)

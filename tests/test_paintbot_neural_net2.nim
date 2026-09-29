@@ -156,8 +156,8 @@ suite "PWNET002 actor":
       "valid index")
     check rejects(encode2(64, [2, 2, 2], [r.attention([[0'u32, 8, 8, 8, 0]], 8, 3, 1, 8, 0, 0), r.dense(16, 6)]),
       "heads")
-    check rejects(encode2(64, [2, 2, 2], [r.attention([[0'u32, 1, 60, 4, 0], [0'u32, 1, 10, 4, 0]], 8, 2, 1, 8, 0, 0),
-      r.dense(16, 6)]), "tokens")
+    check rejects(encode2(300, [2, 2, 2], [r.attention([[0'u32, 1, 200, 4, 0], [0'u32, 1, 57, 4, 0]], 8, 2, 1, 8, 0, 0),
+      r.dense(16, 6)]), "tokens exceed 256")
     var nonfinite = r.dense(64, 6)
     nonfinite.tensors[5] = Inf.float32
     check rejects(encode2(64, [2, 2, 2], [nonfinite]), "nonfinite")
@@ -343,7 +343,7 @@ suite "PWNET002 token layers (TOKEN_MLP, TOKEN_MIX, POINTER)":
       change(v[k])
       encode2(64, [2, 2, 2, 3], v)
     check rejects(good.with(0, proc (s: var Spec) = s.params[0] = 0), "tokens")
-    check rejects(good.with(0, proc (s: var Spec) = s.params[0] = 65), "tokens")
+    check rejects(good.with(0, proc (s: var Spec) = s.params[0] = 257), "tokens")
     check rejects(good.with(0, proc (s: var Spec) = s.params[0] = 9), "outside the input")
     check rejects(good.with(0, proc (s: var Spec) = s.params[2] = 2), "valid flag")
     check rejects(good.with(0, proc (s: var Spec) = s.params[3] = 6), "valid flag")
@@ -356,7 +356,7 @@ suite "PWNET002 token layers (TOKEN_MLP, TOKEN_MIX, POINTER)":
       [0'u32, 0, 200], [0'u32, 0, 200], [0'u32, 0, 200]], 0, 0, [4]), r.dense(8, 9)]), "token input")
     check rejects(good.with(1, proc (s: var Spec) = s.params[0] = 1), "earlier TOKEN_MLP")
     check rejects(good.with(1, proc (s: var Spec) = s.params[1] = 0), "TOKEN_MIX width")
-    check rejects(good.with(3, proc (s: var Spec) = s.params[0] = 0), "earlier TOKEN_MIX")
+    check rejects(good.with(3, proc (s: var Spec) = s.params[0] = 2), "earlier TOKEN_MIX")
     check rejects(good.with(3, proc (s: var Spec) = s.params[1] = 5), "exceeds width")
     check rejects(encode2(64, [2, 2, 2, 3], @[r.dense(64, 18), r.tokenMix(0, 5, 18, 4), r.dense(26, 9)]),
       "earlier TOKEN_MLP")
@@ -518,8 +518,8 @@ suite "PWNET002 SEGMENT_NEAR (the input view)":
     discard loadActor(with(proc (s: var Spec) = s.params[6] = NoExclude))
     check rejects(encode2(40, [20, 20], [r.dense(40, 40), near40()]), "SEGMENT_NEAR must be layer 0")
     check rejects(encode2(40, [20, 20], [near40(), near40()]), "layer 1: SEGMENT_NEAR must be layer 0")
-    check rejects(with(proc (s: var Spec) = s.params[0] = 0), "SEGMENT_NEAR tokens must be 1..64")
-    check rejects(encode2(600, [300, 300], [segmentNear(65, 0, 8, 1, 2, 0, 6, 3, 2, 4, 1, 0, 1)]), "tokens must be")
+    check rejects(with(proc (s: var Spec) = s.params[0] = 0), "SEGMENT_NEAR tokens must be 1..256")
+    check rejects(encode2(600, [300, 300], [segmentNear(257, 0, 8, 1, 2, 0, 6, 3, 2, 4, 1, 0, 1)]), "tokens must be")
     check rejects(with(proc (s: var Spec) = s.params[2] = 0), "SEGMENT_NEAR stride")
     check rejects(with(proc (s: var Spec) = s.params[1] = 9), "SEGMENT_NEAR tokens outside the input")
     check rejects(with(proc (s: var Spec) = s.params[1] = 41), "outside the input")

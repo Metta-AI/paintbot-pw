@@ -6,7 +6,8 @@ type
   LayerKind* = enum
     ## PWNET002 layer type codes (the u32 `type` of a layer record).
     lkDense = 1, lkRmsNorm = 2, lkMinGru = 3, lkResidual = 4, lkEntityAttn = 5, lkConcatInput = 6,
-    lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9, lkSegmentNear = 10
+    lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9, lkSegmentNear = 10, lkAttnPool = 11,
+    lkPad = 12
   AttnGroup = object
     offset, stride, count, width, valid: int  # valid = -1: every token of the group is valid
     weight: int                               # E_g [d, width] then e_g [d], offsets into weights
@@ -40,6 +41,8 @@ type
     tokenBuffer: int       # TOKEN_MLP / TOKEN_MIX: scratch offset of the per-token outputs (tokens*tokenWidth)
     validBuffer: int       # TOKEN_*/POINTER: scratch offset of the tokens' valid flags (1 / 0), written by TOKEN_MLP
     near: SegmentNearSpec  # SEGMENT_NEAR (tokens = its token count)
+    exposeTokens: bool     # ENTITY_ATTN: a later layer reads its token rows (tokenBuffer / validBuffer)
+    keyWidth, valueWidth: int  # ATTN_POOL: per-head key and value widths
     operations: int64
   Net2Object = object
     layers: seq[NetLayer]
@@ -56,6 +59,18 @@ type
     observationContract*, actionContract*: string
     encoder, recurrent, decoder: seq[float32]
     net: Net2  # PWNET002 layer stack (nil for PWNET001); see the PWNET002 section below.
+  LayoutSection* = object
+    offset*, rows*, width*: int  # where the section's rows lie in the observation
+    target*: int                 # the logit offset of row 0's pointer target (-1: none)
+  ActorLayout* = object
+    ## The match layout a PWNET002 layout word resolves against (neural_actor.md, "Layout
+    ## words"): the observation's sections (0 cogs, 1 control hearts, 2 great hearts, 3 the
+    ## control and great hearts as one run), the observation width, the logit width and the
+    ## action heads. `present` false: the model may hold no layout word.
+    present*: bool
+    inputs*, outputs*: int
+    sections*: array[4, LayoutSection]
+    heads*: seq[int]
 
 const
   ActorMagic* = "PWNET001"
@@ -140,7 +155,7 @@ const
   MaxNet2State* = 4096      # recurrent floats, all MINGRU layers together
   MaxMinGruHidden* = 1024
   MaxAttnGroups* = 8
-  MaxAttnTokens* = 64
+  MaxAttnTokens* = 256
   MaxAttnModel* = 256
   MaxAttnBlocks* = 8
   MaxAttnFeedForward* = 1024
@@ -149,6 +164,8 @@ const
   MaxTokenInput* = 1024     # TOKEN_MLP: floats gathered per token
   MaxTokenModel* = 256      # TOKEN_MLP layer widths, TOKEN_MIX width
   MaxTokenMlpLayers* = 4
+  MaxAttnPoolHeads* = 32
+  MaxAttnPoolWidth* = 1024  # ATTN_POOL heads x key width, heads x value width
   ## Published cost constants: a multiply-accumulate is 2 operations, an elementwise add,
   ## multiply, compare, max, relu or copy is 1, an exp, sqrt or division is 8, and a MINGRU
   ## unit's gates, interpolation and highway are 32 (PWNET001's 32 per hidden unit).
@@ -203,6 +220,67 @@ proc segmentNearOps*(inputs, tokens: int): int64 =
   ## SEGMENT_NEAR's published cost: the copy of the input, per token pair 12, per token 8.
   int64(inputs) + int64(tokens)*int64(tokens)*12 + int64(tokens)*8
 
+proc attnPoolOps*(tokens, z, width, heads, keyWidth, valueWidth: int): int64 =
+  ## ATTN_POOL's published cost: the copy of x, the query projection, then per token (valid
+  ## or not, like ENTITY_ATTN) its key, its per-head scores, the softmax terms, its value and
+  ## the weighted sum, and per head the normaliser.
+  let W = int64(width)
+  let T = int64(tokens)
+  let Z = int64(z)
+  let H = int64(heads)
+  let K = int64(keyWidth)
+  let V = int64(valueWidth)
+  W + (2*W*H*K + H*K) +
+    T*((2*Z*H*K + H*K) + H*(2*K + 1) + H*(TranscendentalOps + 3) + (2*Z*H*V + H*V) + 2*H*V) +
+    H*(T + TranscendentalOps)
+
+const
+  LayoutWordBase* = 0xFFFE_0000'u32
+  ## Layout words (neural_actor.md): a structural uint32 whose high 16 bits are 0xFFFE names
+  ## a quantity of the match layout (no valid model had such a value before). Low 16 bits:
+  ## section s (bits 12..15), field f (bits 8..11), addend a (bits 0..7). Sections 0..3
+  ## (cogs, control hearts, great hearts, control + great hearts): f 0 rows, 1 offset,
+  ## 2 row width, 3 logit offset of row 0's pointer target; the value is that plus a.
+  ## s = 14: f 0 observation width + a, 1 logit width + a, 2 the size of head a, 3 the logit
+  ## offset of head a.
+  LayoutGlobal* = 14
+proc isLayoutWord*(v: uint32): bool = (v and 0xFFFF_0000'u32) == LayoutWordBase
+proc layoutWord*(section, field: int, addend = 0): uint32 =
+  ## The layout word for (section, field, addend); see LayoutWordBase.
+  LayoutWordBase or uint32((section shl 12) or (field shl 8) or addend)
+proc resolveWord*(ctx: ActorLayout, v: uint32, where: string): uint32 =
+  ## `v` itself unless it is a layout word; then its value in `ctx`.
+  if not isLayoutWord(v): return v
+  if not ctx.present: net2Error(where & "layout word 0x" & $v & " needs a match layout")
+  let low = int(v and 0xFFFF'u32)
+  let section = low shr 12
+  let field = (low shr 8) and 0xF
+  let addend = low and 0xFF
+  var value = 0
+  if section <= 3:
+    let sec = ctx.sections[section]
+    case field
+    of 0: value = sec.rows + addend
+    of 1: value = sec.offset + addend
+    of 2: value = sec.width + addend
+    of 3:
+      if sec.target < 0: net2Error(where & "layout section " & $section & " has no pointer target")
+      value = sec.target + addend
+    else: net2Error(where & "unknown layout word field " & $field)
+  elif section == LayoutGlobal:
+    case field
+    of 0: value = ctx.inputs + addend
+    of 1: value = ctx.outputs + addend
+    of 2, 3:
+      if addend >= ctx.heads.len: net2Error(where & "layout word names head " & $addend)
+      if field == 2: value = ctx.heads[addend]
+      else:
+        for h in 0..<addend: value += ctx.heads[h]
+    else: net2Error(where & "unknown layout word field " & $field)
+  else: net2Error(where & "unknown layout word section " & $section)
+  if value < 0 or value >= int(LayoutWordBase): net2Error(where & "layout word out of range")
+  uint32(value)
+
 proc readWeights(net: Net2, data: string, p: var int, n: int) =
   if n < 0 or net.weights.len + n > MaxNet2Parameters: net2Error("parameter count")
   if p + 4*n > data.len: raise newException(ValueError, "truncated neural actor")
@@ -211,13 +289,29 @@ proc readWeights(net: Net2, data: string, p: var int, n: int) =
     if not finite(x): raise newException(ValueError, "nonfinite neural weight")
     net.weights.add x
 
-proc loadActor2(data: string): Actor =
+proc exposeTokens(net: Net2, source: int, scratch: var int) =
+  ## A later layer reads `source`'s token rows. TOKEN_MLP and TOKEN_MIX keep them already; an
+  ## ENTITY_ATTN layer gets a token buffer (its final token states [tokens, d] and the valid
+  ## flags) the first time, and its cost grows by the copy (tokens*d + tokens).
+  let src = addr net.layers[source]
+  if src.kind != lkEntityAttn or src.exposeTokens: return
+  src.exposeTokens = true
+  src.tokenWidth = src.dModel
+  src.tokenBuffer = scratch
+  src.validBuffer = scratch + src.tokens*src.dModel
+  scratch += src.tokens*src.dModel + src.tokens
+  let copy = int64(src.tokens*src.dModel + src.tokens)
+  src.operations += copy
+  net.operations += copy
+
+proc loadActor2(data: string, ctx: ActorLayout): Actor =
   if data.len < 8 or data[0..<8] != Net2Magic:
     raise newException(ValueError, "invalid neural actor magic")
   var p = 8
+  template word(where: string): uint32 = ctx.resolveWord(readU32(data, p), where)
   let version = readU32(data, p)
-  let inputs = int(readU32(data, p))
-  let outputs = int(readU32(data, p))
+  let inputs = int(word("header: "))
+  let outputs = int(word("header: "))
   let heads = int(readU32(data, p))
   if version != 2 or inputs notin 1..4096 or outputs notin 2..1024 or heads notin 1..32:
     raise newException(ValueError, "unsupported neural actor dimensions/version")
@@ -225,7 +319,7 @@ proc loadActor2(data: string): Actor =
   result.inputSize = inputs; result.outputSize = outputs
   var total = 0
   for i in 0..<heads:
-    let size = int(readU32(data, p))
+    let size = int(word("header: "))
     if size notin 2..1024: raise newException(ValueError, "invalid categorical head")
     result.headSizes.add(size); total += size
   if total != outputs: raise newException(ValueError, "head/output mismatch")
@@ -244,9 +338,14 @@ proc loadActor2(data: string): Actor =
   var work = 0        # the largest per-layer workspace (MINGRU gates, ENTITY_ATTN)
   for k in 0..<count:
     let code = readU32(data, p)
-    var q: array[8, uint32]
-    for j in 0..7: q[j] = readU32(data, p)
     let where = "layer " & $k & ": "
+    var q: array[8, uint32]
+    for j in 0..7:
+      let raw = readU32(data, p)
+      # FP32 parameters (RMSNORM eps, ENTITY_ATTN eps) are never layout words.
+      let floatParam = (code == lkRmsNorm.uint32 and j == 1) or (code == lkEntityAttn.uint32 and j == 7)
+      if floatParam and isLayoutWord(raw): net2Error(where & "parameter " & $j & " cannot be a layout word")
+      q[j] = if floatParam: raw else: ctx.resolveWord(raw, where)
     template unused(first: int) =
       for j in first..7:
         if q[j] != 0: net2Error(where & "unused parameter " & $j & " must be 0")
@@ -333,9 +432,9 @@ proc loadActor2(data: string): Actor =
       var shapes: seq[tuple[count, width: int]]
       for g in 0..<groups:
         var group: AttnGroup
-        group.offset = int(readU32(data, p)); group.stride = int(readU32(data, p))
-        group.count = int(readU32(data, p)); group.width = int(readU32(data, p))
-        let valid = readU32(data, p)
+        group.offset = int(word(where)); group.stride = int(word(where))
+        group.count = int(word(where)); group.width = int(word(where))
+        let valid = word(where)
         if group.count notin 1..MaxAttnTokens or group.width notin 1..inputs or group.stride notin 1..inputs:
           net2Error(where & "ENTITY_ATTN group " & $g & " count/width/stride")
         if group.offset > inputs or (group.count-1)*group.stride + group.width > inputs - group.offset:
@@ -381,7 +480,7 @@ proc loadActor2(data: string): Actor =
       var tokenIn = 0
       for g in 0..<segments:
         var s: TokenSegment
-        s.offset = int(readU32(data, p)); s.stride = int(readU32(data, p)); s.length = int(readU32(data, p))
+        s.offset = int(word(where)); s.stride = int(word(where)); s.length = int(word(where))
         if s.length notin 1..inputs or s.stride notin 0..inputs:
           net2Error(where & "TOKEN_MLP segment " & $g & " length/stride")
         if s.offset > inputs or (t-1)*s.stride + s.length > inputs - s.offset:
@@ -397,7 +496,7 @@ proc loadActor2(data: string): Actor =
       else: net2Error(where & "TOKEN_MLP valid flag outside the token")
       layer.mlpWidths = @[tokenIn]
       for l in 0..<layers:
-        let o = int(readU32(data, p))
+        let o = int(word(where))
         if o notin 1..MaxTokenModel: net2Error(where & "TOKEN_MLP widths must be 1.." & $MaxTokenModel)
         layer.mlpWidths.add o
       layer.weight = net.weights.len
@@ -416,9 +515,10 @@ proc loadActor2(data: string): Actor =
       layer.source = int(q[0])
       let z = int(q[1])
       unused(2)
-      if layer.source >= k or net.layers[layer.source].kind != lkTokenMlp:
-        net2Error(where & "TOKEN_MIX source must name an earlier TOKEN_MLP layer")
+      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMlp, lkEntityAttn}:
+        net2Error(where & "TOKEN_MIX source must name an earlier TOKEN_MLP or ENTITY_ATTN layer")
       if z notin 1..MaxTokenModel: net2Error(where & "TOKEN_MIX width must be 1.." & $MaxTokenModel)
+      net.exposeTokens(layer.source, scratch)
       let src = net.layers[layer.source]
       layer.tokens = src.tokens
       layer.tokenWidth = z
@@ -434,8 +534,9 @@ proc loadActor2(data: string): Actor =
       layer.source = int(q[0])
       layer.length = int(q[1])  # the logit offset of token 0
       unused(2)
-      if layer.source >= k or net.layers[layer.source].kind != lkTokenMix:
-        net2Error(where & "POINTER source must name an earlier TOKEN_MIX layer")
+      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMix, lkTokenMlp, lkEntityAttn}:
+        net2Error(where & "POINTER source must name an earlier TOKEN_MIX, TOKEN_MLP or ENTITY_ATTN layer")
+      net.exposeTokens(layer.source, scratch)
       let src = net.layers[layer.source]
       layer.tokens = src.tokens
       if layer.length > width or layer.tokens > width - layer.length:
@@ -453,7 +554,7 @@ proc loadActor2(data: string): Actor =
       let scaleX = cast[float32](readU32(data, p))
       let scaleZ = cast[float32](readU32(data, p))
       let radius = cast[float32](readU32(data, p))
-      near.dstOffset = int(readU32(data, p)); near.dstStride = int(readU32(data, p))
+      near.dstOffset = int(word(where)); near.dstStride = int(word(where))
       if k != 0: net2Error(where & "SEGMENT_NEAR must be layer 0")
       if t notin 1..MaxAttnTokens: net2Error(where & "SEGMENT_NEAR tokens must be 1.." & $MaxAttnTokens)
       if near.stride notin 1..inputs: net2Error(where & "SEGMENT_NEAR stride must be 1.." & $inputs)
@@ -474,6 +575,40 @@ proc loadActor2(data: string): Actor =
       layer.tokens = t
       layer.outWidth = inputs
       layer.operations = segmentNearOps(inputs, t)
+    of lkPad.uint32:
+      layer.kind = lkPad
+      layer.source = int(q[0])   # where the zeros go
+      layer.length = int(q[1])   # how many
+      unused(2)
+      if layer.source > width: net2Error(where & "PAD position beyond width " & $width)
+      if layer.length notin 0..MaxNet2Width: net2Error(where & "PAD length must be 0.." & $MaxNet2Width)
+      layer.outWidth = width + layer.length
+      if layer.outWidth > MaxNet2Width: net2Error(where & "PAD output exceeds " & $MaxNet2Width)
+      layer.operations = int64(layer.outWidth)
+    of lkAttnPool.uint32:
+      layer.kind = lkAttnPool
+      layer.source = int(q[0])
+      layer.heads = int(q[1]); layer.keyWidth = int(q[2]); layer.valueWidth = int(q[3])
+      unused(4)
+      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMlp, lkTokenMix, lkEntityAttn}:
+        net2Error(where & "ATTN_POOL source must name an earlier TOKEN_MLP, TOKEN_MIX or ENTITY_ATTN layer")
+      if layer.heads notin 1..MaxAttnPoolHeads: net2Error(where & "ATTN_POOL heads must be 1.." & $MaxAttnPoolHeads)
+      if layer.keyWidth notin 1..MaxTokenModel or layer.valueWidth notin 1..MaxTokenModel:
+        net2Error(where & "ATTN_POOL key and value widths must be 1.." & $MaxTokenModel)
+      if layer.heads*layer.keyWidth > MaxAttnPoolWidth or layer.heads*layer.valueWidth > MaxAttnPoolWidth:
+        net2Error(where & "ATTN_POOL heads x width must be at most " & $MaxAttnPoolWidth)
+      net.exposeTokens(layer.source, scratch)
+      let src = net.layers[layer.source]
+      layer.tokens = src.tokens
+      let hk = layer.heads*layer.keyWidth
+      let hv = layer.heads*layer.valueWidth
+      layer.weight = net.weights.len
+      net.readWeights(data, p, hk*width + hk + hk*src.tokenWidth + hk + hv*src.tokenWidth + hv)
+      layer.outWidth = width + hv
+      if layer.outWidth > MaxNet2Width: net2Error(where & "ATTN_POOL output exceeds " & $MaxNet2Width)
+      work = max(work, 2*hk + layer.tokens*layer.heads + hv)
+      layer.operations = attnPoolOps(layer.tokens, src.tokenWidth, width, layer.heads, layer.keyWidth,
+        layer.valueWidth)
     else:
       net2Error(where & "unknown layer type " & $code)
     if tokenSpace > 0:
@@ -481,7 +616,7 @@ proc loadActor2(data: string): Actor =
       scratch += tokenSpace
     case layer.kind
     of lkTokenMlp: layer.validBuffer = layer.tokenBuffer + layer.tokens*layer.tokenWidth
-    of lkTokenMix, lkPointer: layer.validBuffer = net.layers[layer.source].validBuffer
+    of lkTokenMix, lkPointer, lkAttnPool: layer.validBuffer = net.layers[layer.source].validBuffer
     else: discard
     layer.output = scratch
     scratch += layer.outWidth
@@ -517,11 +652,25 @@ proc modelTag*(actor: Actor): string =
   if actor.net.isNil: "w" & $actor.hiddenSize
   else: "pwnet2-l" & $actor.net.layers.len & "-s" & $actor.net.stateSize
 
-proc loadActor*(data: string): Actor =
-  if data.len >= 8 and data[0..<8] == Net2Magic: loadActor2(data)
-  else: loadActor1(data)
+proc peekContracts*(data: string): (string, string) =
+  ## The observation and action contract hashes a model.bin carries, read from its header
+  ## without loading it ("" for both when the header is malformed or truncated).
+  try:
+    var p = 8
+    if data.len >= 8 and data[0..<8] == ActorMagic:
+      p = 8 + 6*4
+    elif data.len >= 8 and data[0..<8] == Net2Magic:
+      p = 8 + 3*4
+      let heads = int(readU32(data, p))
+      if heads notin 1..32: return ("", "")
+      p += 4*heads
+    else: return ("", "")
+    if p + 128 > data.len: return ("", "")
+    (data[p..<p+64], data[p+64..<p+128])
+  except ValueError: ("", "")
 
-proc loadActorFile*(path: string): Actor =
+proc readActorFile*(path: string): string =
+  ## A model.bin's bytes, refused over the format's size bound (loadActorFile's check).
   var magic = newString(8)
   var file = open(path)
   let got = file.readChars(toOpenArray(magic, 0, 7))
@@ -530,7 +679,26 @@ proc loadActorFile*(path: string): Actor =
               else: int64(32+128+128+MaxActorParameters*4)
   if getFileSize(path) > limit:
     raise newException(ValueError, "neural actor file too large")
-  loadActor(readFile(path))
+  readFile(path)
+
+proc loadActor*(data: string, layout: ActorLayout): Actor =
+  ## A model.bin, its PWNET002 layout words (if any) resolved against `layout`.
+  if data.len >= 8 and data[0..<8] == Net2Magic: loadActor2(data, layout)
+  else: loadActor1(data)
+proc loadActor*(data: string): Actor =
+  ## A model.bin with no match layout: a layout word is an error.
+  loadActor(data, ActorLayout())
+
+proc loadActorFile*(path: string, layout = ActorLayout()): Actor =
+  var magic = newString(8)
+  var file = open(path)
+  let got = file.readChars(toOpenArray(magic, 0, 7))
+  file.close()
+  let limit = if got == 8 and magic == Net2Magic: int64(MaxNet2FileBytes)
+              else: int64(32+128+128+MaxActorParameters*4)
+  if getFileSize(path) > limit:
+    raise newException(ValueError, "neural actor file too large")
+  loadActor(readFile(path), layout)
 
 proc checkFinite(y: F32s, n: int) =
   for i in 0..<n:
@@ -573,7 +741,7 @@ proc minGru(layer: NetLayer, x, w, bias, state, combined, next, y: F32s) =
     if not finite(next[i]) or not finite(y[i]):
       raise newException(ValueError, "nonfinite neural intermediate")
 
-proc entityAttention(layer: NetLayer, input, w, work, y: F32s) =
+proc entityAttention(layer: NetLayer, input, w, scratch, work, y: F32s) =
   let d = layer.dModel
   let t = layer.tokens
   let f = layer.ff
@@ -652,6 +820,12 @@ proc entityAttention(layer: NetLayer, input, w, work, y: F32s) =
       dense(normed.at(n*d), d, w.at(w1), w.at(b1), f, true, hidden)
       dense(hidden, f, w.at(w2), w.at(b2), d, false, u)
       for c in 0..<d: x[c] = x[c] + u[c]
+  if layer.exposeTokens:
+    # The final token states and valid flags, for a later TOKEN_MIX / POINTER / ATTN_POOL.
+    let tokens = scratch.at(layer.tokenBuffer)
+    let flags = scratch.at(layer.validBuffer)
+    for i in 0..<t*d: tokens[i] = hs[i]
+    for n in 0..<t: flags[n] = valid[n]
   for c in 0..<2*d: y[c] = 0'f32
   if validCount > 0:
     let inverse = 1'f32 / float32(validCount)
@@ -773,6 +947,72 @@ proc pointerHead(layer: NetLayer, source: NetLayer, x, w, scratch, y: F32s) =
     for i in 0..<z: sum += buffer[n*z+i]*v[i]
     y[layer.length+n] = y[layer.length+n] + (sum + c)
 
+proc attnPool(layer: NetLayer, source: NetLayer, x, w, scratch, work, y: F32s) =
+  ## Cross-attention pooling (neural_actor.md, ATTN_POOL): a query from the current vector,
+  ## keys and values from the source's valid token rows, per head a softmax over the valid
+  ## tokens in token order (ENTITY_ATTN's rules), y = [x, pooled values].
+  let t = layer.tokens
+  let z = source.tokenWidth
+  let width = layer.inWidth
+  let heads = layer.heads
+  let kw = layer.keyWidth
+  let vw = layer.valueWidth
+  let hk = heads*kw
+  let hv = heads*vw
+  let tokens = scratch.at(source.tokenBuffer)
+  let valid = scratch.at(layer.validBuffer)
+  let wq = w.at(layer.weight)
+  let bq = wq.at(hk*width)
+  let wk = bq.at(hk)
+  let bk = wk.at(hk*z)
+  let wv = bk.at(hk)
+  let bv = wv.at(hv*z)
+  let q = work
+  let key = q.at(hk)
+  let score = key.at(hk)       # [t, heads]
+  let value = score.at(t*heads)  # one token's values [hv]
+  for i in 0..<width: y[i] = x[i]
+  let pooled = y.at(width)
+  for c in 0..<hv: pooled[c] = 0'f32
+  var count = 0
+  for n in 0..<t:
+    if valid[n] != 0'f32: inc count
+  if count == 0: return
+  dense(x, width, wq, bq, hk, false, q)
+  let scale = 1'f32 / sqrt(float32(kw))
+  for n in 0..<t:
+    if valid[n] == 0'f32: continue
+    dense(tokens.at(n*z), z, wk, bk, hk, false, key)
+    for j in 0..<heads:
+      var dot = 0'f32
+      for c in 0..<kw: dot += q[j*kw+c]*key[j*kw+c]
+      score[n*heads+j] = dot*scale
+  for j in 0..<heads:
+    var top = 0'f32
+    var first = true
+    for n in 0..<t:
+      if valid[n] == 0'f32: continue
+      let s = score[n*heads+j]
+      if first or s > top:
+        top = s
+        first = false
+    var total = 0'f32
+    for n in 0..<t:
+      if valid[n] == 0'f32: continue
+      let e = exp(score[n*heads+j] - top)
+      score[n*heads+j] = e
+      total += e
+    let inverse = 1'f32 / total
+    for n in 0..<t:
+      if valid[n] == 0'f32: continue
+      score[n*heads+j] = score[n*heads+j]*inverse
+  for n in 0..<t:
+    if valid[n] == 0'f32: continue
+    dense(tokens.at(n*z), z, wv, bv, hv, false, value)
+    for j in 0..<heads:
+      let weight = score[n*heads+j]
+      for c in 0..<vw: pooled[j*vw+c] += weight*value[j*vw+c]
+
 proc segmentNear(layer: NetLayer, input, y: F32s) =
   ## The input view: y = input, then token n's flag at y[dstOffset + n*dstStride]. Geometry in float64, operation
   ## by operation as neural_actor.md writes it (one product or sum per statement, so no contraction).
@@ -846,7 +1086,7 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
       let skip = scratch.at(net.layers[layer.source].output)
       for i in 0..<layer.outWidth: y[i] = x[i] + skip[i]
     of lkEntityAttn:
-      entityAttention(layer[], input, w, scratch.at(net.work), y)
+      entityAttention(layer[], input, w, scratch, scratch.at(net.work), y)
     of lkConcatInput:
       for i in 0..<layer.inWidth: y[i] = x[i]
       for i in 0..<layer.length: y[layer.inWidth+i] = input[layer.source+i]
@@ -858,6 +1098,14 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
       pointerHead(layer[], net.layers[layer.source], x, w, scratch, y)
     of lkSegmentNear:
       segmentNear(layer[], input, y)
+    of lkAttnPool:
+      attnPool(layer[], net.layers[layer.source], x, w, scratch, scratch.at(net.work), y)
+    of lkPad:
+      # y = x[0 ..< at], `length` zeros, x[at ..< width]: room for match-sized pointer heads.
+      let at = layer.source
+      for i in 0..<at: y[i] = x[i]
+      for i in 0..<layer.length: y[at+i] = 0'f32
+      for i in at..<layer.inWidth: y[layer.length+i] = x[i]
     checkFinite(y, layer.outWidth)
     x = y
     if layer.kind == lkSegmentNear: input = y  # every later layer that reads "the input" reads the view

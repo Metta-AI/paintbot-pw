@@ -340,9 +340,29 @@ def validate_sampling(value):
 # model load. PWNET001 models (and anything else) are left to the host's loader, as before.
 PWNET2_MAGIC = b"PWNET002"
 MAX_NEURAL_OPERATIONS = 4_000_000  # per seat per tick (neural_host.MaxNeuralOperations)
+
+
+def neural_budget(seats):
+    """neural_host.neuralOperationBudget: the 16-seat budget, x seats / 16 above 16 seats."""
+    return MAX_NEURAL_OPERATIONS * seats // 16 if seats > 16 else MAX_NEURAL_OPERATIONS
+
+
+# Observation contract ffa.v2 (FFA-kin at any seat count; its width follows the match) and its
+# action contract, ffa.v2 pointer (heads sized by the match). neural_contract.nim holds both.
+OBSERVATION_CONTRACT_FFA_V2 = "paintbot-pw.rules48.obs.ffa.v2"
+OBSERVATION_CONTRACT_FFA_V2_HASH = hashlib.sha256(OBSERVATION_CONTRACT_FFA_V2.encode()).hexdigest()
+ACTION_CONTRACT_FFA_V2_POINTER = "paintbot-pw.rules48.action.ffa.v2.pointer"
+ACTION_CONTRACT_FFA_V2_POINTER_HASH = hashlib.sha256(ACTION_CONTRACT_FFA_V2_POINTER.encode()).hexdigest()
+# PWNET002 layout words (neural_actor.nim): a structural uint32 whose high 16 bits are 0xFFFE
+# names a quantity of the match layout, resolved by the engine when the seat loads.
+LAYOUT_WORD_PREFIX = 0xFFFE0000
+
+
+class LayoutDependent(Exception):
+    """A layout word: the model is validated by the engine against the match's layout."""
 PWNET2_LIMITS = dict(parameters=4_194_304, layers=64, width=4096, state=4096, mingru_hidden=1024, groups=8,
-                     tokens=64, d_model=256, blocks=8, ff=1024, token_segments=8, token_input=1024, token_model=256,
-                     token_mlp_layers=4)
+                     tokens=256, d_model=256, blocks=8, ff=1024, token_segments=8, token_input=1024, token_model=256,
+                     token_mlp_layers=4, pool_heads=32, pool_width=1024)
 TRANSCENDENTAL_OPS, MINGRU_UNIT_OPS = 8, 32
 ATTN_ALWAYS_VALID = 0xFFFFFFFF
 
@@ -379,14 +399,44 @@ def pointer_ops(tokens, z, width):
     return width + tokens * (2 * z + 2)
 
 
+def attn_pool_ops(tokens, z, width, heads, key_width, value_width):
+    """ATTN_POOL's published cost (neural_actor.attnPoolOps)."""
+    return (width + (2 * width * heads * key_width + heads * key_width)
+            + tokens * ((2 * z * heads * key_width + heads * key_width) + heads * (2 * key_width + 1)
+                        + heads * (TRANSCENDENTAL_OPS + 3) + (2 * z * heads * value_width + heads * value_width)
+                        + 2 * heads * value_width)
+            + heads * (tokens + TRANSCENDENTAL_OPS))
+
+
 def segment_near_ops(inputs, tokens):
     """SEGMENT_NEAR's published cost: the copy of the input, 12 per token pair, 8 per token."""
     return inputs + tokens * tokens * 12 + tokens * 8
 
 
-def validate_pwnet2(model, observation_contract=None, action_contract=None):
+def validate_pwnet2(model, observation_contract=None, action_contract=None, seats=16):
     """Validate a PWNET002 model.bin; returns its summary dict (operations, state, layers, parameters).
-    Raises ValueError with the loader's reason otherwise."""
+    Raises ValueError with the loader's reason otherwise. A model with layout words is checked
+    up to its first word and returned with layout_dependent=True: the engine resolves the words
+    against the match's layout and validates the rest when the seat loads. The budget is the
+    seat count's (neural_budget)."""
+    header = {}
+    if len(model) >= 24 and model[:8] == PWNET2_MAGIC:
+        # The contracts sit after the header's head sizes: check them before any layout word.
+        heads = struct.unpack_from("<I", model, 20)[0]
+        at = 24 + 4 * heads
+        if 1 <= heads <= 32 and at + 128 <= len(model):
+            header = dict(observation_contract=model[at:at + 64].decode("ascii", "replace"),
+                          action_contract=model[at + 64:at + 128].decode("ascii", "replace"))
+            if observation_contract is not None and (header["observation_contract"] != observation_contract
+                                                     or header["action_contract"] != action_contract):
+                raise ValueError("package and actor contract mismatch")
+    try:
+        return _walk_pwnet2(model, observation_contract, action_contract, seats, header)
+    except LayoutDependent:
+        return dict(format=2, layout_dependent=True, **header)
+
+
+def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
     lim = PWNET2_LIMITS
     pos = 0
 
@@ -396,6 +446,12 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
             raise ValueError("truncated neural actor")
         value = struct.unpack_from("<I", model, pos)[0]
         pos += 4
+        return value
+
+    def word():
+        value = u32()
+        if value & 0xFFFF0000 == LAYOUT_WORD_PREFIX:
+            raise LayoutDependent()
         return value
 
     def bad(message):
@@ -432,10 +488,10 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
     if len(model) > MAX_MODEL_BYTES or model[:8] != PWNET2_MAGIC:
         raise ValueError("invalid neural actor magic")
     pos = 8
-    version, inputs, outputs, heads = u32(), u32(), u32(), u32()
+    version, inputs, outputs, heads = u32(), word(), word(), u32()
     if version != 2 or not 1 <= inputs <= 4096 or not 2 <= outputs <= 1024 or not 1 <= heads <= 32:
         raise ValueError("unsupported neural actor dimensions/version")
-    sizes = [u32() for _ in range(heads)]
+    sizes = [word() for _ in range(heads)]
     if any(not 2 <= size <= 1024 for size in sizes):
         raise ValueError("invalid categorical head")
     if sum(sizes) != outputs:
@@ -454,10 +510,20 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
     if not 1 <= count <= lim["layers"]:
         bad("layer count must be 1..%d" % lim["layers"])
     width, state, operations, widths = inputs, 0, 0, []
-    token_layers = {}  # layer index -> ("mlp" | "mix", tokens, floats per token)
+    token_layers = {}  # layer index -> ("mlp" | "mix" | "attn", tokens, floats per token)
+    exposed = set()    # ENTITY_ATTN layers whose token rows a later layer reads (their copy is costed once)
+
+    def expose(source):
+        nonlocal operations
+        kind, tokens, d = token_layers[source]
+        if kind == "attn" and source not in exposed:
+            exposed.add(source)
+            operations += tokens * d + tokens
+
     for k in range(count):
         code = u32()
-        q = [u32() for _ in range(8)]
+        # FP32 parameters (RMSNORM eps, ENTITY_ATTN eps) are read as bits, never as layout words.
+        q = [u32() if (code, j) in ((2, 1), (5, 7)) else word() for j in range(8)]
         where = "layer %d: " % k
 
         def unused(first):
@@ -534,7 +600,7 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
                 bad(where + "ENTITY_ATTN passthrough outside the input")
             shapes, tokens = [], 0
             for g in range(groups):
-                offset, stride, n, w, valid = (u32() for _ in range(5))
+                offset, stride, n, w, valid = (word() for _ in range(5))
                 if not 1 <= n <= lim["tokens"] or not 1 <= w <= inputs or not 1 <= stride <= inputs:
                     bad(where + "ENTITY_ATTN group %d count/width/stride" % g)
                 if offset > inputs or (n - 1) * stride + w > inputs - offset:
@@ -552,6 +618,7 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
             out = 2 * d + pass_length
             if out > lim["width"]:
                 bad(where + "ENTITY_ATTN output exceeds %d" % lim["width"])
+            token_layers[k] = ("attn", tokens, d)
             operations += attention_ops(shapes, d, heads_, blocks, ff, pass_length)
         elif code == 6:  # CONCAT_INPUT
             offset, length = q[0], q[1]
@@ -573,7 +640,7 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
                 bad(where + "TOKEN_MLP layers must be 1..%d" % lim["token_mlp_layers"])
             lengths = []
             for g in range(segments):
-                offset, stride, length = u32(), u32(), u32()
+                offset, stride, length = word(), word(), word()
                 if not 1 <= length <= inputs or stride > inputs:
                     bad(where + "TOKEN_MLP segment %d length/stride" % g)
                 if offset > inputs or (tokens - 1) * stride + length > inputs - offset:
@@ -588,7 +655,7 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
                 bad(where + "TOKEN_MLP valid flag outside the token")
             mlp = [sum(lengths)]
             for _ in range(layers):
-                o = u32()
+                o = word()
                 if not 1 <= o <= lim["token_model"]:
                     bad(where + "TOKEN_MLP widths must be 1..%d" % lim["token_model"])
                 mlp.append(o)
@@ -600,10 +667,11 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
         elif code == 8:  # TOKEN_MIX
             source, z = q[0], q[1]
             unused(2)
-            if source >= k or token_layers.get(source, ("",))[0] != "mlp":
-                bad(where + "TOKEN_MIX source must name an earlier TOKEN_MLP layer")
+            if source >= k or token_layers.get(source, ("",))[0] not in ("mlp", "attn"):
+                bad(where + "TOKEN_MIX source must name an earlier TOKEN_MLP or ENTITY_ATTN layer")
             if not 1 <= z <= lim["token_model"]:
                 bad(where + "TOKEN_MIX width must be 1..%d" % lim["token_model"])
+            expose(source)
             _, tokens, token_in = token_layers[source]
             weights(z * token_in + z + z * width)
             out = width + 2 * z
@@ -614,8 +682,9 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
         elif code == 9:  # POINTER
             source, offset = q[0], q[1]
             unused(2)
-            if source >= k or token_layers.get(source, ("",))[0] != "mix":
-                bad(where + "POINTER source must name an earlier TOKEN_MIX layer")
+            if source >= k or token_layers.get(source, ("",))[0] not in ("mix", "mlp", "attn"):
+                bad(where + "POINTER source must name an earlier TOKEN_MIX, TOKEN_MLP or ENTITY_ATTN layer")
+            expose(source)
             _, tokens, z = token_layers[source]
             if offset > width or tokens > width - offset:
                 bad(where + "POINTER offset + tokens exceeds width %d" % width)
@@ -624,7 +693,7 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
             operations += pointer_ops(tokens, z, width)
         elif code == 10:  # SEGMENT_NEAR
             tokens, base, stride, xi, zi, vi, ei, ci = q
-            scale_x, scale_z, radius, dst, dst_stride = u32(), u32(), u32(), u32(), u32()
+            scale_x, scale_z, radius, dst, dst_stride = u32(), u32(), u32(), word(), word()
             if k != 0:
                 bad(where + "SEGMENT_NEAR must be layer 0")
             if not 1 <= tokens <= lim["tokens"]:
@@ -644,6 +713,36 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
                 bad(where + "SEGMENT_NEAR flags outside the input")
             out = inputs
             operations += segment_near_ops(inputs, tokens)
+        elif code == 11:  # ATTN_POOL
+            source, heads_, key_width, value_width = q[:4]
+            unused(4)
+            if source >= k or token_layers.get(source, ("",))[0] not in ("mlp", "mix", "attn"):
+                bad(where + "ATTN_POOL source must name an earlier TOKEN_MLP, TOKEN_MIX or ENTITY_ATTN layer")
+            if not 1 <= heads_ <= lim["pool_heads"]:
+                bad(where + "ATTN_POOL heads must be 1..%d" % lim["pool_heads"])
+            if not 1 <= key_width <= lim["token_model"] or not 1 <= value_width <= lim["token_model"]:
+                bad(where + "ATTN_POOL key and value widths must be 1..%d" % lim["token_model"])
+            if heads_ * key_width > lim["pool_width"] or heads_ * value_width > lim["pool_width"]:
+                bad(where + "ATTN_POOL heads x width must be at most %d" % lim["pool_width"])
+            expose(source)
+            _, tokens, z = token_layers[source]
+            hk, hv = heads_ * key_width, heads_ * value_width
+            weights(hk * width + hk + hk * z + hk + hv * z + hv)
+            out = width + hv
+            if out > lim["width"]:
+                bad(where + "ATTN_POOL output exceeds %d" % lim["width"])
+            operations += attn_pool_ops(tokens, z, width, heads_, key_width, value_width)
+        elif code == 12:  # PAD
+            at, length = q[0], q[1]
+            unused(2)
+            if at > width:
+                bad(where + "PAD position beyond width %d" % width)
+            if length > lim["width"]:
+                bad(where + "PAD length must be 0..%d" % lim["width"])
+            out = width + length
+            if out > lim["width"]:
+                bad(where + "PAD output exceeds %d" % lim["width"])
+            operations += out
         else:
             bad(where + "unknown layer type %d" % code)
         widths.append(out)
@@ -652,15 +751,17 @@ def validate_pwnet2(model, observation_contract=None, action_contract=None):
         bad("length: %d trailing bytes" % (len(model) - pos))
     if width != outputs:
         bad("last layer width %d != outputs %d" % (width, outputs))
-    if operations > MAX_NEURAL_OPERATIONS:
-        raise ValueError("neural actor exceeds native operation budget: %d > %d" % (operations, MAX_NEURAL_OPERATIONS))
+    budget = neural_budget(seats)
+    if operations > budget:
+        raise ValueError("neural actor exceeds native operation budget: %d > %d" % (operations, budget))
     return dict(format=2, inputs=inputs, outputs=outputs, heads=sizes, layers=count, state=state,
                 parameters=parameters, operations=operations, observation_contract=contracts[0].decode(),
                 action_contract=contracts[1].decode())
 
 
-def unpack_package(data):
-    """Return validated (source, model, manifest); only three fixed files are allowed."""
+def unpack_package(data, seats=16):
+    """Return validated (source, model, manifest); only three fixed files are allowed. `seats` is the
+    match's seat count (the neural budget scales with it)."""
     if len(data) > MAX_MODEL_BYTES + MAX_SOURCE_BYTES + MAX_MANIFEST_BYTES + 4096:
         raise ValueError("neural package exceeds size limit")
     limits = {"manifest.json": MAX_MANIFEST_BYTES, "policy.bas": MAX_SOURCE_BYTES,
@@ -727,12 +828,20 @@ def unpack_package(data):
                 validate_joint_sampling(value)
         if "steady_shot" in decoder and STEADY_MOVEMENT in decoder.get("forbid_objectives", []):
             raise ValueError("decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
+        if manifest.get("action_contract") == ACTION_CONTRACT_FFA_V2_POINTER_HASH:
+            for key in decoder:
+                if key != "sampling":
+                    # The other options read the fixed contracts' head indices (neural_host.nim).
+                    raise ValueError("decoder." + key + " is not available under action contract ffa.v2 pointer")
     user_inputs = 0
     if "user_inputs" in manifest:
         if manifest.get("schema") != "paintbot-neural-basic/2":
             raise ValueError("user_inputs need package schema 2")
         user_inputs = validate_user_inputs(manifest["user_inputs"])
     observation_contract = manifest["observation_contract"]
+    if (observation_contract == OBSERVATION_CONTRACT_FFA_V2_HASH) != \
+            (manifest["action_contract"] == ACTION_CONTRACT_FFA_V2_POINTER_HASH):
+        raise ValueError("observation contract ffa.v2 needs action contract ffa.v2 pointer, and the other way round")
     family, base_size = "v2u", OBSERVATION_V2_SIZE
     named = USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
     if not named and observation_contract in V3_USER_INPUTS_CONTRACT_HASHES:
@@ -748,7 +857,7 @@ def unpack_package(data):
     if not files["model.bin"]:
         raise ValueError("empty neural model")
     if files["model.bin"][:8] == PWNET2_MAGIC:
-        validate_pwnet2(files["model.bin"], manifest["observation_contract"], manifest["action_contract"])
+        validate_pwnet2(files["model.bin"], manifest["observation_contract"], manifest["action_contract"], seats)
     if user_inputs:
         inputs, observation = actor_header(files["model.bin"])
         if observation != observation_contract:
@@ -766,8 +875,8 @@ def unpack_package(data):
     return files["policy.bas"], files["model.bin"], manifest
 
 
-def stage_package(data, source_path):
-    source, model, manifest = unpack_package(data)
+def stage_package(data, source_path, seats=16):
+    source, model, manifest = unpack_package(data, seats)
     source_path.write_bytes(source)
     source_path.with_name(source_path.name + ".model.bin").write_bytes(model)
     source_path.with_name(source_path.name + ".neural.json").write_text(json.dumps(manifest))

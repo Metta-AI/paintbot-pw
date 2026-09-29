@@ -84,10 +84,10 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 |---|---|
 | magic | ASCII `PWNET002` |
 | version | 2 |
-| I | input count, 1..4096 (the observation contract's width: 448, 506, 514, or 506 + K / 514 + K for user-input contracts v2u<K> / v3u<K>) |
-| O | output count, 2..1024 (the logits; no value row) |
+| I | input count, 1..4096 (the observation contract's width: 448, 506, 514, or 506 + K / 514 + K for user-input contracts v2u<K> / v3u<K>; ffa.v2: the match's width, usually the layout word `0xFFFEE000`) |
+| O | output count, 2..1024 (the logits; no value row; action contract ffa.v2 pointer: the match's, usually `0xFFFEE100`) |
 | head count | 1..32 |
-| head sizes | one uint32 per head, each 2..1024, summing to O |
+| head sizes | one uint32 per head, each 2..1024, summing to O (layout words allowed) |
 | observation contract | 64 lowercase hex bytes (as PWNET001) |
 | action contract | 64 lowercase hex bytes (as PWNET001) |
 | L | layer count, 1..64 |
@@ -119,13 +119,48 @@ when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 | 6 | CONCAT_INPUT | `offset, len` | none |
 | 7 | TOKEN_MLP | `tokens, segments, valid_segment, valid_index, layers` | segment descriptors, widths, then tensors (below) |
 | 8 | TOKEN_MIX | `source, z` | `Ue[z, d]`, `b[z]`, `Uy[z, width]` (d = the source's token width) |
-| 9 | POINTER | `source, offset` | `v[z]`, `c` (z = the source TOKEN_MIX's width) |
+| 9 | POINTER | `source, offset` | `v[z]`, `c` (z = the source's token width) |
 | 10 | SEGMENT_NEAR | `tokens, base, stride, x, z, valid, exclude, candidate` | `scale_x, scale_z, radius` (FP32 bits), `dst, dst_stride`; no weights |
+| 11 | ATTN_POOL | `source, heads, key, value` | `Wq[h*key, width]`, `bq[h*key]`, `Wk[h*key, z]`, `bk[h*key]`, `Wv[h*value, z]`, `bv[h*value]` |
+| 12 | PAD | `at, len` | none |
 
 Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1024;
-`act` 0 = none, 1 = relu; `eps` finite and > 0; TOKEN_MLP tokens 1..64, segments 1..8, layers
+`act` 0 = none, 1 = relu; `eps` finite and > 0; TOKEN_MLP tokens 1..256, segments 1..8, layers
 1..4, at most 1024 gathered floats per token, TOKEN_MLP widths and TOKEN_MIX `z` 1..256;
-SEGMENT_NEAR only as layer 0, tokens 1..64.
+ENTITY_ATTN at most 256 tokens over all groups; SEGMENT_NEAR only as layer 0, tokens 1..256;
+ATTN_POOL heads 1..32, `key` and `value` 1..256, heads x key and heads x value at most 1024;
+PAD `at` <= the current width, `len` 0..4096. (The token caps were 64 before observation
+contract ffa.v2; a model within the old caps loads and costs exactly as before.)
+
+### Layout words
+
+Observation contract ffa.v2's width, section row counts and offsets, and action contract
+ffa.v2 pointer's head sizes follow the match (seats and control hearts). A model states any
+of them as a **layout word** instead of a number, and the host resolves every word against
+the match layout when the seat loads (the training library: `pw_net_load_layout`), so one
+`model.bin` serves Heartland (16 seats) and Heartland Big (50). A layout word is a uint32
+whose high 16 bits are `0xFFFE` (no valid model had such a value in these fields before);
+its low 16 bits are section `s` (bits 12..15), field `f` (bits 8..11) and an addend `a`
+(bits 0..7); the value is the named quantity plus `a`:
+
+| s | section | f = 0 | f = 1 | f = 2 | f = 3 |
+|---|---|---|---|---|---|
+| 0 | cog rows | rows (seats - 1) | offset of row 0 | row width (44) | logit offset of row 0's pointer target (the aim head's cog rows) |
+| 1 | control heart rows | rows (hearts) | offset | 12 | its target (the objective head's heart rows) |
+| 2 | great heart rows | rows (2) | offset | 12 | its target |
+| 3 | control + great heart rows (contiguous, both 12 wide) | rows | offset | 12 | its target |
+| 14 | the whole | observation width + a | logit width + a | the size of head a | the logit offset of head a |
+
+Words are allowed in the header (I, O, head sizes) and in every structural integer of a
+layer record (params, ENTITY_ATTN group descriptors, TOKEN_MLP segments and widths,
+SEGMENT_NEAR `dst` and `dst_stride`); never in an FP32 field (RMSNORM and ENTITY_ATTN `eps`,
+SEGMENT_NEAR's scales and radius). A word the host cannot resolve (no match layout, an
+unknown section or field, a pointer target the action contract lacks) rejects the model. The
+weight counts must not depend on a word for one file to fit several layouts: build them from
+token layers over the sections, fixed-width DENSE layers, and PAD to open the match-sized
+runs the POINTERs write (the test model `pointerModel` in `tests/paintbot_pwnet2_fixture.nim`
+is one). Staging (`neural_package.py`) validates a model with layout words up to its first
+word and leaves the rest to the host, which checks everything at load.
 
 ## Equations
 
@@ -191,13 +226,17 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
   - Output (width `2*d_L`): the masked mean (`sum * (1/count)`) and the masked max (first
     valid token first) of the valid rows, exactly ENTITY_ATTN's pools; 0 with no valid token.
     The rows `e` and the valid flags stay available to later TOKEN_MIX layers for the tick.
-- **TOKEN_MIX** (per-token layer after the recurrence): `source` names an earlier TOKEN_MLP.
+- **TOKEN_MIX** (per-token layer after the recurrence): `source` names an earlier TOKEN_MLP (or
+  ENTITY_ATTN, whose rows `h_n` are then the `e_n`).
   With the current vector x (width W): `u = Uy x` (no bias), then for each valid token
   `z_n[o] = relu((sum_i e_n[i]*Ue[o,i] + b[o]) + u[o])`; an invalid token's `z_n` is 0.
   Output (width `W + 2z`): `[x, masked mean of z, masked max of z]` (the same pools). The rows
   `z` stay available to later POINTER layers.
-- **POINTER** (per-token scores into chosen outputs): `source` names an earlier TOKEN_MIX with
-  the same tokens. `y = x`, then for each valid token n: `y[offset + n] = x[offset + n] +
+- **ENTITY_ATTN's token rows** (the final `h_n` and the valid flags) are available to a later
+  TOKEN_MIX, POINTER or ATTN_POOL that names the ENTITY_ATTN layer as its `source`; the layer
+  then also copies them to a token buffer (`T*d + T` more operations, counted once).
+- **POINTER** (per-token scores into chosen outputs): `source` names an earlier TOKEN_MIX,
+  TOKEN_MLP or ENTITY_ATTN with the same tokens. `y = x`, then for each valid token n: `y[offset + n] = x[offset + n] +
   (sum_i z_n[i]*v[i] + c)`; invalid tokens add nothing. `offset + tokens` must not exceed the
   width. E.g. the 16 identity aim logits of contract v1/v2 are outputs 52..67 (`offset` 52).
 - **SEGMENT_NEAR** (the input view; parameter-free geometry over tokens already in the input):
@@ -229,6 +268,18 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
     identity (the fog-gated identity block), "an observed teammate is within 150 units of
     the segment from me to this identity".
 
+- **ATTN_POOL** (cross-attention pooling, cost linear in the tokens): `source` names an earlier
+  TOKEN_MLP, TOKEN_MIX or ENTITY_ATTN (its rows `e_n`, width `z`, and valid flags). With the
+  current vector x (width W): `q = Wq x + bq`; for each valid token n, `k_n = Wk e_n + bk`,
+  and per head j `s_(n,j) = (q_j . k_(n,j)) * (1/sqrt(key))`; per head, over the valid tokens
+  in token order, ENTITY_ATTN's softmax (`M = max s` first valid first, `e = exp(s - M)`,
+  `S = sum e`, `w = e * (1/S)`); then for each valid token n in order, `v_n = Wv e_n + bv` and
+  `pool_j += w_(n,j) * v_(n,j)` (from `+0.0`). Output (width `W + heads*value`): `[x, pool]`;
+  the pool is 0 with no valid token. Every DENSE here is the DENSE rule above (a float32 sum
+  from +0 in index order, then the bias).
+- **PAD**: `y = [x[0 ..< at], 0 x len, x[at ..< W]]` (width `W + len`): opens a run of zeros
+  where later POINTERs write match-sized heads.
+
 Inference validates the observation and state (finite) first, checks every layer's output
 and every new state value is finite, and commits the new state and the logits only when
 all are; otherwise the seat fails as PWNET001's does. Scratch for every layer output, the
@@ -239,8 +290,11 @@ initial use, match reset, death and respawn.
 ## Operation count (published formula)
 
 The loader computes the count once, at load, from the params alone (never from which
-tokens are valid), and the host rejects a model over 4,000,000 with the existing error
-and telemetry line. Units: a multiply-accumulate is 2 operations; an elementwise add,
+tokens are valid, with every layout word resolved), and the host rejects a model over the
+budget with the existing error and telemetry line. The budget is 4,000,000 operations per
+seat per tick up to 16 seats and scales like BASIC's instruction budget above that:
+`4,000,000 * seats / 16` (12,500,000 at Heartland Big's 50; `neural_host.neuralOperationBudget`;
+the telemetry line's `budget=` prints it). Units: a multiply-accumulate is 2 operations; an elementwise add,
 multiply, compare, max, relu or copy is 1; an `exp`, `sqrt` or division is 8; a MINGRU
 unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 
@@ -255,7 +309,9 @@ unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 | TOKEN_MIX | `2*W*z + W + T*(2*d*z + 3*z) + pool(z)` |
 | POINTER | `W + T*(2*z + 2)` |
 | SEGMENT_NEAR | `I + 12*T*T + 8*T` |
-| ENTITY_ATTN | `embed + blocks*block + pool` |
+| ENTITY_ATTN | `embed + blocks*block + pool` (+ `T*d + T` when a later layer reads its token rows) |
+| ATTN_POOL | `W + (2*W*h*k + h*k) + T*((2*z*h*k + h*k) + h*(2*k + 1) + h*(8 + 3) + (2*z*h*v + h*v) + 2*h*v) + h*(T + 8)` |
+| PAD | `W + len` |
 
 with, for ENTITY_ATTN (T tokens, h heads, F = ff, P = pass_len):
 
@@ -417,6 +473,42 @@ the own row's territory-boost column (it is r to the local owner). Identity rows
 aim head's identity index 1..16 aims at that seat. Outside FFA the kin, score and
 seat-ownership columns are zero.
 
+**ffa.v2: FFA-kin at any seat count** (Heartland and Heartland Big). Id
+`paintbot-pw.rules48.obs.ffa.v2`, SHA-256
+`d0a10cee5ae4a3b73a13e018fc1904e40f943768483498d896b9915e6313c592`, native version 102
+(`pw_create_observation(seed, max_ticks, 102)`, `pw_set_seats`). A fixed header, then three
+entity sections of fixed-width rows. The row counts follow the match, so **the width is
+fixed per match, not per contract**: `24 + (N-1)*44 + H*12 + 2*12` for N seats and H control
+hearts (828 in Heartland: 16 seats, 10 hearts; 3,404 in Heartland Big: 50 seats, 100 hearts).
+Read it from `pw_handle_observation_size` / `pw_observation_layout` (native), `neuralLayout`
+(BASIC) or `neural_contract.ffaV2Layout` (Nim). Column 0 of every row is its valid flag. No
+map flip. The encoder is `neural_contract.encodeFfaV2Observation`, which documents every
+column; the row order is `ffaV2Rows`.
+
+| columns | block |
+|---|---|
+| 0..7 | self: ffa.v1's 8 floats (centred x, centred z, hp/maxHp, armor/maxHp, cooldown/72, own score/1000, alive, ticks left/8640) |
+| 8..23 | match and own state: seats/64, control hearts/100, ticks remaining/end tick, hearts owned by self/hearts, territory boost here/30, self wet, self height/800, seen cogs/64, cog rows/64, heart rows/100, great rows/2, 5 reserved |
+| 24 + 44k, k < N-1 | cog row k: valid, dx, dz, visible (1), hp/maxHp, 32 gene bits (+-1), r to me, score/1000, hearts held/10, distance/diagonal, wet, height minus own/800, seat id/255 |
+| after the cogs, 12 per heart | control heart row: valid (1), dx, dz, centred x, centred z, owner's r to me (-1 neutral, 1 mine), capture progress, contested, owned by me, distance, wet, height minus own |
+| the last 24 | 2 great heart rows: valid (1), dx, dz, centred x, centred z, state (-1 dormant, 0 awake, 1 charging), present/16, progress, dormant ticks left/1440, distance, wet, height minus own |
+
+- **Only the cogs the seat can see.** The cog section holds only the cogs in view (`sim.visible`,
+  the line of sight that sets ffa.v1's visible column and BASIC's `visible`), packed first,
+  nearest first, ties by seat id; every row after them is all zero (valid 0). Nothing about an
+  unseen cog appears anywhere (position, hp, genes, r, score, hearts held, id, or any count or
+  order that depends on it), whatever the rules. The header carries only the seat's own state
+  and match constants (no alive count, no family or R figure).
+- **Hearts** are static map entities: every control heart and both great hearts, nearest first
+  (ties by index), all valid. Their owner and capture columns are ffa.v1's.
+- **Row -> entity map.** Row k of each section names one seat, control heart or great heart
+  for this tick; the host keeps that map from the observation to the decode (action contract
+  ffa.v2 pointer). Native `pw_observation_rows`, BASIC `neuralRow(section, k)`.
+- The training-only kin mask (`pw_set_obs_mask` bit 0) zeroes cog column 37, heart column 5
+  of a heart another seat owns, and header column 12.
+- The v1 / v2 action contracts address 16 identities, so an ffa.v2 bundle must name action
+  contract ffa.v2 pointer, and that contract needs ffa.v2 (the host rejects either alone).
+
 ## Action contracts
 
 Two action contracts share the five heads `[51,25,2,2,2]` and differ only in what an
@@ -429,6 +521,27 @@ a host that also knows v2.
 |---|---|---|---|
 | v1 | `paintbot-pw.rules37.action.v1.51-25-2-2-2` | `55922d42d4065a069b3193f31e056c3a53cd34175b10fed7ff0d8c22b50a473e` | the body's current position |
 | v2 | `paintbot-pw.rules37.action.v2.51-25-2-2-2` | `51f602ef167919ca825595f9d81777cb807afbb0938a20102457d0594e2b4317` | the body's lead-compensated aim point |
+
+**ffa.v2 pointer** (observation contract ffa.v2 only; native version 3). Id
+`paintbot-pw.rules48.action.ffa.v2.pointer`, SHA-256
+`068fc9816d515cc7df281ce94c7ecb973ca83f8f268021ef06707f934d2d83a5`. The same five heads,
+sized by the match (N seats, H control hearts); the objective and aim heads point at the rows
+of the observation of the same tick (`neural_contract.decodePointerActions`):
+
+| head | size | index |
+|---|---|---|
+| 0 objective | 11 + H | 0 stay; 1..8 compass `pos + 200*d` for d = (1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1) in (x, z), clamped to the map; 9 + k control heart row k; 9 + H + g great heart row g |
+| 1 aim | 8 + N | 0 keep the current aim; 1..8 compass `pos + 5000*compass`; 9 + k cog row k: that cog's lead-compensated aim point (contract v2's rule, memory keyed by seat id); a row past the seen cogs keeps the aim |
+| 2, 3, 4 | 2 each | fire, charge grenade, sneak |
+
+The logits are `11 + H + 8 + N + 6` floats (175 in Heartland Big, 51 in Heartland). With
+layout words a model's POINTERs target the cog rows at `0xFFFE0300` (the aim head's row 0,
+`20 + H`) and the heart rows at `0xFFFE3300` (9). Selection is argmax, or `decoder.sampling`
+(the only decoder option this contract takes; the others read the fixed contracts' head
+indices) and BASIC `neuralTemperature`; `neuralMask` is refused. Native: `pw_set_action_contract(h, 3)`
+on a 102 handle, `pw_action_layout` for the heads, `pw_step` decodes the caller's heads through
+the rows of the observation `pw_observe` wrote for that world (at any seat count), and
+`pw_step_logits` rows are the layout's logit width.
 
 Decoder options are not contracts. A schema-2 bundle may ask for `decoder.fire_hold_teammates`
 (`neural_basic.md`): the decoded shoot order is dropped when a visible teammate stands in

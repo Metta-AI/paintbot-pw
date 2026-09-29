@@ -15,7 +15,9 @@ from neural_package import (unpack_package, validate_aim_retarget, validate_shot
                             USER_INPUT_LIMIT, OBSERVATION_V2_SIZE, validate_pwnet2, attention_ops,
                             MAX_NEURAL_OPERATIONS, PWNET2_LIMITS, USER_INPUTS_CONTRACT_HASHES, segment_near_ops,
                             OBSERVATION_V3_SIZE, OBSERVATION_CONTRACT_V3, OBSERVATION_CONTRACT_V3_HASH,
-                            v3_user_inputs_contract_id, V3_USER_INPUTS_CONTRACT_HASHES)
+                            v3_user_inputs_contract_id, V3_USER_INPUTS_CONTRACT_HASHES,
+                            OBSERVATION_CONTRACT_FFA_V2_HASH, ACTION_CONTRACT_FFA_V2_POINTER_HASH, neural_budget,
+                            attn_pool_ops, LAYOUT_WORD_PREFIX)
 import random
 import struct
 
@@ -543,8 +545,8 @@ class Pwnet2Tests(unittest.TestCase):
             (pwnet2(64, heads, [attn([(60, 8, 1, 8, 0)], 8, 2, 1, 8, 0, 0), (1, [16, 6], [], 96)]), "outside the input"),
             (pwnet2(64, heads, [attn([(0, 8, 8, 8, 8)], 8, 2, 1, 8, 0, 0), (1, [16, 6], [], 96)]), "valid index"),
             (pwnet2(64, heads, [attn([(0, 8, 8, 8, 0)], 8, 3, 1, 8, 0, 0), (1, [16, 6], [], 96)]), "heads"),
-            (pwnet2(64, heads, [attn([(0, 1, 60, 4, 0), (0, 1, 10, 4, 0)], 8, 2, 1, 8, 0, 0), (1, [16, 6], [], 96)]),
-             "tokens"),
+            (pwnet2(300, heads, [attn([(0, 1, 200, 4, 0), (0, 1, 57, 4, 0)], 8, 2, 1, 8, 0, 0), (1, [16, 6], [], 96)]),
+             "tokens exceed 256"),
             (pwnet2(64, heads, [(1, [64, 6], [], 384)], obs="G" * 64), "contract hash"),
         ]
         for model, fragment in cases:
@@ -597,7 +599,7 @@ class Pwnet2Tests(unittest.TestCase):
             ([self.token_mlp(5, [(0, 8, 6)], (0xFFFFFFFF, 1), [4]), (1, [8, 9], [], 72)], "valid index 0"),
             ([self.token_mlp(5, [(0, 8, 6)], (0, 0), [300]), (1, [600, 9], [], 5400)], "widths"),
             ([self.token_mlp(5, [(0, 8, 6)], (0, 0), [4, 4, 4, 4, 4]), (1, [8, 9], [], 72)], "layers"),
-            ([mlp, (8, [0, 4], [], 64), (1, [18, 9, 1], [], 171), (9, [0, 3], [], 5)], "earlier TOKEN_MIX"),
+            ([mlp, (8, [0, 4], [], 64), (1, [18, 9, 1], [], 171), (9, [2, 3], [], 5)], "earlier TOKEN_MIX"),
             ([mlp, (8, [0, 4], [], 64), (1, [18, 9, 1], [], 171), (9, [1, 6], [], 5)], "exceeds width"),
             ([(1, [64, 10], [], 640), (8, [0, 4], [], 60), (1, [18, 9], [], 162)], "earlier TOKEN_MLP"),
             ([mlp, (8, [0, 0], [], 0), (1, [10, 9], [], 90)], "TOKEN_MIX width"),
@@ -637,7 +639,7 @@ class Pwnet2Tests(unittest.TestCase):
         cases = [
             ([(1, [40, 40], [], 1600), self.near()], "layer 1: SEGMENT_NEAR must be layer 0"),
             ([self.near(), self.near()], "layer 1: SEGMENT_NEAR must be layer 0"),
-            ([self.near(0)], "SEGMENT_NEAR tokens must be 1..64"),
+            ([self.near(0)], "SEGMENT_NEAR tokens must be 1..256"),
             ([self.near(stride=0)], "SEGMENT_NEAR stride"),
             ([self.near(base=9)], "SEGMENT_NEAR tokens outside the input"),
             ([self.near(base=41)], "outside the input"),
@@ -663,7 +665,7 @@ class Pwnet2Tests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, fragment):
                 validate_pwnet2(pwnet2(40, heads, layers))
         with self.assertRaisesRegex(ValueError, "tokens must be"):
-            validate_pwnet2(pwnet2(600, [300, 300], [self.near(65)]))
+            validate_pwnet2(pwnet2(600, [300, 300], [self.near(257)]))
         good = pwnet2(40, heads, [self.near()])
         with self.assertRaisesRegex(ValueError, "truncated"):
             validate_pwnet2(good[:-4])
@@ -709,7 +711,8 @@ class Pwnet2Tests(unittest.TestCase):
                                              blocks=consts["MaxAttnBlocks"], ff=consts["MaxAttnFeedForward"],
                                              token_segments=consts["MaxTokenSegments"],
                                              token_input=consts["MaxTokenInput"], token_model=consts["MaxTokenModel"],
-                                             token_mlp_layers=consts["MaxTokenMlpLayers"]))
+                                             token_mlp_layers=consts["MaxTokenMlpLayers"],
+                                             pool_heads=consts["MaxAttnPoolHeads"], pool_width=consts["MaxAttnPoolWidth"]))
         self.assertEqual((consts["TranscendentalOps"], consts["MinGruUnitOps"]), (8, 32))
         # SEGMENT_NEAR's published count: one formula in the loader, staging and neural_actor.md.
         self.assertIn("int64(inputs) + int64(tokens)*int64(tokens)*12 + int64(tokens)*8", source)
@@ -794,4 +797,82 @@ class ObservationV3Tests(unittest.TestCase):
         # v2u<K> keeps v2's width: a v2u3 manifest over a 517-input actor is refused as before.
         with self.assertRaisesRegex(ValueError, "input count must be 509 for 3 user inputs"):
             unpack_package(self.v3_package(observation=v2u_hash(3), inputs=517, user_inputs={"count": 3, "init": [0, 0, 0]}))
+
+
+def layout_word(section, field, addend=0):
+    """neural_actor.layoutWord."""
+    return LAYOUT_WORD_PREFIX | (section << 12) | (field << 8) | addend
+
+
+class FfaV2PackageTests(unittest.TestCase):
+    """Observation contract ffa.v2 + action contract ffa.v2 pointer bundles, layout words, ATTN_POOL, PAD, token
+    caps of 256 and the seat-scaled budget: staging mirrors neural_host.nim / neural_actor.nim."""
+    FFA, POINTER = OBSERVATION_CONTRACT_FFA_V2_HASH, ACTION_CONTRACT_FFA_V2_POINTER_HASH
+
+    def bundle(self, model, decoder=None, obs=None, act=None, seats=16):
+        overrides = {"schema": "paintbot-neural-basic/2", "observation_contract": obs or self.FFA,
+                     "action_contract": act or self.POINTER}
+        if decoder is not None:
+            overrides["decoder"] = decoder
+        return unpack_package(package(overrides, model=model), seats)
+
+    def test_contract_ids(self):
+        self.assertEqual(self.FFA, hashlib.sha256(b"paintbot-pw.rules48.obs.ffa.v2").hexdigest())
+        self.assertEqual(self.POINTER, hashlib.sha256(b"paintbot-pw.rules48.action.ffa.v2.pointer").hexdigest())
+
+    def test_pairing_and_pointer_decoder_options(self):
+        model = pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=self.FFA, act=self.POINTER)
+        self.bundle(model)
+        self.bundle(model, {"sampling": {"mode": "categorical", "temperature": 0.5}})
+        with self.assertRaisesRegex(ValueError, "not available under action contract ffa.v2 pointer"):
+            self.bundle(model, {"aim_snap": {}})
+        with self.assertRaisesRegex(ValueError, "needs action contract ffa.v2 pointer"):
+            self.bundle(pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=self.FFA, act=ACT),
+                        act=ACT)
+        with self.assertRaisesRegex(ValueError, "needs action contract ffa.v2 pointer"):
+            self.bundle(pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=OBS, act=self.POINTER),
+                        obs=OBS)
+
+    def test_layout_words_are_left_to_the_engine(self):
+        words = pwnet2(layout_word(14, 0), [2, 2, 2], [(7, [layout_word(0, 0), 1, 0, 0, 1],
+                                                        [layout_word(0, 1), layout_word(0, 2), 44, 8], 8 * 44 + 8),
+                                                       (1, [16, 6], [], 16 * 6)], obs=self.FFA, act=self.POINTER)
+        info = validate_pwnet2(words)
+        self.assertTrue(info["layout_dependent"])
+        self.assertEqual(info["observation_contract"], self.FFA)
+        self.bundle(words)
+        with self.assertRaisesRegex(ValueError, "contract mismatch"):
+            validate_pwnet2(words, OBS, ACT)
+
+    def test_attn_pool_pad_and_exposed_attention_cost_as_the_engine(self):
+        # neural_actor.nim's test model (test_paintbot_neural_layers): 17,686 operations.
+        model = pwnet2(64, [4, 8], [
+            attn([(0, 8, 8, 8, 0)], 8, 2, 1, 8, 0, 0),
+            (8, [0, 6], [], 6 * 8 + 6 + 6 * 16),
+            (11, [0, 2, 4, 3], [], 8 * 28 + 8 + 8 * 8 + 8 + 6 * 8 + 6),
+            (1, [34, 12], [], 34 * 12),
+            (9, [0, 4], [], 8 + 1)])
+        info = validate_pwnet2(model)
+        self.assertEqual(info["operations"], 17686)
+        self.assertEqual(attn_pool_ops(8, 8, 28, 2, 4, 3), 2836)
+        padded = pwnet2(8, [2, 2, 2, 2], [(1, [8, 4], [], 32), (12, [2, 4], [], 0)])
+        self.assertEqual(validate_pwnet2(padded)["operations"], 2 * 8 * 4 + 8)
+        with self.assertRaisesRegex(ValueError, "PAD position beyond width"):
+            validate_pwnet2(pwnet2(8, [2, 2, 2, 2], [(1, [8, 4], [], 32), (12, [5, 4], [], 0)]))
+        with self.assertRaisesRegex(ValueError, "ATTN_POOL source"):
+            validate_pwnet2(pwnet2(8, [2, 2, 2], [(1, [8, 4], [], 32), (11, [0, 1, 2, 2], [], 0)]))
+
+    def test_token_cap_is_256(self):
+        ok = pwnet2(512, [2, 2, 2], [(7, [256, 1, 0, 0, 1], [0, 2, 2, 4], 4 * 2 + 4), (1, [8, 6], [], 48)])
+        validate_pwnet2(ok)
+        with self.assertRaisesRegex(ValueError, "TOKEN_MLP tokens must be 1..256"):
+            validate_pwnet2(pwnet2(1024, [2, 2, 2], [(7, [257, 1, 0, 0, 1], [0, 2, 2, 4], 4 * 2 + 4), (1, [8, 6], [], 48)]))
+
+    def test_budget_scales_with_seats(self):
+        self.assertEqual((neural_budget(16), neural_budget(8), neural_budget(50)), (4000000, 4000000, 12500000))
+        # 2 * 2000 * 1024 = 4,096,000 operations: over the 16-seat budget, within 50 seats'.
+        big = pwnet2(2000, [512, 512], [(1, [2000, 1024], [], 2000 * 1024)], obs=self.FFA, act=self.POINTER)
+        with self.assertRaisesRegex(ValueError, "operation budget"):
+            self.bundle(big)
+        self.bundle(big, seats=50)
 

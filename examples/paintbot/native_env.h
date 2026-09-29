@@ -5,7 +5,8 @@
 extern "C" {
 #endif
 /* v1 buffers: 16 seats, 448 floats/seat (observation contract v1; a handle from
- * pw_create_observation(..., 2) writes 506, (..., 101) writes 810), 5 int32 actions/seat.
+ * pw_create_observation(..., 2) writes 506, (..., 101) writes 810, (..., 102) a per-match
+ * width at any seat count: see pw_set_seats below), 5 int32 actions/seat.
  * Output reset masks are independent of match terminals. Handles are exclusive
  * to one call at a time. Caller provides correctly sized non-null buffers. */
 int pw_env_version(void);
@@ -497,6 +498,60 @@ int pw_rules_latest(void);
 int pw_set_rules(void *handle, int32_t version);
 int pw_rules(void *handle);
 int pw_set_config_json(void *handle, const char *json, int32_t length, char *error, int32_t capacity);
+/* Observation contract ffa.v2 and N-seat handles (additive; a handle that never calls these
+ * is byte-identical to one from a library without them).
+ * pw_create_observation(seed, max_ticks, 102): observation contract ffa.v2
+ * "paintbot-pw.rules48.obs.ffa.v2" (SHA-256 d0a10cee...), FFA-kin at any seat count: a 24-float
+ * header (the seat's own state and match constants only), then the cog section (seats - 1
+ * rows of 44 floats: ONLY the cogs the seat can see, nearest first, ties by seat id; every row
+ * after them is all zero), the control heart section (one 12-float row per heart, nearest
+ * first) and the great heart section (2 rows of 12). Column 0 of every row is its valid flag.
+ * neural_contract.encodeFfaV2Observation documents every column. The row width follows the
+ * match (seats and control hearts), so it is fixed per match, not per contract:
+ * pw_observation_size_for(102) = -1; read pw_handle_observation_size after each reset.
+ * pw_set_seats(h, n): the seat count from the NEXT pw_reset on, 2..256; n != 16 needs a 102
+ * handle without user inputs (-1 otherwise). Kept across resets; a reset that changes the
+ * count re-creates every per-seat setting at its default (knobs, decoder options, scripts and
+ * policy seats removed). pw_seats(h): the current world's count (-1 NULL). Every per-seat
+ * buffer follows it: pw_observe rows (seat s at s * pw_handle_observation_size; pw_observe_seats
+ * can select seats 0..31 only), pw_step actions n*5 / rewards n / terminals n, pw_kin n*n at
+ * [n*i+j], pw_genes n, pw_scores n, pw_reward_split 2n, pw_kin_seat_stats 3n, pw_pair_stats
+ * n*n*13 at [(n*i+j)*13+stat], pw_seat_stats 8n, pw_seat_state 8n. The eval overrides
+ * pw_set_spawn_grouping and pw_set_kin_override are 16-seat tables and apply to 16-seat
+ * worlds only. With more than 16 seats pw_step returns -5 (nothing stepped) while any seat
+ * would decode the caller's heads: action contracts v1 and v2 address 16 identities, so every
+ * seat must be scripted (pw_set_seat_script) or given a raw command (pw_set_seat_command);
+ * pw_bot_actions and pw_action_candidates return -1 there.
+ * pw_observation_layout(h, int32[16]): [row floats, header floats, cog offset, cog rows, cog
+ * width, heart offset, heart rows, heart width, great offset, great rows, great width, valid
+ * column, seats, control hearts, 0, 0] for the current world (other contracts: [row floats,
+ * row floats, 0 x 9, -1, seats, control hearts, 0, 0]). pw_observation_rows(h, seat, int32
+ * *out, capacity): the seat's row -> entity map for the observation pw_observe writes before
+ * the next pw_step, laid out like the sections: seats - 1 cog-row seat ids (-1 past the seen
+ * cogs), then the heart rows' control heart indices, then the 2 great heart indices; returns
+ * that count and writes only when capacity holds it (capacity 0 sizes the buffer); -1 bad
+ * args or not a 102 handle. All return 0 unless stated, -1 bad args.
+ * Action contract ffa.v2 pointer (additive): pw_set_action_contract(h, 3) on a 102 handle
+ * (-1 on any other; pw_action_contract_hash(3, ...) writes 068fc981...). The five heads are
+ * sized by the current world: pw_action_layout(h, int32[8]) = [5, 11 + control hearts, 8 +
+ * seats, 2, 2, 2, logits per seat, 0] (v1 / v2: [5, 51, 25, 2, 2, 2, 82, 0]). pw_step decodes
+ * each seat's heads through the rows of the observation pw_observe wrote for that world
+ * (objective 9 + k = control heart row k, 9 + H + g = great heart row g; aim 9 + k = cog row
+ * k, lead-compensated; neural_actor.md), at any seat count (no -5); the per-seat decoder
+ * options (strafe, aim snap, ...) and forbid masks do not apply under it, the fire hold and
+ * fire period do. pw_step_logits' logits are n rows of pw_action_layout's width.
+ * pw_sample_actions and pw_action_candidates return -1 under it.
+ * pw_net_load_layout(h, data, length, error, capacity): pw_net_load with the model's PWNET002
+ * layout words resolved against the 102 handle's current layout and action heads, and the
+ * budget of its seat count (4,000,000 x seats / 16 above 16 seats); NULL with the reason in
+ * `error` otherwise (a handle that is not 102 included). */
+#define PW_OBSERVATION_LAYOUT_WORDS 16
+int pw_set_seats(void *handle, int32_t seats);
+int pw_seats(void *handle);
+int pw_observation_layout(void *handle, int32_t *sixteen);
+int pw_observation_rows(void *handle, int32_t seat, int32_t *out, int32_t capacity);
+int pw_action_layout(void *handle, int32_t *eight);
+void *pw_net_load_layout(void *handle, const void *data, int64_t length, char *error, int32_t capacity);
 #ifdef __cplusplus
 }
 #endif

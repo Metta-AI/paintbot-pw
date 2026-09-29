@@ -126,6 +126,14 @@ proc initializeMapEquipment(w: var World) =
     w.heartCaptures.add HeartCapture(team: -1)
   if ffa(): w.placeGreatHearts()
 
+proc controlHeartCount*(): int =
+  ## The control hearts a world built now (newWorld) will have, without building it: the
+  ## active map's hearts, or the island's ten from rules 13. A neural seat sizes its
+  ## observation contract ffa.v2 layout with it before the match's world exists.
+  if activeMap() >= 0: currentMap().hearts.len
+  elif visionRulesVersion >= 13: 10
+  else: 0
+
 proc initializeEquipment(w: var World) =
   if activeMap() >= 0:
     w.initializeMapEquipment(); return
