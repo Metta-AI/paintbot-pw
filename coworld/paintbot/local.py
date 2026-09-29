@@ -15,9 +15,11 @@ p.add_argument("--seed", type=int, default=2026)
 p.add_argument("--output", type=Path, required=True)
 p.add_argument("--port", type=int, default=8088)
 p.add_argument("--mode", choices=["teams", "ffa_kin"], default="teams")
+p.add_argument("--seats", type=int, default=16, help="roster size, 2 .. 256")
+p.add_argument("--map", help='the config\'s "map" (absent: the default arena)')
 p.add_argument(
     "--kin-layout",
-    choices=["sampled", "fours", "pairs", "trios_loner", "cousins", "strangers", "clones"],
+    choices=["sampled", "fours", "pairs", "trios_loner", "cousins", "strangers", "clones", "tribes"],
     help='FFA-kin only: the config\'s "kin_layout" (absent: a layout is sampled per seed)',
 )
 a = p.parse_args()
@@ -26,9 +28,9 @@ out = a.output.resolve()
 out.mkdir(parents=True, exist_ok=False)
 policies = a.policy or [str(root / "examples/paintbot/players/base.bas")]
 if len(policies) == 1:
-    policies *= 16
-if len(policies) != 16:
-    raise ValueError("Supply one shared policy or sixteen file paths")
+    policies *= a.seats
+if len(policies) != a.seats:
+    raise ValueError(f"Supply one shared policy or {a.seats} file paths")
 seats = []
 for i, file in enumerate(policies):
     f = Path(file).resolve()
@@ -53,12 +55,14 @@ for i, file in enumerate(policies):
     )
 )
 config = dict(
-    players=[dict(name=f"Player {i}") for i in range(16)],
-    tokens=[str(i) for i in range(16)],
+    players=[dict(name=f"Player {i}") for i in range(a.seats)],
+    tokens=[str(i) for i in range(a.seats)],
     seed=a.seed,
     max_ticks=a.ticks,
     mode=a.mode,
 )
+if a.map is not None:
+    config["map"] = a.map
 if a.kin_layout is not None:
     config["kin_layout"] = a.kin_layout
 (out / "config.json").write_text(json.dumps(config))

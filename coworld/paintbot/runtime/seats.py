@@ -9,6 +9,7 @@ from urllib.parse import unquote, urlsplit
 from urllib.request import urlopen
 
 MAX_FILE = 100 * 1024 * 1024  # download bound; the BASIC source limit is checked by the host
+MAX_SEATS = 256  # kinship.nim MaxSeats: the engine takes its seat count from the roster
 
 
 def local_path(uri: str) -> Path:
@@ -58,10 +59,10 @@ def load_seats(uri: str) -> dict:
     if document.get("schema") != "coworld-player-seats/1":
         raise ValueError("expected coworld-player-seats/1")
     seats = document["seats"]
-    if not 1 <= len(seats) <= 32 or [s["slot"] for s in seats] != list(
+    if not 1 <= len(seats) <= MAX_SEATS or [s["slot"] for s in seats] != list(
         range(len(seats))
     ):
-        raise ValueError("seats must be contiguous, ordered slots 0..N-1, with N <= 32")
+        raise ValueError(f"seats must be contiguous, ordered slots 0..N-1, with N <= {MAX_SEATS}")
     local_path(document["player_status_uri"])
     for seat in seats:
         local_path(seat["log_uri"])
