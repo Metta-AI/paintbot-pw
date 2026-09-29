@@ -278,7 +278,7 @@ proc resolveWord*(ctx: ActorLayout, v: uint32, where: string): uint32 =
         for h in 0..<addend: value += ctx.heads[h]
     else: net2Error(where & "unknown layout word field " & $field)
   else: net2Error(where & "unknown layout word section " & $section)
-  if value < 0 or value >= int(LayoutWordBase): net2Error(where & "layout word out of range")
+  if value < 0 or int64(value) >= int64(LayoutWordBase): net2Error(where & "layout word out of range")
   uint32(value)
 
 proc readWeights(net: Net2, data: string, p: var int, n: int) =
