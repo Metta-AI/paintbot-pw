@@ -772,6 +772,10 @@ proc bodiesFor(seat: NeuralSeat): array[LegacySeats, int] =
     seat.bodiesReady = true
   seat.bodies
 
+proc headSize(seat: NeuralSeat, head: int): int =
+  ## The size of action head `head` for this seat (a seat without a model: ActionSizes').
+  if seat.heads.len > 0: seat.heads[head] else: ActionSizes[head]
+
 proc rowsFor(seat: NeuralSeat): FfaV2Rows =
   ## The tick's ffa.v2 row -> entity map (once per tick: the observation and the decode read
   ## the same pre-action world).
@@ -1076,7 +1080,7 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
   discard h.addFunction("neuralSetChoice", 2, proc(a: openArray[int32]): int32 =
     seat.require(seat.sampled and not seat.decoded, "neuralSetChoice must come between neuralSample and neuralDecode")
     seat.require(a[0] in 0'i32..<ActionSizes.len.int32, "neuralSetChoice head out of range")
-    seat.require(a[1] >= 0 and a[1] < seat.heads[a[0]].int32, "neuralSetChoice choice out of range")
+    seat.require(a[1] >= 0 and a[1] < seat.headSize(a[0].int).int32, "neuralSetChoice choice out of range")
     seat.choices[a[0]] = a[1]
     1, 4)
   discard h.addFunction("neuralDecode", 0, proc(a: openArray[int32]): int32 =
@@ -1131,7 +1135,7 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
   # does not exist now. Goal 0 is the seat's position, aim 0 its current aim.
   proc goalRead(axis: int): HostProc =
     result = proc(a: openArray[int32]): int32 =
-      seat.require(a[0] in 0'i32..<seat.heads[0].int32, "neuralGoal index out of range")
+      seat.require(a[0] in 0'i32..<seat.headSize(0).int32, "neuralGoal index out of range")
       let w = seat.world
       if w[].cogs[seat.slot].hp <= 0: return low(int32)
       let (found, p) = if a[0] == 0: (true, w[].cogs[seat.slot].pos)
@@ -1143,7 +1147,7 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
   proc aimRead(axis: int): HostProc =
     result = proc(a: openArray[int32]): int32 =
       seat.require(seat.sampled, "neuralAim readers require neuralSample or neuralDecode first")
-      seat.require(a[0] in 0'i32..<seat.heads[1].int32, "neuralAim index out of range")
+      seat.require(a[0] in 0'i32..<seat.headSize(1).int32, "neuralAim index out of range")
       let (found, p) = seat.aimCandidatePoint(a[0].int)
       if not found: low(int32) elif axis == 0: p.x else: p.z
   discard h.addFunction("neuralAimX", 1, aimRead(0), 16)
@@ -1154,7 +1158,7 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
   discard h.addFunction("neuralLayout", 1, proc(a: openArray[int32]): int32 =
     seat.require(a[0] in 0'i32..20'i32, "neuralLayout index out of range")
     let i = a[0].int
-    if i >= 16: return seat.heads[i-16].int32
+    if i >= 16: return seat.headSize(i-16).int32
     let words = neuralLayoutWords(seat)
     words[i], 4)
   # The tick's row -> entity map (ffa.v2): neuralRow(section, k) is the seat id (section 0,
