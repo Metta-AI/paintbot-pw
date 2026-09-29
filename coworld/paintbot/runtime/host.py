@@ -17,7 +17,7 @@ import tempfile
 import time
 from pathlib import Path
 from oracle import MAX_ANSWER, Oracle, flatten
-from seats import load_seats, verified_policy, write_json
+from seats import MAX_SEATS, load_seats, verified_policy, write_json
 from neural_package import stage_package
 
 MAX_SOURCE = 128 * 1024  # BASIC source limit per seat; matches maxSourceBytes in bots.nim
@@ -82,8 +82,6 @@ def basic_oracle_round(oracle, world, pending):
         replies.append({"slot": slot, "id": request_id, "status": len(answers) or -1, "answers": answers})
     return replies
 
-
-MAX_SEATS = 256  # kinship.nim MaxSeats
 
 def run(engine):
     doc = load_seats(os.environ["COGAME_PLAYER_SEATS_URI"])

@@ -960,6 +960,26 @@ class HostSeatCountTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "seats must be 2 .. 256"):
                     host.run("/nonexistent/paintbot")
 
+    def test_the_seat_file_loader_takes_every_roster_size(self):
+        # Heartland Big's 50-seat rounds died in the host on a stale 32-seat cap in load_seats
+        # that the mocked test above never reached.
+        from seats import MAX_SEATS, load_seats
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+
+            def roster(n):
+                doc = {"schema": "coworld-player-seats/1", "player_status_uri": (tmp / "status.json").as_uri(),
+                       "seats": [{"slot": i, "log_uri": (tmp / f"p{i}.log").as_uri(), "size_bytes": 0} for i in range(n)]}
+                path = tmp / f"seats-{n}.json"
+                path.write_text(json.dumps(doc))
+                return path.as_uri()
+
+            for n in (16, 50, 100, MAX_SEATS):
+                self.assertEqual(len(load_seats(roster(n))["seats"]), n)
+            with self.assertRaisesRegex(ValueError, "N <= 256"):
+                load_seats(roster(MAX_SEATS + 1))
+
 
 class HeartlandManifestTests(unittest.TestCase):
     """coworld/heartland: the same engine in FFA-kin mode, published as its own Coworld."""
