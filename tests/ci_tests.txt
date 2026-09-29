@@ -68,6 +68,7 @@ nim r tests/test_paintbot_kinship.nim
 nim r tests/test_paintbot_ffa_rules.nim
 nim r tests/test_paintbot_ffa_lake_hearts.nim
 nim r tests/test_paintbot_ffa_replay.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_ffa_fog.nim
 nim r tests/test_paintbot_kinhue.nim
 nim r tests/test_paintbot_ffa_basic.nim
 nim r tests/test_paintbot_ffa_baseline.nim
@@ -100,6 +101,7 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v3.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_parity.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_config.nim

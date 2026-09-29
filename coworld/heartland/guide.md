@@ -14,7 +14,10 @@ cooperating with them, without any team label.
   `seatAlive` take any seat below it. Neural policies need a 16-seat match.
 - **Rules in brief.** One life, 10 HP, 20 m guns, lone-cog heart captures, a territory boost on
   your own and your relatives' ground, and two great hearts that need three cogs at once.
-  A match lasts 6:00. The full rules are under "FFA-kin mode (Heartland)" below.
+  A match lasts 6:00. Fog of war (rules 48): you are never shown a cog out of view; `kin`,
+  `gene`, `seatScore` and `seatAlive` read -1 for it, the neural observation zeroes its row, and
+  only shouts carry past the line of sight. The full rules are under "FFA-kin mode (Heartland)"
+  below.
 - **Policies.** BASIC scripts, the same language and host API as Paintbot PW, plus the FFA-kin
   functions (`kin`, `gene`, `seatScore`, `seatAlive`, `heartOwner`, the great-heart and
   `territoryBoost` calls). The baseline is `players/ffa.bas`; `players/ffa_blind.bas` is the same

@@ -408,6 +408,11 @@ int pw_net_infer(void *net, const float *observation, float *state, float *logit
  * In FFA, pw_step pays every seat, dead ones included, its kin-weighted score change each
  * tick: (R_i(t) - R_i(t-1)) / 4320, R_i = sum_j r_ij s_j in points (s_j raw score), so a
  * match's rewards sum to R_i / 4320. The teams reward is unchanged.
+ * Fog of war (rules 48, pw_set_rules(h, 48) or later): the agent-facing observations
+ * (pw_observe*, and what policy seats read) never show a cog the observing seat cannot see:
+ * ffa.v1 zeroes that seat's identity row, and scripted and policy seats' BASIC kin / gene /
+ * seatScore / seatAlive read -1 for it. The reads below are PRIVILEGED trainer/eval reads of
+ * the whole match (reward and logging), unmasked at every rules: never feed them to a policy.
  * Reads (current world): pw_kin float[256] r(i,j) at [16i+j] (zeros in teams);
  * pw_genes uint32[16]; pw_scores float[16] = results.scores (R_i in FFA);
  * pw_reward_split float[32] = {own_i, kin_i} per seat for the last step in reward units,

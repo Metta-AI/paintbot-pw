@@ -136,6 +136,7 @@ SIGNATURES = {
     "pw_set_seat_fire_period": ([P, ctypes.c_int, I32], ctypes.c_int),
     "pw_set_seat_damage_scale": ([P, ctypes.c_int, I32], ctypes.c_int),
     "pw_set_game_mode": ([P, I32], ctypes.c_int), "pw_set_kin_layout": ([P, I32], ctypes.c_int),
+    "pw_set_rules": ([P, I32], ctypes.c_int),
     "pw_kin": ([P, PF], ctypes.c_int), "pw_genes": ([P, PU], ctypes.c_int),
     "pw_scores": ([P, PF], ctypes.c_int), "pw_reward_split": ([P, PF], ctypes.c_int),
     "pw_kin_seat_stats": ([P, PF], ctypes.c_int), "pw_pair_stats": ([P, PI], ctypes.c_int),
@@ -309,6 +310,8 @@ def run_episode(job):
         raise RuntimeError("pw_create_observation failed")
     try:
         lib.pw_set_game_mode(h, 1)
+        if job.get("rules") and lib.pw_set_rules(h, job["rules"]) != 0:
+            raise RuntimeError(f"pw_set_rules({job['rules']}) failed")
         lib.pw_set_kin_layout(h, LAYOUTS[job["layout"]] if job.get("layout") else -1)
         if job.get("override"):
             fam, genes, ibd = job["override"]
@@ -1292,6 +1295,9 @@ def parse_args(argv=None):
     ap.add_argument("--layouts", default=None, help="comma-separated layouts: " + ",".join(ALL_LAYOUTS))
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--ticks", type=int, default=FFA_TICKS, help="max ticks per episode (8640 = full match)")
+    ap.add_argument("--rules", type=int, default=0,
+                    help="engine rules for every episode (pw_set_rules; 0 = the library default, 40). "
+                         "48 plays the FFA-kin fog of war")
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--bootstrap", type=int, default=1000, help="bootstrap resamples")
     ap.add_argument("--lib", default=None, help="libpaintbot_pw path (built into tmp/ if missing)")
@@ -1340,6 +1346,7 @@ def main(argv=None):
             elif j["assign"].startswith("self:"):
                 j["policies"] = dict(j["policies"], main=sp[j["assign"][5:]])
                 j["assign"] = "all"
+            j["rules"] = args.rules
             jobs.append(j)
     print(f"{len(jobs)} episodes: " + ", ".join(
         f"{s} {sum(1 for j in jobs if j['suite'] == s)}" for s in args.suites), file=sys.stderr)
@@ -1362,6 +1369,7 @@ def main(argv=None):
                 dump.write(json.dumps(dict(e, pairs=list(e["pairs"]))) + "\n")
     meta = {"policy": policies["main"]["name"], "policy2": policies.get("second", {}).get("name"),
             "episodes": args.episodes, "ticks": args.ticks, "seed": args.seed, "bootstrap": args.bootstrap,
+            "rules": args.rules or None,
             "suites": args.suites, "layouts": args.layouts, "finished": time.strftime("%Y-%m-%d %H:%M:%S")}
     (out_dir / "results.json").write_text(json.dumps({"meta": meta, "results": results}, indent=1,
                                                      default=lambda o: None))

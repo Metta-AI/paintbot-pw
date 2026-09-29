@@ -405,8 +405,12 @@ There is no map flip, for observations or for the compass heads of either action
 | 740 + 6g, g = 0..1 | great heart g: centred x, centred z, state (-1 dormant, 0 awake, 1 charging), present/16, progress, dormant ticks left/1440 |
 | 752..809 | v2's terrain block columns 0..53, then visible other seats wet/8 and dry/8, 2 reserved |
 
-Positions and hp of other seats are fog-gated; alive, genes, r, score and hearts held are
-public. hp and armor are divided by `maxHp()` (FfaMaxHp = 10 in FFA, 3 otherwise).
+Positions and hp of other seats are fog-gated; before rules 48 alive, genes, r, score and hearts
+held are public. From rules 48 (the FFA-kin fog of war, `sim.ffaFog`) the whole row of a seat the
+observer cannot see is zero, alive included (unknown), so genes, r, score and hearts held appear
+only for seats in view; the seat's own row, the hearts and the great hearts are unchanged. The
+layout, id and hash stay: like team vision (rules 42), the rules decide what is in view, the
+contract how it is laid out. hp and armor are divided by `maxHp()` (FfaMaxHp = 10 in FFA, 3 otherwise).
 Scores are raw scores s_j in points / 1000, the only columns that can exceed 1. Under
 the training-only mask bit 0 every r column reads 0, the seat's own row included, and so does
 the own row's territory-boost column (it is r to the local owner). Identity rows are indexed by seat, and the

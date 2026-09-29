@@ -32,6 +32,7 @@ dim spokeX(256)
 dim spokeY(256)
 dim spokeTick(256)
 dim capBy(256)
+dim kinK(256)
 dim taken(64)
 dim avoidUntil(64)
 dim pickupMemoryX(64)
@@ -39,7 +40,7 @@ dim pickupMemoryY(64)
 dim pickupMemoryKind(64)
 dim pickupMemoryTick(64)
 dim drF(6)
-dim blindKin(16)
+dim blindKin(256)
 ' Seat arrays hold up to 256 seats (the engine's most); loops run to the match's seat count.
 nSeats = seatCount()
 
@@ -150,7 +151,7 @@ sub kinInLine(ex, ey)
   if reach > 0 then
     k = 0
     while k < nSeats
-      if k <> selfId and blindKin(k) >= 25 and visible(k) then
+      if k <> selfId and kinK(k) >= 25 and visible(k) then
         kinAt(playerX(k) - selfX, playerY(k) - selfY)
       end if
       k = k + 1
@@ -159,7 +160,7 @@ sub kinInLine(ex, ey)
     ' the past six ticks, stands in for where they are.
     k = 0
     while k < nSeats
-      if k <> selfId and spokeTick(k) > 0 and worldTick - spokeTick(k) <= 6 and blindKin(k) >= 25 and not visible(k) then
+      if k <> selfId and spokeTick(k) > 0 and worldTick - spokeTick(k) <= 6 and kinK(k) >= 25 and not visible(k) then
         kinAt(spokeX(k) - selfX, spokeY(k) - selfY)
       end if
       k = k + 1
@@ -168,7 +169,7 @@ sub kinInLine(ex, ey)
     ' so this only catches the ones who just left the cone).
     k = 0
     while k < nSeats
-      if k <> selfId and lastSeen(k) > 0 and worldTick - lastSeen(k) <= 24 and blindKin(k) >= 25 and not visible(k) then
+      if k <> selfId and lastSeen(k) > 0 and worldTick - lastSeen(k) <= 24 and kinK(k) >= 25 and not visible(k) then
         kinAt(oldX(k) - selfX, oldY(k) - selfY)
       end if
       k = k + 1
@@ -203,9 +204,22 @@ if started = 0 then
   i = 0
   while i < nSeats
     spokeTick(i) = -100
+    kinK(i) = -1
     i = i + 1
   wend
 end if
+' Kinship is known only for cogs in view (rules 48, the FFA-kin fog of war: the kin host
+' function reads -1 for a cog we cannot see). Genes never change within a match, so a cog seen
+' once stays known: kinK holds the last kin read, -1 (treated as a stranger) until then. Under
+' older rules every kin read is known and kinK is exactly it.
+kinI = 0
+while kinI < nSeats
+  kinV = blindKin(kinI)
+  if kinV >= 0 then
+    kinK(kinI) = kinV
+  end if
+  kinI = kinI + 1
+wend
 myVX = selfX - lastX
 myVY = selfY - lastY
 if gunWait > 0 then
@@ -254,7 +268,7 @@ while i < heardCount() and i < 24
     spokeX(s) = heardX(i)
     spokeY(s) = heardY(i)
     spokeTick(s) = worldTick
-    if blindKin(s) >= 25 and strEq(heardText(i), strNew("hurt")) then
+    if kinK(s) >= 25 and strEq(heardText(i), strNew("hurt")) then
       hurtX = heardX(i)
       hurtY = heardY(i)
     end if
@@ -263,7 +277,7 @@ while i < heardCount() and i < 24
 wend
 i = 0
 while i < nSeats
-  if i <> selfId and blindKin(i) >= 25 and visible(i) then
+  if i <> selfId and kinK(i) >= 25 and visible(i) then
     if lastSeen(i) = worldTick - 1 and playerHp(i) < oldHp(i) then
       hurtX = playerX(i)
       hurtY = playerY(i)
@@ -277,7 +291,7 @@ if hurtX >= 0 then
   culpritD = 36000000
   i = 0
   while i < nSeats
-    if i <> selfId and blindKin(i) < 25 and visible(i) then
+    if i <> selfId and kinK(i) < 25 and visible(i) then
       dx = playerX(i) - hurtX
       dy = playerY(i) - hurtY
       d2 = dx * dx + dy * dy
@@ -331,7 +345,7 @@ while j < heartCount() and j < 64
     end if
     ' A stranger is taking one of our hearts: go back and stand on it.
     if c >= 0 and c < nSeats then
-      if blindKin(c) < 50 and d2 < defendD then
+      if kinK(c) < 50 and d2 < defendD then
         defend = j
         defendD = d2
       end if
@@ -347,7 +361,7 @@ if objective < 0 and mine < 2 then
   rank = 0
   i = 0
   while i < selfId
-    if blindKin(i) >= 50 and seatAlive(i) and capBy(i) = 0 then
+    if kinK(i) >= 50 and seatAlive(i) and capBy(i) = 0 then
       rank = rank + 1
     end if
     i = i + 1
@@ -362,10 +376,10 @@ if objective < 0 and mine < 2 then
       c = controlCaptureTeam(j)
       ok = taken(j) = 0 and owner <> selfId and avoidUntil(j) <= worldTick
       if ok and owner >= 0 then
-        ok = blindKin(owner) < 50
+        ok = kinK(owner) < 50
       end if
       if ok and c >= 0 and c <> selfId then
-        ok = blindKin(c) < 50
+        ok = kinK(c) < 50
       end if
       if ok then
         dx = (controlX(j) - homeX) / 8
@@ -429,10 +443,10 @@ if neutral = 0 then
       c = controlCaptureTeam(j)
       ok = owner >= 0 and owner <> selfId and avoidUntil(j) <= worldTick
       if ok then
-        ok = blindKin(owner) < 25
+        ok = kinK(owner) < 25
       end if
       if ok and c >= 0 and c <> selfId then
-        ok = blindKin(c) < 50
+        ok = kinK(c) < 50
       end if
       if ok then
         dx = (controlX(j) - selfX) / 8
@@ -569,7 +583,7 @@ threatsNear = 0
 i = 0
 while i < nSeats
   if i <> selfId and visible(i) then
-    if blindKin(i) < 25 then
+    if kinK(i) < 25 then
       px = playerX(i)
       py = playerY(i)
       dx = px - selfX
@@ -603,7 +617,7 @@ while i < nSeats
         ' A stranger close to a visible sibling is a threat to it.
         k = 0
         while k < nSeats
-          if k <> selfId and blindKin(k) >= 50 and visible(k) then
+          if k <> selfId and kinK(k) >= 50 and visible(k) then
             ex = playerX(k) - px
             ey = playerY(k) - py
             if ex * ex + ey * ey < 1440000 then
@@ -888,7 +902,7 @@ if hasGrenade and best >= 0 then
   safe = 1
   i = 0
   while i < nSeats
-    if i <> selfId and blindKin(i) >= 25 and visible(i) then
+    if i <> selfId and kinK(i) >= 25 and visible(i) then
       fx = playerX(i) - nx
       fy = playerY(i) - ny
       if fx * fx + fy * fy < 202500 then
