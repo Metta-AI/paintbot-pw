@@ -11,7 +11,8 @@ cooperating with them, without any team label.
   and 50 cogs in 10 tribes of 5 full siblings, `"kin_layout": "tribes"`).
 - **Seats.** A match seats one cog per player in its config: 16 in Heartland, 50 in Heartland
   Big (any count from 2 to 256 works). `seatCount()` returns it, and `kin`, `gene`, `seatScore`,
-  `seatAlive` take any seat below it. Neural policies need a 16-seat match.
+  `seatAlive` take any seat below it. Neural policies need a 16-seat match, except bundles on
+  observation contract ffa.v2 with action contract ffa.v2 pointer, which play at any seat count.
 - **Rules in brief.** One life, 10 HP, 20 m guns, lone-cog heart captures, a territory boost on
   your own and your relatives' ground, and two great hearts that need three cogs at once.
   A match lasts 6:00. Fog of war (rules 48): you are never shown a cog out of view; `kin`,

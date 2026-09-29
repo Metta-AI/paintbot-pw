@@ -271,7 +271,21 @@ index of the contract, user inputs included; e.g. a ready spray can is `hasSpray
 and `neuralAimX/Z(k)` (k in 0..24) are the points head choice m / k resolves to this tick
 (`pw_action_candidates`' rule; goal 0 = the seat's position, aim 0 = its current aim;
 INT32_MIN when the candidate does not exist now); the aim readers need `neuralSample` first
-and use the tick's movement and sneak choices for a contract-v2 identity lead.
+and use the tick's movement and sneak choices for a contract-v2 identity lead. Under action
+contract ffa.v2 pointer the index ranges are that match's heads (objective `0 .. 10 + H`,
+aim `0 .. 7 + N`) and the points are the rows' (`neural_actor.md`).
+
+Layout readers (every seat; the section words need observation contract ffa.v2):
+`neuralLayout(i)` for i in 0..15 is `pw_observation_layout`'s word i (row floats, header
+floats, cog offset, cog rows, cog width, heart offset, heart rows, heart width, great offset,
+great rows, great width, valid column, seats, control hearts), and for i in 16..20 the size of
+action head i - 16. `neuralRow(section, k)` is the entity observation row k shows this tick:
+section 0 the seat id of cog row k (-1 past the cogs the seat sees), 1 the control heart index,
+2 the great heart index (ffa.v2 only).
+
+Action contract ffa.v2 pointer seats select by argmax, `decoder.sampling` or
+`neuralTemperature`; `neuralMask` / `neuralMaskFrom` are refused (their bit masks cover the
+fixed contracts' 51 objectives), and so is every manifest `decoder` option but `sampling`.
 
 What stays native: the fire hold, aim retarget, aim snap, shot gate, spray aim and strafe
 legs need int64 geometry, path planning or the seat's own streams, so they remain manifest
@@ -286,7 +300,8 @@ seat with the bundle's policy.bas and manifest, the trainer passing each tick's 
 temperatures) from `pw_seat_policy_choices` (`native_env.h`).
 
 Native inference has a separate deterministic operation count and a maximum of
-4,000,000 operations per seat/tick. This cannot be bypassed by repeated host
+4,000,000 operations per seat/tick, scaled like BASIC's budget above 16 seats
+(`4,000,000 * seats / 16`: 12,500,000 in a 50-seat match). This cannot be bypassed by repeated host
 calls. Bytecode and ordinary host work retain their existing limits. `PW_BASIC_PEAKS=1`
 reports `peak_neural_operations` separately from bytecode work. On the hosted platform
 each seat that loaded a neural package also gets one line in its private seat log at

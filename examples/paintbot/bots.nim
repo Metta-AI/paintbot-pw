@@ -420,10 +420,10 @@ proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):seq[Bot] =
     result[slot]=Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural,failed:neuralFailed)
     when defined(coworld):result[slot].output=playerPrinter(slot)
 when defined(pwTraining):
-  var peakInstructions* {.threadvar.}: array[LegacySeats, int64]
-  var peakWork* {.threadvar.}: array[LegacySeats, int64]
-  var peakStrings* {.threadvar.}: array[LegacySeats, int64]
-  var peakNativeWork* {.threadvar.}: array[LegacySeats, int64]
+  var peakInstructions* {.threadvar.}: array[MaxSeats, int64]
+  var peakWork* {.threadvar.}: array[MaxSeats, int64]
+  var peakStrings* {.threadvar.}: array[MaxSeats, int64]
+  var peakNativeWork* {.threadvar.}: array[MaxSeats, int64]
   proc loadScriptBot*(source: string, slot: int): Bot =
     ## One seat from BASIC source text, exactly as loadBots builds a file seat without a
     ## neural package: same string limits, host functions, compile limits and runtime

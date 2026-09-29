@@ -102,7 +102,7 @@ def run(engine):
                     data = verified_policy(seat)
                     source = tmp / f"player-{slot}.bas"
                     if data.startswith(b"PK\x03\x04"):
-                        data = stage_package(data, source)
+                        data = stage_package(data, source, len(doc["seats"]))
                         check_source(data)
                         seat.update(size_bytes=len(data), content_hash="sha256:" + hashlib.sha256(data).hexdigest())
                     else:

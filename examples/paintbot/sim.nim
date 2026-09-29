@@ -261,7 +261,7 @@ when defined(pwTraining):
       gunKills*, grenadeKills*, weaponSprayKills*: int32
       hitsFromWater*, hitsFromHigh*, hitsFromTrench*: int32
       hitsToWater*, hitsToHigh*, hitsToTrench*: int32
-    CombatTelemetry* = array[LegacySeats, SeatStats] # the training library plays LegacySeats
+    CombatTelemetry* = array[MaxSeats, SeatStats] # one entry per seat the training library plays
   const HighGroundHeight* = 216 # pw_seat_weapon_stats' "high": terrainHeight >= this
   type DamageWeapon* = enum
     dwNone, dwGun, dwGrenade, dwSpray
@@ -276,7 +276,7 @@ when defined(pwTraining):
   var damageWeapon* {.threadvar.}: DamageWeapon
   # Per-attacker damage scale in permille, pointed at by the host for one step; nil or
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
-  var damageScale* {.threadvar.}: ptr array[LegacySeats, int32]
+  var damageScale* {.threadvar.}: ptr array[MaxSeats, int32]
   # FFA-kin pair counters (native pw_pair_stats): the host points this at a proc for one
   # step and damage() reports every damage event past the shield and life checks, with the
   # health it removed. Telemetry only; never part of World, its hash or any decision.
