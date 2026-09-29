@@ -1099,7 +1099,7 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
 
 proc pw_set_kin_layout*(handle: pointer, layout: int32): cint {.exportc, cdecl, dynlib.} =
   ## FFA kin layout for the next resets: -1 = drawn from the seed by weight (default), else
-  ## 0 fours, 1 pairs, 2 trios + loner, 3 cousins, 4 strangers, 5 clones (families and genes
+  ## 0 fours, 1 pairs, 2 trios + loner, 3 cousins, 4 strangers, 5 clones, 6 tribes (families and genes
   ## still from the seed, kinship.kinshipFor). Kept across resets, applied at the next
   ## pw_reset; pw_set_kin_override wins over it. 0, or -1 bad args.
   if handle == nil or layout notin -1'i32..KinLayout.high.ord.int32: return -1

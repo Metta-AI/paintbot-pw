@@ -119,7 +119,8 @@ suite "Native FFA-kin ABI":
   test "the mode and kin layout apply at the next reset and are kept across resets":
     let h = pw_create(3, 240)
     check pw_game_mode(h) == 0 and pw_set_game_mode(h, 1) == 0 and pw_game_mode(h) == 0
-    check pw_set_game_mode(h, 2) == -1 and pw_set_kin_layout(h, 6) == -1 and pw_set_kin_layout(h, -2) == -1
+    check pw_set_game_mode(h, 2) == -1 and pw_set_kin_layout(h, 7) == -1 and pw_set_kin_layout(h, -2) == -1
+    check pw_set_kin_layout(h, 6) == 0 # tribes (families of 5)
     check pw_set_kin_layout(h, 5) == 0 # clones
     check pw_reset(h, 3, 0) == 0
     check pw_game_mode(h) == 1 and envOf(h).world.endTick == FfaMatchTicks
