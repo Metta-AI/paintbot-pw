@@ -116,7 +116,10 @@ Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `playerCarrying(slot)`, `pickupCount()`, `pickupVisible(id)`, `pickupX(id)`,
 `pickupY(id)`, `pickupKind(id)` (0 grenade, 1 spray, 2 medkit, 3 armor),
 `glory(team)` (rules 37), `gloryHeartCount()`, `gloryHeartX(id)`, `gloryHeartY(id)`,
-`gloryHeartTicksLeft(id)` (rules 38). Hidden player, pickup and glory-heart coordinates are
+`gloryHeartTicksLeft(id)` (rules 38). The scoreboard the HUD shows: `teamLives(team)` (lives
+left summed over the team's cogs, the count the behind-in-lives award compares),
+`awardBehind()` (glory per life trailed) and `awardBehindSeconds()` (its period), from the
+match's glory config; -1 for an invalid team and in FFA-kin. Hidden player, pickup and glory-heart coordinates are
 not disclosed (-1). Nearby agents: `nearAgents(radius)` lists the agents you can see within `radius`
 (clamped to 20000), nearest first, at most 64, and returns the count; `nearAgentId(k)`, `nearAgentX(k)`,
 `nearAgentY(k)`, `nearAgentHp(k)` and `nearAgentTeam(k)` read entry k (-1, or Hp 0, past the end).

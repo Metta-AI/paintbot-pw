@@ -6,9 +6,9 @@ proc fp(buffer: var openArray[float32]): ptr UncheckedArray[cfloat] =
   cast[ptr UncheckedArray[cfloat]](addr buffer[0])
 
 suite "Native ffa.v1 observation selection":
-  test "version 101 creates 810-float rows equal to the reference encoder; 3 stays unknown":
+  test "version 101 creates 810-float rows equal to the reference encoder; 4 is unknown (3 is v3)":
     check pw_observation_size_for(101) == 810
-    check pw_observation_size_for(3) == -1 and pw_create_observation(1, 24, 3) == nil
+    check pw_observation_size_for(4) == -1 and pw_create_observation(1, 24, 4) == nil
     var text: array[65, char]
     let buffer = cast[ptr UncheckedArray[char]](addr text[0])
     check pw_observation_contract_hash(101, buffer, 65) == 0

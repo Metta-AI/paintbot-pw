@@ -883,6 +883,12 @@ proc earnGlory*(w: var World, side: int, kind: GloryKind, amount: int32) =
   w.glory[side] += amount
   w.gloryEvents.add GloryEvent(tick: w.tick, team: side.int32, amount: amount, kind: kind)
 
+proc teamLives*(w: World, side: int): int32 =
+  ## Lives left summed over the side's cogs: the count the behind-in-lives glory award
+  ## compares (updateGlory), observation contract v3's scoreboard and BASIC teamLives(t).
+  for i in 0..<Seats:
+    if team(i) == side: result += w.equipment[i].lives
+
 proc updateGlory*(w: var World) =
   ## Rules 37, once per tick after the tick counter advances: forget old awards, count
   ## down one glory per second, pay a team that went thirty seconds without supplies, and
@@ -899,8 +905,7 @@ proc updateGlory*(w: var World) =
       w.lastSupplyTick[side] = w.tick
       w.earnGlory(side, gloryQuietSupplies, rules.quietSupplies)
   if visionRulesVersion >= 39 and w.tick mod (rules.behindLivesSeconds*TickRate) == 0:
-    var lives: array[2, int32]
-    for i in 0..<Seats: lives[team(i)] += w.equipment[i].lives
+    let lives = [w.teamLives(0), w.teamLives(1)]
     for side in 0..1:
       let behind = lives[1-side]-lives[side]
       if behind > 0: w.earnGlory(side, gloryBehindLives, behind*rules.behindLives)

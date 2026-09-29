@@ -84,7 +84,7 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 |---|---|
 | magic | ASCII `PWNET002` |
 | version | 2 |
-| I | input count, 1..4096 (the observation contract's width: 448, 506, or 506 + K for user-input contract v2u<K>) |
+| I | input count, 1..4096 (the observation contract's width: 448, 506, 514, or 506 + K / 514 + K for user-input contracts v2u<K> / v3u<K>) |
 | O | output count, 2..1024 (the logits; no value row) |
 | head count | 1..32 |
 | head sizes | one uint32 per head, each 2..1024, summing to O |
@@ -299,7 +299,7 @@ entry is additive to v1; a host that ignores the newer ones sees the same bytes.
 
 ## Observation contracts
 
-Two observation contracts exist. The actor file and the package manifest carry the
+The observation contracts below exist. The actor file and the package manifest carry the
 contract's SHA-256 (the hash of the id string); the host encodes each seat with the
 contract its actor names and requires the actor's input count to be that contract's
 width, so a v1 bundle keeps byte-identical behaviour on a host that also knows v2. An
@@ -309,6 +309,7 @@ unknown hash fails the seat, as before.
 |---|---|---|---|
 | v1 | `paintbot-pw.rules37.obs.v1.float448` | `ed5d16768e3144a04a28420ce227ff2d6a831be9f64f3633326b133a5335b7e2` | 448 |
 | v2 | `paintbot-pw.rules37.obs.v2.float506` | `e0d7b0b97975725c470ef6119ca2a6caf4aaa6f34cd15bee02bd306489c029e5` | 506 |
+| v3 | `paintbot-pw.rules43.obs.v3.float514` | `06f16d62adedda6995d393696c0d2ed257aa9380b86341e73d1d6a3c7ea374f1` | 514 |
 
 v2 is v1 followed by a terrain block: columns 0..447 are the v1 observation, same order,
 same values (`encodeObservation` v1 is called unchanged on that slice), and columns
@@ -362,9 +363,36 @@ touches the world or its hash.
 manifest's `user_inputs.count` must be K. Training: `pw_create_observation_inputs(seed,
 max_ticks, K)`; a policy seat's rows carry its inputs, every other seat's user columns are 0.
 
+**v3: v2 + the scoreboard** (teams game only). Columns 0..505 are v2 unchanged; columns
+506..513 are `encodeScoreboardBlock` (`neural_contract.nim`), from the seat's team's side:
+
+| column | field |
+|---|---|
+| 506 | own team's lives left (`sim.teamLives`: the sum the behind-in-lives award compares) / 32 |
+| 507 | enemy team's lives left / 32 |
+| 508 | own team's glory / 1000 |
+| 509 | enemy team's glory / 1000 |
+| 510 | behind-in-lives award, glory per life trailed (the match's `glory.behind_lives`) / 10 |
+| 511 | its period in seconds (`glory.behind_lives_seconds`) / 60 |
+| 512 | quiet-supplies award (`glory.quiet_supplies`) / 100 |
+| 513 | ticks remaining, max(0, end tick - tick) / max(1, end tick) |
+
+Only what the HUD shows every viewer: each seat's lives (the header's life pips), both glory
+totals (the header score), the match's glory awards (the scoreboard and the score tooltip,
+rules 43) and the clock. An FFA-kin match refuses a v3 seat at load (no teams, lives or
+glory there). Native: `pw_create_observation(seed, max_ticks, 3)`; `pw_set_game_mode(h, 1)`
+returns -1 on a v3 handle.
+
+**v3u<K>: v3 + K user inputs.** Id `paintbot-pw.rules43.obs.v3u<K>`, K = 1..64, SHA-256 of
+the id (all 64 in `neural_contract.V3UserInputsContractHashes`; K = 1 is `8086b6f3…`);
+514 + K floats: v3 unchanged, then the K user inputs exactly as v2u<K> feeds them. The
+manifest's `user_inputs.count` must be K. Training: `pw_create_observation_inputs_v(seed,
+max_ticks, 3, K)` (version 2 there is `pw_create_observation_inputs`);
+`pw_user_inputs_contract_hash_v(3, K, out, 65)` writes the hash.
+
 **ffa.v1: FFA-kin** (mode `ffa_kin`). Id `paintbot-pw.rules40.obs.ffa.v1.float810`, SHA-256
 `6b19dc324386542eb915d30c2ce1707a8f8e192a0425ee8b2ae9145969583fc7`, 810 floats, native version
-101 (`pw_create_observation(seed, max_ticks, 101)`; 3 stays unknown). A separate encoder
+101 (`pw_create_observation(seed, max_ticks, 101)`). A separate encoder
 (`neural_contract.encodeFfaObservation`, which documents every column), not a v1/v2 prefix.
 There is no map flip, for observations or for the compass heads of either action contract
 (in FFA mode no seat is mirrored). Layout:

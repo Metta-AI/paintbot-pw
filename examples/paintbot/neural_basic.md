@@ -236,7 +236,10 @@ the actor has 506 + K inputs. Manifest, actor hash and input count must all agre
 at staging and at load). `neuralInput(i, v)` (i in 0..K-1) sets input i to v clamped to
 +-1,000,000; the net reads `float32(v) / 1000`. Values persist across ticks and deaths
 within a match and start at `init` each match; a value set during tick t is in the
-observation of tick t+1 (one tick of latency, the same in training).
+observation of tick t+1 (one tick of latency, the same in training). An actor on
+observation contract v3 (`paintbot-pw.rules43.obs.v3.float514`, v2 + an 8-float scoreboard,
+teams game only) takes user inputs the same way through `paintbot-pw.rules43.obs.v3u<K>`
+(table `neural_contract.V3UserInputsContractHashes`): 514 + K inputs.
 
 **Head-level phase (net -> BASIC).** Per tick, in this order:
 

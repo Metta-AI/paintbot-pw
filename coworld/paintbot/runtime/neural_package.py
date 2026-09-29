@@ -56,6 +56,11 @@ MAX_SHOT_GATE_RANGE = 20000
 # below, and its input count is 506 + K. neural_host.nim holds the same rules.
 MAX_USER_INPUTS, USER_INPUT_LIMIT = 64, 1000000
 OBSERVATION_V2_SIZE = 506
+# Observation contract v3 (teams game): v2's 506 floats, then an 8-float scoreboard block (neural_contract.nim
+# encodeScoreboardBlock). v3u<K> = v3 + K user inputs, exactly as v2u<K> is to v2.
+OBSERVATION_V3_SIZE = 514
+OBSERVATION_CONTRACT_V3 = "paintbot-pw.rules43.obs.v3.float514"
+OBSERVATION_CONTRACT_V3_HASH = hashlib.sha256(OBSERVATION_CONTRACT_V3.encode()).hexdigest()
 ACTOR_MAGIC = b"PWNET001"
 
 
@@ -63,8 +68,14 @@ def user_inputs_contract_id(count):
     return "paintbot-pw.rules39.obs.v2u%d" % count
 
 
+def v3_user_inputs_contract_id(count):
+    return "paintbot-pw.rules43.obs.v3u%d" % count
+
+
 USER_INPUTS_CONTRACT_HASHES = {hashlib.sha256(user_inputs_contract_id(k).encode()).hexdigest(): k
                                for k in range(1, MAX_USER_INPUTS + 1)}
+V3_USER_INPUTS_CONTRACT_HASHES = {hashlib.sha256(v3_user_inputs_contract_id(k).encode()).hexdigest(): k
+                                  for k in range(1, MAX_USER_INPUTS + 1)}
 
 
 def validate_user_inputs(value):
@@ -721,13 +732,18 @@ def unpack_package(data):
         if manifest.get("schema") != "paintbot-neural-basic/2":
             raise ValueError("user_inputs need package schema 2")
         user_inputs = validate_user_inputs(manifest["user_inputs"])
-    named = USER_INPUTS_CONTRACT_HASHES.get(manifest["observation_contract"], 0)
+    observation_contract = manifest["observation_contract"]
+    family, base_size = "v2u", OBSERVATION_V2_SIZE
+    named = USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
+    if not named and observation_contract in V3_USER_INPUTS_CONTRACT_HASHES:
+        family, base_size = "v3u", OBSERVATION_V3_SIZE
+        named = V3_USER_INPUTS_CONTRACT_HASHES[observation_contract]
     if user_inputs and not named:
-        raise ValueError("user_inputs need observation contract v2u<K>")
+        raise ValueError("user_inputs need observation contract v2u<K> or v3u<K>")
     if named and not user_inputs:
-        raise ValueError("observation contract v2u%d needs manifest user_inputs" % named)
+        raise ValueError("observation contract %s%d needs manifest user_inputs" % (family, named))
     if user_inputs and named != user_inputs:
-        raise ValueError("user_inputs.count does not match observation contract v2u%d" % named)
+        raise ValueError("user_inputs.count does not match observation contract %s%d" % (family, named))
     files["policy.bas"].decode("utf-8")
     if not files["model.bin"]:
         raise ValueError("empty neural model")
@@ -735,11 +751,18 @@ def unpack_package(data):
         validate_pwnet2(files["model.bin"], manifest["observation_contract"], manifest["action_contract"])
     if user_inputs:
         inputs, observation = actor_header(files["model.bin"])
-        if observation != manifest["observation_contract"]:
+        if observation != observation_contract:
             raise ValueError("package and actor contract mismatch")
-        if inputs != OBSERVATION_V2_SIZE + user_inputs:
+        if inputs != base_size + user_inputs:
             raise ValueError("neural actor input count must be %d for %d user inputs"
-                             % (OBSERVATION_V2_SIZE + user_inputs, user_inputs))
+                             % (base_size + user_inputs, user_inputs))
+    elif observation_contract == OBSERVATION_CONTRACT_V3_HASH:
+        # A new contract, so its actor is checked at staging as the host checks it at load.
+        inputs, observation = actor_header(files["model.bin"])
+        if observation != observation_contract:
+            raise ValueError("package and actor contract mismatch")
+        if inputs != OBSERVATION_V3_SIZE:
+            raise ValueError("neural actor input count must be %d for observation contract v3" % OBSERVATION_V3_SIZE)
     return files["policy.bas"], files["model.bin"], manifest
 
 

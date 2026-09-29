@@ -162,8 +162,9 @@ type
     # observationSize(obsVersion) floats apart. The world never reads it.
     obsVersion: ObservationContractVersion
     # Neural BASIC I/O (PLAN-neural-basic-io). userInputs: the K of observation contract
-    # v2u<K> (pw_create_observation_inputs; 0 otherwise): every pw_observe row is 506 + K
-    # floats, the last K a policy seat's user inputs (zeros for any other seat). policy:
+    # v2u<K> or v3u<K> (pw_create_observation_inputs / _v; 0 otherwise): every pw_observe row
+    # is observationSize(obsVersion) + K floats (506 + K, or 514 + K for v3), the last K a
+    # policy seat's user inputs (zeros for any other seat). policy:
     # the seats running a bundle's policy.bas under its manifest
     # (pw_set_seat_policy_script), stepped only by pw_step_logits. Unused, nothing here
     # runs and every path is byte-identical.
@@ -461,8 +462,8 @@ proc gateFire(env: ptr NativeEnv, slot: int, command: var Command) =
   else:
     command.shoot = false
 proc observationHash(env: ptr NativeEnv): string =
-  ## The observation contract hash this handle encodes (v1, v2 or v2u<K>).
-  if env.userInputs > 0: UserInputsContractHashes[env.userInputs-1]
+  ## The observation contract hash this handle encodes (v1, v2, v3, ffa.v1, v2u<K> or v3u<K>).
+  if env.userInputs > 0: userInputsContractHash(env.obsVersion, env.userInputs)
   else: observationContractHash(env.obsVersion)
 proc installScript(env: ptr NativeEnv, slot: int) =
   ## A fresh runtime for the seat's source, as a new match loads its bots. A policy seat
@@ -594,11 +595,13 @@ proc pw_env_version*(): cint {.exportc, cdecl, dynlib.} = 1
 proc pw_observation_size*(): cint {.exportc, cdecl, dynlib.} = ObservationSize
 proc pw_action_count*(): cint {.exportc, cdecl, dynlib.} = ActionSizes.len
 
+const NativeObservationVersions = [ocV1.int32, ocV2.int32, ocV3.int32, ocFfaV1.int32]
 proc obsContract(version: int32): ObservationContractVersion =
-  ## A native observation version already checked to be 1, 2 or 101.
+  ## A native observation version already checked to be 1, 2, 3 or 101.
   case version
   of 1: ocV1
   of 2: ocV2
+  of 3: ocV3
   else: ocFfaV1
 
 proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): pointer =
@@ -631,18 +634,19 @@ proc pw_create*(seed, maxTicks: int32): pointer {.exportc, cdecl, dynlib.} =
 
 proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.exportc, cdecl, dynlib.} =
   ## pw_create with the observation contract chosen: 1 = v1 (identical to pw_create),
-  ## 2 = v2 (v1 + terrain block), 101 = ffa.v1 (FFA-kin, 810 floats). nil for any other
-  ## version or a bad max_ticks.
-  if obsVersion notin [ocV1.int32, ocV2.int32, ocFfaV1.int32]: return nil
+  ## 2 = v2 (v1 + terrain block), 3 = v3 (v2 + scoreboard block; the teams game only:
+  ## pw_set_game_mode refuses FFA-kin on the handle), 101 = ffa.v1 (FFA-kin, 810 floats).
+  ## nil for any other version or a bad max_ticks.
+  if obsVersion notin NativeObservationVersions: return nil
   createEnv(seed, maxTicks, obsContract(obsVersion))
 
 proc pw_observation_size_for*(obsVersion: int32): cint {.exportc, cdecl, dynlib.} =
   ## Floats per seat under observation contract `obsVersion`; -1 if unknown.
-  if obsVersion notin [ocV1.int32, ocV2.int32, ocFfaV1.int32]: return -1
+  if obsVersion notin NativeObservationVersions: return -1
   observationSize(obsContract(obsVersion)).cint
 
 proc pw_observation_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
-  ## The handle's observation contract version (1, 2 or 101); -1 for a nil handle.
+  ## The handle's observation contract version (1, 2, 3 or 101); -1 for a nil handle.
   if handle == nil: return -1
   cast[ptr NativeEnv](handle).obsVersion.cint
 
@@ -662,6 +666,16 @@ proc pw_create_observation_inputs*(seed, maxTicks, userInputs: int32): pointer {
   result = createEnv(seed, maxTicks, ocV2)
   if result != nil: cast[ptr NativeEnv](result).userInputs = userInputs.int
 
+proc pw_create_observation_inputs_v*(seed, maxTicks, obsVersion, userInputs: int32): pointer {.exportc, cdecl, dynlib.} =
+  ## pw_create_observation_inputs with the base contract chosen: obsVersion 2 = v2u<K>
+  ## (identical to pw_create_observation_inputs), 3 = v3u<K>: every pw_observe row is v3's
+  ## 514 floats followed by the K user-input floats. K = userInputs within 0 .. 64; K = 0 is
+  ## pw_create_observation(seed, maxTicks, obsVersion). nil for another version, a bad K or
+  ## a bad max_ticks.
+  if obsVersion notin [ocV2.int32, ocV3.int32] or userInputs notin 0'i32..MaxUserInputs.int32: return nil
+  result = createEnv(seed, maxTicks, obsContract(obsVersion))
+  if result != nil: cast[ptr NativeEnv](result).userInputs = userInputs.int
+
 proc pw_handle_user_inputs*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   ## The handle's K (0 unless created by pw_create_observation_inputs); -1 for nil.
   if handle == nil: return -1
@@ -678,11 +692,23 @@ proc pw_user_inputs_contract_hash*(userInputs: int32, output: ptr UncheckedArray
   output[hash.len] = '\0'
   0
 
+proc pw_user_inputs_contract_hash_v*(obsVersion, userInputs: int32, output: ptr UncheckedArray[char],
+    capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The 64-hex SHA-256 of observation contract v2u<K> (obsVersion 2; identical to
+  ## pw_user_inputs_contract_hash) or v3u<K> (obsVersion 3), K = userInputs within 1 .. 64,
+  ## NUL-terminated (capacity >= 65). 0, or -1 bad args.
+  if output == nil or capacity < 65 or obsVersion notin [ocV2.int32, ocV3.int32] or
+      userInputs notin 1'i32..MaxUserInputs.int32: return -1
+  let hash = userInputsContractHash(obsContract(obsVersion), userInputs.int)
+  for i, c in hash: output[i] = c
+  output[hash.len] = '\0'
+  0
+
 proc pw_observation_contract_hash*(obsVersion: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The 64-hex SHA-256 an actor and manifest carry for observation contract
   ## `obsVersion`, NUL-terminated; capacity must be >= 65. 0, or -1 bad args.
-  if output == nil or capacity < 65 or obsVersion notin [ocV1.int32, ocV2.int32, ocFfaV1.int32]: return -1
+  if output == nil or capacity < 65 or obsVersion notin NativeObservationVersions: return -1
   let hash = observationContractHash(obsContract(obsVersion))
   for i, c in hash: output[i] = c
   output[hash.len] = '\0'
@@ -725,18 +751,20 @@ proc pw_observe_seats*(handle: pointer, seats: uint32, observations, resets: Flo
   let env = cast[ptr NativeEnv](handle)
   try:
     if env.userInputs > 0:
-      # v2u<K>: the v2 row, then the seat's user inputs as its policy.bas left them (the
-      # values its next decision's observation reads); zeros for a seat without them.
-      let n = ObservationSizeV2 + env.userInputs
+      # v2u<K> / v3u<K>: the v2 or v3 row, then the seat's user inputs as its policy.bas
+      # left them (the values its next decision's observation reads); zeros for a seat
+      # without them.
+      let base = observationSize(env.obsVersion)
+      let n = base + env.userInputs
       for slot in 0..<Seats:
         if (seats and (1'u32 shl slot)) == 0: continue
         let row = slot*n
-        encodeObservation(env.world,slot,observations.toOpenArray(row,row+ObservationSizeV2-1),
-          env.bodiesFor(slot),ocV2)
+        encodeObservation(env.world,slot,observations.toOpenArray(row,row+base-1),
+          env.bodiesFor(slot),env.obsVersion)
         let bot = env.scriptBots[slot]
         let inputs = if env.policy[slot] and bot != nil and bot.neural != nil: bot.neural.userInputs else: @[]
         for i in 0..<env.userInputs:
-          observations[row+ObservationSizeV2+i] = if i < inputs.len: userInputFeature(inputs[i]) else: 0'f32
+          observations[row+base+i] = if i < inputs.len: userInputFeature(inputs[i]) else: 0'f32
         resets[slot] = env.resets[slot]
     elif env.obsVersion == ocFfaV1:
       for slot in 0..<Seats:
@@ -975,8 +1003,10 @@ proc pw_seat_stats*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.
 
 proc pw_set_game_mode*(handle: pointer, mode: int32): cint {.exportc, cdecl, dynlib.} =
   ## 0 = the teams game (default), 1 = FFA-kin. Kept across resets and applied at the next
-  ## pw_reset (the current world keeps its mode). 0, or -1 bad args.
+  ## pw_reset (the current world keeps its mode). 0, or -1 bad args (FFA-kin on an
+  ## observation contract v3 handle included: v3 is the teams game's).
   if handle == nil or mode notin 0'i32..1'i32: return -1
+  if mode == 1 and cast[ptr NativeEnv](handle).obsVersion == ocV3: return -1
   cast[ptr NativeEnv](handle).nextMode = GameMode(mode)
   0
 
@@ -1041,8 +1071,9 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
   ## handle keeps its map (pw_set_map's, or an earlier config's); "map": "" is the island. They
   ## replace the handle's mode, kin layout, map, vision and glory awards from its NEXT pw_reset
   ## on (the current world keeps its own), as pw_set_game_mode, pw_set_kin_layout and pw_set_map
-  ## do; the rules stay pw_set_rules'. 0; -1 bad args; -2 a config the host would refuse, with
-  ## its reason in `error` (NUL-terminated, truncated to capacity; "" on success; may be NULL).
+  ## do; the rules stay pw_set_rules'. 0; -1 bad args; -2 a config the host would refuse (or an
+  ## FFA-kin config on an observation contract v3 handle), with its reason in `error`
+  ## (NUL-terminated, truncated to capacity; "" on success; may be NULL).
   if handle == nil or length < 0 or (length > 0 and json == nil): return -1
   var text = newString(length.int)
   if length > 0: copyMem(addr text[0], json, length.int)
@@ -1052,6 +1083,10 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
       writeMessage(error, capacity, e.msg)
       return -2
   let env = cast[ptr NativeEnv](handle)
+  if config.mode == gmFfaKin and env.obsVersion == ocV3:
+    # Observation contract v3 is the teams game's, as pw_set_game_mode refuses it too.
+    writeMessage(error, capacity, "observation contract v3 is for the teams game only")
+    return -2
   env.nextMode = config.mode
   env.kinLayout = if config.kinLayout.isSome: config.kinLayout.get.ord.int32 else: -1
   # A config without "map" keeps the handle's map (pw_set_map), so a trainer can draw maps

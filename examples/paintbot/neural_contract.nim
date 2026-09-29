@@ -88,11 +88,21 @@ static:
   doAssert ObservationContractFfaV1 == "paintbot-pw.rules40.obs.ffa.v1.float" & $ObservationSizeFfaV1
   doAssert FfaMatchTicks == 8640 and GreatHeartDormantTicks == 1440
 static: doAssert ObservationSizeV2 == 506 and ObservationContractV2 == "paintbot-pw.rules37.obs.v2.float" & $ObservationSizeV2
+const
+  ## Observation contract v3 ("scoreboard"): v2's 506 floats unchanged in columns
+  ## 0 .. ObservationSizeV2-1, followed by the seat's team's public scoreboard
+  ## (ScoreboardBlockSize floats; encodeScoreboardBlock documents every column). The teams
+  ## game only: FFA-kin refuses it. The hash is the SHA-256 of the id, as for v1 and v2.
+  ScoreboardBlockSize* = 8
+  ObservationSizeV3* = ObservationSizeV2 + ScoreboardBlockSize
+  ObservationContractV3* = "paintbot-pw.rules43.obs.v3.float514"
+  ObservationContractV3Hash* = "06f16d62adedda6995d393696c0d2ed257aa9380b86341e73d1d6a3c7ea374f1"
+static: doAssert ObservationSizeV3 == 514 and ObservationContractV3 == "paintbot-pw.rules43.obs.v3.float" & $ObservationSizeV3
 
 type
   ObservationContractVersion* = enum
-    ## ocFfaV1 is 101, not 3: version numbers are the native ABI's, and 3 stays unknown.
-    ocV1 = 1, ocV2 = 2, ocFfaV1 = 101
+    ## Version numbers are the native ABI's (pw_create_observation): ocFfaV1 is 101.
+    ocV1 = 1, ocV2 = 2, ocV3 = 3, ocFfaV1 = 101
   ActionContractVersion* = enum
     acV1 = 1, acV2 = 2
   AimMemory* = object
@@ -122,21 +132,25 @@ proc observationContractHash*(version: ObservationContractVersion): string =
   case version
   of ocV1: ObservationContractHash
   of ocV2: ObservationContractV2Hash
+  of ocV3: ObservationContractV3Hash
   of ocFfaV1: ObservationContractFfaV1Hash
 proc observationContractId*(version: ObservationContractVersion): string =
   case version
   of ocV1: ObservationContract
   of ocV2: ObservationContractV2
+  of ocV3: ObservationContractV3
   of ocFfaV1: ObservationContractFfaV1
 proc observationSize*(version: ObservationContractVersion): int =
   case version
   of ocV1: ObservationSize
   of ocV2: ObservationSizeV2
+  of ocV3: ObservationSizeV3
   of ocFfaV1: ObservationSizeFfaV1
 proc observationContractVersion*(hash: string): ObservationContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ObservationContractHash: ocV1
   elif hash == ObservationContractV2Hash: ocV2
+  elif hash == ObservationContractV3Hash: ocV3
   elif hash == ObservationContractFfaV1Hash: ocFfaV1
   else: raise newException(ValueError, "unknown neural observation contract")
 
@@ -324,6 +338,45 @@ proc encodeTerrainBlock*(w: World, slot: int, output: var openArray[float32],
   output[57] = float32(mateDry)/8
 static: doAssert 58 == TerrainBlockSize
 
+const
+  ## Scoreboard block divisors (observation contract v3). Lives: 8 seats x 4 lives.
+  ScoreboardLivesScale* = 32
+  ScoreboardGloryScale* = 1000
+  ScoreboardBehindLivesScale* = 10
+  ScoreboardBehindSecondsScale* = 60
+  ScoreboardQuietSuppliesScale* = 100
+
+proc encodeScoreboardBlock*(w: World, slot: int, output: var openArray[float32]) =
+  ## Observation contract v3's scoreboard block (ScoreboardBlockSize floats), written at
+  ## output[0 ..< ScoreboardBlockSize], from the seat's team's side (team(slot); no map
+  ## flip is involved: nothing here is a position). Only what the match HUD already shows
+  ## every viewer: each seat's lives (the header's life pips), both glory totals (the
+  ## header score), the match's glory awards (the scoreboard and the score tooltip, from
+  ## the rules-43 "glory" config) and the match clock. Nothing fog-gated.
+  ##   0  own team's lives left (sim.teamLives, the sum the behind-in-lives award compares) / 32
+  ##   1  enemy team's lives left / 32
+  ##   2  own team's glory / 1000
+  ##   3  enemy team's glory / 1000
+  ##   4  behind-in-lives award, glory per life trailed (gloryRules().behindLives) / 10
+  ##   5  its period in seconds (gloryRules().behindLivesSeconds) / 60
+  ##   6  quiet-supplies award (gloryRules().quietSupplies) / 100
+  ##   7  ticks remaining, max(0, endTick - tick) / max(1, endTick)
+  ## The teams game only: ValueError in FFA-kin (no teams, lives or glory there).
+  if slot notin 0..<Seats or output.len != ScoreboardBlockSize:
+    raise newException(ValueError, "invalid neural scoreboard block dimensions or seat")
+  if ffa(): raise newException(ValueError, "observation contract v3 is for the teams game only")
+  let side = team(slot)
+  let awards = gloryRules()
+  output[0] = float32(w.teamLives(side))/ScoreboardLivesScale.float32
+  output[1] = float32(w.teamLives(1-side))/ScoreboardLivesScale.float32
+  output[2] = float32(w.glory[side])/ScoreboardGloryScale.float32
+  output[3] = float32(w.glory[1-side])/ScoreboardGloryScale.float32
+  output[4] = float32(awards.behindLives)/ScoreboardBehindLivesScale.float32
+  output[5] = float32(awards.behindLivesSeconds)/ScoreboardBehindSecondsScale.float32
+  output[6] = float32(awards.quietSupplies)/ScoreboardQuietSuppliesScale.float32
+  output[7] = float32(max(0'i32, w.endTick-w.tick))/max(1'i32, w.endTick).float32
+static: doAssert 8 == ScoreboardBlockSize
+
 proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
     bodies: array[Seats, int], kin: Kinship, mask = 0'u32) =
   ## Observation contract ffa.v1 (ObservationSizeFfaV1 = 810 floats), for FFA-kin. No map
@@ -453,7 +506,7 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
     bodies: array[Seats, int], version: ObservationContractVersion) =
   ## The observation of the given contract. v1 is the encoder above, called unchanged;
   ## v2 writes the same v1 floats in columns 0 .. ObservationSize-1 and the terrain
-  ## block after them.
+  ## block after them; v3 writes v2's floats and the scoreboard block after them.
   if slot notin 0..<Seats or output.len != observationSize(version):
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   case version
@@ -461,6 +514,10 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
   of ocV2:
     w.encodeObservation(slot, output.toOpenArray(0, ObservationSize-1), bodies)
     w.encodeTerrainBlock(slot, output.toOpenArray(ObservationSize, ObservationSizeV2-1), bodies)
+  of ocV3:
+    w.encodeObservation(slot, output.toOpenArray(0, ObservationSize-1), bodies)
+    w.encodeTerrainBlock(slot, output.toOpenArray(ObservationSize, ObservationSizeV2-1), bodies)
+    w.encodeScoreboardBlock(slot, output.toOpenArray(ObservationSizeV2, ObservationSizeV3-1))
   of ocFfaV1:
     # Hosted and default callers: the match's kinship, no mask (masks are training-only).
     w.encodeFfaObservation(slot, output, bodies, activeKinship)
@@ -990,17 +1047,102 @@ proc userInputsFromHash*(hash: string): int =
   for i, h in UserInputsContractHashes:
     if h == hash: return i + 1
   0
+# Observation contract "v3 + K user inputs": v3's 514 floats (v2's 506, then the scoreboard
+# block) unchanged, then the K user inputs exactly as v2u<K> feeds them. Contract id
+# paintbot-pw.rules43.obs.v3u<K>, K = 1 .. 64; the hash is the SHA-256 of the id, one per K.
+const
+  V3UserInputsContractHashes*: array[MaxUserInputs, string] = [
+    "8086b6f36b9c2cf07e9e6586e97221e484f809e08669075663c5dcf9cb63ac36",
+    "ca964b56d4b488655b32aae55f7d75d5d0bacbbbaf394956a8e689a61aacb455",
+    "610439dc76c3fce685e386984c89ba6608047840c202e75e8471c5f836e5ac8f",
+    "5d747520806f13a50c308df52fb8fbe48bf37267dc56682e15e612519741795d",
+    "3733cfe85e510fdf9b702f83db1fd045603e883dd521dc381dae71dc24096b47",
+    "3759d22dc27f9a636d67df7d5aa6b0fd569385ad79f00a99aa9937adee3866cc",
+    "078d05d86e3d6a7c567a59e85c5052e5898a9e638d05f44a8037c4cb69ab7a11",
+    "3df9e895a5534e81362bae38a245c11d7d677f660a6a9f15066f8542a15f814e",
+    "942ff27110190e8f59c790b3a238bb36e3e24fe0810a01e0e62407fe39292bf0",
+    "32af93f613fa6eba4f9ad34e81ecdc975b9c8b6b1a2f181eceae6be313a985f2",
+    "ab7a66b3fa0f992aac3a363866ccb1a5d42ab8913dc4c078ab86392efc8dc3bd",
+    "2c92b3897a89ec43f8e643af039e769efd6624d91fd09508700a005df8269b19",
+    "1abf7b958c62810b8874f476423bfebc1d26d530e8305f8e8c013fbdea3ef448",
+    "7ff09120660978dbf145e9a426aedd32df5c599c9b317ecbcd6cf3fdc99738ad",
+    "6ccc6ee131b6713c85546fbac5ed7e22142b4b8e25bc46ede228f46099399e2e",
+    "26c647d0c254edf7ce9b29bc2eb005997afa01bf5335ff00692cf6683d1df24d",
+    "727cf5714151451f3d2416e75a390caff8b6c845e46fc7e81c825e548e1224de",
+    "f9ca2d1f7761fcc4b95a6cde30c77252f0762bb97cb7102b504614929854345f",
+    "5760383d267aaae222da3520ff15e4aa28ac40f10203a60ddffde3379ea36786",
+    "899b3292526f5d554b9208ab31a72d47fab57772b8076d040cfc022571e4fee0",
+    "c2ae79efbcbbbad9358aafa16d8800c9dfe448a8057a965e322df6fb4bf96ced",
+    "d350354a83a439ccf969d2647b9a10192f6fdddd45d4debbed6507af20cf82aa",
+    "22fc8b4438abf44f2b67fe2127612c35762a222ded6eb1af893a60e9d6f490d8",
+    "501418109b1bf8a0cc873debdecd87c9a9ddc7ffaf088078924242f0e5a8970a",
+    "ecbeee86bf7a959f529e17bc732bba879cdf4cad6c5c46c6164ab25b02980412",
+    "66dc26a93d0b548d98e5077ae5ad832b25c1d475df0f78a78f743709385baab1",
+    "6962e9609980d86b5b075ee0d5c46cea2ff83b2a32e184012875627d6cb79bf8",
+    "0e42592253d6c34969473065cba39e97d080165f1d22c3c755d055d8b791e7bd",
+    "e6539f1a85484ff132710cf56f0aecb5d9f803256db66987765147d1d0c67566",
+    "7d4e9709131fcda3223ae2001b2d81d4fea4b3e5ad875407dd3a10a6035b9b46",
+    "e2dc42dbc2357e54241749c8fc57f2ea680d82d0e1b06d6acb463a2075b8a342",
+    "92c7b22891330d11753da7215bad0d300eb0990955a6caf2f8dc003917646d3d",
+    "f58000ed67c49e04a60b8c9267232a1b80ebb9a911e451262ebd74f0444ef514",
+    "9eccec352a94f907b86c2da3c77d70b5bc124533b9a433769ab64fd995edfb20",
+    "842711c2a9472dca8d439e9a282b37dffa0c3181aa3acf30f083e4afb5526fff",
+    "79b3107563784d91accf0ac782cb5abfcb557a479ed7fe36cd9ef52865b95bf7",
+    "52f47f77cf7bff9c918665b4bb8ad6203ee05e0b7aa0a56c7e2eeeb74747df90",
+    "45b6557b86984eb6530bea5f94805b09e754eeb40cb8f4febd71aaeaa8daf32e",
+    "cff4448d357e59d79fd855fee804e93b2af374de8f7a0e3f05c25c3991490707",
+    "5c84bec7f53a3f908730eace5e4b46e54fbd7b667810dd0d3ffa4a096b0c0e2b",
+    "5b8875b4ad74933d12cb56485f7cae2bed4d6afe03353a51edc0e4bdf9453a85",
+    "de33870fb5abaf4c9389f8b34fc6de29996a918a448102389eee584c62d5b584",
+    "31261ac0c63b3895a4477b77541586189832efa70cc3b128c13928c7d86d754c",
+    "e4c7b3167e32875d1021af2c43d47c1ada6fb5009168996dd6f0310ffd50ab10",
+    "470eecc6ad180e003f5eadaa494cc4ff0d7081a5e3ed6d852e094657c3c88d9e",
+    "3dcfb44fca9e12451c95d5dd9125873264ac8c9f5b4b70e683e1a537d85e159d",
+    "883774ce00e428c29f6a5c89a093e66bac369f7ab347ddf8fb6c3ca753599d84",
+    "aefffc802bf72a33161bef617bf61d4dbbe9a3d341d170f6ebfd1ed733d6b894",
+    "1d3ab99e6c3382242ea34b33f4538ab67f43533b3931a7428dea2b158f69603e",
+    "db29ce7ce8c2e198084c924d004ea3b53007d51fbdbf7a98c17af3a4933b4287",
+    "ea55268d4a10466c2505b7f358b3b9edf18415b45b380cbcf251cd6c6f72e704",
+    "844c8e69d776b025687c5e1e78532bca2cced387800970b710a21fb45e9fa428",
+    "f3906987e82cb18b873a1b8148465f115d9269cb132ef6abee1b4126638a044b",
+    "396a6d9c4516c5623212f43d888932b83a92a838d515db6c487e30098fbe710a",
+    "240c98819e335e604a618e843afb6f833f26d4b466f47d3a3cd2e2ca389ea8d6",
+    "c1eb1cdc6272aaa3cafdace231a5f6b5d8ea97f2583556d13ac0f21202fb02c3",
+    "8013591018d6092ab4d4adb9c86ab62023556c11dd40b632549e4cc6006c8168",
+    "166dc93a8c95c7d833ea6e3255946383b03d10b83a8b05e429c72e039095f9ee",
+    "4f5c229d86ea1a0a440010ea32716e816dc0ec20cf4ec2c44542ea836df3bab1",
+    "1ca0805827c8b53cb75984fdcc4eca4c72b6df9e348e970dab661079ca227089",
+    "ecdc9c3c4abdfc647c0b552d9f09fd90fdba797a7ffc3083b6406da2bacc5a85",
+    "a0c334d7c41043c6ad1cac81741a9cd831b9ad34d4f171e654da9e7ce5808f01",
+    "736562060cb8eafb0c9568ba560ebfdc187d9dca245909f7b4fa9c1c1ae319bf",
+    "1695203c740b769ff61f9bd18c4687f517db1664069b3ae47e7466060cb77dfb"
+  ]
+proc v3UserInputsContractId*(k: int): string = "paintbot-pw.rules43.obs.v3u" & $k
+proc v3UserInputsFromHash*(hash: string): int =
+  ## K when `hash` names observation contract v3u<K>; 0 otherwise.
+  for i, h in V3UserInputsContractHashes:
+    if h == hash: return i + 1
+  0
+proc userInputsContractHash*(version: ObservationContractVersion, k: int): string =
+  ## The hash of observation contract v2u<K> (version ocV2) or v3u<K> (ocV3), K = 1 .. 64.
+  if k notin 1..MaxUserInputs or version notin {ocV2, ocV3}:
+    raise newException(ValueError, "no user-input observation contract for that version and count")
+  if version == ocV3: V3UserInputsContractHashes[k-1] else: UserInputsContractHashes[k-1]
 proc userInputFeature*(value: int32): float32 =
   ## The float a user input value feeds the net: float32(v) / 1000 (v already clamped).
   float32(value) / 1000'f32
 proc clampUserInput*(value: int32): int32 = clamp(value, -UserInputLimit, UserInputLimit)
 proc encodeObservationInputs*(w: World, slot: int, output: var openArray[float32],
-    bodies: array[Seats, int], inputs: openArray[int32]) =
-  ## Observation contract v2u<K>, K = inputs.len: v2's 506 floats, then the K user inputs.
-  if inputs.len notin 1..MaxUserInputs or output.len != ObservationSizeV2 + inputs.len:
+    bodies: array[Seats, int], inputs: openArray[int32], version = ocV2) =
+  ## Observation contract v2u<K> (version ocV2) or v3u<K> (ocV3), K = inputs.len: the
+  ## version's 506 or 514 floats, then the K user inputs.
+  if version notin {ocV2, ocV3}:
+    raise newException(ValueError, "user inputs need observation contract v2 or v3")
+  let n = observationSize(version)
+  if inputs.len notin 1..MaxUserInputs or output.len != n + inputs.len:
     raise newException(ValueError, "invalid neural observation dimensions or seat")
-  w.encodeObservation(slot, output.toOpenArray(0, ObservationSizeV2-1), bodies, ocV2)
-  for i, value in inputs: output[ObservationSizeV2+i] = userInputFeature(value)
+  w.encodeObservation(slot, output.toOpenArray(0, n-1), bodies, version)
+  for i, value in inputs: output[n+i] = userInputFeature(value)
 
 # Decoder strafe legs (bundle option decoder.strafe_legs, schema 2; not a contract change):
 # base.bas's footwork in contact (its planLeg), as pw-diag measured it (first-contact.md,
