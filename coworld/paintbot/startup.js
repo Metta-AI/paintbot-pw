@@ -65,7 +65,7 @@
     }
     return new Uint8Array(await new Blob(chunks).arrayBuffer());
   }
-  async function prepareReplay() {
+  async function downloadReplay() {
     const uri = new URLSearchParams(location.hash.slice(1)).get('replay') || new URLSearchParams(location.search).get('replay');
     if (!uri) throw new Error('No replay was supplied. Open a completed episode replay.');
     let bytes = await download(uri, 'replay', 64 * 1048576);
@@ -73,6 +73,26 @@
     const zlib = (bytes[0] & 15) === 8 && (bytes[0] >> 4) <= 7 && ((bytes[0] << 8) | bytes[1]) % 31 === 0;
     if (gzip || zlib) bytes = await inflate(bytes, gzip ? 'gzip' : 'deflate', 64 * 1048576);
     if (!bytes.length) throw new Error('The replay file is empty');
+    return bytes;
+  }
+  // The replay header names its build: "paintbot_pw" (16 seats, this directory) or a crowd
+  // build "paintbot_pw_s<N>" (Heartland Big's 50 seats), whose viewer and verifier are in s<N>/.
+  // Header: "POLYWORLDREPLAY", u16 format, u16 game version, u16 game-id length, game id.
+  function buildDirectory(bytes) {
+    const magic = 'POLYWORLDREPLAY';
+    if (!bytes || bytes.length < magic.length + 6) return '';
+    for (let i = 0; i < magic.length; i++) if (bytes[i] !== magic.charCodeAt(i)) return '';
+    const at = magic.length + 6;
+    const length = bytes[magic.length + 4] | (bytes[magic.length + 5] << 8);
+    const game = new TextDecoder().decode(bytes.subarray(at, at + length));
+    const crowd = /^paintbot_pw_s(\d+)$/.exec(game);
+    return crowd ? `s${crowd[1]}/` : '';
+  }
+  const replayBytes = isReplay ? downloadReplay() : Promise.resolve(null);
+  const build = replayBytes.then(buildDirectory);
+  async function prepareReplay() {
+    const bytes = await replayBytes;
+    const directory = await build;
     progress('replay', 'Verifying replay in background…');
     const index = await new Promise((resolve, reject) => {
       worker = new Worker('index-worker.js');
@@ -84,7 +104,7 @@
       };
       // Retain these same bytes for the viewer; only the worker's index returns
       // via transfer. No network lookup or external index is trusted here.
-      worker.postMessage(bytes.buffer);
+      worker.postMessage({buffer: bytes.buffer, directory});
     });
     worker.terminate();
     progress('replay', 'Replay verified');
@@ -92,6 +112,7 @@
   }
   const replay = isReplay ? prepareReplay() : Promise.resolve(null);
   replay.catch(failure);
+  build.catch(failure);
   if (isReplay) {
     Module.preRun = [() => {
       addRunDependency('verified-replay');
@@ -111,7 +132,7 @@
     progress('assets', 'Artwork ready');
   })();
   const wasm = (async () => {
-    const response = await fetch('paintbot.wasm', {signal: abort.signal});
+    const response = await fetch((await build) + 'paintbot.wasm', {signal: abort.signal});
     if (!response.ok) throw new Error(`Viewer download failed (${response.status})`);
     const compiled = await WebAssembly.compileStreaming(response);
     Module.instantiateWasm = (imports, receive) => {
@@ -119,10 +140,10 @@
       return {};
     };
   })();
-  Promise.all([assets, wasm]).then(() => {
+  Promise.all([assets, wasm, build]).then(([, , directory]) => {
     if (stopped) return;
     const script = document.createElement('script');
-    script.src = 'paintbot.js';
+    script.src = directory + 'paintbot.js';
     script.onerror = () => failure(new Error('Could not load viewer code'));
     document.body.append(script);
   }).catch(failure);

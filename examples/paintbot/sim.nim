@@ -6,7 +6,7 @@ import std/[tables, math]
 import kinship
 
 const
-  Seats* = 16
+  Seats* {.intdefine: "pwSeats".} = 16 ## -d:pwSeats=N for scale benchmarks only; hosted play is 16
   TickRate* = 24
   MatchTicks* = 5*60*TickRate # Historical replay duration.
   HeartMeterMatchTicks* = 10*60*TickRate
@@ -746,12 +746,15 @@ proc sampleSpawnHeart*(w: var World, slot: int): int =
     draw -= weight
   candidates[^1]
 
+# Crowd builds (-d:pwSeats > 16) widen the spawn disc with the square root of the seat count, so a
+# large family still fits round its anchor; the 16-seat game keeps HeartSpawnRadius exactly.
+const SpawnRadius = (when Seats <= 16: HeartSpawnRadius.int32 else: int32(HeartSpawnRadius.float*sqrt(Seats.float/16)))
 proc spawnNear(w: var World, slot: int, origin: Point): bool =
   # Search only near the origin (a heart, or an FFA spawn anchor). If crowded, retry next tick.
   for attempt in 0..<128:
-    let p = point(origin.x.int+w.rng.between(-HeartSpawnRadius, HeartSpawnRadius).int,
-        origin.z.int+w.rng.between(-HeartSpawnRadius, HeartSpawnRadius).int)
-    if distance2(origin, p) > HeartSpawnRadius*HeartSpawnRadius: continue
+    let p = point(origin.x.int+w.rng.between(-SpawnRadius, SpawnRadius).int,
+        origin.z.int+w.rng.between(-SpawnRadius, SpawnRadius).int)
+    if distance2(origin, p) > SpawnRadius.int64*SpawnRadius: continue
     if w.blocked(p) or w.occupied(p, slot) or not w.traversable(origin, p): continue
     w.cogs[slot].pos = p; w.cogs[slot].goal = p
     w.cogs[slot].hp = maxHp(); w.cogs[slot].shield = 36

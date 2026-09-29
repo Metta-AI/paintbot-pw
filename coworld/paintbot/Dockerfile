@@ -13,9 +13,12 @@ COPY config.nims config.nims
 COPY src src
 COPY examples/paintbot examples/paintbot
 RUN nim c -d:coworld -o:/out/paintbot examples/paintbot/paintbot.nim
+# Crowd build for Heartland Big (50 seats: 10 tribes of 5); runtime/host.py picks it by seat count.
+RUN nim c -d:coworld -d:pwSeats=50 --nimcache:/tmp/nimcache-50 -o:/out/paintbot-50 examples/paintbot/paintbot.nim
 FROM python:3.12-slim
 RUN pip install --no-cache-dir boto3==1.40.18
 COPY --from=compiler /out/paintbot /usr/local/bin/paintbot
+COPY --from=compiler /out/paintbot-50 /usr/local/bin/paintbot-50
 COPY coworld/paintbot/runtime /runtime
 EXPOSE 8080
 ENTRYPOINT ["python", "/runtime/host.py"]

@@ -10,6 +10,11 @@ def package(output: Path) -> None:
     data = (output / "paintbot.data").read_bytes()
     if data != (output / "play/paintbot.data").read_bytes():
         raise ValueError("Replay/live asset layouts differ")
+    # Crowd builds (s<N>/, Heartland Big) load the same artwork package.
+    for crowd in sorted(output.glob("s[0-9]*/paintbot.data")):
+        if crowd.read_bytes() != data:
+            raise ValueError(f"{crowd.parent.name} asset layout differs from the replay viewer's")
+        crowd.unlink()
     (output / "paintbot.data.gz").write_bytes(
         gzip.compress(data, compresslevel=9, mtime=0)
     )

@@ -35,7 +35,8 @@ suite "kin layout config":
     check parseKinLayout(%*{"mode": "ffa_kin"}, gmFfaKin).isNone
     check parseKinLayout(%*{"mode": "ffa_kin", "kin_layout": "sampled"}, gmFfaKin).isNone
     let names = {"fours": klFours, "pairs": klPairs, "trios_loner": klTriosLoner,
-      "cousins": klCousins, "strangers": klStrangers, "clones": klClones}
+      "cousins": klCousins, "strangers": klStrangers, "clones": klClones,
+      "tribes": klTribes}
     for (name, layout) in names:
       check parseKinLayout(%*{"mode": "ffa_kin", "kin_layout": name}, gmFfaKin) == some(layout)
     expect ValueError: discard parseKinLayout(%*{"kin_layout": "triples"}, gmFfaKin)

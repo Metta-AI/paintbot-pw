@@ -9,7 +9,7 @@ export options
 import polyworld/rngs
 
 const
-  KinSeats* = 16 # Seats in sim.nim; kept separate so sim can import this module.
+  KinSeats* {.intdefine: "pwSeats".} = 16 # Seats in sim.nim; kept separate so sim can import this module.
   Loci* = 32
   SiblingLoci = 16 # r = 1/2
   CousinLoci = 8 # r = 1/4
@@ -17,14 +17,16 @@ const
 
 type
   KinLayout* = enum
-    klFours, klPairs, klTriosLoner, klCousins, klStrangers, klClones
+    klFours, klPairs, klTriosLoner, klCousins, klStrangers, klClones,
+    klTribes ## families of TribeSize full siblings filling the seats (crowd builds: 50 seats = 10 tribes of 5)
   Kinship* = object
     layout*: KinLayout
     family*: array[KinSeats, int8] # family id per seat, -1 = loner
     genes*: array[KinSeats, uint32] # 32 loci as bits
     ibd*: array[KinSeats, array[KinSeats, int8]] # loci shared by descent, 0..32
 
-const LayoutWeights: array[KinLayout, int32] = [25'i32, 25, 20, 20, 5, 5]
+const LayoutWeights: array[KinLayout, int32] = [25'i32, 25, 20, 20, 5, 5, 0] # tribes: pinned only
+const TribeSize* = 5
 static: doAssert LayoutWeights.sum == 100
 
 when defined(pwTraining):
@@ -68,6 +70,10 @@ proc build(layout: KinLayout, rng: var Rng): Kinship =
     of klTriosLoner: @[3, 3, 3, 3, 3]
     of klStrangers: newSeq[int]()
     of klClones: @[16]
+    of klTribes: (block:
+      var tribes: seq[int]
+      for unused in 0..<KinSeats div TribeSize: tribes.add TribeSize
+      tribes)
   # Seats join families in shuffled order; whoever is left over is a loner.
   let order = rng.shuffled(KinSeats)
   for i in 0..<KinSeats: result.family[i] = -1

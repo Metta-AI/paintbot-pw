@@ -61,6 +61,7 @@ proc parseKinLayout*(config: JsonNode, mode: GameMode): Option[KinLayout] =
   of "cousins": some(klCousins)
   of "strangers": some(klStrangers)
   of "clones": some(klClones)
+  of "tribes": some(klTribes)
   else: raise newException(ValueError, "Unknown Paintbot kin_layout: " & layout.getStr)
 
 type MatchConfig* = object

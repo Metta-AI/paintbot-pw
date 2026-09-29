@@ -57,6 +57,17 @@ html=html.replace('</head>',bootstrap+'</head>')
 (out/'play/index.html').write_text(html.replace('</body>',hud+'</body>'))
 PLAY
 
+# Crowd builds (Heartland Big: PAINTBOT_CROWD_SEATS=50) go in s<N>/: startup.js reads the
+# replay header's game id (paintbot_pw_s<N>) and loads that build. They share the artwork.
+for seats in ${PAINTBOT_CROWD_SEATS:-}; do
+  crowd=(-d:pwSeats="$seats" --nimcache:"$root/tmp/nimcache-crowd-$seats"
+    --passL:-sSTACK_SIZE=33554432 --passL:-sINITIAL_MEMORY=134217728)
+  nim c "${crowd[@]}" -d:emscripten -d:replayIndexer examples/paintbot/indexer.nim
+  nim c "${crowd[@]}" -d:emscripten -d:replayViewer -d:workerReplayIndex examples/paintbot/paintbot.nim
+  mkdir -p "$output/s$seats"
+  cp examples/paintbot/emscripten/paintbot.{js,wasm,data} examples/paintbot/emscripten/paintbot-index.{js,wasm} "$output/s$seats/"
+done
+
 # Compress the opaque Emscripten archive explicitly: the static content server
 # does not apply HTTP compression to application/octet-stream. Both clients use
 # the same asset layout; share the compressed package across replay and live.

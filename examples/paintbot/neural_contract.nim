@@ -81,13 +81,16 @@ const
   ## r-to-me column (and the territory-boost column, which is r to the local owner), the
   ## genes-only ablation.
   FfaObsMaskKin* = 1'u32
-static:
-  doAssert FfaIdentityRowSize == 2 + 1 + 1 + 1 + Loci + 1 + 1 + 1 + 2
-  doAssert FfaIdentityOffset == 8 and FfaHeartOffset == 680 and FfaGreatOffset == 740
-  doAssert FfaTerrainOffset == 752 and ObservationSizeFfaV1 == 810
-  doAssert ObservationContractFfaV1 == "paintbot-pw.rules40.obs.ffa.v1.float" & $ObservationSizeFfaV1
-  doAssert FfaMatchTicks == 8640 and GreatHeartDormantTicks == 1440
-static: doAssert ObservationSizeV2 == 506 and ObservationContractV2 == "paintbot-pw.rules37.obs.v2.float" & $ObservationSizeV2
+# The observation contracts pin the 16-seat layout; builds with more seats (-d:pwSeats) refuse
+# neural seats (neural_host checks Seats).
+when Seats == 16:
+  static:
+    doAssert FfaIdentityRowSize == 2 + 1 + 1 + 1 + Loci + 1 + 1 + 1 + 2
+    doAssert FfaIdentityOffset == 8 and FfaHeartOffset == 680 and FfaGreatOffset == 740
+    doAssert FfaTerrainOffset == 752 and ObservationSizeFfaV1 == 810
+    doAssert ObservationContractFfaV1 == "paintbot-pw.rules40.obs.ffa.v1.float" & $ObservationSizeFfaV1
+    doAssert FfaMatchTicks == 8640 and GreatHeartDormantTicks == 1440
+  static: doAssert ObservationSizeV2 == 506 and ObservationContractV2 == "paintbot-pw.rules37.obs.v2.float" & $ObservationSizeV2
 const
   ## Observation contract v3 ("scoreboard"): v2's 506 floats unchanged in columns
   ## 0 .. ObservationSizeV2-1, followed by the seat's team's public scoreboard
@@ -97,7 +100,8 @@ const
   ObservationSizeV3* = ObservationSizeV2 + ScoreboardBlockSize
   ObservationContractV3* = "paintbot-pw.rules43.obs.v3.float514"
   ObservationContractV3Hash* = "06f16d62adedda6995d393696c0d2ed257aa9380b86341e73d1d6a3c7ea374f1"
-static: doAssert ObservationSizeV3 == 514 and ObservationContractV3 == "paintbot-pw.rules43.obs.v3.float" & $ObservationSizeV3
+when Seats == 16:
+  static: doAssert ObservationSizeV3 == 514 and ObservationContractV3 == "paintbot-pw.rules43.obs.v3.float" & $ObservationSizeV3
 
 type
   ObservationContractVersion* = enum

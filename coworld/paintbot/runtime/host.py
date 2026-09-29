@@ -83,10 +83,20 @@ def basic_oracle_round(oracle, world, pending):
     return replies
 
 
+def engine_for_seats(engine, seats):
+    """The engine build for a seat count: the 16-seat game is `engine`; a crowd variant (Heartland
+    Big's 50 seats) runs `engine`-N, built with -d:pwSeats=N into the same image."""
+    if seats == 16:
+        return engine
+    crowd = f"{engine}-{seats}"
+    if not os.path.isfile(crowd):
+        raise ValueError(f"Paintbot has no {seats}-seat engine (16 seats, or a build at {crowd})")
+    return crowd
+
+
 def run(engine):
     doc = load_seats(os.environ["COGAME_PLAYER_SEATS_URI"])
-    if len(doc["seats"]) != 16:
-        raise ValueError("Paintbot requires 16 seats")
+    engine = engine_for_seats(engine, len(doc["seats"]))
     child = None
     oracle = Oracle.from_env()
     try:

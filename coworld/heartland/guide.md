@@ -8,7 +8,10 @@ cooperating with them, without any team label.
 
 - **Leagues.** Heartland (`heartland` variant: Heartwick island, cousin-linked families of four)
   and Heartland Big (`heartland-big`: Big Twin Mesas, ten times the area with 100 control hearts,
-  a kinship layout drawn per match).
+  and 50 cogs in 10 tribes of 5 full siblings, `"kin_layout": "tribes"`).
+- **Seats.** Heartland seats 16 cogs; Heartland Big seats 50. `seatCount()` returns the match's
+  seat count, and `kin`, `gene`, `seatScore`, `seatAlive` take any seat below it. Neural policies
+  need the 16-seat game.
 - **Rules in brief.** One life, 10 HP, 20 m guns, lone-cog heart captures, a territory boost on
   your own and your relatives' ground, and two great hearts that need three cogs at once.
   A match lasts 6:00. The full rules are under "FFA-kin mode (Heartland)" below.

@@ -46,6 +46,12 @@ suite "kinship":
         of klTriosLoner: check sizes == @[3, 3, 3, 3, 3, 0]
         of klStrangers: check sizes == newSeq[int](KinSeats)
         of klClones: check sizes == @[16]
+        of klTribes:
+          # Families of TribeSize siblings fill the seats; any remainder are loners.
+          var tribes: seq[int]
+          for unused in 0..<KinSeats div TribeSize: tribes.add TribeSize
+          for unused in 0..<KinSeats mod TribeSize: tribes.add 0
+          check sizes == tribes
         for i in 0..<KinSeats:
           for j in 0..<KinSeats:
             if i == j: continue
@@ -95,7 +101,9 @@ suite "kinship":
       let k = sampleKinship(seed)
       seen.incl k.layout
       inc counts[k.layout]
-    check seen == {KinLayout.low..KinLayout.high}
+    # Every sampled layout appears; tribes (weight 0) is only ever pinned (Heartland Big).
+    check seen == {KinLayout.low..klClones}
+    check counts[klTribes] == 0
     # Weights 25/25/20/20/5/5: the rare layouts stay rare.
     check counts[klStrangers] < counts[klFours]
     check counts[klClones] < counts[klPairs]

@@ -559,6 +559,9 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
   let modelPath = sourcePath & ".model.bin"
   if not fileExists(modelPath): return
+  when Seats != 16:
+    # Every observation contract lays out 16 seats; a crowd build disables the seat instead.
+    raise newException(ValueError, "neural policies need the 16-seat game; this match has " & $Seats & " seats")
   let actor = loadActorFile(modelPath)
   # Model metadata is authoritative even when running a local unpacked package. The
   # observation contract hash selects the encoder (v1; v2 = v1 + terrain block; v3 = v2 + scoreboard) and

@@ -146,6 +146,9 @@ proc limits*(): Limits =
   result=defaultLimits()
   result.maxSourceBytes=128*1024; result.maxInstructions=50000
   result.maxMemoryBytes=2*1024*1024; result.maxWorkUnits=125000
+  when Seats > 16:
+    # Crowd builds (-d:pwSeats): a script's roster loops grow with the seat count, and so does its budget.
+    result.maxInstructions=50000*Seats div 16; result.maxWorkUnits=125000*Seats div 16
   result.maxArrayElements=4096;result.maxGlobals=512;result.maxCallDepth=16
   result.maxPrintBytes=1024;result.maxPrintEvents=128
 proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
@@ -288,6 +291,7 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
     proc seatIndex(value: int32): bool = value >= 0 and value < Seats
     proc inMatch(i: int): bool = active.cogs[i].hp > 0 or active.equipment[i].lives > 0
     discard result.addFunction("gameMode",0,proc(a:openArray[int32]):int32 = 1,4)
+    discard result.addFunction("seatCount",0,proc(a:openArray[int32]):int32 = Seats.int32,4)
     discard result.addFunction("kin",1,proc(a:openArray[int32]):int32 =
       if not seatIndex(a[0]): -1'i32
       else: activeKinship.rPercent(slot, a[0].int),4)

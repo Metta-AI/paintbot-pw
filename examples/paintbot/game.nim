@@ -135,34 +135,37 @@ proc toPreMapFfaRecording(r: Recording, k: Kinship): PreMapRecordingFfa =
   PreMapRecordingFfa(seed: r.seed, frames: r.frames, names: r.names,
     communications: r.communications, endTick: r.endTick, mode: gameMode.uint8,
     layout: k.layout.uint8, family: k.family, genes: k.genes, ibd: k.ibd)
+const ReplayGame* = when Seats == 16: "paintbot_pw" else: "paintbot_pw_s" & $Seats
+  ## The replay header's game id. A crowd build (-d:pwSeats=N) writes and reads only its own
+  ## seat count, so a 16-seat engine or viewer refuses a 50-seat replay instead of misreading it.
 proc saveRecording*(path: string, r: Recording) =
   ## Teams games keep the rules-numbered Recording; FFA-kin adds the mode and kinship.
   if ffa():
     if replayRulesVersion >= 41:
-      saveReplayFile(path, "paintbot_pw", replayGameVersion(), r.toFfaRecording(activeKinship))
+      saveReplayFile(path, ReplayGame, replayGameVersion(), r.toFfaRecording(activeKinship))
     else:
-      saveReplayFile(path, "paintbot_pw", replayGameVersion(),
+      saveReplayFile(path, ReplayGame, replayGameVersion(),
         r.toPreMapFfaRecording(activeKinship))
-  elif replayRulesVersion >= 43: saveReplayFile(path, "paintbot_pw", replayGameVersion(), r)
+  elif replayRulesVersion >= 43: saveReplayFile(path, ReplayGame, replayGameVersion(), r)
   elif replayRulesVersion == 42:
-    saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreGloryRecording(seed: r.seed,
+    saveReplayFile(path, ReplayGame, replayGameVersion(), PreGloryRecording(seed: r.seed,
       frames: r.frames, names: r.names, communications: r.communications, endTick: r.endTick,
       map: r.map, vision: r.vision))
   elif replayRulesVersion == 41:
     # Each version is written in the shape its loader reads.
-    saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreVisionRecording(seed: r.seed,
+    saveReplayFile(path, ReplayGame, replayGameVersion(), PreVisionRecording(seed: r.seed,
       frames: r.frames, names: r.names, communications: r.communications, endTick: r.endTick, map: r.map))
   else:
-    saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreMapRecording(seed: r.seed,
+    saveReplayFile(path, ReplayGame, replayGameVersion(), PreMapRecording(seed: r.seed,
       frames: r.frames, names: r.names, communications: r.communications, endTick: r.endTick))
 proc loadFfaRecording(path: string, version: int): Recording =
   let rules = version - FfaReplayVersionBase
   if rules notin FfaRulesVersions:
     raise newException(ReplayError, "Unsupported Paintbot FFA replay version")
   let old =
-    if rules >= 41: loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa)
+    if rules >= 41: loadReplayFile(path, ReplayGame, version.uint16, RecordingFfa)
     else:
-      let pre = loadReplayFile(path, "paintbot_pw", version.uint16, PreMapRecordingFfa)
+      let pre = loadReplayFile(path, ReplayGame, version.uint16, PreMapRecordingFfa)
       RecordingFfa(seed: pre.seed, frames: pre.frames, names: pre.names,
         communications: pre.communications, endTick: pre.endTick, mode: pre.mode,
         layout: pre.layout, family: pre.family, genes: pre.genes, ibd: pre.ibd)
@@ -194,37 +197,37 @@ proc loadRecording*(path: string): Recording =
   if version >= FfaReplayVersionBase:
     result = loadFfaRecording(path, version)
   elif replayRulesVersion == 1:
-    let old = loadReplayFile(path, "paintbot_pw", 1, LegacyRecording)
+    let old = loadReplayFile(path, ReplayGame, 1, LegacyRecording)
     result.seed = old.seed
     result.frames = convertFrames(old.frames)
   elif replayRulesVersion in [2, 3, 4, 5]:
-    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, LegacyMetadataRecording)
+    let old = loadReplayFile(path, ReplayGame, replayRulesVersion.uint16, LegacyMetadataRecording)
     result = Recording(seed: old.seed, frames: convertFrames(old.frames),
         names: old.names, communications: old.communications)
   elif replayRulesVersion in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]:
-    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PriorRecording)
+    let old = loadReplayFile(path, ReplayGame, replayRulesVersion.uint16, PriorRecording)
     result = Recording(seed:old.seed,frames:convertFrames(old.frames),names:old.names,communications:old.communications)
   elif replayRulesVersion in [23, 24, 25]:
-    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreSoundRecording)
+    let old = loadReplayFile(path, ReplayGame, replayRulesVersion.uint16, PreSoundRecording)
     result = Recording(seed:old.seed,frames:convertFrames(old.frames),names:old.names,
       communications:old.communications,endTick:old.endTick)
   elif replayRulesVersion in [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]:
-    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreMapRecording)
+    let old = loadReplayFile(path, ReplayGame, replayRulesVersion.uint16, PreMapRecording)
     result = Recording(seed: old.seed, frames: old.frames, names: old.names,
       communications: old.communications, endTick: old.endTick)
   elif replayRulesVersion == 41:
-    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreVisionRecording)
+    let old = loadReplayFile(path, ReplayGame, replayRulesVersion.uint16, PreVisionRecording)
     result = Recording(seed: old.seed, frames: old.frames, names: old.names,
       communications: old.communications, endTick: old.endTick, map: old.map)
     discard mapIndex(result.map) # an unknown map is an invalid replay
   elif replayRulesVersion == 42:
-    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreGloryRecording)
+    let old = loadReplayFile(path, ReplayGame, replayRulesVersion.uint16, PreGloryRecording)
     result = Recording(seed: old.seed, frames: old.frames, names: old.names,
       communications: old.communications, endTick: old.endTick, map: old.map, vision: old.vision)
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
   elif replayRulesVersion in [43, 44, 45]: # 44 and 45 changed routing only; the format is 43's
-    result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
+    result = loadReplayFile(path, ReplayGame, replayRulesVersion.uint16, Recording)
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
     if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
@@ -289,6 +292,15 @@ proc setup*() =
     while i < args.len:
       if args[i].startsWith("--map:"):
         mapChoice = args[i]["--map:".len..^1]; discard mapIndex(mapChoice); inc i; continue
+      if args[i].startsWith("--mode:"):
+        # Local play and recording: "--mode:ffa_kin" plays Heartland (a match lasts at most 6:00).
+        gameMode = parseGameMode(%*{"mode": args[i]["--mode:".len..^1]})
+        if ffa(): options.maximumTicks = min(options.maximumTicks, FfaMatchTicks.int32)
+        inc i; continue
+      if args[i].startsWith("--kin-layout:"):
+        # With --mode:ffa_kin (earlier on the line): pin a kin layout, e.g. "--kin-layout:tribes".
+        kinLayoutPin = parseKinLayout(%*{"kin_layout": args[i]["--kin-layout:".len..^1]}, gameMode)
+        inc i; continue
       if args[i].startsWith("--vision:"):
         visionChoice = args[i]["--vision:".len..^1]; configureVision(visionChoice); inc i; continue
       if args[i].startsWith("--glory:"):

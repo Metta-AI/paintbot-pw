@@ -21,16 +21,17 @@
 '   5. Late game (no neutral heart left): go to a ready great heart and wait there while three
 '      or more cogs live; otherwise walk into the nearest stranger-owned heart to steal it.
 ' Movement, aim lead, dodge legs and the dry-route detour are base.bas's. Every loop is bounded by
-' the 16 seats, the heart count or a fixed count; the heaviest tick stays far under the budget.
-dim oldX(16)
-dim oldY(16)
-dim oldHp(16)
-dim lastSeen(16)
-dim hurtUntil(16)
-dim spokeX(16)
-dim spokeY(16)
-dim spokeTick(16)
-dim capBy(16)
+' seatCount() (16, or 50 in Heartland Big), the heart count or a fixed count; the heaviest tick
+' stays far under the budget.
+dim oldX(64)
+dim oldY(64)
+dim oldHp(64)
+dim lastSeen(64)
+dim hurtUntil(64)
+dim spokeX(64)
+dim spokeY(64)
+dim spokeTick(64)
+dim capBy(64)
 dim taken(64)
 dim avoidUntil(64)
 dim pickupMemoryX(64)
@@ -39,6 +40,8 @@ dim pickupMemoryKind(64)
 dim pickupMemoryTick(64)
 dim drF(6)
 dim blindKin(16)
+' Seat arrays hold up to 64 seats; loops run to the match's seat count.
+nSeats = seatCount()
 
 ' Integer square root by Newton's method from above. 23170^2 exceeds any squared map distance.
 sub isqrt(n)
@@ -146,7 +149,7 @@ sub kinInLine(ex, ey)
   reach = root
   if reach > 0 then
     k = 0
-    while k < 16
+    while k < nSeats
       if k <> selfId and blindKin(k) >= 25 and visible(k) then
         kinAt(playerX(k) - selfX, playerY(k) - selfY)
       end if
@@ -155,7 +158,7 @@ sub kinInLine(ex, ey)
     ' Relatives beside or behind us are outside the vision cone; where they last spoke from, in
     ' the past six ticks, stands in for where they are.
     k = 0
-    while k < 16
+    while k < nSeats
       if k <> selfId and spokeTick(k) > 0 and worldTick - spokeTick(k) <= 6 and blindKin(k) >= 25 and not visible(k) then
         kinAt(spokeX(k) - selfX, spokeY(k) - selfY)
       end if
@@ -164,7 +167,7 @@ sub kinInLine(ex, ey)
     ' And where we last saw them, in the past second (they walk under 900 units in that time,
     ' so this only catches the ones who just left the cone).
     k = 0
-    while k < 16
+    while k < nSeats
       if k <> selfId and lastSeen(k) > 0 and worldTick - lastSeen(k) <= 24 and blindKin(k) >= 25 and not visible(k) then
         kinAt(oldX(k) - selfX, oldY(k) - selfY)
       end if
@@ -198,7 +201,7 @@ if started = 0 then
   lastY = selfY
   lastHp = selfHp + armorHp
   i = 0
-  while i < 16
+  while i < nSeats
     spokeTick(i) = -100
     i = i + 1
   wend
@@ -247,7 +250,7 @@ end if
 i = 0
 while i < heardCount() and i < 24
   s = heardSlot(i)
-  if s >= 0 and s < 16 then
+  if s >= 0 and s < nSeats then
     spokeX(s) = heardX(i)
     spokeY(s) = heardY(i)
     spokeTick(s) = worldTick
@@ -259,7 +262,7 @@ while i < heardCount() and i < 24
   i = i + 1
 wend
 i = 0
-while i < 16
+while i < nSeats
   if i <> selfId and blindKin(i) >= 25 and visible(i) then
     if lastSeen(i) = worldTick - 1 and playerHp(i) < oldHp(i) then
       hurtX = playerX(i)
@@ -273,7 +276,7 @@ if hurtX >= 0 then
   culprit = -1
   culpritD = 36000000
   i = 0
-  while i < 16
+  while i < nSeats
     if i <> selfId and blindKin(i) < 25 and visible(i) then
       dx = playerX(i) - hurtX
       dy = playerY(i) - hurtY
@@ -293,7 +296,7 @@ end if
 ' Hearts. capBy(m) = 1 while seat m is capturing something; mine = hearts we own.
 i = 0
 while i < 64
-  if i < 16 then
+  if i < nSeats then
     capBy(i) = 0
   end if
   taken(i) = 0
@@ -308,7 +311,7 @@ objective = -1
 j = 0
 while j < heartCount() and j < 64
   c = controlCaptureTeam(j)
-  if c >= 0 and c < 16 then
+  if c >= 0 and c < nSeats then
     capBy(c) = 1
   end if
   if c = selfId then
@@ -325,7 +328,7 @@ while j < heartCount() and j < 64
       nearestMineD = d2
     end if
     ' A stranger is taking one of our hearts: go back and stand on it.
-    if c >= 0 and c < 16 then
+    if c >= 0 and c < nSeats then
       if blindKin(c) < 50 and d2 < defendD then
         defend = j
         defendD = d2
@@ -348,7 +351,7 @@ if objective < 0 and mine < 2 then
     i = i + 1
   wend
   picked = 0
-  while picked <= rank and picked < 16
+  while picked <= rank and picked < nSeats
     choice = -1
     choiceCost = 2147483647
     j = 0
@@ -374,7 +377,7 @@ if objective < 0 and mine < 2 then
       j = j + 1
     wend
     if choice < 0 then
-      picked = 16
+      picked = nSeats
     else
       taken(choice) = 1
       if picked = rank then
@@ -400,7 +403,7 @@ while j < heartCount() and j < 64
 wend
 living = 0
 i = 0
-while i < 16
+while i < nSeats
   if seatAlive(i) then
     living = living + 1
   end if
@@ -466,7 +469,7 @@ while g < greatHeartCount()
     end if
     near = 0
     i = 0
-    while i < 16
+    while i < nSeats
       if i <> selfId and visible(i) then
         ex = playerX(i) - gx
         ey = playerY(i) - gy
@@ -562,7 +565,7 @@ best = -1
 bestCost = 2147483647
 threatsNear = 0
 i = 0
-while i < 16
+while i < nSeats
   if i <> selfId and visible(i) then
     if blindKin(i) < 25 then
       px = playerX(i)
@@ -597,13 +600,13 @@ while i < 16
         end if
         ' A stranger close to a visible sibling is a threat to it.
         k = 0
-        while k < 16
+        while k < nSeats
           if k <> selfId and blindKin(k) >= 50 and visible(k) then
             ex = playerX(k) - px
             ey = playerY(k) - py
             if ex * ex + ey * ey < 1440000 then
               cost = cost - 2500000
-              k = 16
+              k = nSeats
             end if
           end if
           k = k + 1
@@ -882,7 +885,7 @@ if hasGrenade and best >= 0 then
   d2 = dx * dx + dy * dy
   safe = 1
   i = 0
-  while i < 16
+  while i < nSeats
     if i <> selfId and blindKin(i) >= 25 and visible(i) then
       fx = playerX(i) - nx
       fy = playerY(i) - ny
@@ -904,7 +907,7 @@ if hasGrenade and best >= 0 then
 end if
 
 i = 0
-while i < 16
+while i < nSeats
   if visible(i) then
     oldX(i) = playerX(i)
     oldY(i) = playerY(i)

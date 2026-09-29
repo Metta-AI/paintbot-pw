@@ -948,6 +948,27 @@ class ManifestTests(unittest.TestCase):
         self.assertTrue((Path(__file__).parent / "players/ffa.bas").is_file())
 
 
+class EngineForSeatsTests(unittest.TestCase):
+    def test_sixteen_seats_run_the_game_and_crowds_need_their_build(self):
+        import host
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = Path(tmp) / "paintbot"
+            engine.write_text("")
+            self.assertEqual(host.engine_for_seats(str(engine), 16), str(engine))
+            with self.assertRaisesRegex(ValueError, "no 50-seat engine"):
+                host.engine_for_seats(str(engine), 50)
+            (Path(tmp) / "paintbot-50").write_text("")
+            self.assertEqual(host.engine_for_seats(str(engine), 50), str(engine) + "-50")
+            with self.assertRaisesRegex(ValueError, "no 12-seat engine"):
+                host.engine_for_seats(str(engine), 12)
+
+    def test_the_image_builds_the_heartland_big_engine(self):
+        dockerfile = (Path(__file__).parent / "Dockerfile").read_text()
+        self.assertIn("-d:pwSeats=50", dockerfile)
+        self.assertIn("/usr/local/bin/paintbot-50", dockerfile)
+
+
 class HeartlandManifestTests(unittest.TestCase):
     """coworld/heartland: the same engine in FFA-kin mode, published as its own Coworld."""
 
@@ -960,14 +981,19 @@ class HeartlandManifestTests(unittest.TestCase):
         self.assertEqual(self.manifest["game"]["name"], "heartland")
         self.assertEqual(schema["properties"]["mode"]["enum"], ["ffa_kin"])
         self.assertIn("mode", schema["required"])
-        tokens = [f"t{i}" for i in range(16)]
         configs = {v["id"]: v["game_config"] for v in self.manifest["variants"]}
         configs["certification"] = self.manifest["certification"]["game_config"]
         self.assertEqual(sorted(configs), ["certification", "heartland", "heartland-big"])
         for name, config in configs.items():
             with self.subTest(name):
                 self.assertEqual(config["mode"], "ffa_kin")
+                tokens = [f"t{i}" for i in range(len(config["players"]))]
                 self.assertEqual(_schema_errors(schema, dict(config, tokens=tokens)), [])
+        # Heartland seats 16; Heartland Big seats 50 cogs in 10 tribes of 5 (the -d:pwSeats=50 engine).
+        self.assertEqual(len(configs["heartland"]["players"]), 16)
+        self.assertEqual(len(configs["heartland-big"]["players"]), 50)
+        self.assertEqual(configs["heartland-big"]["kin_layout"], "tribes")
+        tokens = [f"t{i}" for i in range(16)]
         # A teams config is not a Heartland config.
         self.assertTrue(_schema_errors(schema, dict(configs["heartland"], tokens=tokens, mode="teams")))
         self.assertTrue(_schema_errors(schema, {k: v for k, v in dict(configs["heartland"], tokens=tokens).items() if k != "mode"}))
@@ -985,9 +1011,17 @@ class HeartlandManifestTests(unittest.TestCase):
             self.assertTrue((self.root / player["file"]).is_file(), player["file"])
         self.assertTrue(self.manifest["game"]["docs"]["readme"]["value"].startswith("# Heartland\n"))
         # Same image, protocols, results and replay viewer as paintbot-pw: only the mode differs.
-        for key in ("runnable", "results_schema", "replay_viewer", "protocols", "player_runtime"):
+        for key in ("runnable", "replay_viewer", "protocols", "player_runtime"):
             self.assertEqual(self.manifest["game"][key], self.paintbot["game"][key], key)
-        for key in ("tokens", "players", "seed", "max_ticks", "kin_layout", "map"):
+        # Seat-sized arrays take 16 or 50 entries here (paintbot-pw: 16); everything else matches.
+        for key in ("tokens", "players"):
+            ours = dict(self.manifest["game"]["config_schema"]["properties"][key])
+            self.assertEqual((ours.pop("minItems"), ours.pop("maxItems")), (16, 50))
+            ours.pop("description", None)
+            theirs = {k: v for k, v in self.paintbot["game"]["config_schema"]["properties"][key].items()
+                      if k not in ("minItems", "maxItems", "description")}
+            self.assertEqual(ours, theirs, key)
+        for key in ("seed", "max_ticks", "kin_layout", "map"):
             self.assertEqual(self.manifest["game"]["config_schema"]["properties"][key],
                              self.paintbot["game"]["config_schema"]["properties"][key], key)
 
