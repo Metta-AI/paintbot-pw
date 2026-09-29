@@ -354,7 +354,7 @@ out, 65)` report it; `pw_observation_size()` stays 448. The observation contract
 touches the world or its hash.
 
 **v2u<K>: v2 + K user inputs** (PLAN-neural-basic-io part A). Id
-`paintbot-pw.rules39.obs.v2u<K>`, K = 1..64, SHA-256 of the id (all 64 listed in
+`paintbot-pw.rules39.obs.v2u<K>`, K = 1..128, SHA-256 of the id (all 128 listed in
 `neural_contract.UserInputsContractHashes`; K = 1 is `bd80f4d3…`, K = 2 `b064de43…`, K = 3
 `a8c43d03…`); 506 + K floats. Columns 0..505 are v2 unchanged; column 506 + i is
 `float32(v_i) / 1000` where v_i is the value the seat's policy.bas last set with
@@ -383,8 +383,8 @@ rules 43) and the clock. An FFA-kin match refuses a v3 seat at load (no teams, l
 glory there). Native: `pw_create_observation(seed, max_ticks, 3)`; `pw_set_game_mode(h, 1)`
 returns -1 on a v3 handle.
 
-**v3u<K>: v3 + K user inputs.** Id `paintbot-pw.rules43.obs.v3u<K>`, K = 1..64, SHA-256 of
-the id (all 64 in `neural_contract.V3UserInputsContractHashes`; K = 1 is `8086b6f3…`);
+**v3u<K>: v3 + K user inputs.** Id `paintbot-pw.rules43.obs.v3u<K>`, K = 1..128, SHA-256 of
+the id (all 128 in `neural_contract.V3UserInputsContractHashes`; K = 1 is `8086b6f3…`);
 514 + K floats: v3 unchanged, then the K user inputs exactly as v2u<K> feeds them. The
 manifest's `user_inputs.count` must be K. Training: `pw_create_observation_inputs_v(seed,
 max_ticks, 3, K)` (version 2 there is `pw_create_observation_inputs`);

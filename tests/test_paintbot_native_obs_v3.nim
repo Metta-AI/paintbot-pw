@@ -158,9 +158,10 @@ suite "Native observation contract v3":
     check pw_create_observation_inputs_v(1, 100, 1, 3) == nil
     check pw_create_observation_inputs_v(1, 100, 101, 3) == nil
     check pw_create_observation_inputs_v(1, 100, 3, -1) == nil
-    check pw_create_observation_inputs_v(1, 100, 3, 65) == nil
+    check pw_create_observation_inputs_v(1, 100, 3, 129) == nil
+    check pw_create_observation_inputs_v(1, 100, 2, 129) == nil
     check pw_create_observation_inputs_v(1, HeartMeterMatchTicks+1, 3, 3) == nil
-    for k in [1'i32, 3, 32, 63, 64]:
+    for k in [1'i32, 3, 32, 63, 64, 65, 66, 128]:
       let h3 = pw_create_observation_inputs_v(1, 100, 3, k)
       let h2 = pw_create_observation_inputs_v(1, 100, 2, k)
       require h3 != nil and h2 != nil
@@ -174,7 +175,7 @@ suite "Native observation contract v3":
       check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash_v(2, k, o, 65)) ==
         hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash(k, o, 65))
       pw_destroy(h3); pw_destroy(h2)
-    for (v, k) in [(3'i32, 0'i32), (3'i32, 65'i32), (1'i32, 3'i32), (101'i32, 3'i32)]:
+    for (v, k) in [(3'i32, 0'i32), (3'i32, 129'i32), (2'i32, 129'i32), (1'i32, 3'i32), (101'i32, 3'i32)]:
       check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash_v(v, k, o, 65))[0] == -1
     check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash_v(3, 3, o, 64))[0] == -1
     let zero = pw_create_observation_inputs_v(1, 100, 3, 0)

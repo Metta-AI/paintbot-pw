@@ -111,9 +111,9 @@ suite "Native policy-script seats":
 
   test "arguments, contracts, status codes and the pw_step guard":
     check pw_create_observation_inputs(1, 100, -1) == nil
-    check pw_create_observation_inputs(1, 100, 65) == nil
-    for k in [33'i32, 34, 64]:
-      # The cap is 64: v2u33 .. v2u64 handles are 506 + K wide and name their own contract.
+    check pw_create_observation_inputs(1, 100, 129) == nil
+    for k in [33'i32, 34, 64, 65, 66, 128]:
+      # The cap is 128: v2u33 .. v2u128 handles are 506 + K wide and name their own contract.
       let wide = pw_create_observation_inputs(1, 100, k)
       require wide != nil
       check pw_handle_observation_size(wide) == ObservationSizeV2 + k and pw_handle_user_inputs(wide) == k
@@ -133,7 +133,7 @@ suite "Native policy-script seats":
     check pw_user_inputs_contract_hash(K, cast[ptr UncheckedArray[char]](addr hash[0]), 65) == 0
     check $cast[cstring](addr hash[0]) == contract
     check pw_user_inputs_contract_hash(0, cast[ptr UncheckedArray[char]](addr hash[0]), 65) == -1
-    check pw_user_inputs_contract_hash(65, cast[ptr UncheckedArray[char]](addr hash[0]), 65) == -1
+    check pw_user_inputs_contract_hash(129, cast[ptr UncheckedArray[char]](addr hash[0]), 65) == -1
     check pw_set_seat_policy_script(nil, 0, nil, 0, nil, 0) == -1
     check setPolicy(handle, 16, Policy, manifest) == -1
     var message: array[256, char]

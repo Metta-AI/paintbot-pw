@@ -392,8 +392,8 @@ neuralInput(1, -99)
 """ & Act, userInputs = 2)
     check readBack.play(31, 100).len == 100
 
-  test "user-input actors above the old 32 cap: K = 34 and K = 64 load and play, K = 65 is rejected":
-    for k in [33, 34, 64]:
+  test "user-input actors above the old 32 and 64 caps: K = 33 .. 128 load and play, K = 129 is rejected":
+    for k in [33, 34, 64, 65, 66, 128]:
       checkpoint "K = " & $k
       # The last input is written and read back through the observation tail.
       let players = bundle("""
@@ -406,14 +406,14 @@ neuralInput(0, worldTick)
       check not players[0].failed
       check players[0].neural.userInputs.len == k
       check players.play(31, 100).len == 100
-    let k64 = UserInputsContractHashes[63]
+    let k128 = UserInputsContractHashes[127]
     var zeros: seq[string]
-    for i in 0..<65: zeros.add "0"
-    check bundle(Act, userInputs = 64, manifest = manifestFor(k64, userInputs =
-      "{\"count\": 65, \"init\": [" & zeros.join(", ") & "]}"))[0].failed
-    for bad in ["neuralInput(64, 1)\n", "neuralObs(" & $(ObservationSizeV2 + 64) & ")\n"]:
+    for i in 0..<129: zeros.add "0"
+    check bundle(Act, userInputs = 128, manifest = manifestFor(k128, userInputs =
+      "{\"count\": 129, \"init\": [" & zeros.join(", ") & "]}"))[0].failed
+    for bad in ["neuralInput(128, 1)\n", "neuralObs(" & $(ObservationSizeV2 + 128) & ")\n"]:
       checkpoint bad
-      let outOfRange = bundle(bad & Act, userInputs = 64)
+      let outOfRange = bundle(bad & Act, userInputs = 128)
       discard outOfRange.decide(newWorld(3))
       check outOfRange[0].failed
 
@@ -438,13 +438,19 @@ neuralInput(0, worldTick)
       check bundle(Act, userInputs = 2, manifest = manifestFor(k2, userInputs = bad))[0].failed
     check parseUserInputs(parseJson("{\"count\": 3, \"init\": [1000000, -1000000, 0]}")) == @[1000000'i32, -1000000, 0]
     for k in 1..MaxUserInputs: check userInputsFromHash(UserInputsContractHashes[k-1]) == k
-    # The cap is 64; the v2u1 .. v2u32 hashes of the original 32-input table are unchanged.
-    check MaxUserInputs == 64
+    # The cap is 128; the v2u1 .. v2u64 hashes of the original 64-input table are unchanged
+    # (v2u1, v2u32, v2u64 pinned, and an FNV-1a-64 digest of the concatenated 64).
+    check MaxUserInputs == 128
     check UserInputsContractHashes[0] == "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04"
     check UserInputsContractHashes[31] == "94373a1ce8a95bbcf99f8fcb1d2acc07e8fb19ab13c99591389ac2cff807e7c3"
     check UserInputsContractHashes[63] == "18a5141bf7d78fdf93524757bf261f367cfebe3b489fb6f2988936375bb8f4aa"
-    var zeros65: seq[string]
-    for i in 0..<65: zeros65.add "0"
-    expect ValueError: discard parseUserInputs(parseJson("{\"count\": 65, \"init\": [" & zeros65.join(", ") & "]}"))
+    check UserInputsContractHashes[127] == "a40a0922dbdfa188e739f591344da3d30b299a431939778d7cd4cc715fa96ba2"
+    var digest = 0xcbf29ce484222325'u64
+    for k in 0..<64:
+      for c in UserInputsContractHashes[k]: digest = (digest xor uint64(ord(c))) * 0x100000001b3'u64
+    check digest == 0xf784abdafb78ea91'u64
+    var zeros129: seq[string]
+    for i in 0..<129: zeros129.add "0"
+    expect ValueError: discard parseUserInputs(parseJson("{\"count\": 129, \"init\": [" & zeros129.join(", ") & "]}"))
     check userInputsFromHash(ObservationContractV2Hash) == 0
     check userInputsContractId(7) == "paintbot-pw.rules39.obs.v2u7"

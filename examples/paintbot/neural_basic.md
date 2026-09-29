@@ -228,7 +228,7 @@ neural budget; no limit changes. Misuse (wrong order, out-of-range index, a head
 choice masked) disables the seat like any other neural error.
 
 **User inputs (BASIC -> net).** A schema-2 manifest may carry
-`"user_inputs": {"count": K, "init": [K integers]}`, K within 1..64, each init value within
+`"user_inputs": {"count": K, "init": [K integers]}`, K within 1..128, each init value within
 -1,000,000..1,000,000. The actor's observation contract is then
 `paintbot-pw.rules39.obs.v2u<K>` (hash = SHA-256 of that id; the table is
 `neural_contract.UserInputsContractHashes`): v2's 506 floats followed by K user floats, so

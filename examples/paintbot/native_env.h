@@ -329,7 +329,7 @@ int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, in
 /* Neural BASIC I/O (PLAN-neural-basic-io), training side; every call additive, and a
  * handle that never uses them is byte-identical to one without them.
  * pw_create_observation_inputs: observation contract v2u<K>
- * "paintbot-pw.rules39.obs.v2u<K>" (K = user_inputs, 1..64; 0 = pw_create_observation(.., 2)):
+ * "paintbot-pw.rules39.obs.v2u<K>" (K = user_inputs, 1..128; 0 = pw_create_observation(.., 2)):
  * every pw_observe row is v2's 506 floats followed by K floats, a policy seat's user inputs
  * as its policy.bas left them (float32(v) / 1000: what its next decision's observation
  * reads), zeros for every other seat. pw_handle_user_inputs = the handle's K;
