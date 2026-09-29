@@ -3,7 +3,7 @@ import std/[math, times, algorithm, strutils]
 when defined(emscripten) and defined(workerReplayIndex): import flatty
 import windy, opengl, vmath, chroma, jsony, gltf
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam, selectionoutlines]
-import game, sim, analysis, scenery, villagegraphics, controls, celebration, projection, kinhue
+import game, sim, analysis, camdirector, scenery, villagegraphics, controls, celebration, projection, kinhue
 from kinship import activeKinship, rPercent
 import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
@@ -41,6 +41,8 @@ type
     celebrating: bool
     celebrationSeconds: float32
     actionCamera: bool
+    inset: bool ## the action camera's runner-up view fills the corner inset
+    instantReplay: bool
     camera: array[3, float32]
     screen: array[Seats, array[2, float32]]
     visible: array[Seats, bool]
@@ -79,10 +81,13 @@ var
   lens = -1
   follow = false
   autoCamera = true
-  director = initActionCam(minDistance = 26, maxDistance = 150, tight = 0.6,
-    followRate = 1.0, zoomRate = 0.7, holdSeconds = 2.8, mapSpan = 160)
-  directorTick = -1
+  director = newDirector(160)
   directorLens = -2
+  instant: InstantReplay
+  insetView: InsetShot
+  missCheckTick = -1
+  orbitPhase = 0'f32
+  orbitAmount = 0'f32 ## 0..1: the action camera's slow sway fades in and out
   camY = 0'f32
   firstPerson = false
   territoryOverlay = false
@@ -108,6 +113,7 @@ proc setSpeed(value: cfloat) {.exportc: "pw_speed", cdecl,
 proc setTick(value: cint) {.exportc: "pw_seek", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   victory = Celebration()
+  instant.cancel()
   transport.seekTo(value.int32, play = false)
 proc saveLiveRecording() {.exportc: "pw_save", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
@@ -152,10 +158,7 @@ proc setActionCamera(value: cint) {.exportc: "pw_action_camera", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   autoCamera = value != 0
   if autoCamera: follow = false
-  director = initActionCam(minDistance = 26, maxDistance = 150, tight = 0.6,
-    followRate = 1.0, zoomRate = 0.7, holdSeconds = 2.8,
-    mapSpan = (maxX()-minX()).float32/100)
-  directorTick = -1
+  director = newDirector(mapSpan(), lookahead = replayMode)
   directorLens = lens
 proc setTerritory(value:cint) {.exportc:"pw_territory",cdecl,
     codegenDecl:"EMSCRIPTEN_KEEPALIVE $# $#$#".} = territoryOverlay=value!=0
@@ -911,76 +914,60 @@ proc runGraphics*() =
     if autoCamera and not cameraFinished:
       if directorLens != lens: setActionCamera(1)
       # Rebuild visible interests each simulation tick, including after lens changes.
-      let cameraTickChanged = directorTick != world.tick
+      let cameraTickChanged = director.tick != world.tick
       if cameraTickChanged:
-        director.beginFrame(world.tick)
-        for i, c in world.cogs:
-          if c.hp <= 0 or not seen(i): continue
-          director.noteInterest(int32(i+1), poses[i], 15, 5, world.tick, 1)
-          when Seats <= 16:
-            for j in i+1..<Seats:
-              if (not ffa() and team(i) == team(j)) or world.cogs[j].hp <= 0 or not seen(j): continue
-              let gap = length(poses[i]-poses[j])
-              if gap < 40:
-                director.noteInterest(int32(100+i*Seats+j), (poses[i]+poses[j])*0.5,
-                  100-gap, gap*0.5+3, world.tick, 1)
-          else:
-            # Crowds: every pair within 40 m is thousands of interests a tick. Each cog adds
-            # only its nearest opponent (unrelated, in FFA-kin), in an id range of its own.
-            var nearest = -1
-            var nearestGap = 40'f32
-            for j in 0..<Seats:
-              if j == i or world.cogs[j].hp <= 0 or not seen(j): continue
-              if (not ffa() and team(i) == team(j)) or (ffa() and kinPercent(i, j) > 0): continue
-              let gap = length(poses[i]-poses[j])
-              if gap < nearestGap: nearest = j; nearestGap = gap
-            if nearest >= 0:
-              director.noteInterest(int32(1_500_000_000+i), (poses[i]+poses[nearest])*0.5,
-                100-nearestGap, nearestGap*0.5+3, world.tick, 1)
-        for n, h in world.controlHearts:
-          var nearby: array[2, int]
-          var total = 0
-          for i, c in world.cogs:
-            if c.hp > 0 and seen(i) and distance2(c.pos,h.pos) < 1000000:
-              inc nearby[team(i)]
-              inc total
-          if total > 0:
-            let contested = if ffa(): total > 1 else: nearby[0] > 0 and nearby[1] > 0
-            director.noteInterest(int32(1000+n), position(h.pos, 2),
-              (if contested: 125'f32 else: 45'f32), 9, world.tick, 1)
-        # Events are recorded in tick order: start at the first one from the last 36 ticks.
-        var first = 0
-        var hi = index.events.len
-        while first < hi:
-          let mid = (first+hi) div 2
-          if index.events[mid].tick < world.tick-36: first = mid+1 else: hi = mid
-        for n in first..<index.events.len:
-          let event = index.events[n]
-          if event.tick > world.tick: break
-          if world.tick-event.tick > 36: continue
-          if event.slot >= 0 and not seen(event.slot): continue
-          let weight = case event.kind
-            of "grenade blast": 165'f32
-            of "down": 145'f32
-            of "tag", "spray": 100'f32
-            of "territory": 130'f32
-            else: 0'f32
-          if weight > 0 and (lens < 0 or event.slot >= 0):
-            director.noteInterest(int32(10000+n), position(point(event.x,event.z),1),
-              weight, 9, world.tick, 1)
-        directorTick = world.tick
+        director.noteInterests(world, index, poses, seen, lens)
+        # An instant replay holds the missed highlight above everything else.
+        if instant.active:
+          director.cam.noteInterest(ReplayFocusId, instant.focus, 400, 6, world.tick, 1,
+            replace = true)
       if not paused or cameraTickChanged:
-        director.chooseShot(dt.float32, max(1, playbackRate.int32))
-      director.follow(target, distance, dt.float32, max(1, playbackRate.int32))
+        director.cam.chooseShot(dt.float32, max(1, playbackRate.int32))
+      director.cam.follow(target, distance, dt.float32, max(1, playbackRate.int32))
       camX = target.x; camY = target.y; camZ = target.z
+      insetView = if firstPerson or instant.active: (false, vec3(0, 0, 0), 0'f32)
+        else: director.insetShot(dt.float32)
+      # Replays at up to 2x: rewind to a highlight both views missed once the action is calm.
+      if replayMode and (transport.playing or instant.active):
+        let calm = director.cam.interestScore(director.cam.lockId) < CalmScore
+        let back = instant.update(world.tick, dt.float32, calm,
+          allowed = transport.playing and playbackRate <= 2)
+        if back >= 0: transport.seekTo(back, play = true)
+    else:
+      insetView = (false, vec3(0, 0, 0), 0'f32)
+      # The action camera was turned off or the match ended: return from a replay.
+      let back = instant.finish(world.tick)
+      if back >= 0 and not cameraFinished: transport.seekTo(back, play = transport.playing)
+    # A slow sway while the action camera holds a shot; it fades out when a
+    # person takes the camera so the view never snaps.
+    let swaying = autoCamera and not cameraFinished and director.cam.locked and playbackRate < 16
+    orbitAmount = clamp(orbitAmount+(if swaying: 1'f32 else: -1'f32)*dt.float32, 0, 1)
+    if not paused: orbitPhase += dt.float32*2*PI/30
+    let viewYaw = yaw+0.07'f32*orbitAmount*sin(orbitPhase)
 
-    let (eye, view, projection) = spectatorCamera(target, distance, yaw, tilt,
+    let (eye, view, projection) = spectatorCamera(target, distance, viewYaw, tilt,
         window.size.x, window.size.y)
     profMark(1)
     let vp = projection*view
-    proc onScreen(p: Vec3, margin = 1.15'f32): bool =
+    let insetVp = if insetView.show:
+        (let (_, v, p) = spectatorCamera(insetView.target, insetView.distance, viewYaw, tilt, 16, 10); p*v)
+      else: mat4()
+    # Highlights neither view showed become instant-replay candidates.
+    if world.tick < missCheckTick: missCheckTick = world.tick
+    if replayMode and autoCamera and world.tick != missCheckTick and
+        world.tick-missCheckTick <= MissScanTicks:
+      for event in index.eventsBetween(missCheckTick, world.tick):
+        if (event.slot >= 0 and not seen(event.slot)) or not world.isHighlight(event): continue
+        let at = position(point(event.x, event.z), 1)
+        proc inView(m: Mat4): bool =
+          let q = projected(m, at)
+          q[0] in 0.03'f32..0.97'f32 and q[1] in 0.03'f32..0.97'f32
+        if not inView(vp) and not (insetView.show and inView(insetVp)):
+          instant.noteMissed(event.tick.int32, at)
+    missCheckTick = world.tick
+    proc onScreen(p: Vec3, margin = 1.15'f32, view = vp): bool =
       ## Near the camera view; crowd decorations and characters off screen are skipped.
-      let q = vp * vec4(p.x, p.y+1, p.z, 1)
+      let q = view * vec4(p.x, p.y+1, p.z, 1)
       q.w > 0 and abs(q.x) <= q.w*margin+1.5 and abs(q.y) <= q.w*margin+1.5
     proc groundView(): array[4, int] =
       ## The world rectangle the camera shows on the ground (with a margin for relief), or
@@ -1026,7 +1013,7 @@ proc runGraphics*() =
       order.sort(proc(a, b: (float32, int)): int = cmp(a[0], b[0]))
       for i in 0..<Seats: nearRank[i] = Seats
       for r, e in order: nearRank[e[1]] = r
-    proc actors(exclude = -1, margin = 1.15'f32, maxRank = Seats) =
+    proc actors(exclude = -1, margin = 1.15'f32, maxRank = Seats, view = vp) =
       # Crowds: draw only cogs near the view (a looser margin for the shadow pass, whose casters
       # may stand off screen), still cogs before rolling ones so each pose is computed once.
       for pass in 0..1:
@@ -1034,7 +1021,7 @@ proc runGraphics*() =
         if c.hp <= 0 or i == exclude or not shown(i): continue
         let still = c.pos == previous[i].pos
         if (pass == 0) != still: continue
-        if nearRank[i] >= maxRank or not onScreen(poses[i], margin): continue
+        if nearRank[i] >= maxRank or not onScreen(poses[i], margin, view): continue
         # Teammates may overlap exactly; don't put their helmet around the eye camera.
         if exclude >= 0 and distance2(c.pos, world.cogs[exclude].pos) <
             10000: continue
@@ -1391,14 +1378,9 @@ proc runGraphics*() =
     profMark(7)
     shapes.draw(vp)
     profMark(8)
-    # A real second 3D camera gives the selected bot's eye-level view.
-    if firstPerson and selected >= 0 and world.cogs[selected].hp > 0 and shown(selected):
-      let c = world.cogs[selected]
-      let p = poses[selected]+vec3(0, 1.5, 0)
-      let d = direction(c.pos, c.aim, 100)
-      let forward = vec3(d.x.float32/100, 0, d.z.float32/100)
-      let v = lookAt(p, p+forward, vec3(0, 1, 0))
-      let proj = perspective(78'f32, 1.6'f32, 0.15'f32, 180'f32)
+    # A second 3D view in the corner: the selected bot's eyes, or the action camera's
+    # runner-up shot elsewhere on the map.
+    proc drawInset(v, proj: Mat4, eyeAt: Vec3, exclude: int) =
       let wi = (window.size.x.float32*insetSize).int; let he = wi*5 div 8
       var ratio = 1'f32
       when defined(emscripten):
@@ -1413,13 +1395,24 @@ proc runGraphics*() =
       glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
       scene.toon.drawBackground()
       drawTerrain(proj*v)
-      beginCharacters(scene, window, v, proj, p)
+      beginCharacters(scene, window, v, proj, eyeAt)
       glViewport((window.size.x-wi-right).GLint, (window.size.y-he-top).GLint,
           wi.GLsizei, he.GLsizei)
-      actors(selected); finishCharacters(scene)
-      if islandTerrain: drawWater(proj*v, p, (world.tick.float32+alpha)/24)
+      actors(exclude, view = proj*v); finishCharacters(scene)
+      if islandTerrain: drawWater(proj*v, eyeAt, (world.tick.float32+alpha)/24)
       shapes.draw(proj*v)
       glDisable(GL_SCISSOR_TEST)
+    if firstPerson and selected >= 0 and world.cogs[selected].hp > 0 and shown(selected):
+      let c = world.cogs[selected]
+      let p = poses[selected]+vec3(0, 1.5, 0)
+      let d = direction(c.pos, c.aim, 100)
+      let forward = vec3(d.x.float32/100, 0, d.z.float32/100)
+      drawInset(lookAt(p, p+forward, vec3(0, 1, 0)),
+        perspective(78'f32, 1.6'f32, 0.15'f32, 180'f32), p, selected)
+    elif insetView.show:
+      let (insetEye, v, p) = spectatorCamera(insetView.target, insetView.distance, viewYaw,
+        tilt, 16, 10)
+      drawInset(v, p, insetEye, -1)
     profMark(9)
     window.swapBuffers()
     profMark(10)
@@ -1485,7 +1478,7 @@ proc runGraphics*() =
             for j in 0..<Seats: row[j] = activeKinship.rPercent(i, j)
             rPct.add row
         let payload = ViewerState(mode: mode, family: family, genes: genes, rPct: rPct, kinHue: kinHue, terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, glory: gloryRules(), maxHp: maxHp(), world: hudWorld, staticOmitted: staticOmitted, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
-            paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, camera: [camX,camZ,distance], screen: screens, visible: visibility,
+            paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, inset: insetView.show, instantReplay: instant.active, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint, map: mapName(), land: landMask()).toJson()
         let data = payload.cstring
         let tick = world.tick
