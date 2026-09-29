@@ -1,6 +1,6 @@
 ## Headless action-camera evaluation over Paintbot replays.
 ##
-##     nim r -d:release examples/paintbot/camera_eval.nim [--speed:4] [--cam:jump=90] a.replay [b.replay ...]
+##     nim r -d:release examples/paintbot/camera_eval.nim [--speed:4] [--cam:hold=4] a.replay [b.replay ...]
 ##
 ## Plays each replay through the viewer's camera director at 60 frames a
 ## second and the given playback speed, with no lens, then reports:
@@ -54,18 +54,19 @@ proc onScreen(target: Vec3, distance: float32, p: Vec3): bool =
 proc allSeen(i: int): bool = true
 
 var overrides: seq[(string, float32)]
-  ## --cam:<field>=<value> tuning overrides applied to each new director.
+  ## --cam:<field>=<value> overrides of CameraGrading fields (and lookahead=0/1),
+  ## applied on top of the replay's mode grading.
 
-proc tune(cam: ActionCam) =
+proc graded(): CameraGrading =
+  result = gradingFor()
   for (field, value) in overrides:
-    case field
-    of "cluster": cam.clusterShare = value
-    of "fatigue": cam.fatigueSeconds = value
-    of "jump": cam.jumpDistance = value
-    of "margin": cam.sameShotMargin = value
-    of "hold": cam.holdSeconds = value
-    of "coverage", "lookahead": discard
-    else: quit "unknown --cam field: " & field
+    var found = field == "lookahead"
+    for name, slot in result.fieldPairs:
+      if name == field:
+        when slot is int: slot = value.int
+        else: slot = value
+        found = true
+    if not found: quit "unknown --cam field: " & field
 
 proc evaluate*(path: string, speed: float32, totals: var Totals) =
   recording = loadRecording(path)
@@ -73,10 +74,8 @@ proc evaluate*(path: string, speed: float32, totals: var Totals) =
   world = newWorld(recording.seed, recording.endTick)
   let index = indexReplay()
   world = newWorld(recording.seed, recording.endTick)
-  let director = newDirector(mapSpan(), lookahead = true)
-  director.cam.tune()
+  let director = newDirector(mapSpan(), lookahead = true, grading = graded())
   for (field, value) in overrides:
-    if field == "coverage": director.coverageBonus = value
     if field == "lookahead": director.lookahead = value != 0
   var
     target = vec3(0, 0, 0)

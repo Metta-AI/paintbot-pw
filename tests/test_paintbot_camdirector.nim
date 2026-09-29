@@ -115,3 +115,18 @@ suite "inset and instant replay":
     r.noteMissed(300, vec3(0, 0, 0))
     check r.update(301, 1, calm = true) == -1
     check r.update(302, 10, calm = true) != -1
+
+suite "per-mode grading":
+  teardown:
+    gameMode = gmTeams
+
+  test "each game mode gets its own grading":
+    gameMode = gmTeams
+    check gradingFor() == TeamsGrading
+    check newDirector(100).grading == TeamsGrading
+    gameMode = gmFfaKin
+    check gradingFor() == FfaGrading
+    let d = newDirector(100)
+    check d.grading == FfaGrading
+    check d.cam.holdSeconds == FfaGrading.hold
+    check d.cam.fatigueSeconds == FfaGrading.fatigue
