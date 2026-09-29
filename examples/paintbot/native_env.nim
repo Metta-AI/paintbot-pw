@@ -1882,6 +1882,29 @@ proc pw_seat_weapon_stats*(handle: pointer, seat: cint, output: ptr UncheckedArr
     output[i] = v
   0
 
+const SeatStateFloats* = 8 ## pw_seat_state floats per seat
+
+proc pw_seat_state*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
+  ## Every seat's public body state in one call (training library only), 16 seats x 8
+  ## floats in seat order: [x, z (world units), hp, armor, lives, respawn (ticks until the
+  ## seat respawns, 0 while alive), carrying (1 = holds a heart), equipment bits (1 =
+  ## grenade, 2 = spray can)]. For training-side critics that need the whole match state
+  ## every tick without pw_world_json's serialisation. A pure read: the world and its hash
+  ## are unchanged. Returns 0, -1 for bad arguments.
+  if handle == nil or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  for slot in 0..<Seats:
+    let c = env.world.cogs[slot]
+    let e = env.world.equipment[slot]
+    let o = slot*SeatStateFloats
+    output[o] = c.pos.x.float32; output[o+1] = c.pos.z.float32
+    output[o+2] = c.hp.float32; output[o+3] = e.armor.float32
+    output[o+4] = e.lives.float32; output[o+5] = c.respawn.float32
+    output[o+6] = (if c.carrying: 1'f32 else: 0'f32)
+    output[o+7] = float32((if e.grenade: 1 else: 0) + (if e.sprayCan: 2 else: 0))
+  0
+
 proc pw_world_json*(handle: pointer, output: ptr UncheckedArray[char], capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The whole world as one JSON object (training library only): {"rulesVersion": R,
   ## "heard": {}, then every World field}, the object the engine streamed to PW_POLICY_FD
