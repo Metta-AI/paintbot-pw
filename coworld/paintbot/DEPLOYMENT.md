@@ -779,3 +779,15 @@ The commit is tagged `coworld-v0.3.71`. Viewer only; rules and replays are uncha
 - Live matches now feed downs, blasts and flips to the camera.
 - Measure camera changes with `examples/paintbot/camera_eval.nim` over league replays. #160 adds a separate
   grading preset for Heartland.
+
+## Glory for being behind in cogs: 0.3.75 (rules 47)
+
+`d9a228b` (#163) merged while main's build was red from an unrelated clash between #162 and #165, so its own
+deploy was skipped. Automatic deploy run 36529719762 then shipped `a13ebe0` (#166, which fixed that clash) as 0.3.75 =
+`cow_d6aa090a-6992-4b7d-822b-4cfb58d9789d`, carrying rules 47. The commit is tagged `coworld-v0.3.75`; 0.3.76
+(`07e5b30`) followed.
+
+A team now also earns glory for cogs out of the match (dead with no lives left). Every `behind_cogs_seconds` a team
+earns `behind_cogs` per cog it has out beyond the enemy's count, on top of the behind-in-lives award. Every teams
+variant sets `"glory": {"behind_lives": 5, "behind_cogs": 5}`. Rules 46 and older recordings keep their format and
+never pay it.
