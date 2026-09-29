@@ -30,7 +30,7 @@ suite "Configurable glory awards (rules 43)":
     check parseGloryConfig(newJNull()) == DefaultGloryConfig
     check parseGloryConfig(parseJson("{}")) == DefaultGloryConfig
     check DefaultGloryConfig == GloryConfig(quietSupplies: 10, quietSupplySeconds: 30,
-      behindLives: 1, behindLivesSeconds: 5, heart: 20)
+      behindLives: 1, behindLivesSeconds: 5, heart: 20, behindCogs: 1, behindCogsSeconds: 5)
 
   test "each key overrides one award and leaves the others":
     let g = parseGloryConfig(parseJson("""{"behind_lives": 5}"""))
@@ -39,14 +39,16 @@ suite "Configurable glory awards (rules 43)":
     check g.behindLivesSeconds == 5
     check g.heart == GloryHeartAward
     let all = parseGloryConfig(parseJson("""{"quiet_supplies": 0, "quiet_supplies_seconds": 12,
-      "behind_lives": 3, "behind_lives_seconds": 2, "heart": 50}"""))
+      "behind_lives": 3, "behind_lives_seconds": 2, "heart": 50, "behind_cogs": 4,
+      "behind_cogs_seconds": 3}"""))
     check all == GloryConfig(quietSupplies: 0, quietSupplySeconds: 12, behindLives: 3,
-      behindLivesSeconds: 2, heart: 50)
+      behindLivesSeconds: 2, heart: 50, behindCogs: 4, behindCogsSeconds: 3)
 
   test "bad glory configs are refused":
     for text in ["""[]""", """{"behind": 5}""", """{"behind_lives": 1.5}""",
         """{"behind_lives": "5"}""", """{"behind_lives": -1}""", """{"behind_lives": 1001}""",
-        """{"behind_lives_seconds": 0}""", """{"quiet_supplies_seconds": 601}"""]:
+        """{"behind_lives_seconds": 0}""", """{"quiet_supplies_seconds": 601}""",
+        """{"behind_cogs": 1001}""", """{"behind_cogs": -1}""", """{"behind_cogs_seconds": 0}"""]:
       expect ValueError:
         discard parseGloryConfig(parseJson(text))
 

@@ -988,16 +988,18 @@
   // side to Azure's, filled by the owning team; a capture in progress traces
   // the outline in the capturing team's color.
   const heartStripOrder = [];
-  const GLORY_KINDS = ["gloryQuietSupplies", "gloryFriendlyFire", "gloryHeart", "gloryBehindLives"];
+  const GLORY_KINDS = ["gloryQuietSupplies", "gloryFriendlyFire", "gloryHeart", "gloryBehindLives", "gloryBehindCogs"];
   const GLORY_REASONS = {
     gloryQuietSupplies: "thirty seconds without supplies",
     gloryFriendlyFire: "friendly fire taken in the opening thirty seconds",
     gloryHeart: "picked up a glory heart",
     gloryBehindLives: "behind in lives",
+    gloryBehindCogs: "behind in cogs",
   };
   const GLORY_TOAST_TICKS = 72;
   // Rules 43: the match's glory awards (the game config's "glory"); earlier rules paid these.
-  const DEFAULT_GLORY = {quietSupplies: 10, quietSupplySeconds: 30, behindLives: 1, behindLivesSeconds: 5, heart: 20};
+  // behindCogs (rules 47) is paid only from rules 47.
+  const DEFAULT_GLORY = {quietSupplies: 10, quietSupplySeconds: 30, behindLives: 1, behindLivesSeconds: 5, heart: 20, behindCogs: 1, behindCogsSeconds: 5};
   const gloryAwards = data => (data && data.rulesVersion >= 43 && data.glory) || DEFAULT_GLORY;
   const gloryPeriod = seconds => seconds === 30 ? "thirty seconds" : seconds === 5 ? "five seconds" : `${seconds} seconds`;
   function gloryReason(kind) {
@@ -1006,7 +1008,7 @@
   // The scoreboard's list of glory events for rules 37 and later.
   function gloryEventsText(data, rules) {
     const g = gloryAwards(data);
-    return `${gloryPeriod(g.quietSupplySeconds)} without supplies adds ${g.quietSupplies}${rules >= 39 ? `, each glory heart picked up ${g.heart}, and every ${gloryPeriod(g.behindLivesSeconds)} a team behind in lives ${g.behindLives} per life it trails by` : rules >= 38 ? ", friendly fire taken in the opening thirty seconds 30 per hit, and each glory heart picked up 20" : ", friendly fire taken in the opening thirty seconds 30 per hit"}`;
+    return `${gloryPeriod(g.quietSupplySeconds)} without supplies adds ${g.quietSupplies}${rules >= 39 ? `, each glory heart picked up ${g.heart}, and every ${gloryPeriod(g.behindLivesSeconds)} a team behind in lives ${g.behindLives} per life it trails by${rules >= 47 ? `, and every ${gloryPeriod(g.behindCogsSeconds)} a team with more cogs out of lives ${g.behindCogs} per extra cog out` : ""}` : rules >= 38 ? ", friendly fire taken in the opening thirty seconds 30 per hit, and each glory heart picked up 20" : ", friendly fire taken in the opening thirty seconds 30 per hit"}`;
   }
   // Rules 37: the engine keeps each glory award for a few seconds; show the recent ones,
   // in team color, at the very top. Same-tick awards of one kind merge into a line.

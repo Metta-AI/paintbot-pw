@@ -118,7 +118,9 @@ Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `glory(team)` (rules 37), `gloryHeartCount()`, `gloryHeartX(id)`, `gloryHeartY(id)`,
 `gloryHeartTicksLeft(id)` (rules 38). The scoreboard the HUD shows: `teamLives(team)` (lives
 left summed over the team's cogs, the count the behind-in-lives award compares),
-`awardBehind()` (glory per life trailed) and `awardBehindSeconds()` (its period), from the
+`awardBehind()` (glory per life trailed) and `awardBehindSeconds()` (its period), and from rules 47
+`teamCogsOut(team)` (the team's cogs out of the match: dead with no lives left),
+`awardBehindCogs()` (glory per extra cog out) and `awardBehindCogsSeconds()` (its period), from the
 match's glory config; -1 for an invalid team and in FFA-kin. Hidden player, pickup and glory-heart coordinates are
 not disclosed (-1). Nearby agents: `nearAgents(radius)` lists the agents you can see within `radius`
 (clamped to 20000), nearest first, at most 64, and returns the count; `nearAgentId(k)`, `nearAgentX(k)`,
@@ -335,10 +337,21 @@ absent keys keep the defaults in the glory table below:
 | `behind_lives` | 1 | glory per life a team trails the enemy by |
 | `behind_lives_seconds` | 5 | how often the behind-in-lives award pays, in seconds |
 | `heart` | 20 | glory for picking up a glory heart |
+| `behind_cogs` | 1 | rules 47: glory per cog a team has out of the match beyond the enemy's count |
+| `behind_cogs_seconds` | 5 | rules 47: how often the behind-in-cogs award pays, in seconds |
 
 Awards are 0 to 1000 and periods 1 to 600 seconds. Every teams variant sets
-`"glory": {"behind_lives": 5}`, so a team behind in lives earns 5 per life it trails by every
-five seconds. Replays record the awards they were played with.
+`"glory": {"behind_lives": 5, "behind_cogs": 5}`, so every five seconds a team behind in lives
+earns 5 per life it trails by, and a team with more cogs out earns 5 per extra cog out.
+Replays record the awards they were played with.
+
+### Glory for cogs out (rules 47)
+
+A cog is out of the match once it is dead with no lives left. From rules 47, every
+`behind_cogs_seconds` a team earns `behind_cogs` glory per cog it has out beyond the enemy's
+count, on top of the behind-in-lives award (a cog that runs out still counts toward the lives
+deficit as well). The team with fewer cogs out earns nothing. Teams recordings at rules 46 and
+older never pay it and replay as before.
 
 ### Team vision (rules 42, opt-in)
 
@@ -582,7 +595,8 @@ that makes a team more likely to win (captures, tags, meter points), only for re
 for hardship a team takes on. Each team's glory starts at the match length in seconds (600 for
 the ten-minute limit, `endTick div TickRate`) and loses one per second, so a five-minute win
 keeps about 300 before events. The events below list the engine defaults from `sim.nim`; from
-rules 43 a variant's `"glory"` config can change them (every teams variant pays 5 per life behind):
+rules 43 a variant's `"glory"` config can change them (every teams variant pays 5 per life behind
+and 5 per cog out behind):
 
 | Event | Glory | Credited to |
 | --- | --- | --- |
@@ -590,6 +604,7 @@ rules 43 a variant's `"glory"` config can change them (every teams variant pays 
 | Friendly fire taken in the opening thirty seconds (`GloryFriendlyFire`, per hit; rules 37 and 38, removed in rules 39) | +30 | the team that took it |
 | Picking up a glory heart (`GloryHeartAward`, rules 38) | +20 | the team of the cog that touched it |
 | Every five seconds, per life fewer than the enemy (`GloryBehindLives`, rules 39; lives left summed over the team's cogs) | +1 | the team behind in lives |
+| Every five seconds, per cog out of the match beyond the enemy's count (`GloryBehindCogs`, rules 47; dead with no lives left) | +1 | the team with more cogs out |
 
 Spawn protection and self-damage never count; the supply
 clock restarts whenever a teammate collects a grenade, spray can, medkit, armor or uniform,

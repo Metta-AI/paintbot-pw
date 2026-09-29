@@ -67,6 +67,9 @@ type
     endTick: int32
     map: string
     vision: string
+  PreCogsGloryConfig = object
+    ## GloryConfig at rules 43-46: without the rules-47 behind-in-cogs award.
+    quietSupplies, quietSupplySeconds, behindLives, behindLivesSeconds, heart: int32
   Recording43 = object
     ## Teams recordings at rules 43-45: Recording with 16 seats in fixed arrays.
     seed: int32
@@ -76,7 +79,18 @@ type
     endTick: int32
     map: string
     vision: string
-    glory: GloryConfig = DefaultGloryConfig
+    glory: PreCogsGloryConfig
+  Recording46 = object
+    ## Teams recordings at rules 46: Recording with the rules 43-46 glory awards.
+    seed: int32
+    frames: seq[Frame]
+    names: seq[string]
+    communications: seq[Communication]
+    endTick: int32
+    map: string
+    vision: string
+    glory: PreCogsGloryConfig
+    seats: int32
   Recording* = object
     ## A match as the engine and viewer hold it, and (from rules 46) as a teams recording
     ## stores it: one command per seat in every frame and one name per seat.
@@ -185,9 +199,18 @@ proc ibdSeq(ibd: array[LegacySeats, array[LegacySeats, int8]]): seq[seq[int8]] =
   for row in ibd: result.add @row
 var replayRulesVersion* = LiveRules
 const
-  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1046 today).
-  FfaRulesVersions = [40, 41, 42, 43, 44, 45, 46]
+  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1047 today).
+  FfaRulesVersions = [40, 41, 42, 43, 44, 45, 46, 47]
   SeatCountRules* = 46 ## The first rules whose recordings carry their seat count.
+  BehindCogsRules* = 47 ## The first rules whose recordings carry the behind-in-cogs award.
+proc toPreCogs(g: GloryConfig): PreCogsGloryConfig =
+  PreCogsGloryConfig(quietSupplies: g.quietSupplies, quietSupplySeconds: g.quietSupplySeconds,
+    behindLives: g.behindLives, behindLivesSeconds: g.behindLivesSeconds, heart: g.heart)
+proc fromPreCogs(g: PreCogsGloryConfig): GloryConfig =
+  ## Rules 43-46 awards; the behind-in-cogs award keeps its default (those rules never pay it).
+  GloryConfig(quietSupplies: g.quietSupplies, quietSupplySeconds: g.quietSupplySeconds,
+    behindLives: g.behindLives, behindLivesSeconds: g.behindLivesSeconds, heart: g.heart,
+    behindCogs: DefaultGloryConfig.behindCogs, behindCogsSeconds: DefaultGloryConfig.behindCogsSeconds)
 proc replayGameVersion*(): uint16 =
   ## The header version a recording made now is saved with.
   uint16((if ffa(): FfaReplayVersionBase else: 0) + replayRulesVersion)
@@ -204,11 +227,14 @@ proc saveRecordingAs*(path: string, version: int, r: Recording) =
   if version >= SeatCountRules:
     var r = r
     if r.seats == 0: r.seats = (if r.names.len > 0: r.names.len else: Seats).int32
-    saveReplayFile(path, "paintbot_pw", v, r)
+    if version >= BehindCogsRules: saveReplayFile(path, "paintbot_pw", v, r)
+    else: saveReplayFile(path, "paintbot_pw", v, Recording46(seed: r.seed, frames: r.frames,
+      names: r.names, communications: r.communications, endTick: r.endTick, map: r.map,
+      vision: r.vision, glory: toPreCogs(r.glory), seats: r.seats))
   elif version >= 43:
     saveReplayFile(path, "paintbot_pw", v, Recording43(seed: r.seed, frames: toFrames16(r.frames),
       names: toNames16(r.names), communications: r.communications, endTick: r.endTick, map: r.map,
-      vision: r.vision, glory: r.glory))
+      vision: r.vision, glory: toPreCogs(r.glory)))
   elif version == 42:
     saveReplayFile(path, "paintbot_pw", v, PreGloryRecording(seed: r.seed, frames: toFrames16(r.frames),
       names: toNames16(r.names), communications: r.communications, endTick: r.endTick, map: r.map,
@@ -338,11 +364,19 @@ proc loadRecording*(path: string): Recording =
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording43)
     result = Recording(seed: old.seed, frames: convertFrames(old.frames), names: @(old.names),
       communications: old.communications, endTick: old.endTick, map: old.map, vision: old.vision,
-      glory: old.glory)
+      glory: fromPreCogs(old.glory))
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
     if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
   elif replayRulesVersion == SeatCountRules:
+    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording46)
+    result = Recording(seed: old.seed, frames: old.frames, names: old.names,
+      communications: old.communications, endTick: old.endTick, map: old.map, vision: old.vision,
+      glory: fromPreCogs(old.glory), seats: old.seats)
+    discard mapIndex(result.map) # an unknown map is an invalid replay
+    if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
+    if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
+  elif replayRulesVersion == BehindCogsRules:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")

@@ -263,6 +263,14 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
     (if ffa(): -1'i32 else: gloryRules().behindLives),4)
   discard result.addFunction("awardBehindSeconds",0,proc(a:openArray[int32]):int32 =
     (if ffa(): -1'i32 else: gloryRules().behindLivesSeconds),4)
+  # Rules 47: team t's cogs out of the match (dead, no lives left), the count the
+  # behind-in-cogs glory award compares, and that award and its period. FFA-kin reads -1.
+  discard result.addFunction("teamCogsOut",1,proc(a:openArray[int32]):int32 =
+    (if not ffa() and a[0] >= 0 and a[0] <= 1: active.teamCogsOut(a[0].int) else: -1'i32),4)
+  discard result.addFunction("awardBehindCogs",0,proc(a:openArray[int32]):int32 =
+    (if ffa(): -1'i32 else: gloryRules().behindCogs),4)
+  discard result.addFunction("awardBehindCogsSeconds",0,proc(a:openArray[int32]):int32 =
+    (if ffa(): -1'i32 else: gloryRules().behindCogsSeconds),4)
   # Rules 38: glory hearts are fog-gated like pickups; hidden or invalid ones read -1.
   discard result.addFunction("gloryHeartCount",0,proc(a:openArray[int32]):int32 = active.gloryHearts.len.int32,4)
   proc getGloryHeart(field:int):HostProc =
