@@ -1900,7 +1900,7 @@ proc pw_seat_state*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl
   if handle == nil or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
-  for slot in 0..<Seats:
+  for slot in 0..<LegacySeats:
     let c = env.world.cogs[slot]
     let e = env.world.equipment[slot]
     let o = slot*SeatStateFloats

@@ -25,12 +25,12 @@ proc snapshot(env: pointer): JsonNode =
 proc scripted(seed, ticks: int): pointer =
   result = pw_create(seed.int32, ticks.int32)
   let source = readFile(Base)
-  for slot in 0..<Seats:
+  for slot in 0..<LegacySeats:
     doAssert pw_set_seat_script(result, slot.cint, cast[ptr UncheckedArray[char]](unsafeAddr source[0]),
       source.len.int32) == 0
 
-proc expected(w: JsonNode): array[Seats*SeatStateFloats, float32] =
-  for slot in 0..<Seats:
+proc expected(w: JsonNode): array[LegacySeats*SeatStateFloats, float32] =
+  for slot in 0..<LegacySeats:
     let c = w["cogs"][slot]
     let e = w["equipment"][slot]
     let o = slot*SeatStateFloats
@@ -45,7 +45,7 @@ proc expected(w: JsonNode): array[Seats*SeatStateFloats, float32] =
 
 suite "pw_seat_state":
   test "arguments":
-    var out16: array[Seats*SeatStateFloats, cfloat]
+    var out16: array[LegacySeats*SeatStateFloats, cfloat]
     check pw_seat_state(nil, fbuf(out16)) == -1
     let env = pw_create(3, 100)
     check pw_seat_state(env, nil) == -1
@@ -59,10 +59,10 @@ suite "pw_seat_state":
     for seed in 1..seeds:
       let env = scripted(seed * 17, ticks)
       let twin = scripted(seed * 17, ticks)
-      var actions = newSeq[int32](Seats * pw_action_count())
-      var rewards = newSeq[cfloat](Seats)
-      var terminals = newSeq[cfloat](Seats)
-      var got: array[Seats*SeatStateFloats, cfloat]
+      var actions = newSeq[int32](LegacySeats * pw_action_count())
+      var rewards = newSeq[cfloat](LegacySeats)
+      var terminals = newSeq[cfloat](LegacySeats)
+      var got: array[LegacySeats*SeatStateFloats, cfloat]
       for tick in 0..<ticks:
         let before = pw_state_hash(env)
         check pw_seat_state(env, fbuf(got)) == 0
@@ -74,7 +74,7 @@ suite "pw_seat_state":
             checkpoint "seed " & $seed & " tick " & $tick & " float " & $i & ": " & $got[i] & " != " & $want[i]
             check got[i] == want[i]
             break
-        for slot in 0..<Seats:
+        for slot in 0..<LegacySeats:
           let o = slot*SeatStateFloats
           if got[o+5] > 0: inc respawning
           if got[o+6] > 0: inc carries
@@ -84,9 +84,9 @@ suite "pw_seat_state":
         check pw_step(twin, cast[ptr UncheckedArray[int32]](addr actions[0]),
           cast[ptr UncheckedArray[cfloat]](addr rewards[0]), cast[ptr UncheckedArray[cfloat]](addr terminals[0])) == rc
         if rc != 0 or terminals[0] > 0: break
-      var stats: array[Seats*8, int32]
+      var stats: array[LegacySeats*8, int32]
       check pw_seat_stats(env, cast[ptr UncheckedArray[int32]](addr stats[0])) == 0
-      for slot in 0..<Seats: deaths += stats[slot*8+5]
+      for slot in 0..<LegacySeats: deaths += stats[slot*8+5]
       pw_destroy(env)
       pw_destroy(twin)
     checkpoint "deaths " & $deaths & " respawning-seat-ticks " & $respawning & " carrying-seat-ticks " & $carries &
