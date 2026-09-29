@@ -5,7 +5,7 @@
 ## Scores are rebuilt every tick and replace the previous tick's, so they can
 ## fall as well as rise: a past event decays, a separating pair cools off.
 ## With `lookahead` (replays, where the whole event index is known), events up
-## to LeadTicks ahead are scored too, so the camera is already there when a
+## to the grading's leadTicks ahead are scored too, so the camera is already there when a
 ## cog goes down or a heart flips.
 import std/math
 import vmath
@@ -14,12 +14,6 @@ import game, sim, analysis
 from kinship import activeKinship, rPercent
 
 const
-  PastTicks = 36
-    ## How long a past event stays interesting.
-  HalfLifeTicks = 12'f32
-    ## A past event's score halves every half second.
-  LeadTicks = 48
-    ## With lookahead, events this many ticks ahead are scored.
   LeadFloor = 0.6'f32
     ## Share of its score an event has at the far edge of the lead window.
   HitTicks = 24
@@ -52,14 +46,35 @@ const
     ## An instant replay waits until the held shot scores below this.
 
 type
+  CameraGrading* = object
+    ## Everything the director weighs, tuned per game mode (see gradingFor).
+    blast*, down*, greatHeart*, territory*, greatHeartCharge*, tag*: float32
+      ## Event scores; "spray" scores as a tag.
+    cog*, coverage*: float32
+      ## Every living cog, plus up to `coverage` for one the camera has not shown lately.
+    duel*, duelUnsighted*, duelHit*: float32
+      ## Opponents within 40 m score `duel` minus their gap, times `duelUnsighted`
+      ## across a wall, plus `duelHit` when they have just hit each other.
+    hit*, danger*: float32
+      ## A hit framing shooter and victim; a cog one hit from going down in sight.
+    heartContested*, heartIdle*, heartCapture*: float32
+      ## A control heart with cogs near: contested, or idle plus `heartCapture`
+      ## times the progress of a capture under way.
+    greatHeartBase*, greatHeartProgress*: float32
+    halfLifeTicks*: float32
+      ## A past event's score halves this often.
+    pastTicks*, leadTicks*: int
+      ## How long a past event stays interesting; how far ahead replays look.
+    hold*, clusterShare*, fatigue*, sameShotMargin*, jumpDistance*, followRate*: float32
+      ## ActionCam settings: holdSeconds, clusterShare, fatigueSeconds,
+      ## sameShotMargin, jumpDistance, followRate.
   Director* = ref object
     cam*: ActionCam
     tick*: int32
       ## Simulation tick the interests were last rebuilt for, or -1.
     lookahead*: bool
       ## Score future events from the index (replays only).
-    coverageBonus*: float32
-      ## Extra score for a cog the camera has not shown in CoverageSeconds.
+    grading*: CameraGrading
     lastPoses: array[Seats, Vec3]
     velocity: array[Seats, Vec3]
       ## Smoothed metres per tick.
@@ -81,18 +96,56 @@ type
       ## Wall-clock seconds until another replay may start.
     missed: seq[tuple[tick: int32, position: Vec3]]
 
-proc newDirector*(mapSpan: float32, lookahead = false): Director =
-  ## Creates a director tuned for Paintbot's arena scale.
+const
+  TeamsGrading* = CameraGrading(
+    blast: 165, down: 145, greatHeart: 150, territory: 130, greatHeartCharge: 100, tag: 100,
+    cog: 15, coverage: 20,
+    duel: 100, duelUnsighted: 0.35, duelHit: 30,
+    hit: 70, danger: 70,
+    heartContested: 125, heartIdle: 45, heartCapture: 90,
+    greatHeartBase: 60, greatHeartProgress: 80,
+    halfLifeTicks: 12, pastTicks: 36, leadTicks: 48,
+    hold: 4, clusterShare: 0.35, fatigue: 14, sameShotMargin: 1.3, jumpDistance: 90,
+    followRate: 1)
+    ## paintbot-pw teams: short elimination fights; downs and flips decide it.
+  FfaGrading* = CameraGrading(
+    blast: 165, down: 145, greatHeart: 150, territory: 150, greatHeartCharge: 100, tag: 100,
+    cog: 15, coverage: 0,
+    duel: 55, duelUnsighted: 0.35, duelHit: 30,
+    hit: 60, danger: 70,
+    heartContested: 125, heartIdle: 20, heartCapture: 90,
+    greatHeartBase: 60, greatHeartProgress: 80,
+    halfLifeTicks: 12, pastTicks: 36, leadTicks: 48,
+    hold: 6, clusterShare: 0.2, fatigue: 0, sameShotMargin: 2, jumpDistance: 90,
+    followRate: 0.8)
+    ## Heartland FFA-kin: many small scraps spread over a big map, where the teams
+    ## grading kept the camera hopping. Duels and idle hearts weigh less, flips more;
+    ## shots hold longer and pan slower. Tuned with camera_eval on 6 Heartland replays,
+    ## checked on 12 others (see the PR adding it).
+
+proc gradingFor*(): CameraGrading =
+  ## The grading for the current game mode.
+  if ffa(): FfaGrading else: TeamsGrading
+
+proc apply*(d: Director) =
+  ## Pushes the grading's camera settings into the ActionCam.
+  d.cam.holdSeconds = d.grading.hold
+  d.cam.clusterShare = d.grading.clusterShare
+  d.cam.fatigueSeconds = d.grading.fatigue
+  d.cam.sameShotMargin = d.grading.sameShotMargin
+  d.cam.jumpDistance = d.grading.jumpDistance
+  d.cam.followRate = d.grading.followRate
+
+proc newDirector*(mapSpan: float32, lookahead = false,
+    grading = gradingFor()): Director =
+  ## Creates a director tuned for Paintbot's arena scale and the game mode.
   result = Director(
     cam: initActionCam(minDistance = 26, maxDistance = 150, tight = 0.6,
-      followRate = 1.0, zoomRate = 0.7, holdSeconds = 4, mapSpan = mapSpan),
+      followRate = 1.0, zoomRate = 0.7, holdSeconds = grading.hold, mapSpan = mapSpan),
     tick: -1,
     lookahead: lookahead,
-    coverageBonus: 20)
-  result.cam.clusterShare = 0.35
-  result.cam.fatigueSeconds = 14
-  result.cam.jumpDistance = 90
-  result.cam.sameShotMargin = 1.3
+    grading: grading)
+  result.apply()
 
 proc related(a, b: int): bool =
   ## Whether two FFA-kin seats share any kinship.
@@ -121,10 +174,11 @@ proc firstFrom(moments: seq[Moment], tick: int): int =
 
 proc timeWeight(d: Director, age: int): float32 =
   ## Multiplier for an event `age` ticks old; negative ages are still to come.
+  let g = d.grading
   if age >= 0:
-    if age > PastTicks: 0'f32 else: pow(0.5'f32, age.float32/HalfLifeTicks)
-  elif not d.lookahead or -age > LeadTicks: 0'f32
-  else: LeadFloor+(1-LeadFloor)*(1-(-age).float32/LeadTicks)
+    if age > g.pastTicks: 0'f32 else: pow(0.5'f32, age.float32/g.halfLifeTicks)
+  elif not d.lookahead or -age > g.leadTicks: 0'f32
+  else: LeadFloor+(1-LeadFloor)*(1-(-age).float32/g.leadTicks.float32)
 
 proc closeness(w: World): float32 =
   ## One when the teams are level on cogs standing plus lives, falling
@@ -162,6 +216,7 @@ proc noteInterests*(d: Director, w: World, index: ReplayIndex,
     poses: array[Seats, Vec3], seen: proc(i: int): bool, lens: int) =
   ## Rebuilds the scored interests for the current simulation tick.
   var cam = d.cam
+  let g = d.grading
   cam.beginFrame(w.tick)
   let
     tick = w.tick
@@ -206,22 +261,22 @@ proc noteInterests*(d: Director, w: World, index: ReplayIndex,
           poses[i].z-cam.lockTarget.z)) > cam.jumpRange()*0.5: 0'f32
       else: max(0, tick-d.lastInShot[i]).float32/TickRate.float32
     cam.noteInterest(int32(i+1), led(poses[i], d.velocity[i]),
-      15+d.coverageBonus*min(1, unseen/CoverageSeconds), 5, tick, 1, replace = true)
+      g.cog+g.coverage*min(1, unseen/CoverageSeconds), 5, tick, 1, replace = true)
     # Danger: a cog one hit from going down with an opponent in sight.
     if c.hp == 1 and maxHp() > 1:
       for j, o in w.cogs:
         if o.hp > 0 and opponents(i, j) and seen(j) and w.visible(j, i) and
             length(poses[i]-poses[j]) < 25:
           cam.noteInterest(int32(1_600_000_000+i), led(poses[i], d.velocity[i]),
-            70*stakes, 6, tick, 1, replace = true)
+            g.danger*stakes, 6, tick, 1, replace = true)
           break
     proc duel(id: int32, j: int, gap: float32) =
       ## Two opponents close together: hot when they can see or are hitting
       ## each other, lukewarm across a wall.
       let
         sighted = w.visible(i, j) or w.visible(j, i)
-        base = (100-gap)*(if sighted: 1'f32 else: 0.35'f32)
-        score = (base+(if recentHit(i, j): 30'f32 else: 0'f32))*stakes
+        base = (g.duel-gap)*(if sighted: 1'f32 else: g.duelUnsighted)
+        score = (base+(if recentHit(i, j): g.duelHit else: 0'f32))*stakes
       cam.noteInterest(id, led((poses[i]+poses[j])*0.5, (d.velocity[i]+d.velocity[j])*0.5),
         score, gap*0.5+3, tick, 1, replace = true)
     when Seats <= 16:
@@ -243,13 +298,13 @@ proc noteInterests*(d: Director, w: World, index: ReplayIndex,
   for n in firstFrom(index.hits, tick-HitTicks)..<index.hits.len:
     let hit = index.hits[n]
     let weight = d.timeWeight(tick-hit.tick)
-    if hit.tick > tick+LeadTicks: break
+    if hit.tick > tick+g.leadTicks: break
     if weight <= 0 or hit.slot notin 0..<Seats or hit.victim notin 0..<Seats: continue
     if not seen(hit.slot) and not seen(hit.victim): continue
     let
       a = poses[hit.slot]
       b = poses[hit.victim]
-    cam.noteInterest(int32(700_000_000+n), (a+b)*0.5, 70*weight*stakes,
+    cam.noteInterest(int32(700_000_000+n), (a+b)*0.5, g.hit*weight*stakes,
       length(a-b)*0.5+3, tick, 1, replace = true)
   for n, h in w.controlHearts:
     var nearby: array[2, int]
@@ -260,31 +315,33 @@ proc noteInterests*(d: Director, w: World, index: ReplayIndex,
         inc total
     if total > 0:
       let contested = if ffa(): total > 1 else: nearby[0] > 0 and nearby[1] > 0
-      var score = if contested: 125'f32 else: 45'f32
+      var score = if contested: g.heartContested else: g.heartIdle
       # A capture under way heats up as it nears the flip.
       if n < w.heartCaptures.len and w.heartCaptures[n].team >= 0:
-        score = max(score, 45+90*min(1, w.heartCaptures[n].ticks.float32/HeartCaptureTicks.float32))
+        score = max(score, g.heartIdle+g.heartCapture*
+          min(1, w.heartCaptures[n].ticks.float32/HeartCaptureTicks.float32))
       cam.noteInterest(int32(1000+n), w.worldPoint(h.pos, 2), score*stakes, 9, tick, 1,
         replace = true)
   if ffa():
-    for n, g in w.greatHearts:
-      if g.progress > 0 and g.dormantUntil <= tick:
-        cam.noteInterest(int32(5000+n), w.worldPoint(g.pos, 2),
-          60+80*min(1, g.progress.float32/GreatHeartCaptureTicks.float32), 12, tick, 1,
+    for n, great in w.greatHearts:
+      if great.progress > 0 and great.dormantUntil <= tick:
+        cam.noteInterest(int32(5000+n), w.worldPoint(great.pos, 2),
+          g.greatHeartBase+g.greatHeartProgress*
+            min(1, great.progress.float32/GreatHeartCaptureTicks.float32), 12, tick, 1,
           replace = true)
-  for n in firstFrom(index.events, tick-PastTicks)..<index.events.len:
+  for n in firstFrom(index.events, tick-g.pastTicks)..<index.events.len:
     let event = index.events[n]
-    if event.tick > tick+LeadTicks: break
+    if event.tick > tick+g.leadTicks: break
     let timing = d.timeWeight(tick-event.tick)
     if timing <= 0: continue
     if event.slot >= 0 and not seen(event.slot): continue
     let weight = case event.kind
-      of "grenade blast": 165'f32
-      of "down": 145'f32
-      of "great heart": 150'f32
-      of "territory": 130'f32
-      of "great heart charge": 100'f32
-      of "tag", "spray": 100'f32
+      of "grenade blast": g.blast
+      of "down": g.down
+      of "great heart": g.greatHeart
+      of "territory": g.territory
+      of "great heart charge": g.greatHeartCharge
+      of "tag", "spray": g.tag
       else: 0'f32
     if weight > 0 and (lens < 0 or event.slot >= 0):
       cam.noteInterest(int32(10000+n), w.worldPoint(point(event.x, event.z), 1),

@@ -764,3 +764,18 @@ Every teams variant sets `"glory": {"behind_lives": 5}`, so a team behind in liv
 it trails every five seconds (was 1). To retune glory later, edit the variants' `game_config` in
 `coworld_manifest_template.json`; no engine change is needed. Rules 43 recordings carry the awards they were
 played with. Rules 42 and older recordings load with the defaults.
+
+## Smarter action camera: 0.3.71
+
+Automatic deploy shipped `42328b5` (#159) as 0.3.71 = `cow_fd72a95b-574e-4a92-9532-ff43e641a8d5`, now canonical.
+The commit is tagged `coworld-v0.3.71`. Viewer only; rules and replays are unchanged.
+
+- The action camera looks ahead in replays: it heads for a down or heart flip up to 2 s before it happens. It also
+  weighs how much an event matters (last cogs standing, lead-changing flips, close matches) and whether two
+  opponents can actually see each other.
+- A corner inset ("ACTION ELSEWHERE") shows the strongest action outside the main shot.
+- Instant replay (replays at up to 2x): a highlight that neither view showed is rewound and replayed once the
+  action is calm, under an INSTANT REPLAY banner. It fires at most once every 45 s, and a manual seek cancels it.
+- Live matches now feed downs, blasts and flips to the camera.
+- Measure camera changes with `examples/paintbot/camera_eval.nim` over league replays. #160 adds a separate
+  grading preset for Heartland.
