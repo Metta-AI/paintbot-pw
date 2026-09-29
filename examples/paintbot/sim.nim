@@ -823,16 +823,19 @@ proc configureMap*(name: string) =
 proc mapName*(): string =
   if activeMap() >= 0: MapNames[activeMap()] else: ""
 
+proc sizeSeats*(w: var World) =
+  ## Gives every per-seat list one entry per seat of the current match (Seats).
+  w.cogs.setLen(Seats)
+  w.equipment.setLen(Seats)
+  w.uniforms.setLen(Seats)
+  w.seatScore.setLen(Seats)
+  w.heartSeconds.setLen(Seats)
+  w.greatShare.setLen(Seats)
+  w.spawnAnchor.setLen(Seats)
 proc newWorld*(seed: int32, endTick: int32 = 0): World =
   ## A world for the current seat count (Seats; see configureSeats).
   configureRules(visionRulesVersion)
-  result.cogs = newSeq[Cog](Seats)
-  result.equipment = newSeq[Equipment](Seats)
-  result.uniforms = newSeq[bool](Seats)
-  result.seatScore = newSeq[int32](Seats)
-  result.heartSeconds = newSeq[int32](Seats)
-  result.greatShare = newSeq[int32](Seats)
-  result.spawnAnchor = newSeq[Point](Seats)
+  result.sizeSeats()
   result.endTick = if ffa():
     (if endTick <= 0: FfaMatchTicks.int32 else: min(endTick, FfaMatchTicks.int32))
   elif visionRulesVersion >= 28:

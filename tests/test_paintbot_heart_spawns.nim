@@ -23,6 +23,7 @@ suite "Heart-based spawns":
 
   test "softmax favors the sum of distances and ignores self, enemies and dead cogs":
     var w: World
+    w.sizeSeats()
     w.rng = initRng(42)
     w.controlHearts = @[
       ControlHeart(pos: point(0, 0), owner: 0),

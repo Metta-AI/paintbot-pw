@@ -20,11 +20,11 @@ proc main() =
     configureRules(NativeRules)
     let handle = pw_create(recording.seed, recording.endTick)
     doAssert handle != nil
-    for slot in 0..<Seats:
+    for slot in 0..<LegacySeats:
       doAssert pw_set_seat_script(handle, slot.cint,
         cast[ptr UncheckedArray[char]](unsafeAddr source[0]), source.len.int32) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     var matched = 0
     var firstMismatch = -1
     for tick, frame in recording.frames:
@@ -36,7 +36,7 @@ proc main() =
         firstMismatch = tick; break
       inc matched
     var statuses: seq[int]
-    for slot in 0..<Seats: statuses.add pw_seat_script_status(handle, slot.cint, nil, 0).int
+    for slot in 0..<LegacySeats: statuses.add pw_seat_script_status(handle, slot.cint, nil, 0).int
     let ended = terminals[0] == 1
     pw_destroy(handle)
     let ok = firstMismatch < 0 and matched == recording.frames.len and ended

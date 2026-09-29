@@ -49,7 +49,7 @@ proc run(driver: Driver, seed: int32): array[3, uint32] =
   visionRulesVersion = 40
   configureRules(40)
   var w = newWorld(seed, 14400)
-  var players: seq[Bot]
+  var players = newSeq[Bot](Seats)
   if driver == basic: players = loadBots(@[BotGroup(path: Base, count: Seats)])
   var at = 0
   var shots = 0

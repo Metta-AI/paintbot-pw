@@ -168,7 +168,7 @@ suite "Hosted neural seats and the native ABI take the same fire hold (radius)":
       for side in 0..1:
         let wide = neuralSeats("{\"fire_hold_teammates\": {\"radius\": 150}, \"sampling\": {\"mode\": \"categorical\"}}")
         let plain = neuralSeats("{\"fire_hold_teammates\": true, \"sampling\": {\"mode\": \"categorical\"}}")
-        var players: seq[Bot]
+        var players = newSeq[Bot](Seats)
         for slot in 0..<Seats: players[slot] = if team(slot) == side: wide[slot] else: plain[slot]
         var world = newWorld(seed, ticks.int32)
         let handle = pw_create(seed, ticks.int32)

@@ -274,7 +274,7 @@ suite "Hosted neural seats and the native ABI take the same decoder path (aim re
         for side in 0..1:
           let on = neuralSeats(config.decoder)
           let off = neuralSeats(plainSeats)
-          var players: seq[Bot]
+          var players = newSeq[Bot](Seats)
           for slot in 0..<Seats: players[slot] = if team(slot) == side: on[slot] else: off[slot]
           var world = newWorld(seed, ticks.int32)
           let handle = pw_create(seed, ticks.int32)

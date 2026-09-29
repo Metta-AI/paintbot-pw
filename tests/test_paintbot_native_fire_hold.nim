@@ -165,7 +165,7 @@ suite "Native decoder fire hold":
     require w.cogs[shooter].cooldown == 0 and w.equipment[shooter].windup == 0
     require not w.equipment[shooter].sprayCan
     # The production interpreter drives the seat: it shoots at the enemy's position.
-    var players: seq[Bot]
+    var players = newSeq[Bot](Seats)
     players[shooter] = loadScriptBot("shootAt(" & $t.x & ", " & $t.z & ")\n", shooter)
     for (name, hold, mateHp) in [("plain", false, 2'i32), ("held", true, 3'i32)]:
       var trial = w

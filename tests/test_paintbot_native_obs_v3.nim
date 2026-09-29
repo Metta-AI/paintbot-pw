@@ -72,7 +72,7 @@ proc hostRun(model, manifest: string, seed: int32, ticks: int, policySeats: set[
   defer:
     for suffix in ["", ".model.bin", ".neural.json"]: removeFile(path & suffix)
   resetOracle()
-  var players: seq[Bot]
+  var players = newSeq[Bot](Seats)
   let neural = loadBots(@[BotGroup(path: path, count: Seats)])
   let plain = loadBots(@[BotGroup(path: Base, count: Seats)])
   for slot in 0..<Seats: players[slot] = if slot.int8 in policySeats: neural[slot] else: plain[slot]

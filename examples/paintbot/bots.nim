@@ -97,6 +97,7 @@ proc nearAgents(slot, radius: int): int =
   ## observes (a disguised body reports its disguise; of two bodies sharing an identity the
   ## nearer is kept, as playerX does). Visits only grid cells the circle touches, so the
   ## cost follows the neighbourhood, not the roster.
+  if nearLists.len != Seats: nearLists.setLen(Seats)
   nearLists[slot].setLen(0)
   let me = active.cogs[slot]
   if me.hp <= 0: return 0
@@ -455,7 +456,7 @@ proc decide*(bots:openArray[Bot],w:World):seq[Command] =
   for l in nearLists.mitems: l.setLen(0)
   beginOracleTick(w.tick)
   for slot in 0..<Seats:
-    let b=bots[slot];let cog=w.cogs[slot]
+    let b=(if slot < bots.len: bots[slot] else: nil);let cog=w.cogs[slot]
     # FFA-kin has no team hearts: home is the seat's spawn anchor, and the carried-heart data
     # all read home (never stolen). selfTeam is the seat.
     var home, heart, ownPos: Point

@@ -166,7 +166,7 @@ suite "Hosted neural seats and the native ABI agree across respawns (every decod
       for side in 0..1:
         let on = neuralSeats(full)
         let off = neuralSeats(plainHold)
-        var players: seq[Bot]
+        var players = newSeq[Bot](Seats)
         for slot in 0..<Seats: players[slot] = if team(slot) == side: on[slot] else: off[slot]
         var world = newWorld(seed, ticks.int32)
         let handle = pw_create(seed, ticks.int32)
@@ -239,7 +239,7 @@ suite "Hosted neural seats and the native ABI agree across respawns (every decod
       for side in 0..0:
         let on = neuralSeats(full)
         let off = neuralSeats(plainHold)
-        var players: seq[Bot]
+        var players = newSeq[Bot](Seats)
         for slot in 0..<Seats: players[slot] = if team(slot) == side: on[slot] else: off[slot]
         var world = newWorld(seed, ticks.int32)
         let handle = pw_create(seed, ticks.int32)
