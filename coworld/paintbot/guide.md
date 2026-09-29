@@ -341,8 +341,8 @@ absent keys keep the defaults in the glory table below:
 | `behind_cogs_seconds` | 5 | rules 47: how often the behind-in-cogs award pays, in seconds |
 
 Awards are 0 to 1000 and periods 1 to 600 seconds. Every teams variant sets
-`"glory": {"behind_lives": 5, "behind_cogs": 5}`, so every five seconds a team behind in lives
-earns 5 per life it trails by, and a team with more cogs out earns 5 per extra cog out.
+`"glory": {"behind_lives": 5, "behind_cogs": 10}`, so every five seconds a team behind in lives
+earns 5 per life it trails by, and a team with more cogs out earns 10 per extra cog out.
 Replays record the awards they were played with.
 
 ### Glory for cogs out (rules 47)
@@ -596,7 +596,7 @@ for hardship a team takes on. Each team's glory starts at the match length in se
 the ten-minute limit, `endTick div TickRate`) and loses one per second, so a five-minute win
 keeps about 300 before events. The events below list the engine defaults from `sim.nim`; from
 rules 43 a variant's `"glory"` config can change them (every teams variant pays 5 per life behind
-and 5 per cog out behind):
+and 10 per cog out behind):
 
 | Event | Glory | Credited to |
 | --- | --- | --- |
