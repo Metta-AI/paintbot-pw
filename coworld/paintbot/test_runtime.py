@@ -900,7 +900,7 @@ class ManifestTests(unittest.TestCase):
                 if config.get("mode") == "ffa_kin":
                     self.assertNotIn("glory", config)
                 else:
-                    self.assertEqual(config["glory"], {"behind_lives": 5, "behind_cogs": 5})
+                    self.assertEqual(config["glory"], {"behind_lives": 5, "behind_cogs": 10})
         competition = self._config("competition")
         self.assertEqual(_schema_errors(schema, dict(competition, glory={
             "quiet_supplies": 0, "quiet_supplies_seconds": 600, "behind_lives": 1000,
