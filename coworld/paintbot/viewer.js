@@ -110,6 +110,7 @@
   $("map-expand").innerHTML = icon("map");
   const mapPanel = $("map-panel");
   function containMap() {
+    if (!innerWidth || !innerHeight) return;
     const r=mapPanel.getBoundingClientRect();
     if (r.right > innerWidth || r.left < 0) mapPanel.style.left = `${Math.max(0,innerWidth-mapPanel.offsetWidth-12)}px`;
     if (r.top < 0 || r.bottom > innerHeight) {
@@ -174,7 +175,10 @@
     const height = Math.round(width / aspect);
     canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
     canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
-    containMap();
+    // Only a panel the viewer has moved or resized needs containing: the default CSS anchor
+    // (bottom-left) already fits, and containing it during a transient tiny viewport (an embed
+    // still sizing itself) would re-anchor it to the top for good.
+    if (mapPanel.style.left) containMap();
     return (mapLayout = { key, width, height, dpr });
   }
   function resizeMap(width) {
