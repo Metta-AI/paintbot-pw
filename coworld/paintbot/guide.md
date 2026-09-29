@@ -357,7 +357,7 @@ record the map name, and the viewer draws each map's terrain, scenery and coastl
 
 Two big maps stretch the same layouts over ten times the area: `big-twin-mesas` and
 `big-deep-forest` (variants `map-big-twin-mesas` and `map-big-deep-forest`; the
-`heartland-big` variant plays FFA-kin on `big-twin-mesas`). The world spans about
+`heartland` Coworld's `heartland-big` variant plays FFA-kin on `big-twin-mesas`). The world spans about
 50,000 x 30,000 units instead of 16,000 x 9,600, still centred on (3200, 2000). Hearts keep
 the shipped maps' territory per heart, about 730 m2 of land each, so the big maps carry 100
 (`big-twin-mesas`) and 126 (`big-deep-forest`) control hearts: the two homes, the four role
@@ -378,7 +378,8 @@ The generator and previews are in `tools/mapgen/`.
 
 ### FFA-kin mode (Heartland)
 
-The `heartland` variant sets `"mode": "ffa_kin"` in the game config (rules 41 otherwise; the
+Heartland is published as its own Coworld, `heartland` (variants `heartland` and `heartland-big`); it is
+this engine with `"mode": "ffa_kin"` in the game config (rules 41 otherwise; the
 teams game is untouched when the mode is absent or `"teams"`). The variant plays on Heartwick;
 a config may add a generated `"map"`, and the FFA-kin rules below apply there unchanged. All sixteen cogs are separate
 players, but some are related, and a cog's score counts its relatives' points.
@@ -393,7 +394,7 @@ players, but some are related, and a cog's score counts its relatives' points.
   `"fours"`, `"pairs"`, `"trios_loner"`, `"cousins"`, `"strangers"` or `"clones"`
   (`"sampled"` or absent draws one per seed, as above). Which seats form which family and
   every genome still come from the seed. The key is FFA-kin only; a teams config that sets it
-  is rejected. The Heartland league (the `heartland` variant) sets `"kin_layout": "cousins"`,
+  is rejected. The Heartland league (the `heartland` Coworld's `heartland` variant) sets `"kin_layout": "cousins"`,
   so every league match has four families of four in two cousin-linked pairs, with r = 1, 1/2,
   1/4 and 0 all present.
 - **Rules.** Every hit is an ordinary hit (there are no teams, so no friendly fire, and no
