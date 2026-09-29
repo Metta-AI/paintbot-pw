@@ -15,7 +15,7 @@ Reference: `coworld-ctf/client/replay_broadcast.html`, with the newer communicat
 | Play/pause, restart, back-tick, +5s, end | All supported, plus forward one tick; 1/2/4/16x speed |
 | Scrubbing and tick deep links | Range scrubber, `?t=<tick>` opens paused; independent 240-tick seek checkpoints |
 | Loop and auto-skip lulls | Loop restarts playback; lull skip jumps to two seconds before the next event |
-| Minimap, camera pan/zoom | Draggable bottom-left tactical map, collapses into its own button; colored hearts and agents, click-to-pan, camera footprint; keyboard and wheel zoom |
+| Minimap, camera pan/zoom | Draggable bottom-left tactical map, resizable from its corner grip (drag or arrow keys, size remembered), collapses into its own button; the arena's own aspect ratio at device resolution; heart and agent markers sized to map density (neutral hearts faint, owned hearts filled), click-to-pan, camera footprint; keyboard and wheel zoom |
 | POV visibility lens | Individual bot vision through the agent context menu, using actual range and cover checks |
 | First-person inset, resize grip, tactical context | Second 3D camera, pointer/keyboard resize handle; selected bot highlighted on full-context minimap |
 | Comms, expand/collapse, jump to live | Initially collapsed, team filters, time-correct public shouts, pinned scrolling; no private diagnostic logs |
