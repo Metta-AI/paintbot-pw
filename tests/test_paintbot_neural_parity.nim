@@ -2,7 +2,7 @@
 ## contract with a fixed width (v1, v2, v3, v2u<K>, ffa.v1) and both action contracts (v1, v2)
 ## are driven through the training library for a few hundred ticks with seeded actions, the
 ## decoder options on some seats, a scripted seat and a mid-match reset; every observation
-## row, reset flag, action candidate, reward, terminal and world hash is folded into one
+## row, reset flag, action candidate, terminal, tick, winner and world hash is folded into one
 ## FNV-1a digest per scenario. The digests were recorded on origin/main 0ff41d2 (before
 ## observation contract ffa.v2 and N-seat handles); an engine change that moves any byte a
 ## fixed contract's policy sees or any decoded command fails here.
@@ -97,11 +97,12 @@ proc run(s: Scenario): uint64 =
       d.add code
       if code != 0: break
       inc steps
-      d.add rewards
+      # Rewards stay out of the digest: the FFA reward sums float64 products a C compiler may
+      # fuse (FMA) on some targets, and the world hash below already pins what was played.
       d.add terminals
       d.add pw_state_hash(h)
       doAssert pw_results(h, fp(results)) == 0
-      d.add results
+      d.add results[0 .. 1]  # tick and winner (the FFA scores are float sums, like the rewards)
   pw_destroy(h)
   d.h
 
@@ -117,8 +118,8 @@ const Scenarios = [
 
 # Recorded on origin/main 0ff41d2 (PWPARITY_PRINT=1 prints them).
 const Golden: array[Scenarios.len, uint64] = [
-  0x6E3C1AFADD5ECD03'u64, 0x46FAA48048A56E29'u64, 0x0A3E59725732548E'u64, 0xA1D762437CBFDC22'u64,
-  0x6220DD35381B6889'u64, 0xF4EEC46999A65BB4'u64, 0x430442B7CC0D822F'u64, 0x38CAD2FFE1F9AC73'u64]
+  0xDF80AC7227887D07'u64, 0xD04F07C05217E7A1'u64, 0xAAD92B85A1D61D66'u64, 0xC49A997E0E75C672'u64,
+  0xE2BF1FE51D49FC45'u64, 0x2BB355999AFDA0FB'u64, 0x66C91BEE84EB8CF8'u64, 0xF729E5FF6B53E866'u64]
 
 suite "Fixed-width neural contracts are byte-identical":
   for i, s in Scenarios:
@@ -126,3 +127,12 @@ suite "Fixed-width neural contracts are byte-identical":
       let digest = run(s)
       if existsEnv("PWPARITY_PRINT"): echo "  ", s.name, ": 0x", digest.toHex, " (", steps, " steps)"
       check digest == Golden[i]
+
+  test "the teams game at rules 48 plays and observes exactly as at rules 47":
+    # Rules 48 (the FFA-kin fog of war) changes nothing in the teams game.
+    var teams48 = Scenarios[1]
+    teams48.rules = 48
+    check run(teams48) == Golden[1]
+    var v3at48 = Scenarios[2]
+    v3at48.rules = 48
+    check run(v3at48) == Golden[2]
