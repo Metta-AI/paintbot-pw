@@ -28,7 +28,7 @@ const GoldenMap: array[Driver, array[3, uint32]] = [  # map crater, seed 7
   scripted: [3118672817'u32, 3368131015'u32, 2096818526'u32],
   basic: [3637015912'u32, 1169035448'u32, 1771586162'u32]]
 
-proc scriptedCommands(w: World): array[Seats, Command] =
+proc scriptedCommands(w: World): array[LegacySeats, Command] =
   ## Deterministic, integer-only, reads nothing but the world.
   for slot in 0..<Seats:
     let cog = w.cogs[slot]
@@ -50,12 +50,12 @@ proc scriptedCommands(w: World): array[Seats, Command] =
 proc run(driver: Driver, seed: int32): array[3, uint32] =
   visionRulesVersion = 41
   var w = newWorld(seed, 14400)
-  var players: array[Seats, Bot]
+  var players = newSeq[Bot](Seats)
   if driver == basic: players = loadBots(@[BotGroup(path: Base, count: Seats)])
   var at = 0
   var shots = 0
   while w.tick < Checkpoints[^1] and w.winner == -1:
-    let commands = if driver == basic: players.decide(w) else: scriptedCommands(w)
+    let commands = if driver == basic: players.decide(w) else: @(scriptedCommands(w))
     if driver == basic: deliverSpeech(w)
     w.step(commands)
     shots += w.balls.len

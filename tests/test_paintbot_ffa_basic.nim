@@ -113,7 +113,7 @@ suite "FFA-kin BASIC host":
     # Submitted teams scripts may use any of the FFA names as plain variables.
     let names = ["kin", "gene", "heartOwner", "gameMode", "greatHeartCount", "greatHeartX",
       "greatHeartY", "greatHeartPresent", "greatHeartProgress", "greatHeartDormant",
-      "seatScore", "seatAlive", "territoryBoost"]
+      "seatScore", "seatAlive", "territoryBoost", "seatCount"]
     let path = getTempDir() / "paintbot-ffa-basic-names.bas"
     defer: removeFile(path)
     var source = ""

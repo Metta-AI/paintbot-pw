@@ -68,7 +68,7 @@ when defined(pwTraining):
     oracleEnabled* {.threadvar.}: bool
     oracleInterval* {.threadvar.}: int
     currentTick {.threadvar.}: int32
-    seats {.threadvar.}: array[Seats, Seat]
+    seats {.threadvar.}: array[MaxSeats, Seat]
     pendingAsks {.threadvar.}: seq[OracleAsk]
     seatsReady {.threadvar.}: bool
 else:
@@ -80,7 +80,7 @@ else:
     oracleEnabled*: bool
     oracleInterval* = DefaultOracleInterval
     currentTick: int32
-    seats: array[Seats, Seat]
+    seats: array[MaxSeats, Seat]
     pendingAsks: seq[OracleAsk]
     seatsReady: bool
 

@@ -26,7 +26,7 @@ const Golden: array[Driver, array[3, array[3, uint32]]] = [
     [3098977061'u32, 2754228622'u32, 628403883'u32],  # seed 7
     [507368414'u32, 717417816'u32, 1129494330'u32]]]  # seed 2026
 
-proc scriptedCommands(w: World): array[Seats, Command] =
+proc scriptedCommands(w: World): array[LegacySeats, Command] =
   ## Deterministic, integer-only, reads nothing but the world.
   for slot in 0..<Seats:
     let cog = w.cogs[slot]
@@ -49,12 +49,12 @@ proc run(driver: Driver, seed: int32): array[3, uint32] =
   visionRulesVersion = 40
   configureRules(40)
   var w = newWorld(seed, 14400)
-  var players: array[Seats, Bot]
+  var players = newSeq[Bot](Seats)
   if driver == basic: players = loadBots(@[BotGroup(path: Base, count: Seats)])
   var at = 0
   var shots = 0
   while w.tick < Checkpoints[^1] and w.winner == -1:
-    let commands = if driver == basic: players.decide(w) else: scriptedCommands(w)
+    let commands = if driver == basic: players.decide(w) else: @(scriptedCommands(w))
     if driver == basic: deliverSpeech(w)
     w.step(commands)
     shots += w.balls.len

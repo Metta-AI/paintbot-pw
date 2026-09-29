@@ -157,7 +157,7 @@ suite "Observation contract ffa.v1":
       s.cogs[0].shield = 0
       let before = s.cogs[0].pos
       let planned = s.plannedStep(0, far, false)
-      var cmds: array[Seats, Command]
+      var cmds: array[LegacySeats, Command]
       cmds[0] = Command(walk: true, goal: far)
       s.step(cmds)
       check s.cogs[0].pos == Point(x: before.x + planned.x, z: before.z + planned.z)

@@ -20,25 +20,25 @@ template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[i
 const Root = currentSourcePath().parentDir.parentDir
 const Base = Root / "coworld/paintbot/players/base.bas"
 
-type Derived* = array[Seats, array[9, int]]  # the pw_seat_weapon_stats layout
+type Derived* = array[LegacySeats, array[9, int]]  # the pw_seat_weapon_stats layout
 
 proc classes(w: World, p: Point): (bool, bool, bool) =
   (inWater(p), terrainHeight(p.x.int, p.z.int) >= HighGroundHeight, w.trenchAt(p) >= 0)
 
-proc derivedStep*(w: var World, commands: array[Seats, Command], acc: var Derived) =
+proc derivedStep*(w: var World, commands: openArray[Command], acc: var Derived) =
   ## Step `w`, adding each enemy damage event of the step to `acc`, derived without the
   ## library's telemetry. Weapon: a spray hit when the attacker's sprayHits bit for the
   ## victim is newly set this step (first event of the pair; a burst started this step
   ## clears the old bits); a grenade hit when a blast of this tick owned by the attacker
   ## reaches the victim (explosions add their blast before dealing damage, and come after
   ## the gun and spray phases); otherwise the gun. A kill is the observeTag after the event.
-  var preHits: array[Seats, uint32]
-  var preBurst: array[Seats, int32]
+  var preHits: array[LegacySeats, uint32]
+  var preBurst: array[LegacySeats, int32]
   for i in 0..<Seats:
-    preHits[i] = w.equipment[i].sprayHits
+    preHits[i] = w.equipment[i].sprayHits.words[0]
     preBurst[i] = w.equipment[i].burst
-  var seen: array[Seats, uint32]
-  var lastWeapon: array[Seats, int]
+  var seen: array[LegacySeats, uint32]
+  var lastWeapon: array[LegacySeats, int]
   let wp = addr w
   let ap = addr acc
   observeHit = proc(tick: int32, victim, attacker: int, pos: Point) =
@@ -47,7 +47,7 @@ proc derivedStep*(w: var World, commands: array[Seats, Command], acc: var Derive
     let bit = 1'u32 shl victim
     var weapon = 0
     let started = preBurst[attacker] == 0 and e.burst == SprayTicks
-    if (e.sprayHits and bit) != 0 and (seen[attacker] and bit) == 0 and
+    if (e.sprayHits.words[0] and bit) != 0 and (seen[attacker] and bit) == 0 and
         (started or (preHits[attacker] and bit) == 0):
       seen[attacker] = seen[attacker] or bit
       weapon = 2
@@ -69,7 +69,7 @@ proc derivedStep*(w: var World, commands: array[Seats, Command], acc: var Derive
     observeHit = nil
     observeTag = nil
 
-proc read(h: pointer): (Derived, array[Seats*8, int32], array[Seats, array[4, int32]]) =
+proc read(h: pointer): (Derived, array[LegacySeats*8, int32], array[LegacySeats, array[4, int32]]) =
   for s in 0..<Seats:
     var st: array[9, int32]
     doAssert pw_seat_weapon_stats(h, s.cint, ibuf(st)) == 0
@@ -107,8 +107,8 @@ suite "Native per-weapon kills and hit locations":
         check pw_set_seat_script(h, s.cint, cast[ptr UncheckedArray[char]](unsafeAddr baseSource[0]),
           baseSource.len.int32) == 0
       var derived: Derived
-      var actions: array[Seats*ActionSizes.len, int32]
-      var rewards, terminals: array[Seats, float32]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var rewards, terminals: array[LegacySeats, float32]
       for pass in 0..1:
         if pass == 1:
           # A reset clears the counters with the rest of the match telemetry.
@@ -141,9 +141,9 @@ suite "Native per-weapon kills and hit locations":
       let h = pw_create(matchSeed, ticks.int32)
       require h != nil
       var derived: Derived
-      var actions: array[Seats*ActionSizes.len, int32]
-      var rewards, terminals: array[Seats, float32]
-      var commands: array[Seats, Command]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var rewards, terminals: array[LegacySeats, float32]
+      var commands: array[LegacySeats, Command]
       while w.tick < ticks and w.winner == -1:
         for slot in 0..<Seats:
           let o = slot*ActionSizes.len

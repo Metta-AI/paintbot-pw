@@ -15,7 +15,7 @@ suite "Original Paintbot equipment":
     var w = arena()
     w.equipment[0].grenade = true
     w.cogs[0].aim = point(6000, 200)
-    var c: array[Seats, Command]
+    var c: array[LegacySeats, Command]
     c[0].chargeGrenade = true
     for tick in 0..<24: w.step(c)
     check w.grenades.len == 0
@@ -44,7 +44,7 @@ suite "Original Paintbot equipment":
     w.cogs[0].pos = point(3000, 2000); w.cogs[0].goal = w.cogs[0].pos
     w.cogs[1].pos = point(3400, 2000); w.cogs[1].goal = w.cogs[1].pos
     w.equipment[0].sprayCan = true; w.equipment[1].armor = 3
-    var c: array[Seats, Command]
+    var c: array[LegacySeats, Command]
     c[0] = Command(shoot: true, aim: point(4000, 2000))
     w.step(c)
     check w.cogs[1].hp == 3
@@ -66,7 +66,7 @@ suite "Original Paintbot equipment":
     var w = arena()
     w.trenches = @[Cover(x: 2800, z: 1800, w: 280, h: 280)]
     w.cogs[0].pos = point(2940, 1940); w.cogs[0].goal = w.cogs[0].pos
-    var c: array[Seats, Command]
+    var c: array[LegacySeats, Command]
     c[0] = Command(walk: true, direct: true, goal: point(4000, 1940))
     w.step(c)
     check w.cogs[0].pos.x == 2945
@@ -81,31 +81,31 @@ suite "Original Paintbot equipment":
     check w.equipment[0].lives == 0
     check not w.equipment[0].grenade
     check w.hearts[1].pos == home(1)
-    for tick in 0..<100: w.step(default(array[Seats, Command]))
+    for tick in 0..<100: w.step(default(array[LegacySeats, Command]))
     check w.cogs[0].hp == 0
   test "one capture wins even if own heart is stolen":
     var w = arena()
     w.cogs[0].pos = home(0); w.cogs[0].goal = home(0); w.cogs[0].carrying = true
     w.hearts[1].carrier = 0; w.hearts[0].carrier = 1
-    w.step(default(array[Seats, Command]))
+    w.step(default(array[LegacySeats, Command]))
     check w.winner == 0
   test "shield refills armor without healing and medkit heals":
     var w = arena()
     w.cogs[0].hp = 1
     w.pickups = @[Pickup(pos: w.cogs[0].pos, kind: armorPickup)]
-    w.step(default(array[Seats, Command]))
+    w.step(default(array[LegacySeats, Command]))
     check w.cogs[0].hp == 1
     check w.equipment[0].armor == 3
     check w.pickups[0].readyAt == 720
     w.pickups.add Pickup(pos: w.cogs[0].pos, kind: medkitPickup)
-    w.step(default(array[Seats, Command]))
+    w.step(default(array[LegacySeats, Command]))
     check w.cogs[0].hp == 3
 
   test "windup locks aim and simultaneous friendly fire can kill both":
     var w=arena()
     w.cogs[0].pos=point(3000,2000);w.cogs[0].goal=w.cogs[0].pos;w.cogs[0].hp=1
     w.cogs[2].pos=point(3400,2000);w.cogs[2].goal=w.cogs[2].pos;w.cogs[2].hp=1
-    var c:array[Seats,Command]
+    var c:array[LegacySeats,Command]
     c[0]=Command(shoot:true,aim:w.cogs[2].pos)
     c[2]=Command(shoot:true,aim:w.cogs[0].pos)
     w.step(c)
@@ -151,7 +151,7 @@ suite "Original Paintbot equipment":
     w.cogs[2].pos = point(3500,2450)
     check not w.sprayTouches(0,2)
     w.equipment[0].sprayCan = true
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     commands[0] = Command(shoot:true,aim:point(4000,2000))
     w.step(commands)
     check w.cogs[1].hp == 0
@@ -165,7 +165,7 @@ suite "Original Paintbot equipment":
     w.cogs[1].goal = w.cogs[1].pos
     w.cogs[1].shield = 2
     w.equipment[0].sprayCan = true
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     commands[0] = Command(shoot:true,aim:point(4000,2000))
     w.step(commands)
     check w.cogs[1].hp == 3

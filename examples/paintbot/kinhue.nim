@@ -24,10 +24,11 @@ proc angle(v: array[Loci, float]): float =
   result = radToDeg(arctan2(y, x))
   if result < 0: result += 360
 
-proc familyHues*(k: Kinship): array[KinSeats, float32] =
+proc familyHues*(k: Kinship): seq[float32] =
   ## Hue in degrees per seat, or LonerHue. Families linked by descent (cousins) form a clan;
   ## clans get evenly spaced hue slots in the circular order of their projected genomes, and a
   ## clan's families share its slot, so hues stay distinct and cousins stay adjacent.
+  result = newSeq[float32](k.family.len)
   for i in 0..<KinSeats: result[i] = LonerHue
   var families: seq[int]
   for i in 0..<KinSeats:

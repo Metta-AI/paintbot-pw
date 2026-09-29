@@ -27,7 +27,7 @@ suite "nearAgents":
     var rng = initRand(7)
     for seed in [2026'i32, 11, 99]:
       var w = newWorld(seed)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for tick in 0..<480:
         if tick mod 40 == 0:
           for i in 0..<Seats:

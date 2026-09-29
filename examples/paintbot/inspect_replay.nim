@@ -3,7 +3,7 @@ import polyworld/tapes
 import game, sim
 let r=loadRecording(paramStr(1))
 var w=newWorld(r.seed)
-var moves,shots:array[Seats,int]
+var moves,shots:array[MaxSeats,int]
 for f in r.frames:
   for i,c in f.commands:
     if c.walk and c.goal!=w.cogs[i].pos:inc moves[i]

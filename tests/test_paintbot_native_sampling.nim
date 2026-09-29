@@ -134,10 +134,10 @@ suite "Native ABI decoder sampling":
       pw_destroy(plain)
       pw_destroy(sampling)
     for seat in 0..<Seats: check pw_set_seat_sampling(sampling, seat.cint, 1000, 0) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, cfloat]
-    var observations: array[Seats*ObservationSize, cfloat]
-    var resets: array[Seats, cfloat]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, cfloat]
+    var observations: array[LegacySeats*ObservationSize, cfloat]
+    var resets: array[LegacySeats, cfloat]
     for tick in 0..<300:
       # The same caller actions for both handles; the sampling handle also draws, which
       # must not reach the world.

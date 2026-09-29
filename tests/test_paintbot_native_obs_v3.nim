@@ -61,7 +61,7 @@ neuralIssue()
 """
 
 proc hostRun(model, manifest: string, seed: int32, ticks: int, policySeats: set[int8]):
-    (seq[uint32], seq[array[Seats, seq[float32]]]) =
+    (seq[uint32], seq[array[LegacySeats, seq[float32]]]) =
   ## The game's own loop over staged bundle files: policy seats run the bundle, the rest
   ## base.bas. Per tick: the world hash after the step, and each policy seat's observation
   ## (empty when its script did not run that tick: dead).
@@ -72,17 +72,17 @@ proc hostRun(model, manifest: string, seed: int32, ticks: int, policySeats: set[
   defer:
     for suffix in ["", ".model.bin", ".neural.json"]: removeFile(path & suffix)
   resetOracle()
-  var players: array[Seats, Bot]
+  var players = newSeq[Bot](Seats)
   let neural = loadBots(@[BotGroup(path: path, count: Seats)])
   let plain = loadBots(@[BotGroup(path: Base, count: Seats)])
   for slot in 0..<Seats: players[slot] = if slot.int8 in policySeats: neural[slot] else: plain[slot]
   var w = newWorld(seed, ticks.int32)
   while w.tick < ticks and w.winner == -1:
-    var alive: array[Seats, bool]
+    var alive: array[LegacySeats, bool]
     for slot in 0..<Seats: alive[slot] = w.cogs[slot].hp > 0
     let commands = players.decide(w)
     deliverSpeech(w)
-    var observed: array[Seats, seq[float32]]
+    var observed: array[LegacySeats, seq[float32]]
     for slot in 0..<Seats:
       if slot.int8 notin policySeats: continue
       check not players[slot].failed
@@ -133,7 +133,7 @@ suite "Native observation contract v3":
       check pw_reset(handle, 5, 480) == 0
       let n = pw_handle_observation_size(handle).int
       var observations = newSeq[float32](Seats*n)
-      var resets: array[Seats, float32]
+      var resets: array[LegacySeats, float32]
       require pw_observe(handle, fbuf(observations), fbuf(resets)) == 0
       for slot in 0..<Seats:
         check observations[slot*n+510] == 0.5'f32
@@ -196,9 +196,9 @@ suite "Native observation contract v3":
       let v3 = pw_create_observation(seed, ticks.int32, 3)
       let v3u = pw_create_observation_inputs_v(seed, ticks.int32, 3, 5)
       require v2 != nil and v3 != nil and v3u != nil
-      var actions: array[Seats*ActionSizes.len, int32]
-      var commands: array[Seats, Command]
-      var rewards, terminals, resets2, resets3, resetsU: array[Seats, float32]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var commands: array[LegacySeats, Command]
+      var rewards, terminals, resets2, resets3, resetsU: array[LegacySeats, float32]
       var obs2 = newSeq[float32](Seats*ObservationSizeV2)
       var obs3 = newSeq[float32](Seats*ObservationSizeV3)
       var obsU = newSeq[float32](Seats*(ObservationSizeV3+5))
@@ -232,7 +232,7 @@ suite "Native observation contract v3":
   test "pw_observe_seats writes only the chosen v3 rows":
     let handle = pw_create_observation(9, 24, 3)
     var obs = newSeq[float32](Seats*ObservationSizeV3)
-    var resets: array[Seats, float32]
+    var resets: array[LegacySeats, float32]
     for i in 0..<obs.len: obs[i] = -9
     for i in 0..<resets.len: resets[i] = -9
     check pw_observe_seats(handle, (1'u32 shl 4) or (1'u32 shl 11), fbuf(obs), fbuf(resets)) == 0
@@ -269,14 +269,14 @@ suite "Native observation contract v3":
       for slot in 0..<Seats:
         if slot.int8 in seats: require setPolicy(handle, slot, Policy, manifest) == 0
         else: require setScript(handle, slot, baseSource) == 0
-      var states: array[Seats, seq[float32]]
-      var alive: array[Seats, bool]
+      var states: array[LegacySeats, seq[float32]]
+      var alive: array[LegacySeats, bool]
       for slot in 0..<Seats: states[slot] = newSeq[float32](actor.hiddenSize)
       var observations = newSeq[float32](Seats*n)
-      var resets: array[Seats, float32]
-      var actions: array[Seats*ActionSizes.len, int32]
-      var logits: array[Seats*LogitSize, float32]
-      var rewards, terminals: array[Seats, float32]
+      var resets: array[LegacySeats, float32]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var logits: array[LegacySeats*LogitSize, float32]
+      var rewards, terminals: array[LegacySeats, float32]
       for t, hash in expected:
         require pw_observe(handle, fbuf(observations), fbuf(resets)) == 0
         for slot in 0..<Seats:

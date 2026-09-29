@@ -18,7 +18,7 @@ suite "Heartwick wilderness":
     var w=newWorld(2026)
     w.cogs[0].pos=point(-400,-200)
     let goal=point(6800,-200)
-    var commands:array[Seats,Command]
+    var commands:array[LegacySeats,Command]
     commands[0]=Command(walk:true,goal:goal,aim:goal)
     for tick in 0..<400:w.step(commands)
     check distance2(w.cogs[0].pos,goal)<10000

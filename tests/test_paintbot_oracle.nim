@@ -39,7 +39,7 @@ else
 end if
 """
 
-proc bots(source: string): array[Seats,Bot] =
+proc bots(source: string): seq[Bot] =
   let path = getTempDir()/"paintbot-oracle-test.bas"
   writeFile(path, source)
   defer: removeFile(path)
@@ -76,7 +76,7 @@ suite "BASIC advisor oracle":
     let players = bots(Advised)
     discard players.decide(w)
     discard drainOracleAsks()
-    w.step(default(array[Seats,Command]))
+    w.step(default(array[LegacySeats,Command]))
     var commands = players.decide(w)
     check not commands[2].walk
     check shouts[2] == @["0"]
@@ -86,7 +86,7 @@ suite "BASIC advisor oracle":
     answers["press"] = OracleAnswer(value: 900, confidence: -1)
     answers["caution"] = OracleAnswer(value: 1500, confidence: 400)
     deliverOracleReply(OracleReply(slot: 2, id: 1, status: 3, answers: answers))
-    w.step(default(array[Seats,Command]))
+    w.step(default(array[LegacySeats,Command]))
     commands = players.decide(w)
     check shouts[2] == @["3"]
     check commands[2].walk
@@ -99,14 +99,14 @@ suite "BASIC advisor oracle":
     discard players.decide(w)
     discard drainOracleAsks()
     deliverOracleReply(OracleReply(slot: 2, id: 1, status: -1))
-    w.step(default(array[Seats,Command]))
+    w.step(default(array[LegacySeats,Command]))
     discard players.decide(w)
     check shouts[2] == @["-1"]
     # Ask again: still inside the interval, refused; at the interval, accepted with a new id.
     let retry = bots("if worldTick > 0 then\n  oracleQuestion(strNew(\"q\"), 0, strNew(\"?\"))\n  r = oracleAsk()\n  shout(strFromInt(r))\nend if\n")
     discard retry.decide(w)
     check shouts[2] == @["0"]
-    while w.tick < 24: w.step(default(array[Seats,Command]))
+    while w.tick < 24: w.step(default(array[LegacySeats,Command]))
     discard retry.decide(w)
     check shouts[2] == @["2"]
     check drainOracleAsks()[0].id == 2
@@ -208,10 +208,10 @@ req = oracleAsk()
     check shouts[2] == @["-1"]
     discard drainOracleAsks()
     deliverOracleReply(OracleReply(slot: 2, id: 1, status: -1))
-    w.step(default(array[Seats,Command]))
+    w.step(default(array[LegacySeats,Command]))
     discard bots(Probe).decide(w)
     check shouts[2] == @["23"]
-    while w.tick < 24: w.step(default(array[Seats,Command]))
+    while w.tick < 24: w.step(default(array[LegacySeats,Command]))
     discard bots(Probe).decide(w)
     check shouts[2] == @["0"]
     oracleEnabled = false
@@ -249,7 +249,7 @@ req = oracleAsk()
     # A second ask with the same question set names it by hash and does not repeat the text.
     lines = @[]
     deliverOracleReply(OracleReply(slot: 2, id: 1, status: -1))
-    while w.tick < 24: w.step(default(array[Seats,Command]))
+    while w.tick < 24: w.step(default(array[LegacySeats,Command]))
     discard bots(Advised).decide(w)
     discard drainOracleAsks()
     var sawQuestions = false

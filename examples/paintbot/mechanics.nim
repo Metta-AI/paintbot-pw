@@ -192,7 +192,7 @@ proc initializeEquipment(w: var World) =
 when defined(pwTraining):
   # Eval-only (native pw_set_spawn_grouping): spawn groups independent of the kinship's
   # families, -1 = alone. Training builds only, so hosted play can never reach it.
-  var spawnGroupingOverride* {.threadvar.}: Option[array[Seats, int8]]
+  var spawnGroupingOverride* {.threadvar.}: Option[array[LegacySeats, int8]]
 
 proc openAnchor(w: World, p: Point): bool =
   ## Generated maps only: a spawn anchor needs walkable ground around it, or a family anchored
@@ -215,8 +215,8 @@ proc placeFfaSpawns(w: var World) =
   ## the family grouping.
   var family = activeKinship.family
   when defined(pwTraining):
-    if spawnGroupingOverride.isSome: family = spawnGroupingOverride.get
-  var group: array[Seats, int]
+    if spawnGroupingOverride.isSome: family = @(spawnGroupingOverride.get)
+  var group = newSeq[int](Seats)
   var groups = 0
   for i in 0..<Seats: groups = max(groups, family[i].int+1)
   for i in 0..<Seats:
@@ -515,15 +515,16 @@ proc waypointFor*(w: World, slot: int, start, goal: Point): Point =
     return mirrorPoint(w.waypoint(mirrorPoint(start), mirrorPoint(goal)))
   w.waypoint(start, goal)
 
-proc seatOrder*(w: World): array[Seats, int] =
+proc seatOrder*(w: World): seq[int] =
   ## The order seats act within a tick. Seats alternate teams, so acting in seat order every
   ## tick let red win every contested push, supply and spray exchange. Rules 35 swap each
   ## pair on odd ticks, so neither team is the perpetual first mover.
+  result = newSeq[int](Seats)
   for i in 0..<Seats: result[i] = i
   if visionRulesVersion >= 35 and w.tick mod 2 == 1:
     for i in countup(0, Seats-2, 2): swap(result[i], result[i+1])
 
-proc pickupEquipment(w: var World, attacked: array[Seats, bool]) =
+proc pickupEquipment(w: var World, attacked: openArray[bool]) =
   let order = w.seatOrder()
   for k in 0..<w.pickups.len:
     if w.pickups[k].readyAt > w.tick: continue
@@ -551,9 +552,9 @@ proc pickupEquipment(w: var World, attacked: array[Seats, bool]) =
             grenadePickup: 120 else: 720)
         break
 
-proc stepEquipment(w: var World, commands: array[Seats, Command]) =
+proc stepEquipment(w: var World, commands: openArray[Command]) =
   if w.winner != -1: return
-  var attacked: array[Seats, bool]
+  var attacked = newSeq[bool](Seats)
   if visionRulesVersion in 21..22 and w.tick >= BarrageStartTick:
     # Only the life currently on the field survives the sudden-death cutoff.
     for i in 0..<Seats:

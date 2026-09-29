@@ -580,7 +580,7 @@ run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState()
 paintbot_act(neuralLogits())
 """
 
-proc seatFixture(model: string): array[Seats, Bot] =
+proc seatFixture(model: string): seq[Bot] =
   let path = getTempDir()/"paintbot-neural-net2-test.bas"
   writeFile(path, NeuralSource)
   writeFile(path & ".model.bin", model)
@@ -601,7 +601,7 @@ suite "PWNET002 hosted seat":
     for tick in 0..<40:
       discard players.decide(w)
       check not players[0].failed
-      w.step(default(array[Seats, Command]))
+      w.step(default(array[LegacySeats, Command]))
     let actor = loadActor(model)
     check players[0].neural.state.len == 64
     check players[0].neural.nativeWork == actor.operationCount
@@ -617,7 +617,7 @@ suite "PWNET002 hosted seat":
     for tick in 0..<40:
       discard players.decide(w)
       check not players[0].failed
-      w.step(default(array[Seats, Command]))
+      w.step(default(array[LegacySeats, Command]))
     let actor = loadActor(model)
     check players[0].neural.state.len == 128
     check players[0].neural.telemetry(actor.operationCount, 40) ==
@@ -632,7 +632,7 @@ suite "PWNET002 hosted seat":
     for tick in 0..<40:
       discard players.decide(w)
       check not players[0].failed
-      w.step(default(array[Seats, Command]))
+      w.step(default(array[LegacySeats, Command]))
     let actor = loadActor(model)
     check players[0].neural.state.len == 128
     check players[0].neural.telemetry(actor.operationCount, 40) ==
@@ -673,7 +673,7 @@ suite "PWNET002 with user inputs (observation contract v2u<K>)":
       Spec(code: 1, params: [inputs.uint32, 8, 0, 0, 0, 0, 0, 0], tensors: w1),
       Spec(code: 1, params: [8, LogitSize.uint32, 0, 0, 0, 0, 0, 0], tensors: w2)],
       observationContract = contract, actionContract = ActionContractV2Hash)
-  proc inputsBundle(source, model: string, count: int, contract: string): array[Seats, Bot] =
+  proc inputsBundle(source, model: string, count: int, contract: string): seq[Bot] =
     let path = getTempDir()/("paintbot-neural-net2-inputs-" & $getCurrentProcessId() & ".bas")
     writeFile(path, source)
     writeFile(path & ".model.bin", model)
@@ -704,7 +704,7 @@ paintbot_act(neuralLogits())
     check not players[0].failed
     check players[0].neural.observation.len == ObservationSizeV2 + k
     var world = newWorld(33)
-    var ranBefore: array[Seats, bool]
+    var ranBefore: array[LegacySeats, bool]
     for tick in 0..<60:
       let commands = players.decide(world)
       for slot in 0..<Seats: require not players[slot].failed

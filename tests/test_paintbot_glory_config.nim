@@ -5,7 +5,7 @@ import polyworld/[cli, tapes]
 import ../examples/paintbot/[sim, game]
 
 proc idle(w: var World, ticks: int) =
-  var commands: array[Seats, Command]
+  var commands: array[LegacySeats, Command]
   for tick in 0..<ticks: w.step(commands)
 
 proc behindAwards(w: World): seq[GloryEvent] =
@@ -95,10 +95,10 @@ suite "Configurable glory awards (rules 43)":
     recording = Recording(seed: 2026, endTick: HeartMeterMatchTicks, map: mapName(),
       vision: visionMode(), glory: g)
     world = newWorld(recording.seed, recording.endTick)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     for tick in 0..<240:
       world.step(commands)
-      recording.frames.add Frame(commands: commands, hash: world.stateHash())
+      recording.frames.add Frame(commands: @(commands), hash: world.stateHash())
     let path = getTempDir()/"paintbot-glory-config.replay"
     defer: removeFile(path)
     saveRecording(path, recording)
@@ -127,10 +127,10 @@ suite "Configurable glory awards (rules 43)":
     recording = Recording(seed: 2026, endTick: HeartMeterMatchTicks, map: mapName(),
       vision: visionMode(), glory: gloryRules())
     world = newWorld(recording.seed, recording.endTick)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     for tick in 0..<24:
       world.step(commands)
-      recording.frames.add Frame(commands: commands, hash: world.stateHash())
+      recording.frames.add Frame(commands: @(commands), hash: world.stateHash())
     let path = getTempDir()/"paintbot-glory-config-42.replay"
     defer: removeFile(path)
     saveRecording(path, recording)

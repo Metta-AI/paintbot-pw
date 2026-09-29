@@ -26,8 +26,8 @@ suite "Native BASIC seats":
     require handle != nil
     for slot in 0..<Seats:
       if team(slot) == 0: check setScript(handle, slot, baseSource) == 0
-    var actions: array[Seats*ActionSizes.len, int32] # All zeros: unscripted seats idle.
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32] # All zeros: unscripted seats idle.
+    var rewards, terminals: array[LegacySeats, float32]
     var results: array[8, float32]
     var orders: array[10, int32]
     var walked = 0
@@ -62,8 +62,8 @@ suite "Native BASIC seats":
       let handle = pw_create(seed, 720)
       require handle != nil
       for slot in 0..<Seats: check setScript(handle, slot, baseSource) == 0
-      var actions: array[Seats*ActionSizes.len, int32]
-      var rewards, terminals: array[Seats, float32]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var rewards, terminals: array[LegacySeats, float32]
       for pass in 0..1:
         if pass == 1: check pw_reset(handle, seed, 720) == 0
         for hash in expected:
@@ -75,9 +75,9 @@ suite "Native BASIC seats":
     var reference = newWorld(77, 480)
     let handle = pw_create(77, 480)
     require handle != nil
-    var actions: array[Seats*ActionSizes.len, int32]
-    var commands: array[Seats, Command]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var commands: array[LegacySeats, Command]
+    var rewards, terminals: array[LegacySeats, float32]
     while reference.winner == -1 and reference.tick < reference.endTick:
       for slot in 0..<Seats:
         let o = slot*ActionSizes.len
@@ -98,8 +98,8 @@ suite "Native BASIC seats":
     check ($cast[cstring](addr message[0])).len > 0
     check setScript(handle, 2, "while 1 = 1\n  x = x + 1\nwend\n") == 0
     check pw_seat_script_status(handle, 2, nil, 0) == 1
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     require pw_step(handle, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
     check pw_seat_script_status(handle, 2, cast[ptr UncheckedArray[char]](addr message[0]), 256) == 3
     check ($cast[cstring](addr message[0])).len > 0

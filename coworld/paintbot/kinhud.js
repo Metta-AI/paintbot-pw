@@ -17,17 +17,19 @@
     return pct >= 100 ? '1' : pct === 50 ? '½' : pct === 25 ? '¼' : `${pct}%`;
   }
   const points = (tenths) => tenths / 10;
+  // Seats in this match: 16, or a crowd variant's count (Heartland Big: 50).
+  const seatCount = (state) => state.world?.cogs?.length || 16;
   // R_i = sum_j r_ij s_j, in points. rPct is round(100 r) and s is in tenths, both integers.
   function kinScore(state, seat) {
     const w = state.world;
     let total = 0;
-    for (let j = 0; j < 16; j++) total += (state.rPct?.[seat]?.[j] ?? (j === seat ? 100 : 0)) * (w.seatScore?.[j] ?? 0);
+    for (let j = 0; j < seatCount(state); j++) total += (state.rPct?.[seat]?.[j] ?? (j === seat ? 100 : 0)) * (w.seatScore?.[j] ?? 0);
     return total / 1000;
   }
   function cogRows(state) {
     const w = state.world;
     const rows = [];
-    for (let seat = 0; seat < 16; seat++) {
+    for (let seat = 0; seat < seatCount(state); seat++) {
       rows.push({
         seat,
         family: state.family?.[seat] ?? -1,
@@ -47,7 +49,7 @@
   function familyChips(state) {
     const w = state.world;
     const chips = new Map();
-    for (let seat = 0; seat < 16; seat++) {
+    for (let seat = 0; seat < seatCount(state); seat++) {
       const family = state.family?.[seat] ?? -1;
       const key = family >= 0 ? `f${family}` : `l${seat}`;
       if (!chips.has(key)) chips.set(key, { family, seat: family >= 0 ? null : seat, hue: hueOf(state, seat), score: 0, hearts: 0, members: [], alive: 0 });
@@ -81,28 +83,32 @@
     if (next.has(key)) next.delete(key); else next.add(key);
     return next;
   }
-  // Seats belonging to the selected families, as a 16-bit mask (bit i = seat i).
+  // Seats belonging to the selected families as a bit mask (bit i = seat i): a number for up to
+  // 31 seats, a BigInt for crowd matches. maskBit reads either.
   function focusMask(state, focus) {
-    let mask = 0;
-    for (let seat = 0; seat < 16; seat++) {
+    const seats = seatCount(state);
+    let mask = seats > 31 ? 0n : 0;
+    for (let seat = 0; seat < seats; seat++) {
       const family = state.family?.[seat] ?? -1;
-      if (focus.has(family >= 0 ? `f${family}` : `l${seat}`)) mask |= 1 << seat;
+      if (!focus.has(family >= 0 ? `f${family}` : `l${seat}`)) continue;
+      if (typeof mask === 'bigint') mask |= 1n << BigInt(seat); else mask |= 1 << seat;
     }
     return mask;
   }
+  const maskBit = (mask, i) => typeof mask === 'bigint' ? Number((mask >> BigInt(i)) & 1n) : (mask >> i) & 1;
   // How each cog is drawn. Kin view (a selected cog) takes precedence: the cog and its kin get
   // badges (kin with ½ / ¼), kin get a halo, unrelated cogs dim. Otherwise, with families
   // selected, their cogs get a badge and a halo and every other cog dims. With nothing selected
   // no cog is dimmed and no badges are drawn.
   function cogEmphasis(state, selected, mask) {
     const out = [];
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < seatCount(state); i++) {
       if (selected >= 0) {
         const pct = i === selected ? 100 : state.rPct?.[selected]?.[i] ?? 0;
         out.push({ dim: pct === 0, halo: i !== selected && pct > 0, badge: pct > 0,
           label: i === selected ? '' : kinLabel(pct) });
       } else if (mask) {
-        const on = (mask >> i & 1) === 1;
+        const on = maskBit(mask, i) === 1;
         out.push({ dim: !on, halo: on, badge: on, label: '' });
       } else out.push({ dim: false, halo: false, badge: false, label: '' });
     }

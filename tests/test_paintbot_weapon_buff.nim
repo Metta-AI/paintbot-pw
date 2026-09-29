@@ -23,11 +23,11 @@ proc blastAt(rules, distance: int): int32 =
 
 suite "Stronger grenades and spray (rules 40)":
   teardown:
-    visionRulesVersion = 45
-    replayRulesVersion = 45
-  test "live rules are 45 (rules 40 weapons, generated maps, opt-in team vision, glory awards, lake routing in every mode)":
-    check visionRulesVersion == 45
-    check replayRulesVersion == 45
+    visionRulesVersion = LiveRules
+    replayRulesVersion = LiveRules
+  test "live rules are 46 (rules 40 weapons, generated maps, opt-in team vision, glory awards, lake routing in every mode, recordings carry their seat count)":
+    check visionRulesVersion == 46
+    check replayRulesVersion == 46
   test "an open-ground blast deals 3 from rules 40, 2 before":
     check blastAt(39, 100) == 1
     check blastAt(40, 100) == 0
@@ -48,7 +48,7 @@ suite "Stronger grenades and spray (rules 40)":
     w.clearField()
     let seat = 0
     w.equipment[seat].sprayCan = true
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     commands[seat] = Command(shoot: true, aim: home(1))
     w.cogs[seat].aim = home(1)
     w.step(commands)

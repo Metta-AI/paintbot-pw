@@ -129,4 +129,20 @@ const result = kin.matchResult(state, i => `Bot ${i + 1}`);
 assert.equal(result.top.seat, 4);
 assert.match(result.text, /Match ended · top cog Bot 5 \(R 50\.0\) · top loner 5 \(50\.0\)/);
 
+// A crowd match (Heartland Big: 50 seats, 10 tribes of 5): the mask becomes a BigInt past 31
+// seats, and every seat gets an emphasis and a chip.
+{
+  const crowd = {
+    family: Array.from({length: 50}, (_, i) => Math.floor(i / 5)),
+    rPct: Array.from({length: 50}, (_, i) => Array.from({length: 50}, (_, j) => i === j ? 100 : Math.floor(i / 5) === Math.floor(j / 5) ? 50 : 0)),
+    world: {cogs: Array.from({length: 50}, () => ({hp: 10})), seatScore: Array(50).fill(10), controlHearts: []},
+  };
+  const mask = kin.focusMask(crowd, new Set(['f9']));
+  assert.equal(typeof mask, 'bigint');
+  const em = kin.cogEmphasis(crowd, -1, mask);
+  assert.equal(em.length, 50);
+  assert.deepEqual(em.map((e, i) => e.halo ? i : -1).filter((i) => i >= 0), [45, 46, 47, 48, 49]);
+  assert.equal(kin.cogEmphasis(crowd, 47, 0).filter((e) => e.halo).length, 4);
+  assert.equal(kin.familyChips(crowd).length, 10);
+}
 console.log('Paintbot FFA-kin HUD sorting, family sums, dead flags, great hearts and R maths passed');

@@ -33,6 +33,7 @@
     "nim r tests/test_paintbot_glory_hearts.nim": 2.7,
     "nim r tests/test_paintbot_maps.nim": 20.0,
     "nim r tests/test_paintbot_map_modes.nim": 90.0,
+    "nim r tests/test_paintbot_seat_counts.nim": 150.0,
     "nim r tests/test_paintbot_glory_behind.nim": 2.5,
     "nim r tests/test_paintbot_weapon_buff.nim": 2.4,
     "nim r tests/test_paintbot_rules40_golden.nim": 35.6,

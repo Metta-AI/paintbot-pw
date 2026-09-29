@@ -13,7 +13,7 @@ type Buffer = ptr UncheckedArray[cfloat]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
 
-var shots: array[Seats, seq[int32]]
+var shots: array[LegacySeats, seq[int32]]
 var issued = 0 # Ticks on which seat 0's script ordered a shot (before the gate).
 observeShot = proc(tick: int32, slot: int) = shots[slot].add tick
 
@@ -25,8 +25,8 @@ proc scriptedWorld(seed, ticks: int32, source: string): pointer =
       cast[ptr UncheckedArray[char]](unsafeAddr source[0]), source.len.int32) == 0
 
 proc play(handle: pointer, ticks: int): seq[uint32] =
-  var actions: array[Seats*ActionSizes.len, int32]
-  var rewards, terminals: array[Seats, float32]
+  var actions: array[LegacySeats*ActionSizes.len, int32]
+  var rewards, terminals: array[LegacySeats, float32]
   var orders: array[10, int32]
   for slot in 0..<Seats: shots[slot] = @[]
   issued = 0
@@ -87,7 +87,7 @@ suite "Native curriculum knobs":
     let handle = scriptedWorld(11, 2400, baseSource)
     check pw_set_seat_damage_scale(handle, 0, 0) == 0
     discard play(handle, 2400)
-    var stats: array[Seats*8, int32]
+    var stats: array[LegacySeats*8, int32]
     check pw_seat_stats(handle, ibuf(stats)) == 0
     check stats[2] > 0      # hits_enemy landed
     check stats[0] == 0     # damage_dealt_enemy

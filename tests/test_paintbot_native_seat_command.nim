@@ -43,8 +43,8 @@ suite "Native raw seat command":
       bad[field] = -1
       check pw_set_seat_command(h, 0, ibuf(bad)) == -1
     var orders: array[10, int32]
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     # Aim far outside the map clamps exactly as lookAt clamps; the goal is kept verbatim.
     var wild = [1'i32, 99999, -99999, 1, 99999, -99999, 1, 1, 0]
     check pw_set_seat_command(h, 0, ibuf(wild)) == 0
@@ -75,12 +75,12 @@ suite "Native raw seat command":
     defer: pw_destroy(h)
     var forbid = [9'i32, 10]
     for slot in 0..<Seats: check pw_set_seat_forbid_objectives(h, slot.cint, ibuf(forbid), 2) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     for slot in 0..<Seats: actions[slot*5] = 9   # a forbidden objective on every seat
     check pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == -3
     for tick in 0..<300:
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for slot in 0..<Seats:
         let me = reference.cogs[slot]
         commands[slot] = Command(walk: tick mod 7 != 0, goal: point(me.pos.x.int + 400*((slot+tick div 30) mod 3 - 1), me.pos.z.int + 300),
@@ -92,7 +92,7 @@ suite "Native raw seat command":
       require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0   # forbidden heads ignored
       require pw_state_hash(h) == reference.stateHash()
   test "the fire hold and the fire period apply to a command only when set on the seat":
-    proc shootAtMates(w: World): array[Seats, Command] =
+    proc shootAtMates(w: World): array[LegacySeats, Command] =
       ## Every seat stands and shoots past its first visible teammate, so the hold has work.
       for slot in 0..<Seats:
         let me = w.cogs[slot]
@@ -111,8 +111,8 @@ suite "Native raw seat command":
       for slot in countup(0, Seats-1, 2):
         if hold: check pw_set_seat_fire_hold(h, slot.cint, 1) == 0
         check pw_set_seat_fire_period(h, slot.cint, period) == 0
-      var actions: array[Seats*ActionSizes.len, int32]
-      var rewards, terminals: array[Seats, float32]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var rewards, terminals: array[LegacySeats, float32]
       var held = 0
       while reference.winner == -1 and reference.tick < 600:
         var commands = shootAtMates(reference)
@@ -139,8 +139,8 @@ suite "Native raw seat command":
     defer: pw_destroy(h)
     let source = readFile(Base)
     for slot in 0..<Seats: check setScript(h, slot, source) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     var orders: array[10, int32]
     for tick in 0..<5: require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
     var cmd = [1'i32, 1234, 2345, 0, 3000, 2000, 0, 1, 0]
@@ -160,8 +160,8 @@ suite "Native raw seat command":
       let h = pw_create(seed, 2400)
       require h != nil
       check pw_set_action_contract(h, contract) == 0
-      var actions: array[Seats*ActionSizes.len, int32]
-      var rewards, terminals: array[Seats, float32]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var rewards, terminals: array[LegacySeats, float32]
       var orders: array[10, int32]
       var steps = 0
       while w.winner == -1 and w.tick < w.endTick:
@@ -189,8 +189,8 @@ suite "Native raw seat command":
       pw_destroy(a)
       pw_destroy(b)
     var reference = newWorld(31, 600)
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     var orders: array[10, int32]
     while reference.winner == -1 and reference.tick < reference.endTick:
       for slot in 0..<Seats:
@@ -198,7 +198,7 @@ suite "Native raw seat command":
         actions[o] = int32(1 + (slot + reference.tick.int div 60) mod 10)
         actions[o+1] = int32(17 + (reference.tick.int div 9 + slot) mod 8)
         actions[o+2] = int32(reference.tick mod 3 == 0)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for slot in 0..<Seats:
         let o = slot*ActionSizes.len
         commands[slot] = reference.decodeActions(slot, actions.toOpenArray(o, o+ActionSizes.len-1))

@@ -7,12 +7,12 @@ suite "Paintbot replay analysis and metadata":
   test "checkpoint seeks preserve all recorded world hashes":
     recording=Recording(seed:2026,endTick:HeartMeterMatchTicks)
     world=newWorld(recording.seed)
-    var commands:array[Seats,Command]
+    var commands:array[LegacySeats,Command]
     for i in 0..<Seats:
       commands[i]=Command(walk:true,goal:home(1-team(i)))
     for tick in 0..<720:
       world.step(commands)
-      recording.frames.add Frame(commands:commands,hash:world.stateHash())
+      recording.frames.add Frame(commands: @(commands),hash:world.stateHash())
     replayMode=true
     var updates: seq[int]
     let built = indexReplay(proc(tick, total: int) =
@@ -34,19 +34,27 @@ suite "Paintbot replay analysis and metadata":
   test "v1 remains readable and v26 preserves public metadata":
     type Legacy=object
       seed:int32
-      frames:seq[Frame]
+      frames:seq[uint32] # a v1 recording with no frames: only the seed is read
     let path=getTempDir()/"paintbot-replay-metadata-test.replay"
     defer:removeFile(path)
     saveReplayFile(path,"paintbot_pw",1,Legacy(seed:2026,frames: @[]))
     check loadRecording(path).names[0]=="Ember 1"
+    # Rules 26 recordings (written by saveRecording in their own 16-seat shape) keep public
+    # metadata: names and communications.
+    let rules = replayRulesVersion
+    defer: replayRulesVersion = rules
+    replayRulesVersion = 26
+    recording.names = newSeq[string](LegacySeats)
     recording.names[0]="Daveey <test>"
     recording.communications = @[Communication(tick:1,slot:0,text:"Guard the heart ♥")]
-    saveReplayFile(path,"paintbot_pw",26,recording)
+    saveRecording(path,recording)
+    check loadReplayFileHeader(path).gameVersion == 26
     let loaded=loadRecording(path)
     check loaded.names[0]=="Daveey <test>"
     check loaded.communications[0].text=="Guard the heart ♥"
+    replayRulesVersion = 26
     recording.communications[0].slot=16
-    saveReplayFile(path,"paintbot_pw",26,recording)
+    saveRecording(path,recording)
     expect ReplayError:discard loadRecording(path)
   test "analysis refuses corrupt replay inputs":
     recording.communications = @[]
@@ -92,11 +100,11 @@ suite "Paintbot replay analysis and metadata":
     world.cogs[1].goal = world.cogs[1].pos
     world.equipment[1].armor = 1
     let initial = snapshot(world)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     commands[0] = Command(shoot: true, aim: world.cogs[1].pos)
     for tick in 0..<30:
       world.step(commands)
-      recording.frames.add Frame(commands: commands, hash: world.stateHash())
+      recording.frames.add Frame(commands: @(commands), hash: world.stateHash())
     world = snapshot(initial)
     replayMode = true
     var history = ReplayIndex(checkpoints: @[Checkpoint(state: snapshot(initial))])

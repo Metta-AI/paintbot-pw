@@ -35,22 +35,28 @@ const
   NearMaxAgents = 64
 when defined(pwTraining):
   var
-    shouts* {.threadvar.}: array[Seats,seq[string]]
-    heard* {.threadvar.}: array[Seats,seq[HeardMessage]]
+    shouts* {.threadvar.}: seq[seq[string]]
+    heard* {.threadvar.}: seq[seq[HeardMessage]]
     active* {.threadvar.}: World
-    commands* {.threadvar.}: array[Seats, Command]
-  var visionCache {.threadvar.}: array[Seats, array[Seats, int8]]
+    commands* {.threadvar.}: seq[Command]
+  var visionCache {.threadvar.}: seq[seq[int8]]
   var nearGrid {.threadvar.}: NearGrid
-  var nearLists {.threadvar.}: array[Seats, seq[NearAgent]]
+  var nearLists {.threadvar.}: seq[seq[NearAgent]]
 else:
   var
-    shouts*: array[Seats,seq[string]]
-    heard*: array[Seats,seq[HeardMessage]]
+    shouts*: seq[seq[string]]
+    heard*: seq[seq[HeardMessage]]
     active*: World
-    commands*: array[Seats, Command]
-  var visionCache: array[Seats, array[Seats, int8]]
+    commands*: seq[Command]
+  var visionCache: seq[seq[int8]]
   var nearGrid: NearGrid
-  var nearLists: array[Seats, seq[NearAgent]]
+  var nearLists: seq[seq[NearAgent]]
+proc resetVisionCache() =
+  ## One unknown (0) visibility entry per observer and body, sized to this match's seats.
+  visionCache.setLen(Seats)
+  for row in visionCache.mitems:
+    row.setLen(Seats)
+    for v in row.mitems: v = 0
 proc bodyForSeat(observer, identity: int): int =
   if identity notin 0..<Seats: return -1
   if identity == observer: return observer
@@ -70,7 +76,7 @@ proc buildNearGrid() =
   g.originX = minX(); g.originZ = minZ()
   g.nx = (maxX()-minX()) div NearCell+1; g.nz = (maxZ()-minZ()) div NearCell+1
   g.cellStart = newSeq[int32](g.nx*g.nz+1)
-  var cells: array[Seats, int]
+  var cells = newSeq[int](Seats)
   for b in 0..<Seats:
     cells[b] = -1
     let c = active.cogs[b]
@@ -91,6 +97,7 @@ proc nearAgents(slot, radius: int): int =
   ## observes (a disguised body reports its disguise; of two bodies sharing an identity the
   ## nearer is kept, as playerX does). Visits only grid cells the circle touches, so the
   ## cost follows the neighbourhood, not the roster.
+  if nearLists.len != Seats: nearLists.setLen(Seats)
   nearLists[slot].setLen(0)
   let me = active.cogs[slot]
   if me.hp <= 0: return 0
@@ -132,7 +139,7 @@ proc nearAgents(slot, radius: int): int =
 proc nearAgentsFor*(w: World, slot, radius: int): seq[tuple[identity, body: int]] =
   ## Test hook: the nearAgents answer for one seat against a fresh tick of `w`.
   active = w
-  visionCache = default(array[Seats, array[Seats, int8]])
+  resetVisionCache()
   nearGrid.built = false
   discard nearAgents(slot, radius)
   for e in nearLists[slot]: result.add (e.identity.int, e.body.int)
@@ -146,6 +153,9 @@ proc limits*(): Limits =
   result=defaultLimits()
   result.maxSourceBytes=128*1024; result.maxInstructions=50000
   result.maxMemoryBytes=2*1024*1024; result.maxWorkUnits=125000
+  if Seats > LegacySeats:
+    # Crowd matches: a script's roster loops grow with the seat count, and so does its budget.
+    result.maxInstructions=50000*Seats div LegacySeats; result.maxWorkUnits=125000*Seats div LegacySeats
   result.maxArrayElements=4096;result.maxGlobals=512;result.maxCallDepth=16
   result.maxPrintBytes=1024;result.maxPrintEvents=128
 proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
@@ -288,6 +298,7 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
     proc seatIndex(value: int32): bool = value >= 0 and value < Seats
     proc inMatch(i: int): bool = active.cogs[i].hp > 0 or active.equipment[i].lives > 0
     discard result.addFunction("gameMode",0,proc(a:openArray[int32]):int32 = 1,4)
+    discard result.addFunction("seatCount",0,proc(a:openArray[int32]):int32 = Seats.int32,4)
     discard result.addFunction("kin",1,proc(a:openArray[int32]):int32 =
       if not seatIndex(a[0]): -1'i32
       else: activeKinship.rPercent(slot, a[0].int),4)
@@ -352,13 +363,14 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
     commands[slot].aim=Point(x:clamp(a[0],minX().int32,maxX().int32),z:clamp(a[1],minZ().int32,maxZ().int32));1,4)
   discard result.addFunction("shootAt",2,proc(a:openArray[int32]):int32 =
     commands[slot].shoot=true;commands[slot].aim=Point(x:clamp(a[0],minX().int32,maxX().int32),z:clamp(a[1],minZ().int32,maxZ().int32));1,4)
-proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
+proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):seq[Bot] =
+  result = newSeq[Bot](Seats)
   # A hosted game journals every advisor request and answer to the asking seat's own log:
   # it is the only record of a decision's exact state that leaves the pod.
   when defined(coworld):
     oracleJournal = proc(slot: int, line: string) = playerLog(slot, line)
   let sources=groups.expandBotSources(controllerKinds(Seats,playerSlot))
-  var paths: array[Seats, string]
+  var paths = newSeq[string](Seats)
   var nextSlot = 0
   for group in groups:
     for unused in 0..<group.count:
@@ -392,10 +404,10 @@ proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):array[Seats,Bot] =
     result[slot]=Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural,failed:neuralFailed)
     when defined(coworld):result[slot].output=playerPrinter(slot)
 when defined(pwTraining):
-  var peakInstructions* {.threadvar.}: array[Seats, int64]
-  var peakWork* {.threadvar.}: array[Seats, int64]
-  var peakStrings* {.threadvar.}: array[Seats, int64]
-  var peakNativeWork* {.threadvar.}: array[Seats, int64]
+  var peakInstructions* {.threadvar.}: array[LegacySeats, int64]
+  var peakWork* {.threadvar.}: array[LegacySeats, int64]
+  var peakStrings* {.threadvar.}: array[LegacySeats, int64]
+  var peakNativeWork* {.threadvar.}: array[LegacySeats, int64]
   proc loadScriptBot*(source: string, slot: int): Bot =
     ## One seat from BASIC source text, exactly as loadBots builds a file seat without a
     ## neural package: same string limits, host functions, compile limits and runtime
@@ -423,8 +435,8 @@ when defined(pwTraining):
     strings.bindProgram(p)
     Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural)
 else:
-  var peakInstructions*, peakWork*, peakStrings*, peakNativeWork*: array[Seats, int64] ## per-seat BASIC peaks, for PW_BASIC_PEAKS
-proc logNeuralTelemetry*(bots: array[Seats,Bot], ticks: int,
+  var peakInstructions*, peakWork*, peakStrings*, peakNativeWork*: array[MaxSeats, int64] ## per-seat BASIC peaks, for PW_BASIC_PEAKS
+proc logNeuralTelemetry*(bots: openArray[Bot], ticks: int,
     log: proc(slot: int, text: string)) =
   ## Writes each neural seat's telemetry line (peak operations against the budget) through
   ## `log`, one line per seat that loaded a neural model. Plain BASIC seats are skipped, and
@@ -433,15 +445,18 @@ proc logNeuralTelemetry*(bots: array[Seats,Bot], ticks: int,
     if bots[slot].isNil: continue
     let line = bots[slot].neural.telemetry(peakNativeWork[slot], ticks)
     if line.len > 0: log(slot, line & "\n")
-proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
-  shouts=default(array[Seats,seq[string]])
-  active=w;commands=default(array[Seats,Command])
-  visionCache=default(array[Seats,array[Seats,int8]])
+proc decide*(bots:openArray[Bot],w:World):seq[Command] =
+  shouts=newSeq[seq[string]](Seats)
+  # Speech heard last tick (deliverSpeech); none yet on a match's first decision.
+  if heard.len != Seats: heard.setLen(Seats)
+  active=w;commands=newSeq[Command](Seats)
+  resetVisionCache()
   nearGrid.built=false
+  nearLists.setLen(Seats)
   for l in nearLists.mitems: l.setLen(0)
   beginOracleTick(w.tick)
   for slot in 0..<Seats:
-    let b=bots[slot];let cog=w.cogs[slot]
+    let b=(if slot < bots.len: bots[slot] else: nil);let cog=w.cogs[slot]
     # FFA-kin has no team hearts: home is the seat's spawn anchor, and the carried-heart data
     # all read home (never stolen). selfTeam is the seat.
     var home, heart, ownPos: Point
@@ -476,7 +491,7 @@ proc decide*(bots:array[Seats,Bot],w:World):array[Seats,Command] =
 
 proc deliverSpeech*(w: World) =
   ## Next-tick hearing matches CTF's 20%-of-map-width radius, regardless of vision.
-  heard=default(array[Seats,seq[HeardMessage]])
+  heard=newSeq[seq[HeardMessage]](Seats)
   for sender in 0..<Seats:
     if w.cogs[sender].hp<=0:continue
     for receiver in 0..<Seats:

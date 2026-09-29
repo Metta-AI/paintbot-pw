@@ -4,9 +4,9 @@ export topography
 import polyworld/[rngs, hashes, visions]
 import std/[tables, math]
 import kinship
+export Seats, KinSeats, configureSeats, MaxSeats, LegacySeats
 
 const
-  Seats* = 16
   TickRate* = 24
   MatchTicks* = 5*60*TickRate # Historical replay duration.
   HeartMeterMatchTicks* = 10*60*TickRate
@@ -74,17 +74,21 @@ const
       weights[i] = int32(exp(-float(i) / 100.0) * 1000000.0)
     weights
 
-# A set of seats. Up to 32 seats it is the uint32 bitmask the state hash has always carried,
-# so recordings stay bit-identical; larger (benchmark) rosters use 64-bit words. A plain
-# `1'u32 shl j` is undefined for j >= 32 and wraps differently on ARM and WASM.
-when Seats <= 32:
-  type SeatMask* = uint32
-  template hasSeat*(m: SeatMask, j: int): bool = (m and (1'u32 shl j)) != 0
-  template addSeat*(m: var SeatMask, j: int) = m = m or (1'u32 shl j)
-else:
-  type SeatMask* = array[(Seats+63) div 64, uint64]
-  template hasSeat*(m: SeatMask, j: int): bool = (m[j shr 6] and (1'u64 shl (j and 63))) != 0
-  template addSeat*(m: var SeatMask, j: int) = m[j shr 6] = m[j shr 6] or (1'u64 shl (j and 63))
+# A set of seats (up to MaxSeats) in 32-bit words. It hashes as the single uint32 bitmask the
+# state hash has always carried while no seat above 31 is in it, so every recording made with
+# 16 seats stays bit-identical. A plain `1'u32 shl j` is undefined for j >= 32 (and wraps
+# differently on ARM and WASM), hence the words.
+type SeatMask* = object
+  words*: array[MaxSeats div 32, uint32]
+template hasSeat*(m: SeatMask, j: int): bool = (m.words[j shr 5] and (1'u32 shl (j and 31))) != 0
+template addSeat*(m: var SeatMask, j: int) =
+  m.words[j shr 5] = m.words[j shr 5] or (1'u32 shl (j and 31))
+proc addHashy*(h: var uint32, m: SeatMask) =
+  h.addHashy(m.words[0])
+  for i in 1..<m.words.len:
+    if m.words[i] != 0:
+      h.addHashy(i.int32)
+      h.addHashy(m.words[i])
 
 type
   Point* = object
@@ -151,13 +155,13 @@ type
   World* = object
     seed*, tick*: int32
     rng*: Rng
-    cogs*: array[Seats, Cog]
+    cogs*: seq[Cog]
     hearts*: array[2, Heart]
     captures*: array[2, int32]
     cover*: seq[Cover]
     balls*: seq[Paintball]
     winner*: int32 # -1 before a capture victory
-    equipment*: array[Seats, Equipment]
+    equipment*: seq[Equipment]
     trenches*: seq[Cover]
     pickups*: seq[Pickup]
     grenades*: seq[Lob]
@@ -170,7 +174,7 @@ type
     bigHeartRound*: int32
     usedBigHearts*: seq[bool]
     sounds*: seq[SoundCue] # Listener-relative sectors; never exact source coordinates.
-    uniforms*: array[Seats, bool]
+    uniforms*: seq[bool]
     glory*: array[2, int32] # Rules 37: the winner's score, in seconds; see GloryQuietSupplies and friends.
     lastSupplyTick*: array[2, int32] # The last tick each team collected a supply.
     gloryEvents*: seq[GloryEvent] # Recent awards, kept GloryEventLifetime ticks for the viewer.
@@ -178,21 +182,21 @@ type
     nextGloryHeart*: int32 # Rules 38: the tick the next pair appears.
     gloryPickups*: seq[GloryPickup] # Rules 38: recent pickups, kept GloryEventLifetime ticks.
     # FFA-kin only; hashed only in that mode, so rules-40 hashes are unchanged.
-    seatScore*: array[Seats, int32] # Raw score s_i in tenths: heart income plus great-heart shares.
-    heartSeconds*: array[Seats, int32] # Seconds of heart ownership paid to each seat.
-    greatShare*: array[Seats, int32] # Great-heart bounty paid to each seat, in tenths.
+    seatScore*: seq[int32] # Raw score s_i in tenths: heart income plus great-heart shares.
+    heartSeconds*: seq[int32] # Seconds of heart ownership paid to each seat.
+    greatShare*: seq[int32] # Great-heart bounty paid to each seat, in tenths.
     greatHearts*: array[2, GreatHeart]
-    spawnAnchor*: array[Seats, Point] # Where each seat's family (or the loner) spawns.
+    spawnAnchor*: seq[Point] # Where each seat's family (or the loner) spawns.
   TerritoryWorld = object
     seed*, tick*: int32
     rng*: Rng
-    cogs*: array[Seats, Cog]
+    cogs*: seq[Cog]
     hearts*: array[2, Heart]
     captures*: array[2, int32]
     cover*: seq[Cover]
     balls*: seq[Paintball]
     winner*: int32 # -1 before a capture victory
-    equipment*: array[Seats, Equipment]
+    equipment*: seq[Equipment]
     trenches*: seq[Cover]
     pickups*: seq[Pickup]
     grenades*: seq[Lob]
@@ -201,13 +205,13 @@ type
   CombatWorld = object
     seed*, tick*: int32
     rng*: Rng
-    cogs*: array[Seats, Cog]
+    cogs*: seq[Cog]
     hearts*: array[2, Heart]
     captures*: array[2, int32]
     cover*: seq[Cover]
     balls*: seq[Paintball]
     winner*: int32 # -1 before a capture victory
-    equipment*: array[Seats, Equipment]
+    equipment*: seq[Equipment]
     trenches*: seq[Cover]
     pickups*: seq[Pickup]
     grenades*: seq[Lob]
@@ -218,7 +222,6 @@ type
     chargeGrenade*: bool
     sneak*: bool
 
-static: doAssert KinSeats == Seats
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
 type GameMode* = enum
@@ -227,7 +230,7 @@ type GameMode* = enum
   gmTeams, gmFfaKin
 # Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
 # still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
-const LiveRules* = 45
+const LiveRules* = 46
   ## The rules live games play and record (game.nim's replayRulesVersion starts here too). The
   ## training library defaults to its own NativeRules and accepts NativeRules .. LiveRules.
 when defined(pwTraining):
@@ -248,7 +251,7 @@ when defined(pwTraining):
       gunKills*, grenadeKills*, weaponSprayKills*: int32
       hitsFromWater*, hitsFromHigh*, hitsFromTrench*: int32
       hitsToWater*, hitsToHigh*, hitsToTrench*: int32
-    CombatTelemetry* = array[Seats, SeatStats]
+    CombatTelemetry* = array[LegacySeats, SeatStats] # the training library plays LegacySeats
   const HighGroundHeight* = 216 # pw_seat_weapon_stats' "high": terrainHeight >= this
   type DamageWeapon* = enum
     dwNone, dwGun, dwGrenade, dwSpray
@@ -263,7 +266,7 @@ when defined(pwTraining):
   var damageWeapon* {.threadvar.}: DamageWeapon
   # Per-attacker damage scale in permille, pointed at by the host for one step; nil or
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
-  var damageScale* {.threadvar.}: ptr array[Seats, int32]
+  var damageScale* {.threadvar.}: ptr array[LegacySeats, int32]
   # FFA-kin pair counters (native pw_pair_stats): the host points this at a proc for one
   # step and damage() reports every damage event past the shield and life checks, with the
   # health it removed. Telemetry only; never part of World, its hash or any decision.
@@ -746,12 +749,18 @@ proc sampleSpawnHeart*(w: var World, slot: int): int =
     draw -= weight
   candidates[^1]
 
+proc spawnRadius(): int32 =
+  ## The spawn disc round a heart or family anchor: HeartSpawnRadius for up to 16 seats, wider
+  ## by the square root of the seat count beyond that, so a large family still fits.
+  if Seats <= LegacySeats: HeartSpawnRadius.int32
+  else: int32(HeartSpawnRadius.float*sqrt(Seats.float/LegacySeats.float))
 proc spawnNear(w: var World, slot: int, origin: Point): bool =
   # Search only near the origin (a heart, or an FFA spawn anchor). If crowded, retry next tick.
+  let radius = spawnRadius()
   for attempt in 0..<128:
-    let p = point(origin.x.int+w.rng.between(-HeartSpawnRadius, HeartSpawnRadius).int,
-        origin.z.int+w.rng.between(-HeartSpawnRadius, HeartSpawnRadius).int)
-    if distance2(origin, p) > HeartSpawnRadius*HeartSpawnRadius: continue
+    let p = point(origin.x.int+w.rng.between(-radius, radius).int,
+        origin.z.int+w.rng.between(-radius, radius).int)
+    if distance2(origin, p) > radius.int64*radius: continue
     if w.blocked(p) or w.occupied(p, slot) or not w.traversable(origin, p): continue
     w.cogs[slot].pos = p; w.cogs[slot].goal = p
     w.cogs[slot].hp = maxHp(); w.cogs[slot].shield = 36
@@ -814,8 +823,19 @@ proc configureMap*(name: string) =
 proc mapName*(): string =
   if activeMap() >= 0: MapNames[activeMap()] else: ""
 
+proc sizeSeats*(w: var World) =
+  ## Gives every per-seat list one entry per seat of the current match (Seats).
+  w.cogs.setLen(Seats)
+  w.equipment.setLen(Seats)
+  w.uniforms.setLen(Seats)
+  w.seatScore.setLen(Seats)
+  w.heartSeconds.setLen(Seats)
+  w.greatShare.setLen(Seats)
+  w.spawnAnchor.setLen(Seats)
 proc newWorld*(seed: int32, endTick: int32 = 0): World =
+  ## A world for the current seat count (Seats; see configureSeats).
   configureRules(visionRulesVersion)
+  result.sizeSeats()
   result.endTick = if ffa():
     (if endTick <= 0: FfaMatchTicks.int32 else: min(endTick, FfaMatchTicks.int32))
   elif visionRulesVersion >= 28:
@@ -977,7 +997,7 @@ proc scores*(w: World): seq[float] =
 type LegacyWorld = object
   seed, tick: int32
   rng: Rng
-  cogs: array[Seats, Cog]
+  cogs: seq[Cog]
   hearts: array[2, Heart]
   captures: array[2, int32]
   cover: seq[Cover]
@@ -1344,8 +1364,8 @@ proc territoryBoost*(w: World, slot: int): int =
 proc boostedSpeed*(speed, boost: int): int =
   ## A move speed under a territory boost; exact identity at boost 0 (the teams game).
   speed * (100 + boost) div 100
-proc stepEquipment(w: var World, commands: array[Seats, Command])
-proc step*(w: var World, commands: array[Seats, Command],
+proc stepEquipment(w: var World, commands: openArray[Command])
+proc step*(w: var World, commands: openArray[Command],
     rulesVersion = visionRulesVersion) =
   if rulesVersion >= 6:
     w.stepEquipment(commands)

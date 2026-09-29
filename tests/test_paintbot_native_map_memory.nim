@@ -16,7 +16,7 @@ const Root = currentSourcePath().parentDir.parentDir
 const Base = Root / "coworld/paintbot/players/base.bas"
 type
   Buffer = ptr UncheckedArray[cfloat]
-  Actions = array[Seats*ActionSizes.len, int32]
+  Actions = array[LegacySeats*ActionSizes.len, int32]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
 template cbuf(s: string): ptr UncheckedArray[char] =
@@ -35,7 +35,7 @@ proc play(handle: pointer, seed: int32, ticks: int) =
   ## base.bas on the odd seats (they route with the navigation cache), a fixed action pattern
   ## on the even seats.
   var actions: Actions
-  var rewards, terminals: array[Seats, float32]
+  var rewards, terminals: array[LegacySeats, float32]
   for tick in 0..<ticks:
     for slot in countup(0, Seats-1, 2):
       let offset = slot*ActionSizes.len

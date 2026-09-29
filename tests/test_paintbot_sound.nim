@@ -47,7 +47,7 @@ suite "Imperfect directional hearing":
   test "quiet movement halves speed and removes only footsteps":
     var loud = arena()
     var quiet = loud.snapshot()
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     commands[0] = Command(walk:true,direct:true,goal:point(3400,2000))
     loud.step(commands)
     commands[0].sneak = true
@@ -68,10 +68,10 @@ suite "Imperfect directional hearing":
   test "explosions produce cues and cues expire after one second":
     var w = arena()
     w.grenades = @[Lob(target:point(3200,3000),owner:0,landsAt:0)]
-    w.step(default(array[Seats,Command]))
+    w.step(default(array[LegacySeats,Command]))
     check w.sounds.len == 2
     check w.sounds[0].kind == 2
-    for i in 0..<SoundLifetime: w.step(default(array[Seats,Command]))
+    for i in 0..<SoundLifetime: w.step(default(array[LegacySeats,Command]))
     check w.sounds.len == 0
 
   test "BASIC receives only its own directional cues and can sneak":

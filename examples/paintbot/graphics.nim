@@ -12,7 +12,7 @@ type
   ViewerIndex = object
     events: seq[Moment]
     momentum: seq[Sample]
-    names: array[Seats, string]
+    names: seq[string]
     communications: seq[Communication]
     seed: int32
   CogTerrain = object
@@ -23,11 +23,11 @@ type
     id: int
     bottom, top: array[2, float32]
   ViewerState = object
-    terrain: array[Seats, CogTerrain]
+    terrain: seq[CogTerrain]
     objects: seq[Inspectable]
     heartHeld: seq[int]
     heartValues: seq[int32]
-    combat: array[Seats, CombatStats]
+    combat: seq[CombatStats]
     rulesVersion: int
     glory: GloryConfig # rules 43: the match's glory awards, for the scoreboard's explanation
     maxHp: int32 # 3, or FfaMaxHp in FFA-kin: the HUD's "hp / max".
@@ -44,15 +44,15 @@ type
     inset: bool ## the action camera's runner-up view fills the corner inset
     instantReplay: bool
     camera: array[3, float32]
-    screen: array[Seats, array[2, float32]]
-    visible: array[Seats, bool]
+    screen: seq[array[2, float32]]
+    visible: seq[bool]
     footprint: array[4, array[2, float32]]
     # FFA-kin (mode "ffa_kin"); empty in the teams game. Raw scores, heart-seconds, great-heart
     # shares and great hearts travel inside world.
     mode: string
     family: seq[int] # family id per seat, -1 = loner
     genes: seq[uint32]
-    rPct: seq[array[Seats, int32]] # round(100 r), row = seat
+    rPct: seq[seq[int32]] # round(100 r), row = seat
     kinHue: seq[float32] # family hue in degrees, -1 = loner (grey)
     map: string ## rules 41: the map's name, or "" for the rules' own island
     staticOmitted: bool ## family, genes, rPct, kinHue and world.cover are as in the last state
@@ -67,8 +67,8 @@ proc landMask(): string =
     for x in countup(minX(), maxX()-1, 100):
       result.add(if islandMargin(x+50, z+50) >= 40: '1' else: '0')
 var
-  kinHues: array[Seats, float32] # FFA-kin family hue per seat; set once the match is loaded.
-  kinRgb: array[Seats, ColorRGBX] # kinHues as colours, cached with them (hues are fixed per match).
+  kinHues: array[MaxSeats, float32] # FFA-kin family hue per seat; set once the match is loaded.
+  kinRgb: array[MaxSeats, ColorRGBX] # kinHues as colours, cached with them (hues are fixed per match).
   transport: Player
   victory: Celebration
   playbackRate = 1'f32
@@ -604,7 +604,8 @@ proc runGraphics*() =
   startupPhase("Preparing replay")
   setup()
   if ffa():
-    kinHues = familyHues(activeKinship)
+    let hues = familyHues(activeKinship)
+    for i in 0..<Seats: kinHues[i] = hues[i]
     for i in 0..<Seats:
       kinRgb[i] = if kinHues[i] < 0: lonerColor
         else: hsl(kinHues[i], KinSaturation, KinLightness).color.asRgbx
@@ -876,7 +877,7 @@ proc runGraphics*() =
     victory.update(world.tick >= transport.timelineEnd and transport.timelineEnd > 0, frameDt.float32)
     let paused = if victory.active: victory.paused else: not transport.playing
     let alpha = if paused or victory.active: 1'f32 else: clamp(transport.accumulator*TickRate.float32, 0, 1)
-    var poses: array[Seats, Vec3]
+    var poses: array[MaxSeats, Vec3]
     for i, c in world.cogs:
       poses[i] = if previous[i].hp > 0 and c.hp > 0: mix(position(previous[
           i].pos), position(c.pos), alpha) else: position(c.pos)
@@ -1005,7 +1006,7 @@ proc runGraphics*() =
       orderKind = 0
     # Crowds: shadows and occlusion outlines go to the cogs nearest the camera target only.
     const CrowdDetail = 48
-    var nearRank: array[Seats, int]
+    var nearRank: array[MaxSeats, int]
     block:
       var order: seq[(float32, int)]
       for i, c in world.cogs:
@@ -1430,13 +1431,13 @@ proc runGraphics*() =
         {.emit: "EM_ASM({if(Module.paintbotGraphs)Module.paintbotGraphs(JSON.parse(UTF8ToString($0)));}, `samples`);".}
         sentGraphSamples = index.momentum.len
       if lastHud != world.tick or paused or victory.active:
-        var screens: array[Seats, array[2, float32]]
-        var visibility: array[Seats, bool]
+        var screens = newSeq[array[2, float32]](Seats)
+        var visibility = newSeq[bool](Seats)
         let footprint = groundFootprint(vp)
         for i in 0..<Seats:
           visibility[i] = shown(i)
           screens[i] = screenPoint(vp, poses[i]+vec3(0, 1, 0))
-        var terrain: array[Seats, CogTerrain]
+        var terrain = newSeq[CogTerrain](Seats)
         for i, cog in world.cogs:
           let aim = if world.equipment[i].windup > 0:
               Point(x: cog.pos.x+world.equipment[i].gunAim.x,
@@ -1461,7 +1462,7 @@ proc runGraphics*() =
         var mode = "teams"
         var family: seq[int]
         var genes: seq[uint32]
-        var rPct: seq[array[Seats, int32]]
+        var rPct: seq[seq[int32]]
         var kinHue: seq[float32]
         # The kinship tables and the cover never change within a match: the first state carries
         # them and later ones omit them (staticOmitted); viewer.js keeps the last copy.
@@ -1474,10 +1475,10 @@ proc runGraphics*() =
             family.add activeKinship.family[i].int
             genes.add activeKinship.genes[i]
             kinHue.add kinHues[i]
-            var row: array[Seats, int32]
+            var row = newSeq[int32](Seats)
             for j in 0..<Seats: row[j] = activeKinship.rPercent(i, j)
             rPct.add row
-        let payload = ViewerState(mode: mode, family: family, genes: genes, rPct: rPct, kinHue: kinHue, terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: default(array[Seats, CombatStats])), rulesVersion: replayRulesVersion, glory: gloryRules(), maxHp: maxHp(), world: hudWorld, staticOmitted: staticOmitted, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
+        let payload = ViewerState(mode: mode, family: family, genes: genes, rPct: rPct, kinHue: kinHue, terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: newSeq[CombatStats](Seats)), rulesVersion: replayRulesVersion, glory: gloryRules(), maxHp: maxHp(), world: hudWorld, staticOmitted: staticOmitted, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
             paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, inset: insetView.show, instantReplay: instant.active, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint, map: mapName(), land: landMask()).toJson()
         let data = payload.cstring

@@ -21,7 +21,7 @@ proc setScript(handle: pointer, seat: int, source: string): cint =
   let text = if source.len > 0: cast[ptr UncheckedArray[char]](unsafeAddr source[0]) else: nil
   pw_set_seat_script(handle, seat.cint, text, source.len.int32)
 
-proc mixedActions(w: World, actions: var array[Seats*ActionSizes.len, int32], seed: int) =
+proc mixedActions(w: World, actions: var array[LegacySeats*ActionSizes.len, int32], seed: int) =
   ## Identity aims at the nearest apparent enemy, else a changing compass aim; heart
   ## objectives; fire, grenade and sneak on schedules (the contract v2 suite's policy).
   for slot in 0..<Seats:
@@ -94,10 +94,10 @@ suite "Native decoder fire hold":
       require handle != nil
       # Team 0 under the hold, team 1 plain.
       for slot in countup(0, Seats-1, 2): check pw_set_seat_fire_hold(handle, slot.cint, 1) == 0
-      var actions: array[Seats*ActionSizes.len, int32]
-      var commands: array[Seats, Command]
-      var rewards, terminals: array[Seats, float32]
-      var held: array[Seats, int]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var commands: array[LegacySeats, Command]
+      var rewards, terminals: array[LegacySeats, float32]
+      var held: array[LegacySeats, int]
       for pass in 0..1:
         if pass == 1:
           reference = newWorld(seed+61, 720)
@@ -129,8 +129,8 @@ suite "Native decoder fire hold":
       check pw_set_seat_fire_hold(toggled, slot.cint, 1) == 0
       check pw_set_seat_fire_hold(toggled, slot.cint, 0) == 0
     var reference = newWorld(9, 480)
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     var goalsA, goalsB: array[ActionSizes[0]*2, int32]
     var aimsA, aimsB: array[ActionSizes[1]*2, int32]
     while reference.winner == -1 and reference.tick < reference.endTick:
@@ -144,7 +144,7 @@ suite "Native decoder fire hold":
       require pw_step(plain, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       require pw_step(toggled, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       require pw_state_hash(plain) == pw_state_hash(toggled)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for slot in 0..<Seats:
         let o = slot*ActionSizes.len
         commands[slot] = reference.decodeActions(slot, actions.toOpenArray(o, o+ActionSizes.len-1),
@@ -165,7 +165,7 @@ suite "Native decoder fire hold":
     require w.cogs[shooter].cooldown == 0 and w.equipment[shooter].windup == 0
     require not w.equipment[shooter].sprayCan
     # The production interpreter drives the seat: it shoots at the enemy's position.
-    var players: array[Seats, Bot]
+    var players = newSeq[Bot](Seats)
     players[shooter] = loadScriptBot("shootAt(" & $t.x & ", " & $t.z & ")\n", shooter)
     for (name, hold, mateHp) in [("plain", false, 2'i32), ("held", true, 3'i32)]:
       var trial = w
@@ -212,7 +212,7 @@ walkTo(heartX, heartY)
         var w = newWorld(seed, ticks.int32)
         let players = loadBots(@[BotGroup(path: path, count: Seats)])
         var expected: seq[uint32]
-        var held: array[Seats, int]
+        var held: array[LegacySeats, int]
         while w.tick < ticks and w.winner == -1:
           var commands = players.decide(w)
           deliverSpeech(w)
@@ -225,8 +225,8 @@ walkTo(heartX, heartY)
         require handle != nil
         for slot in 0..<Seats: check setScript(handle, slot, source) == 0
         for slot in countup(0, Seats-1, 2): check pw_set_seat_fire_hold(handle, slot.cint, 1) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var rewards, terminals: array[Seats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var rewards, terminals: array[LegacySeats, float32]
         for hash in expected:
           require pw_step(handle, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
           require pw_state_hash(handle) == hash

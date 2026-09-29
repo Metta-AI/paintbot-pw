@@ -30,7 +30,7 @@ proc record(script: string): Recording =
     let commands = players.decide(world)
     deliverSpeech(world)
     world.step(commands)
-    result.frames.add Frame(commands: commands, hash: world.stateHash())
+    result.frames.add Frame(commands: @(commands), hash: world.stateHash())
   for slot in 0..<Seats: check not players[slot].failed
   for i in 0..<Seats: check world.cogs[i].pos.inBounds
 

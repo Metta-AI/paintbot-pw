@@ -23,6 +23,7 @@ suite "Heart-based spawns":
 
   test "softmax favors the sum of distances and ignores self, enemies and dead cogs":
     var w: World
+    w.sizeSeats()
     w.rng = initRng(42)
     w.controlHearts = @[
       ControlHeart(pos: point(0, 0), owner: 0),
@@ -57,7 +58,7 @@ suite "Heart-based spawns":
     w.controlHearts[2].owner = 0
     w.cogs[0].hp = 0
     w.cogs[0].respawn = 1
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.step(commands)
     check w.cogs[0].hp == 3
     check distance2(w.cogs[0].pos, w.controlHearts[2].pos) <= HeartSpawnRadius*HeartSpawnRadius
@@ -71,7 +72,7 @@ suite "Heart-based spawns":
     w.cover.add Cover(x: p.x-1000, z: p.z-1000, w: 2000, h: 2000)
     w.cogs[0].hp = 0
     w.cogs[0].respawn = 1
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.step(commands)
     check w.cogs[0].hp == 0
     check w.equipment[0].lives == 4
@@ -81,7 +82,7 @@ suite "Heart-based spawns":
     for heart in w.controlHearts.mitems: heart.owner = -1
     w.cogs[0].hp = 0
     w.cogs[0].respawn = 1
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.step(commands)
     check w.cogs[0].hp == 3
     check w.cogs[0].pos.x in 150'i32..800'i32

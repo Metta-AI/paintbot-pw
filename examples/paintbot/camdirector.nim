@@ -75,10 +75,10 @@ type
     lookahead*: bool
       ## Score future events from the index (replays only).
     grading*: CameraGrading
-    lastPoses: array[Seats, Vec3]
-    velocity: array[Seats, Vec3]
+    lastPoses: array[MaxSeats, Vec3]
+    velocity: array[MaxSeats, Vec3]
       ## Smoothed metres per tick.
-    lastInShot: array[Seats, int32]
+    lastInShot: array[MaxSeats, int32]
     insetId: int32
     insetTarget: Vec3
     insetDistance: float32
@@ -213,7 +213,7 @@ proc impact(w: World, event: Moment): float32 =
   else: discard
 
 proc noteInterests*(d: Director, w: World, index: ReplayIndex,
-    poses: array[Seats, Vec3], seen: proc(i: int): bool, lens: int) =
+    poses: array[MaxSeats, Vec3], seen: proc(i: int): bool, lens: int) =
   ## Rebuilds the scored interests for the current simulation tick.
   var cam = d.cam
   let g = d.grading
@@ -279,7 +279,7 @@ proc noteInterests*(d: Director, w: World, index: ReplayIndex,
         score = (base+(if recentHit(i, j): g.duelHit else: 0'f32))*stakes
       cam.noteInterest(id, led((poses[i]+poses[j])*0.5, (d.velocity[i]+d.velocity[j])*0.5),
         score, gap*0.5+3, tick, 1, replace = true)
-    when Seats <= 16:
+    if Seats <= 16:
       for j in i+1..<Seats:
         if not opponents(i, j) or w.cogs[j].hp <= 0 or not seen(j): continue
         let gap = length(poses[i]-poses[j])

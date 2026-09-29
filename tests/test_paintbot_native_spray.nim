@@ -18,7 +18,7 @@ type Buffer = ptr UncheckedArray[cfloat]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
 
-proc sprayActions(w: World, actions: var array[Seats*ActionSizes.len, int32], seed: int) =
+proc sprayActions(w: World, actions: var array[LegacySeats*ActionSizes.len, int32], seed: int) =
   ## Seats without a spray can walk to a visible spray pickup when there is one, else to a
   ## heart; seats with a can walk to the enemy half's hearts. Aims cycle compass headings,
   ## identities and keep; fire on two ticks in three.
@@ -44,27 +44,27 @@ proc sprayActions(w: World, actions: var array[Seats*ActionSizes.len, int32], se
     actions[o+3] = 0
     actions[o+4] = 0
 
-type Derived* = array[Seats, array[4, int]]  # enemy damage, team damage, enemy kills, team kills
+type Derived* = array[LegacySeats, array[4, int]]  # enemy damage, team damage, enemy kills, team kills
 
-proc derivedStep*(w: var World, commands: array[Seats, Command], acc: var Derived) =
+proc derivedStep*(w: var World, commands: array[LegacySeats, Command], acc: var Derived) =
   ## Step `w` and add each spray hit of the step to `acc`, derived independently of the
   ## library's telemetry: a damage event (observeHit) is a spray hit when the attacker's
   ## sprayHits bit for the victim is newly set this step (a burst started this step clears
   ## the old bits) and it is the first event of that pair this step; the health it removes
   ## follows from the victim's hp and armor at that moment and SprayDamage.
-  var preHits: array[Seats, uint32]
-  var preBurst: array[Seats, int32]
+  var preHits: array[LegacySeats, uint32]
+  var preBurst: array[LegacySeats, int32]
   for i in 0..<Seats:
-    preHits[i] = w.equipment[i].sprayHits
+    preHits[i] = w.equipment[i].sprayHits.words[0]
     preBurst[i] = w.equipment[i].burst
-  var seen: array[Seats, uint32]
+  var seen: array[LegacySeats, uint32]
   let wp = addr w
   let ap = addr acc
   observeHit = proc(tick: int32, victim, attacker: int, pos: Point) =
     if attacker < 0 or attacker == victim: return
     let e = wp[].equipment[attacker]
     let bit = 1'u32 shl victim
-    if (e.sprayHits and bit) == 0 or (seen[attacker] and bit) != 0: return
+    if (e.sprayHits.words[0] and bit) == 0 or (seen[attacker] and bit) != 0: return
     let started = preBurst[attacker] == 0 and e.burst == SprayTicks
     if not started and (preHits[attacker] and bit) != 0: return
     seen[attacker] = seen[attacker] or bit
@@ -123,12 +123,12 @@ suite "Native decoder spray aim, spray gate and spray counters":
         # Seats 0 mod 4: spray aim + spray gate + retarget + snap + steady; 1 mod 4: spray
         # gate (2 teammates, 2 enemies) only; 2 mod 4: spray aim 500 + shot gate + strafe;
         # 3 mod 4: plain (their spray counters still count).
-        var aimOn: array[Seats, SprayAimOptions]
-        var gateOn: array[Seats, SprayGateOptions]
-        var retargetOn: array[Seats, AimRetargetOptions]
-        var snapOn: array[Seats, AimSnapOptions]
-        var shotOn: array[Seats, ShotGateOptions]
-        var steadyOn, strafeOn: array[Seats, bool]
+        var aimOn: array[LegacySeats, SprayAimOptions]
+        var gateOn: array[LegacySeats, SprayGateOptions]
+        var retargetOn: array[LegacySeats, AimRetargetOptions]
+        var snapOn: array[LegacySeats, AimSnapOptions]
+        var shotOn: array[LegacySeats, ShotGateOptions]
+        var steadyOn, strafeOn: array[LegacySeats, bool]
         for slot in 0..<Seats:
           case slot mod 4
           of 0:
@@ -147,13 +147,13 @@ suite "Native decoder spray aim, spray gate and spray counters":
           if shotOn[slot].enabled: check pw_set_seat_shot_gate(handle, slot.cint, 5250) == 0
           if steadyOn[slot]: check pw_set_seat_steady_shot(handle, slot.cint, 1) == 0
           if strafeOn[slot]: check pw_set_seat_strafe(handle, slot.cint, 5250, 3, 6, 6, 9, 800) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var commands: array[Seats, Command]
-        var rewards, terminals: array[Seats, float32]
-        var states: array[Seats, StrafeState]
-        var rngs: array[Seats, Rng]
-        var memories: array[Seats, AimMemory]
-        var aims, gates: array[Seats, int32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var commands: array[LegacySeats, Command]
+        var rewards, terminals: array[LegacySeats, float32]
+        var states: array[LegacySeats, StrafeState]
+        var rngs: array[LegacySeats, Rng]
+        var memories: array[LegacySeats, AimMemory]
+        var aims, gates: array[LegacySeats, int32]
         var derived: Derived
         for slot in 0..<Seats:
           states[slot] = initStrafeState(slot)
@@ -161,7 +161,7 @@ suite "Native decoder spray aim, spray gate and spray counters":
           memories[slot].resetAimMemory()
         while reference.winner == -1 and reference.tick < reference.endTick:
           sprayActions(reference, actions, seed.int)
-          var aimLast, gateLast: array[Seats, int32]
+          var aimLast, gateLast: array[LegacySeats, int32]
           for slot in 0..<Seats:
             let o = slot*ActionSizes.len
             var heads: array[ActionSizes.len, int32]
@@ -216,15 +216,15 @@ suite "Native decoder spray aim, spray gate and spray counters":
     for slot in 0..<Seats:
       check pw_set_seat_spray_aim(toggled, slot.cint, 850) == 0 and pw_set_seat_spray_gate(toggled, slot.cint, 0, 1) == 0
       check pw_set_seat_spray_aim(toggled, slot.cint, 0) == 0 and pw_set_seat_spray_gate(toggled, slot.cint, -1, 0) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, cfloat]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, cfloat]
     var w = newWorld(2026, 1200)
     for tick in 0..<1200:
       sprayActions(w, actions, 3)
       check pw_step(plain, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       check pw_step(toggled, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       check pw_state_hash(plain) == pw_state_hash(toggled)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for slot in 0..<Seats:
         let o = slot*ActionSizes.len
         commands[slot] = w.decodeActions(slot, actions.toOpenArray(o, o+ActionSizes.len-1), w.observedBodies(slot))
@@ -245,7 +245,7 @@ suite "Hosted neural seats and the native ABI take the same spray options":
     result.add ActionContractV2Hash
     for x in ActionSizes: result.u32(x.uint32)
     result.add repeat('\0', n*4)
-  proc neuralSeats(decoder: string): array[Seats, Bot] =
+  proc neuralSeats(decoder: string): seq[Bot] =
     let path = getTempDir()/"paintbot-native-spray-test.bas"
     writeFile(path, "paintbot_observe(neuralObservation())\n" &
       "run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())\n" &
@@ -268,7 +268,7 @@ suite "Hosted neural seats and the native ABI take the same spray options":
       for side in 0..1:
         let on = neuralSeats(decoder)
         let off = neuralSeats(plainSeats)
-        var players: array[Seats, Bot]
+        var players = newSeq[Bot](Seats)
         for slot in 0..<Seats: players[slot] = if team(slot) == side: on[slot] else: off[slot]
         var world = newWorld(seed, ticks.int32)
         let handle = pw_create(seed, ticks.int32)
@@ -280,8 +280,8 @@ suite "Hosted neural seats and the native ABI take the same spray options":
           check pw_set_seat_fire_hold(handle, slot.cint, 1) == 0
           check pw_set_seat_spray_aim(handle, slot.cint, 850) == 0
           check pw_set_seat_spray_gate(handle, slot.cint, 1, 1) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var rewards, terminals: array[Seats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var rewards, terminals: array[LegacySeats, float32]
         var zero: array[LogitSize, float32]
         var steps = 0
         while world.winner == -1 and world.tick < world.endTick:

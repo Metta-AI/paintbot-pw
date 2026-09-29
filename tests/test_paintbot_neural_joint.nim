@@ -112,7 +112,7 @@ paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
 paintbot_act(neuralLogits())
 """
-  proc seats(decoder: string): array[Seats, Bot] =
+  proc seats(decoder: string): seq[Bot] =
     var r = initRand(77)
     let (model, _, _, _) = r.pwnet001(ObservationSize, 64)
     let path = getTempDir()/("paintbot-neural-joint-" & $getCurrentProcessId() & ".bas")

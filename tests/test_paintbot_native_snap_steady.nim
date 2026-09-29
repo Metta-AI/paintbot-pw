@@ -16,7 +16,7 @@ type Buffer = ptr UncheckedArray[cfloat]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
 
-proc shootingActions(w: World, actions: var array[Seats*ActionSizes.len, int32], seed: int) =
+proc shootingActions(w: World, actions: var array[LegacySeats*ActionSizes.len, int32], seed: int) =
   ## Heart objectives on a schedule, mostly compass aims turning with the tick (an
   ## identity aim at the nearest apparent enemy one decision in five), fire on two ticks
   ## in three, grenade and sneak on schedules.
@@ -79,13 +79,13 @@ suite "Native decoder aim snap and steady shot":
     # Options persist across reset; counts reset.
     check pw_set_seat_aim_snap(h, 3, 22500) == 0
     check pw_set_seat_steady_shot(h, 3, 1) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, cfloat]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, cfloat]
     var w = newWorld(1, 240)
     for tick in 0..<120:
       shootingActions(w, actions, 0)
       require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       w.step(commands)   # only the tick matters to shootingActions' schedules
     check pw_seat_steady_stats(h, 3, ibuf(stats)) == 0
     check stats[0] > 0 and stats[1] >= stats[0]
@@ -105,8 +105,8 @@ suite "Native decoder aim snap and steady shot":
         let version = ActionContractVersion(contract)
         # Seats 0 mod 4: snap + steady; 1 mod 4: snap 45 only; 2 mod 4: steady + strafe +
         # snap; 3 mod 4: plain.
-        var snapOn: array[Seats, AimSnapOptions]
-        var steadyOn, strafeOn: array[Seats, bool]
+        var snapOn: array[LegacySeats, AimSnapOptions]
+        var steadyOn, strafeOn: array[LegacySeats, bool]
         for slot in 0..<Seats:
           case slot mod 4
           of 0:
@@ -119,13 +119,13 @@ suite "Native decoder aim snap and steady shot":
           if snapOn[slot].enabled: check pw_set_seat_aim_snap(handle, slot.cint, snapOn[slot].maxAngleMillideg) == 0
           if steadyOn[slot]: check pw_set_seat_steady_shot(handle, slot.cint, 1) == 0
           if strafeOn[slot]: check pw_set_seat_strafe(handle, slot.cint, 5250, 3, 6, 6, 9, 800) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var commands: array[Seats, Command]
-        var rewards, terminals: array[Seats, float32]
-        var states: array[Seats, StrafeState]
-        var rngs: array[Seats, Rng]
-        var memories: array[Seats, AimMemory]
-        var snaps, shots, ticks: array[Seats, int32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var commands: array[LegacySeats, Command]
+        var rewards, terminals: array[LegacySeats, float32]
+        var states: array[LegacySeats, StrafeState]
+        var rngs: array[LegacySeats, Rng]
+        var memories: array[LegacySeats, AimMemory]
+        var snaps, shots, ticks: array[LegacySeats, int32]
         var totalSnaps, totalShots, totalTicks, overridden = 0
         for pass in 0..1:
           reference = newWorld(matchSeed, 900)
@@ -137,7 +137,7 @@ suite "Native decoder aim snap and steady shot":
             snaps[slot] = 0; shots[slot] = 0; ticks[slot] = 0
           while reference.winner == -1 and reference.tick < reference.endTick:
             shootingActions(reference, actions, seed.int)
-            var snapLast, strafeLast, steadyLast: array[Seats, int32]
+            var snapLast, strafeLast, steadyLast: array[LegacySeats, int32]
             for slot in 0..<Seats:
               let o = slot*ActionSizes.len
               var heads: array[ActionSizes.len, int32]
@@ -189,17 +189,17 @@ suite "Native decoder aim snap and steady shot":
       check pw_set_seat_steady_shot(toggled, slot.cint, 1) == 0
       check pw_set_seat_aim_snap(toggled, slot.cint, 0) == 0
       check pw_set_seat_steady_shot(toggled, slot.cint, 0) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, cfloat]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, cfloat]
     var w = newWorld(2026, 600)
-    var memories: array[Seats, AimMemory]
+    var memories: array[LegacySeats, AimMemory]
     for slot in 0..<Seats: memories[slot].resetAimMemory()
     for tick in 0..<600:
       shootingActions(w, actions, 3)
       check pw_step(plain, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       check pw_step(toggled, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       check pw_state_hash(plain) == pw_state_hash(toggled)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for slot in 0..<Seats:
         let o = slot*ActionSizes.len
         let bodies = w.observedBodies(slot)
@@ -224,7 +224,7 @@ suite "Hosted neural seats and the native ABI take the same decoder path (aim sn
     result.add ActionContractV2Hash
     for x in ActionSizes: result.u32(x.uint32)
     result.add repeat('\0', n*4)
-  proc neuralSeats(decoder: string): array[Seats, Bot] =
+  proc neuralSeats(decoder: string): seq[Bot] =
     let path = getTempDir()/"paintbot-native-snap-steady-test.bas"
     writeFile(path, "paintbot_observe(neuralObservation())\n" &
       "run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())\n" &
@@ -255,8 +255,8 @@ suite "Hosted neural seats and the native ABI take the same decoder path (aim sn
             check pw_set_seat_forbid_objectives(handle, slot.cint, ibuf(river), 2) == 0
             check pw_set_seat_strafe(handle, slot.cint, 5250, 3, 6, 6, 9, 800) == 0
             check pw_set_seat_fire_hold(handle, slot.cint, 1) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var rewards, terminals: array[Seats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var rewards, terminals: array[LegacySeats, float32]
         var zero: array[LogitSize, float32]
         var steps = 0
         while world.winner == -1 and world.tick < world.endTick:

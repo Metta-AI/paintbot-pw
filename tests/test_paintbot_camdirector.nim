@@ -9,7 +9,7 @@ const Root = currentSourcePath().parentDir.parentDir
 
 proc allSeen(i: int): bool = true
 
-proc posesOf(w: World): array[Seats, Vec3] =
+proc posesOf(w: World): array[MaxSeats, Vec3] =
   for i, c in w.cogs: result[i] = w.worldPoint(c.pos)
 
 suite "camera director":

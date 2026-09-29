@@ -35,7 +35,8 @@ suite "kin layout config":
     check parseKinLayout(%*{"mode": "ffa_kin"}, gmFfaKin).isNone
     check parseKinLayout(%*{"mode": "ffa_kin", "kin_layout": "sampled"}, gmFfaKin).isNone
     let names = {"fours": klFours, "pairs": klPairs, "trios_loner": klTriosLoner,
-      "cousins": klCousins, "strangers": klStrangers, "clones": klClones}
+      "cousins": klCousins, "strangers": klStrangers, "clones": klClones,
+      "tribes": klTribes}
     for (name, layout) in names:
       check parseKinLayout(%*{"mode": "ffa_kin", "kin_layout": name}, gmFfaKin) == some(layout)
     expect ValueError: discard parseKinLayout(%*{"kin_layout": "triples"}, gmFfaKin)
@@ -59,7 +60,7 @@ suite "kin layout config":
   test "a pinned layout plays that layout on every seed, with seeded families":
     game.options = GameOptions(seed: 1, maximumTicks: 14400)
     applyGameConfig("""{"mode": "ffa_kin", "kin_layout": "cousins"}""")
-    var families: seq[array[KinSeats, int8]]
+    var families: seq[seq[int8]]
     for seed in 1'i32..50'i32:
       let w = newLiveWorld(seed, 240)
       discard w

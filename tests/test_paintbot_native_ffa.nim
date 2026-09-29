@@ -19,7 +19,7 @@ suite "Native ffa.v1 observation selection":
     check pw_reset(h, 10, 48) == 0
     check pw_observation_contract(h) == 101
     var obs = newSeq[float32](Seats*ObservationSizeFfaV1)
-    var resets: array[Seats, float32]
+    var resets: array[LegacySeats, float32]
     check pw_observe(h, fp(obs), fp(resets)) == 0
     configureRules(NativeRules)
     let reference = newWorld(10, 48)
@@ -46,7 +46,7 @@ proc ffaHandle(seed: int32, ticks = 0'i32, layout = -1'i32): pointer =
   doAssert pw_set_kin_layout(result, layout) == 0
   doAssert pw_reset(result, seed, ticks) == 0
 
-proc heartActions(h: pointer, tick: int): array[Seats*ActionSizes.len, int32] =
+proc heartActions(h: pointer, tick: int): array[LegacySeats*ActionSizes.len, int32] =
   ## Walk to a heart per seat (changing every 20 s) and fire at a compass heading.
   for slot in 0..<Seats:
     let o = slot*ActionSizes.len
@@ -81,9 +81,9 @@ proc command(h: pointer, slot: int, shoot: bool, aim: Point) =
   nine[1] = p.x; nine[2] = p.z
   doAssert pw_set_seat_command(h, slot.cint, ip(nine)) == 0
 
-proc idleStep(h: pointer): array[Seats, float32] =
-  var actions: array[Seats*ActionSizes.len, int32]
-  var terminals: array[Seats, float32]
+proc idleStep(h: pointer): array[LegacySeats, float32] =
+  var actions: array[LegacySeats*ActionSizes.len, int32]
+  var terminals: array[LegacySeats, float32]
   doAssert pw_step(h, ip(actions), fp(result), fp(terminals)) == 0
 
 proc lane(h: pointer, length: int, flat = 20): Point =
@@ -119,7 +119,8 @@ suite "Native FFA-kin ABI":
   test "the mode and kin layout apply at the next reset and are kept across resets":
     let h = pw_create(3, 240)
     check pw_game_mode(h) == 0 and pw_set_game_mode(h, 1) == 0 and pw_game_mode(h) == 0
-    check pw_set_game_mode(h, 2) == -1 and pw_set_kin_layout(h, 6) == -1 and pw_set_kin_layout(h, -2) == -1
+    check pw_set_game_mode(h, 2) == -1 and pw_set_kin_layout(h, 7) == -1 and pw_set_kin_layout(h, -2) == -1
+    check pw_set_kin_layout(h, 6) == 0 # tribes (families of 5)
     check pw_set_kin_layout(h, 5) == 0 # clones
     check pw_reset(h, 3, 0) == 0
     check pw_game_mode(h) == 1 and envOf(h).world.endTick == FfaMatchTicks
@@ -133,7 +134,7 @@ suite "Native FFA-kin ABI":
     let pairs = kinshipFor(klPairs, 4)
     for i in 0..<Seats:
       for j in 0..<Seats: check r[i*Seats+j] == float32(pairs.r(i, j))
-    var genes: array[Seats, uint32]
+    var genes: array[LegacySeats, uint32]
     check pw_genes(h, cast[ptr UncheckedArray[uint32]](addr genes[0])) == 0
     check genes == pairs.genes
     check pw_set_game_mode(h, 0) == 0 and pw_reset(h, 4, 0) == 0
@@ -144,11 +145,11 @@ suite "Native FFA-kin ABI":
   test "summed rewards equal terminal R_i/4320 and each step's split sums to delta R":
     for (seed, layout) in [(11'i32, -1'i32), (12'i32, 5'i32), (13'i32, 1'i32)]:
       let h = ffaHandle(seed, 2400, layout)
-      var total: array[Seats, float64]
-      var afterDeath: array[Seats, float64]
-      var before, after: array[Seats, float32]
-      var split: array[2*Seats, float32]
-      var rewards, terminals: array[Seats, float32]
+      var total: array[LegacySeats, float64]
+      var afterDeath: array[LegacySeats, float64]
+      var before, after: array[LegacySeats, float32]
+      var split: array[2*LegacySeats, float32]
+      var rewards, terminals: array[LegacySeats, float32]
       var worst = 0.0
       var tick = 0
       check pw_scores(h, fp(before)) == 0
@@ -171,7 +172,7 @@ suite "Native FFA-kin ABI":
         inc tick
         if terminals[0] == 1: break
       check worst < 1e-6
-      var final: array[Seats, float32]
+      var final: array[LegacySeats, float32]
       check pw_scores(h, fp(final)) == 0
       var earned = 0
       for i in 0..<Seats:
@@ -293,8 +294,8 @@ suite "Native FFA-kin ABI":
     doAssert pw_set_game_mode(off, 1) == 0 and pw_set_kin_layout(off, 1) == 0
     check pw_set_pair_stats_enabled(off, 2) == -1 and pw_set_pair_stats_enabled(off, 0) == 0
     doAssert pw_reset(off, 27, 600) == 0
-    var r1, r2, t1, t2: array[Seats, float32]
-    var s1, s2: array[2*Seats, float32]
+    var r1, r2, t1, t2: array[LegacySeats, float32]
+    var s1, s2: array[2*LegacySeats, float32]
     for tick in 0..<600:
       var a1 = heartActions(on, tick)
       var a2 = a1
@@ -345,7 +346,7 @@ suite "Native FFA-kin ABI":
     let h = ffaHandle(24, 0, 1)
     let spot = envOf(h).world.greatHearts[0].pos
     h.isolate([(5, spot), (6, spot.near(100)), (7, spot.near(-100)), (8, spot.near(900))])
-    var rewards: array[Seats, float32]
+    var rewards: array[LegacySeats, float32]
     for tick in 0..<GreatHeartCaptureTicks: rewards = h.idleStep()
     let s = h.stats()
     check envOf(h).world.greatShare[5] == 200
@@ -363,14 +364,14 @@ suite "Native FFA-kin ABI":
   test "overrides apply at reset; in the teams game nothing changes, hash for hash":
     let plain = pw_create(31, 480)
     let knobs = pw_create(31, 480)
-    var family: array[Seats, int8]
-    var genes: array[Seats, uint32]
-    var ibd: array[Seats*Seats, int8]
+    var family: array[LegacySeats, int8]
+    var genes: array[LegacySeats, uint32]
+    var ibd: array[LegacySeats*LegacySeats, int8]
     for i in 0..<Seats:
       family[i] = int8(i div 8)
       genes[i] = uint32(i * 7919)
       for j in 0..<Seats: ibd[i*Seats+j] = (if i == j: 32'i8 elif i div 8 == j div 8: 16'i8 else: 0'i8)
-    var grouping: array[Seats, int8]
+    var grouping: array[LegacySeats, int8]
     for i in 0..<Seats: grouping[i] = int8(i mod 4)
     let fam = cast[ptr UncheckedArray[int8]](addr family[0])
     let gen = cast[ptr UncheckedArray[uint32]](addr genes[0])
@@ -387,7 +388,7 @@ suite "Native FFA-kin ABI":
     ibd[0] = 32
     check pw_reset(plain, 32, 480) == 0 and pw_reset(knobs, 32, 480) == 0
     check pw_game_mode(knobs) == 0
-    var r1, r2, t1, t2: array[Seats, float32]
+    var r1, r2, t1, t2: array[LegacySeats, float32]
     for tick in 0..<480:
       var a1 = heartActions(plain, tick)
       var a2 = a1
@@ -403,7 +404,7 @@ suite "Native FFA-kin ABI":
     check pw_reset(knobs, 33, 0) == 0
     check pw_kin(knobs, fp(r)) == 0
     check r[0] == 1 and r[1] == 0.5 and r[8] == 0
-    var got: array[Seats, uint32]
+    var got: array[LegacySeats, uint32]
     check pw_genes(knobs, cast[ptr UncheckedArray[uint32]](addr got[0])) == 0
     check got == genes
     # Spawn anchors follow the grouping (four groups), not the two families.
@@ -415,21 +416,21 @@ suite "Native FFA-kin ABI":
   test "kin invariance through the ABI: one spawn grouping and r, two genomes, identical hashes":
     proc run(genesSalt: uint32, r: int8): seq[uint32] =
       let h = pw_create(41, 24)
-      var family: array[Seats, int8]
-      var genes: array[Seats, uint32]
-      var ibd: array[Seats*Seats, int8]
+      var family: array[LegacySeats, int8]
+      var genes: array[LegacySeats, uint32]
+      var ibd: array[LegacySeats*LegacySeats, int8]
       for i in 0..<Seats:
         family[i] = int8(i div 4)
         genes[i] = uint32(i+1) * genesSalt
         for j in 0..<Seats: ibd[i*Seats+j] = (if i == j: 32'i8 elif i div 4 == j div 4: r else: 0'i8)
-      var grouping: array[Seats, int8]
+      var grouping: array[LegacySeats, int8]
       for i in 0..<Seats: grouping[i] = int8(i div 2)
       doAssert pw_set_game_mode(h, 1) == 0
       doAssert pw_set_kin_override(h, cast[ptr UncheckedArray[int8]](addr family[0]),
         cast[ptr UncheckedArray[uint32]](addr genes[0]), cast[ptr UncheckedArray[int8]](addr ibd[0])) == 0
       doAssert pw_set_spawn_grouping(h, cast[ptr UncheckedArray[int8]](addr grouping[0])) == 0
       doAssert pw_reset(h, 41, 600) == 0
-      var rewards, terminals: array[Seats, float32]
+      var rewards, terminals: array[LegacySeats, float32]
       for tick in 0..<600:
         var actions = heartActions(h, tick)
         if pw_step(h, ip(actions), fp(rewards), fp(terminals)) != 0: break
@@ -446,7 +447,7 @@ suite "Native FFA-kin ABI":
     let h = pw_create(41, 24)
     doAssert pw_set_game_mode(h, 1) == 0 and pw_set_kin_layout(h, 0) == 0
     doAssert pw_reset(h, 41, 600) == 0
-    var rewards, terminals: array[Seats, float32]
+    var rewards, terminals: array[LegacySeats, float32]
     var actions = heartActions(h, 0)
     doAssert pw_step(h, ip(actions), fp(rewards), fp(terminals)) == 0
     check pw_state_hash(h) != a[0]
@@ -456,7 +457,7 @@ suite "Native FFA-kin ABI":
     let h = pw_create_observation(51, 24, 101)
     doAssert pw_set_game_mode(h, 1) == 0 and pw_set_kin_layout(h, 5) == 0 and pw_reset(h, 51, 0) == 0
     var obs = newSeq[float32](Seats*ObservationSizeFfaV1)
-    var resets: array[Seats, float32]
+    var resets: array[LegacySeats, float32]
     check pw_observe(h, fp(obs), fp(resets)) == 0
     check obs[FfaIdentityOffset + FfaIdentityRowSize + 37] == 1 # clones
     check pw_set_obs_mask(h, 1) == 0
@@ -474,7 +475,7 @@ suite "Native FFA-kin ABI":
   test "an FFA handle and a teams handle interleaved on one thread do not disturb each other":
     proc run(handles: openArray[pointer]): seq[seq[uint32]] =
       result = newSeq[seq[uint32]](handles.len)
-      var rewards, terminals: array[Seats, float32]
+      var rewards, terminals: array[LegacySeats, float32]
       for tick in 0..<240:
         for k, h in handles:
           var actions = heartActions(h, tick)
@@ -503,8 +504,8 @@ suite "Native FFA-kin seat scripts, results and bots":
   test "ffa.bas on all 16 seats of an FFA handle plays a whole match without script errors":
     let h = ffaHandle(71, 0)
     for seat in 0..<Seats: check h.setScript(seat, FfaBas) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     var ticks = 0
     while true:
       let code = pw_step(h, ip(actions), fp(rewards), fp(terminals))
@@ -517,7 +518,7 @@ suite "Native FFA-kin seat scripts, results and bots":
       let (code, message) = h.status(seat)
       check code == 1
       if code != 1: echo "seat ", seat, ": ", message
-    var scores: array[Seats, float32]
+    var scores: array[LegacySeats, float32]
     check pw_scores(h, fp(scores)) == 0
     var total = 0.0
     for v in scores: total += v
@@ -535,8 +536,8 @@ suite "Native FFA-kin seat scripts, results and bots":
     check h.setScript(0, FfaBas) == 1 # the teams game has no kin(), gene(), ...
     let (code, message) = h.status(0)
     check code == 2 and message.len > 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     check pw_step(h, ip(actions), fp(rewards), fp(terminals)) == 0 # the disabled seat idles
     check pw_set_game_mode(h, 1) == 0 and pw_reset(h, 72, 240) == 0
     check h.status(0)[0] == 1
@@ -548,7 +549,7 @@ suite "Native FFA-kin seat scripts, results and bots":
 
   test "pw_bot_actions is unsupported in FFA; pw_results keeps the teams layout in teams":
     let f = ffaHandle(73, 0)
-    var actions: array[Seats*ActionSizes.len, int32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
     check pw_bot_actions(f, 0, 1, ip(actions)) == -1
     var results: array[8, float32]
     check pw_results(f, fp(results)) == 0

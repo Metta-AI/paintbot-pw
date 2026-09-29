@@ -54,7 +54,7 @@ suite "Layered village":
       w.cogs[0].pos=if mirrored:point(3600,3200) else:point(2800,800)
       w.cogs[0].goal=w.cogs[0].pos
       let goal=if mirrored:point(4250,3200) else:point(2250,800)
-      var commands:array[Seats,Command]
+      var commands:array[LegacySeats,Command]
       commands[0]=Command(walk:true,goal:goal,aim:goal)
       for tick in 0..<100:w.step(commands)
       check w.elevation(w.cogs[0].pos)>200
@@ -66,12 +66,12 @@ suite "Layered village":
     w.cogs[0].pos=point(1000,2000)
     w.cogs[1].pos=point(2000,2000)
     w.cogs[2].pos=point(3000,2000)
-    shouts=default(array[Seats,seq[string]])
+    shouts=default(array[LegacySeats,seq[string]])
     shouts[0] = @["Contact"]
     deliverSpeech(w)
     check heard[1].len==1
     check heard[1][0].text=="Contact"
     check heard[2].len==0
-    shouts=default(array[Seats,seq[string]])
+    shouts=default(array[LegacySeats,seq[string]])
     deliverSpeech(w)
     check heard[1].len==0

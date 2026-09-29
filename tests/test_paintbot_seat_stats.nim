@@ -31,7 +31,7 @@ suite "Seat combat telemetry":
     silent = w
     var stats: CombatTelemetry
     for s in stats.mitems: s = SeatStats(firstFriendlyFireTick: -1)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     for i in 0..<Seats: commands[i] = Command(walk: true, goal: w.cogs[i].pos, aim: w.cogs[i].pos)
     commands[0] = Command(walk: true, goal: a, aim: b, shoot: true)
     for tick in 0..<240:
@@ -53,13 +53,13 @@ suite "Seat combat telemetry":
   test "native handle exposes the same counters and resets them":
     let handle = pw_create(2026, 2400)
     require handle != nil
-    var stats: array[Seats*8, int32]
+    var stats: array[LegacySeats*8, int32]
     check pw_seat_stats(handle, cast[ptr UncheckedArray[int32]](addr stats[0])) == 0
     for slot in 0..<Seats:
       for k in 0..<7: check stats[slot*8+k] == 0
       check stats[slot*8+7] == -1
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     var tick = 0
     while terminals[0] == 0 and tick < 2400:
       for slot in 0..<Seats:

@@ -58,7 +58,7 @@ suite "Heartwick territory control":
     w.cogs[0].shield=0
     w.equipment[0].lives=1
     w.damage(0,1,99)
-    var cmds:array[Seats,Command]
+    var cmds:array[LegacySeats,Command]
     for tick in 0..RespawnTicks:w.step(cmds)
     check w.cogs[0].hp>0
     check w.equipment[0].lives==StartingLives

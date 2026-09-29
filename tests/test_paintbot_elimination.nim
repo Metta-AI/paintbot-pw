@@ -15,7 +15,7 @@ suite "Team elimination":
   test "an eliminated team loses immediately and the survivor's meter fills":
     for loser in 0..1:
       var w = newWorld(2026)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       w.scoreTicks[loser] = 600*TickRate
       w.eliminate(loser)
       w.step(commands)
@@ -30,7 +30,7 @@ suite "Team elimination":
       check w.stateHash() == hash
   test "a team with a pending respawn is not eliminated":
     var w = newWorld(2026)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.eliminate(1)
     w.equipment[1].lives = 1
     w.cogs[1].respawn = 48
@@ -39,7 +39,7 @@ suite "Team elimination":
     check w.scoreTicks == [1'i32, 1'i32]
   test "the last death ends the match on that tick":
     var w = newWorld(2026)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.eliminate(1)
     w.equipment[1].lives = 1
     w.cogs[1].hp = 1; w.cogs[1].shield = 0
@@ -51,7 +51,7 @@ suite "Team elimination":
     check w.winner == 0
     check w.scoreTicks[0] == w.heartMeterTarget()
   test "mutual elimination awards no bonus and ranks the meters":
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     for tied in [false, true]:
       var w = newWorld(2026)
       w.scoreTicks = [24'i32, (if tied: 24'i32 else: 48'i32)]
@@ -63,7 +63,7 @@ suite "Team elimination":
     visionRulesVersion = 33
     replayRulesVersion = 33
     var w = newWorld(2026)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.eliminate(1)
     w.step(commands)
     check w.winner == -1
@@ -71,7 +71,7 @@ suite "Team elimination":
   test "rules 34 recording round trips to the same elimination result":
     var w = newWorld(2026)
     var r = Recording(seed: w.seed, endTick: w.endTick)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     # Only commands replay, so Blue spends its lives on friendly fire while Red
     # marches over to finish the last cog.
     while w.winner == -1:
@@ -86,13 +86,13 @@ suite "Team elimination":
           commands[i] = Command(walk: team(i) == 0, shoot: true,
               goal: w.cogs[target].pos, aim: w.cogs[target].pos)
       w.step(commands)
-      r.frames.add Frame(commands: commands, hash: w.stateHash())
+      r.frames.add Frame(commands: @(commands), hash: w.stateHash())
     check w.winner == 0
     check w.tick < w.endTick
     check w.scoreTicks[0] == w.heartMeterTarget()
     let path = getTempDir()/"paintbot-elimination.replay"
     defer: removeFile(path)
-    saveReplayFile(path, "paintbot_pw", 34, r)
+    saveRecordingAs(path, 34, r)
     let loaded = loadRecording(path)
     var replay = newWorld(loaded.seed, loaded.endTick)
     for frame in loaded.frames:

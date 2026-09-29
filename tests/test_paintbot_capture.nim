@@ -97,7 +97,7 @@ suite "Three-second heart captures":
     var w = newWorld(2026)
     w.controlHearts[2].owner = 1
     w.touch(0)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     for tick in 0..<71: w.step(commands)
     check w.scoreTicks == [71'i32,142'i32]
     check w.controlHearts[2].owner == 1
@@ -147,16 +147,16 @@ suite "Three-second heart captures":
     defer: removeFile(path)
     world = newWorld(2026,720)
     recording = Recording(seed:2026,endTick:720)
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     commands[0] = Command(walk:true,goal:world.controlHearts[8].pos)
     var partialTick = -1
     while world.tick < 720:
       world.step(commands)
-      recording.frames.add Frame(commands:commands,hash:world.stateHash())
+      recording.frames.add Frame(commands: @(commands),hash:world.stateHash())
       if world.heartCaptures[8].ticks == 30: partialTick = world.tick.int
     require partialTick > 0
     check world.controlHearts[8].owner == 0
-    saveReplayFile(path,"paintbot_pw",26,recording)
+    saveRecordingAs(path, 26, recording)
     recording = loadRecording(path)
     replayMode = true
     let index = indexReplay()

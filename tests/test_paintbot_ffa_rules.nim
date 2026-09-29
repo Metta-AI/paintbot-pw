@@ -26,9 +26,9 @@ proc place(w: var World, slot: int, p: Point) =
 
 proc near(p: Point, dx: int): Point = point(p.x.int+dx, p.z.int)
 
-proc idle(): array[Seats, Command] = default(array[Seats, Command])
+proc idle(): array[LegacySeats, Command] = default(array[LegacySeats, Command])
 
-proc scriptedCommands(w: World): array[Seats, Command] =
+proc scriptedCommands(w: World): array[LegacySeats, Command] =
   ## The golden test's scripted driver for FFA: walk to a heart, shoot the nearest living cog.
   for slot in 0..<Seats:
     let cog = w.cogs[slot]
@@ -222,7 +222,7 @@ suite "FFA-kin rules":
     for tick in 1..<GreatHeartCaptureTicks:
       w.updateGreatHearts(); inc w.tick
       check w.greatHearts[0].progress == tick.int32
-    check w.seatScore == default(array[Seats, int32])
+    check w.seatScore == default(array[LegacySeats, int32])
     w.updateGreatHearts()
     for i in 0..2:
       check w.seatScore[i] == 200
@@ -250,7 +250,7 @@ suite "FFA-kin rules":
     for tick in 0..<GreatHeartCaptureTicks+5:
       w.updateGreatHearts(); inc w.tick
     check w.greatHearts[1].progress == 0
-    check w.seatScore == default(array[Seats, int32])
+    check w.seatScore == default(array[LegacySeats, int32])
     w.cogs[0].pos = w.controlHearts[2].pos
     w.cogs[0].hp = 0
     for tick in 0..<HeartCaptureTicks+5: w.updateTerritory()

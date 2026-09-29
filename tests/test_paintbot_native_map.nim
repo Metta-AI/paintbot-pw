@@ -14,7 +14,7 @@ const Root = currentSourcePath().parentDir.parentDir
 const Base = Root / "coworld/paintbot/players/base.bas"
 type
   Buffer = ptr UncheckedArray[cfloat]
-  Actions = array[Seats*ActionSizes.len, int32]
+  Actions = array[LegacySeats*ActionSizes.len, int32]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
 template cbuf(s: string): ptr UncheckedArray[char] =
@@ -55,7 +55,7 @@ proc defaultRun(seed: int32): (uint64, uint32) =
   for slot in countup(1, Seats-1, 2):
     doAssert pw_set_seat_script(handle, slot.cint, cbuf(source), source.len.int32) == 0
   var actions: Actions
-  var rewards, terminals: array[Seats, float32]
+  var rewards, terminals: array[LegacySeats, float32]
   var digest = 14695981039346656037'u64
   var last: uint32
   for tick in 0..<DefaultTicks:
@@ -77,7 +77,7 @@ else:
   proc mapRun(handle: pointer, seed: int32, ticks: int): seq[uint32] =
     ## Steps a handle with the action pattern; the state hash after every tick.
     var actions: Actions
-    var rewards, terminals: array[Seats, float32]
+    var rewards, terminals: array[LegacySeats, float32]
     for tick in 0..<ticks:
       actions.fillActions(seed.int, tick)
       doAssert pw_step(handle, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
@@ -108,7 +108,7 @@ else:
       configureMap(if job.map < 0: "" else: MapNames[job.map])
       var world = newWorld(job.seed, job.ticks.int32)
       var actions: Actions
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for tick in 0..<job.ticks:
         actions.fillActions(job.seed.int, tick)
         for slot in 0..<Seats:
@@ -203,7 +203,7 @@ else:
         check pw_set_map(hb, b.cint) == 0 and pw_reset(hb, seedB, MapTicks.int32) == 0
         var gotA, gotB: seq[uint32]
         var actions: Actions
-        var rewards, terminals: array[Seats, float32]
+        var rewards, terminals: array[LegacySeats, float32]
         for tick in 0..<MapTicks:
           actions.fillActions(seedA.int, tick)
           require pw_step(ha, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
@@ -240,9 +240,9 @@ else:
       require control != nil and handle != nil
       let n = ObservationSizeV2
       var observed, expected = newSeq[float32](Seats*n)
-      var resets: array[Seats, float32]
+      var resets: array[LegacySeats, float32]
       var actions: Actions
-      var rewards, terminals: array[Seats, float32]
+      var rewards, terminals: array[LegacySeats, float32]
       for tick in 0..<ticks:
         if tick == ticks div 2:
           check pw_set_map(handle, map.cint) == 0
@@ -297,8 +297,8 @@ neuralIssue()
         for slot in 1..<Seats:
           check pw_set_seat_script(handle, slot.cint, cbuf(baseSource), baseSource.len.int32) == 0
         var actions: Actions
-        var logits: array[Seats*LogitSize, float32]
-        var rewards, terminals: array[Seats, float32]
+        var logits: array[LegacySeats*LogitSize, float32]
+        var rewards, terminals: array[LegacySeats, float32]
         var choices: array[22, int32]
         var decided = 0
         for tick in 0..<200:

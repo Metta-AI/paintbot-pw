@@ -51,7 +51,7 @@ suite "Observation contract v2 (terrain)":
       configureRules(37)
       var w = newWorld(seed, 2400)
       var actions: array[ActionSizes.len, int32]
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       var a, b: array[ObservationSize, float32]
       var c: array[ObservationSizeV2, float32]
       while w.winner == -1 and w.tick < w.endTick:

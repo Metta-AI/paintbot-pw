@@ -9,7 +9,7 @@ suite "Rotating big hearts":
 
   test "first heart appears at exactly 30 seconds and rotates at 60":
     var w = newWorld(2026)
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     for tick in 0..<719: w.step(commands)
     check w.bigHeart == -1
     check w.scoreTicks == [719'i32,719'i32]
@@ -70,7 +70,7 @@ suite "Rotating big hearts":
       w.updateBigHeart()
       for heart in w.controlHearts.mitems: heart.owner = -1
       w.controlHearts[w.bigHeart].owner = owner
-      var commands: array[Seats,Command]
+      var commands: array[LegacySeats,Command]
       for tick in 0..<TickRate: w.step(commands)
       check w.scoreTicks == (if owner == 0: [120'i32,0'i32] elif owner == 1: [0'i32,120'i32] else: [0'i32,0'i32])
 
@@ -81,7 +81,7 @@ suite "Rotating big hearts":
     let big = w.bigHeart
     for heart in w.controlHearts.mitems: heart.owner = -1
     w.controlHearts[big].owner = 0
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     w.step(commands)
     check w.scoreTicks == [5'i32,0'i32]
     w.controlHearts[big].owner = 1
@@ -95,7 +95,7 @@ suite "Rotating big hearts":
     check w.remainingHeartPoints() == (300*10+270*4)*TickRate
     w.tick = 750
     check w.remainingHeartPoints() == (10+4)*(MatchTicks-750)
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     for i in 0..<Seats:
       if team(i) == 1:
         w.cogs[i].hp = 0
@@ -111,7 +111,7 @@ suite "Rotating big hearts":
 
   test "timeout does not select a heart that cannot score":
     var w = newWorld(2026,BigHeartInterval)
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     for tick in 0..<BigHeartInterval: w.step(commands)
     check w.winner == -2
     check w.bigHeart == -1
@@ -134,11 +134,11 @@ suite "Rotating big hearts":
     defer: removeFile(path)
     world = newWorld(2026,2161)
     recording = Recording(seed:2026,endTick:2161)
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     for tick in 0..<2161:
       world.step(commands)
-      recording.frames.add Frame(commands:commands,hash:world.stateHash())
-    saveReplayFile(path,"paintbot_pw",26,recording)
+      recording.frames.add Frame(commands: @(commands),hash:world.stateHash())
+    saveRecordingAs(path, 26, recording)
     recording = loadRecording(path)
     replayMode = true
     let index = indexReplay()

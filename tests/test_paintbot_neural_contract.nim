@@ -60,7 +60,7 @@ suite "Neural policy contract":
     logits[1] = Inf.float32
     expect ValueError: discard decodeLogits(w,0,logits)
 
-proc identityOf(bodies: array[Seats,int], body: int): int =
+proc identityOf(bodies: array[LegacySeats,int], body: int): int =
   for identity, b in bodies:
     if b == body: return identity
   -1
@@ -97,7 +97,7 @@ suite "Neural policy contract v2 (lead-compensated identity aim)":
     for seed in [3'i32, 11, 2026]:
       var w = newWorld(seed, 2400)
       for tick in 0..<60:
-        var commands: array[Seats, Command]
+        var commands: array[LegacySeats, Command]
         for slot in 0..<Seats:
           let a = [int32(1+(slot+tick) mod 50), int32((tick*7+slot) mod 25),
                    int32(tick mod 2), int32(tick mod 5 == 0), int32(slot mod 2)]
@@ -150,7 +150,7 @@ suite "Neural policy contract v2 (lead-compensated identity aim)":
     memory.resetAimMemory()
     memory.recordAimMemory(w, shooter, w.observedBodies(shooter))
     block:
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       commands[target] = walk
       w.step(commands)
     require w.cogs[target].pos == point(t.x.int, t.z.int + MoveSpeed)
@@ -169,7 +169,7 @@ suite "Neural policy contract v2 (lead-compensated identity aim)":
       var trial = w
       var fired = false
       for tick in 0..GunWindupTicks:
-        var commands: array[Seats, Command]
+        var commands: array[LegacySeats, Command]
         commands[target] = walk
         if tick == 0: commands[shooter] = command
         else: commands[shooter] = Command(aim: command.aim)
@@ -378,7 +378,7 @@ suite "Decoder fire hold (bundle option, not a contract change)":
     for (name, command, mateHp) in [("fired", fired, 2'i32), ("held", held, 3'i32)]:
       var trial = w
       for tick in 0..GunWindupTicks:
-        var commands: array[Seats, Command]
+        var commands: array[LegacySeats, Command]
         commands[shooter] = if tick == 0: command else: Command(aim: command.aim)
         trial.step(commands)
       checkpoint name
@@ -920,7 +920,7 @@ suite "Decoder aim snap (bundle option, not a contract change)":
       var trial = w
       let command = trial.decodeActions(0, heads, bodies, acV2, memory)
       for tick in 0..GunWindupTicks:
-        var commands: array[Seats, Command]
+        var commands: array[LegacySeats, Command]
         commands[0] = if tick == 0: command else: Command(aim: command.aim)
         trial.step(commands)
       checkpoint name
@@ -971,15 +971,15 @@ suite "Decoder steady shot (bundle option, not a contract change)":
     var w = newWorld(77, 1800)
     var predicted, started, lateCooldown = 0
     while w.winner == -1 and w.tick < w.endTick:
-      var commands: array[Seats, Command]
-      var takes: array[Seats, bool]
+      var commands: array[LegacySeats, Command]
+      var takes: array[LegacySeats, bool]
       for slot in 0..<Seats:
         var actions: array[ActionSizes.len, int32]
         w.trainingBotActions(slot, 2, actions)
         actions[2] = int32((w.tick + slot) mod 4 != 0)
         commands[slot] = w.decodeActions(slot, actions)
         takes[slot] = commands[slot].shoot and w.gunTakesOrder(slot)
-      var cooldowns: array[Seats, int32]
+      var cooldowns: array[LegacySeats, int32]
       for slot in 0..<Seats: cooldowns[slot] = w.cogs[slot].cooldown
       w.step(commands)
       for slot in 0..<Seats:
@@ -1016,7 +1016,7 @@ suite "Decoder steady shot (bundle option, not a contract change)":
     for tick in 0..8:
       var heads = [int32(43), 17, 1, 0, 0]   # compass east, fire
       held.add w.steadyShotActions(0, heads, true)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       commands[0] = w.decodeActions(0, heads, w.observedBodies(0), acV2, memory)
       positions.add w.cogs[0].pos
       w.step(commands)
@@ -1068,7 +1068,7 @@ proc placeOpen(w: var World, seat: int, offsets: openArray[(int, int, int)], fac
       return s
   raise newException(AssertionDefect, "no open placement")
 
-proc diag3Retarget(w: World, slot: int, actions: array[ActionSizes.len, int32], bodies: array[Seats, int],
+proc diag3Retarget(w: World, slot: int, actions: array[ActionSizes.len, int32], bodies: array[LegacySeats, int],
     version: ActionContractVersion, memory: AimMemory, maxRange, hpWeight, carryWeight: float64): int =
   ## pw-diag3's --retarget transliterated (diag3_run.py retarget_aim, mode base): it reads the
   ## seat's encoded observation identity block (float thresholds, hp = round(hp/3 * 3)) and
@@ -1093,7 +1093,7 @@ proc diag3Retarget(w: World, slot: int, actions: array[ActionSizes.len, int32], 
       result = k
       bestCost = cost
 
-proc diag3GateDrops(w: World, slot: int, actions: array[ActionSizes.len, int32], bodies: array[Seats, int],
+proc diag3GateDrops(w: World, slot: int, actions: array[ActionSizes.len, int32], bodies: array[LegacySeats, int],
     version: ActionContractVersion, memory: AimMemory, maxRange: float64): bool =
   ## pw-diag3's --shot-gate transliterated (diag3_run.py gate_drop), on the heads before
   ## the snap, reading the world as its diag state did: the seat's visible mask, true
@@ -1249,7 +1249,7 @@ suite "Decoder shot gate (bundle option, not a contract change)":
   let snap = aimSnapOptions(DefaultAimSnapMillideg)
   var memory: AimMemory
   memory.resetAimMemory()
-  proc gated(w: World, slot: int, heads: array[ActionSizes.len, int32], bodies: array[Seats, int],
+  proc gated(w: World, slot: int, heads: array[ActionSizes.len, int32], bodies: array[LegacySeats, int],
       options: ShotGateOptions, snapOn = true): (bool, array[ActionSizes.len, int32]) =
     ## Snap (when on), then the gate, as the decoders run them.
     var a = heads
@@ -1311,14 +1311,14 @@ suite "Aim retarget and shot gate equal pw-diag3's counterfactuals over whole ma
     var decisions, retargets, gateCompared, gateDrops, disguisedDiffers = 0
     for seed in [11'i32, 12]:
       var w = newWorld(seed, 3000)
-      var memories: array[Seats, AimMemory]
+      var memories: array[LegacySeats, AimMemory]
       for slot in 0..<Seats: memories[slot].resetAimMemory()
       var rng = initRng(seed, 0x5245544152474554'u64)
       let retarget = aimRetargetOptions()
       let gate = shotGateOptions()
       let snap = aimSnapOptions(DefaultAimSnapMillideg)
       while w.winner == -1 and w.tick < w.endTick:
-        var commands: array[Seats, Command]
+        var commands: array[LegacySeats, Command]
         for slot in 0..<Seats:
           var heads: array[ActionSizes.len, int32]
           w.trainingBotActions(slot, 2, heads)
@@ -1404,7 +1404,7 @@ suite "Decoder spray options (bundle options, not a contract change)":
               check a == w.sprayConeHolds(me, aim, w.cogs[j].pos)
               inc compared
               if a: inc touched
-        var commands: array[Seats, Command]
+        var commands: array[LegacySeats, Command]
         for slot in 0..<Seats:
           var heads: array[ActionSizes.len, int32]
           w.trainingBotActions(slot, 2, heads)

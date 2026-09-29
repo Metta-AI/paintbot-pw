@@ -39,7 +39,7 @@ proc manifestFor(observationContract: string, decoder = "", userInputs = "",
   if userInputs.len > 0: result.add ", \"user_inputs\": " & userInputs
   result.add "}"
 proc bundle(source: string, decoder = "", userInputs = 0, init = "", inputs = -1,
-    observationContract = "", manifest = "x", model = true): array[Seats,Bot] =
+    observationContract = "", manifest = "x", model = true): seq[Bot] =
   ## Every seat runs `source` over a seeded random actor (v2 observation, action contract
   ## v2); `userInputs` > 0 makes it a v2u<K> actor with manifest user_inputs.
   inc fixtureCount
@@ -63,7 +63,7 @@ proc bundle(source: string, decoder = "", userInputs = 0, init = "", inputs = -1
       if fileExists(path & suffix): removeFile(path & suffix)
   loadBots(@[BotGroup(path:path,count:Seats)])
 
-proc play(players: array[Seats,Bot], seed: int32, ticks: int): seq[uint32] =
+proc play(players: seq[Bot], seed: int32, ticks: int): seq[uint32] =
   ## The hosted tick loop; one world hash per tick. Every seat must stay enabled.
   var world = newWorld(seed)
   for tick in 0..<ticks:
@@ -210,7 +210,7 @@ suite "neural BASIC I/O on the hosted seat":
       check bundle(variant, decoder).play(11, 500) == expected
 
   test "#101's spray gate in BASIC (between neuralSample and neuralDecode) is decoder.spray_gate, strafe on":
-    proc sprayPlay(players: array[Seats,Bot], seed: int32, ticks: int): seq[uint32] =
+    proc sprayPlay(players: seq[Bot], seed: int32, ticks: int): seq[uint32] =
       # Every live seat holds a spray can, so the gate decides on most shoot orders.
       var world = newWorld(seed)
       for tick in 0..<ticks:

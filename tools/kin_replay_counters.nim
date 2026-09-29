@@ -27,7 +27,7 @@ import ../examples/paintbot/[sim, game, bots, kinship, native_env]
 
 when not defined(pwTraining): {.error: "kin_replay_counters needs -d:pwTraining".}
 
-const PairInts = Seats * Seats * PairStatCount
+const PairInts = LegacySeats * LegacySeats * PairStatCount
 
 proc commandInts(c: Command): array[9, int32] =
   [int32(c.walk), c.goal.x, c.goal.z, int32(c.shoot), c.aim.x, c.aim.z,
@@ -53,24 +53,24 @@ proc counters(path: string): JsonNode =
     return
   let h = pw_create(r.seed, r.endTick.int32)
   defer: pw_destroy(h)
-  var family: array[Seats, int8]
-  var genes: array[Seats, uint32]
-  var ibd: array[Seats * Seats, int8]
-  for i in 0..<Seats:
+  var family: array[LegacySeats, int8]
+  var genes: array[LegacySeats, uint32]
+  var ibd: array[LegacySeats * LegacySeats, int8]
+  for i in 0..<LegacySeats:
     family[i] = k.family[i]
     genes[i] = k.genes[i]
-    for j in 0..<Seats: ibd[i * Seats + j] = k.ibd[i][j]
+    for j in 0..<LegacySeats: ibd[i * LegacySeats + j] = k.ibd[i][j]
   doAssert pw_set_game_mode(h, 1) == 0
   doAssert pw_set_kin_layout(h, k.layout.ord.int32) == 0
   doAssert pw_set_kin_override(h, cast[ptr UncheckedArray[int8]](addr family[0]),
     cast[ptr UncheckedArray[uint32]](addr genes[0]), cast[ptr UncheckedArray[int8]](addr ibd[0])) == 0
   doAssert pw_reset(h, r.seed, r.endTick.int32) == 0
-  var actions: array[Seats * 5, int32]
-  var rewards, terminals: array[Seats, cfloat]
+  var actions: array[LegacySeats * 5, int32]
+  var rewards, terminals: array[LegacySeats, cfloat]
   var res: array[8, cfloat]
   var ticks = 0
   for f in r.frames:
-    for s in 0..<Seats:
+    for s in 0..<LegacySeats:
       var nine = commandInts(f.commands[s])
       doAssert pw_set_seat_command(h, s.cint, cast[ptr UncheckedArray[int32]](addr nine[0])) == 0
     doAssert pw_step(h, cast[ptr UncheckedArray[int32]](addr actions[0]),
@@ -82,9 +82,9 @@ proc counters(path: string): JsonNode =
       return
   var pairs: array[PairInts, int32]
   var seat: array[48, cfloat]
-  var kin: array[Seats * Seats, cfloat]
-  var scores: array[Seats, cfloat]
-  var libGenes: array[Seats, uint32]
+  var kin: array[LegacySeats * LegacySeats, cfloat]
+  var scores: array[LegacySeats, cfloat]
+  var libGenes: array[LegacySeats, uint32]
   doAssert pw_pair_stats(h, cast[ptr UncheckedArray[int32]](addr pairs[0])) == 0
   doAssert pw_kin_seat_stats(h, cast[ptr UncheckedArray[cfloat]](addr seat[0])) == 0
   doAssert pw_kin(h, cast[ptr UncheckedArray[cfloat]](addr kin[0])) == 0
@@ -92,7 +92,7 @@ proc counters(path: string): JsonNode =
   doAssert pw_genes(h, cast[ptr UncheckedArray[uint32]](addr libGenes[0])) == 0
   doAssert pw_results(h, cast[ptr UncheckedArray[cfloat]](addr res[0])) == 0
   var names = newJArray()
-  for i in 0..<Seats: names.add %r.names[i]
+  for i in 0..<LegacySeats: names.add %r.names[i]
   result["seed"] = %r.seed
   result["ticks"] = %ticks
   result["end_tick"] = %r.endTick
@@ -119,19 +119,18 @@ proc recordMatch(output: string, bots: seq[string], seed, ticks, layout: int32) 
   var groups: seq[BotGroup]
   var names: seq[string]
   for n, bot in bots:
-    let count = Seats div bots.len + (if n < Seats mod bots.len: 1 else: 0)
+    let count = LegacySeats div bots.len + (if n < LegacySeats mod bots.len: 1 else: 0)
     groups.add BotGroup(path: bot, count: count)
     for _ in 0..<count: names.add bot.extractFilename
   var players = loadBots(groups)
   world = newWorld(seed, ticks)
-  var rec = Recording(seed: seed, endTick: world.endTick)
-  for i in 0..<Seats: rec.names[i] = names[i]
+  var rec = Recording(seed: seed, endTick: world.endTick, names: names, seats: LegacySeats)
   while world.winner == -1:
     let commands = players.decide(world)
     deliverSpeech(world)
     world.step(commands)
     rec.frames.add Frame(commands: commands, hash: world.stateHash())
-  for slot in 0..<Seats:
+  for slot in 0..<LegacySeats:
     if players[slot].failed: quit("seat " & $slot & " failed to run " & names[slot], 1)
   saveRecording(output, rec)
   kinshipOverride = none(Kinship)

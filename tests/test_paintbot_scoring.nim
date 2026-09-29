@@ -8,7 +8,7 @@ suite "Heartwick points for time held":
     replayRulesVersion = 23
   test "one point per heart per second, including partial seconds":
     var w = newWorld(2026)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     for tick in 0..<24: w.step(commands)
     check w.scoreTicks == [24'i32,24'i32]
     check w.scores()[0] == 1.0
@@ -16,14 +16,14 @@ suite "Heartwick points for time held":
     check w.scores()[0] == 1.5
   test "ownership changes affect subsequent accrual":
     var w = newWorld(2026)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.step(commands)
     w.controlHearts[2].owner = 0
     w.step(commands)
     check w.scoreTicks == [3'i32,2'i32]
   test "elimination credits all ten hearts for the remaining time once":
     var w = newWorld(2026)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.tick = 240
     w.scoreTicks = [240'i32,240'i32]
     for i in 0..<Seats:
@@ -40,7 +40,7 @@ suite "Heartwick points for time held":
     check w.winner == 0
   test "all hearts eliminates enemy including pending respawns":
     var w = newWorld(2026)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     for h in w.controlHearts.mitems: h.owner=0
     for i in 0..<Seats: w.cogs[i].pos=point(3200,2000)
     w.step(commands)
@@ -53,7 +53,7 @@ suite "Heartwick points for time held":
     check w.scoreTicks[0]==MatchTicks*10
   test "timeout uses points, permits ties and never bombards":
     var w = newWorld(2026)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.tick=MatchTicks-1
     w.scoreTicks=[48'i32,24'i32]
     w.step(commands)
@@ -68,7 +68,7 @@ suite "Heartwick points for time held":
     check w.winner == -2
   test "simultaneous elimination awards no survivor bonus":
     var w = newWorld(2026)
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     for i in 0..<Seats:
       w.cogs[i].hp=0
       w.cogs[i].respawn=0
@@ -81,11 +81,11 @@ suite "Heartwick points for time held":
     defer:removeFile(path)
     var w=newWorld(2026,36)
     var r=Recording(seed:2026,endTick:36)
-    var commands:array[Seats,Command]
+    var commands:array[LegacySeats,Command]
     for tick in 0..<36:
       w.step(commands)
-      r.frames.add Frame(commands:commands,hash:w.stateHash())
-    saveReplayFile(path,"paintbot_pw",23,r)
+      r.frames.add Frame(commands: @(commands),hash:w.stateHash())
+    saveRecordingAs(path, 23, r)
     let loaded=loadRecording(path)
     var replay=newWorld(loaded.seed,loaded.endTick)
     for f in loaded.frames:
