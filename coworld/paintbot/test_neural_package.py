@@ -377,13 +377,13 @@ class UserInputTests(unittest.TestCase):
         return package(overrides, model=model)
 
     def test_valid_user_inputs(self):
-        for k in (1, 3, 32, 33, 34, MAX_USER_INPUTS):
+        for k in (1, 3, 32, 33, 34, 64, 65, 66, MAX_USER_INPUTS):
             _, _, manifest = unpack_package(self.inputs_package(k, init=[USER_INPUT_LIMIT] + [-USER_INPUT_LIMIT] * (k - 1)))
             self.assertEqual(manifest["user_inputs"]["count"], k)
 
     def test_user_inputs_field_rules(self):
         for value, message in (([], "must be an object"), ({"init": []}, "count is required"),
-                               ({"count": 0, "init": []}, "within 1 .. 64"), ({"count": 65, "init": [0] * 65}, "within 1 .. 64"),
+                               ({"count": 0, "init": []}, "within 1 .. 128"), ({"count": 129, "init": [0] * 129}, "within 1 .. 128"),
                                ({"count": 2.0, "init": [0, 0]}, "must be an integer"), ({"count": True, "init": [0]}, "integer"),
                                ({"count": 2}, "init is required"), ({"count": 2, "init": 5}, "init must be an array"),
                                ({"count": 2, "init": [0]}, "count entries"), ({"count": 1, "init": [1000001]}, "within -1000000"),
@@ -428,21 +428,31 @@ class UserInputTests(unittest.TestCase):
                   re.findall(r"^  (\w+)\* = ([0-9_]+)(?:'i32)?$", source, re.M)}
         self.assertEqual((MAX_USER_INPUTS, USER_INPUT_LIMIT), (consts["MaxUserInputs"], consts["UserInputLimit"]))
 
-    def test_user_input_cap_is_64_and_the_original_32_contracts_are_unchanged(self):
-        # Raising the cap from 32 to 64 appends v2u33 .. v2u64; v2u1 .. v2u32 keep their hashes (pinned here),
-        # so every existing K <= 32 bundle stages exactly as before.
-        self.assertEqual(MAX_USER_INPUTS, 64)
+    def test_user_input_cap_is_128_and_the_original_64_contracts_are_unchanged(self):
+        # Raising the cap from 32 to 64 appended v2u33 .. v2u64, and from 64 to 128 v2u65 .. v2u128; v2u1 .. v2u64
+        # keep their hashes (pinned here), so every existing K <= 64 bundle stages exactly as before.
+        self.assertEqual(MAX_USER_INPUTS, 128)
         self.assertEqual(v2u_hash(1), "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04")
         self.assertEqual(hashlib.sha256("".join(v2u_hash(k) for k in range(1, 33)).encode()).hexdigest(),
                          "3e49fd8df675ca9c5b21ccb81e3ef3ca78767fab6de847672a3775bec03f9fda")
+        self.assertEqual(hashlib.sha256("".join(v2u_hash(k) for k in range(1, 65)).encode()).hexdigest(),
+                         "17887904f4f2ffec0f4fc47ad1bfa305aead80440d83f43d73b57f8ebaec643b")
         self.assertEqual(v2u_hash(64), "18a5141bf7d78fdf93524757bf261f367cfebe3b489fb6f2988936375bb8f4aa")
-        self.assertEqual(sorted(USER_INPUTS_CONTRACT_HASHES.values()), list(range(1, 65)))
+        self.assertEqual(v2u_hash(128), "a40a0922dbdfa188e739f591344da3d30b299a431939778d7cd4cc715fa96ba2")
+        self.assertEqual(sorted(USER_INPUTS_CONTRACT_HASHES.values()), list(range(1, 129)))
         self.assertEqual(USER_INPUTS_CONTRACT_HASHES[v2u_hash(34)], 34)
-        self.assertNotIn(hashlib.sha256(user_inputs_contract_id(65).encode()).hexdigest(), USER_INPUTS_CONTRACT_HASHES)
-        with self.assertRaisesRegex(ValueError, "within 1 .. 64"):
-            unpack_package(self.inputs_package(65))
+        self.assertEqual(USER_INPUTS_CONTRACT_HASHES[v2u_hash(66)], 66)
+        self.assertNotIn(hashlib.sha256(user_inputs_contract_id(129).encode()).hexdigest(), USER_INPUTS_CONTRACT_HASHES)
+        with self.assertRaisesRegex(ValueError, "within 1 .. 128"):
+            unpack_package(self.inputs_package(129))
         with self.assertRaisesRegex(ValueError, "need observation contract v2u"):
-            unpack_package(self.inputs_package(64, observation=hashlib.sha256(user_inputs_contract_id(65).encode()).hexdigest()))
+            unpack_package(self.inputs_package(128, observation=hashlib.sha256(user_inputs_contract_id(129).encode()).hexdigest()))
+        # v3u<K> follows the same cap; v3u1 .. v3u64 are unchanged.
+        self.assertEqual(hashlib.sha256("".join(v3u_hash(k) for k in range(1, 65)).encode()).hexdigest(),
+                         "8597b082fdd9c1d2222407b74f6ad49e8e1f2112be2f216385d3de0692e4d44d")
+        self.assertEqual(v3u_hash(128), "cbb429e7fa93d9bc478f30da689742751baf4c2a4fee50210f2a104de1410e88")
+        self.assertNotIn(hashlib.sha256(v3_user_inputs_contract_id(129).encode()).hexdigest(),
+                         V3_USER_INPUTS_CONTRACT_HASHES)
 
     def test_packages_without_user_inputs_are_unaffected(self):
         # (v3, which checks its actor at staging, is in ObservationV3Tests.)
@@ -741,7 +751,7 @@ class ObservationV3Tests(unittest.TestCase):
         hashes = re.findall(r'"([0-9a-f]{64})"', block[:block.index("]")])
         self.assertEqual(hashes, [v3u_hash(k) for k in range(1, MAX_USER_INPUTS + 1)])
         self.assertIn('"paintbot-pw.rules43.obs.v3u" & $k', source)
-        self.assertEqual(sorted(V3_USER_INPUTS_CONTRACT_HASHES.values()), list(range(1, 65)))
+        self.assertEqual(sorted(V3_USER_INPUTS_CONTRACT_HASHES.values()), list(range(1, 129)))
         self.assertFalse(set(V3_USER_INPUTS_CONTRACT_HASHES) & set(USER_INPUTS_CONTRACT_HASHES))
         self.assertEqual(v3u_hash(1), "8086b6f36b9c2cf07e9e6586e97221e484f809e08669075663c5dcf9cb63ac36")
 
@@ -762,7 +772,7 @@ class ObservationV3Tests(unittest.TestCase):
             unpack_package(self.v3_package(user_inputs={"count": 1, "init": [0]}))
 
     def test_v3u_accepted_for_every_k(self):
-        for k in (1, 3, 32, 63, 64):
+        for k in (1, 3, 32, 63, 64, 65, 66, MAX_USER_INPUTS):
             _, _, manifest = unpack_package(self.v3_package(observation=v3u_hash(k), inputs=OBSERVATION_V3_SIZE + k,
                                                             user_inputs={"count": k, "init": [7] * k}))
             self.assertEqual(manifest["user_inputs"]["count"], k)

@@ -658,7 +658,7 @@ proc pw_handle_observation_size*(handle: pointer): cint {.exportc, cdecl, dynlib
 
 proc pw_create_observation_inputs*(seed, maxTicks, userInputs: int32): pointer {.exportc, cdecl, dynlib.} =
   ## Observation contract v2u<K> (PLAN-neural-basic-io part A), K = userInputs within
-  ## 1 .. 64: every pw_observe row is v2's 506 floats followed by K user-input floats, a
+  ## 1 .. 128: every pw_observe row is v2's 506 floats followed by K user-input floats, a
   ## policy seat's (pw_set_seat_policy_script) as its policy.bas set them, zeros for every
   ## other seat. K = 0 is pw_create_observation(seed, maxTicks, 2). nil for a bad K or
   ## max_ticks.
@@ -669,7 +669,7 @@ proc pw_create_observation_inputs*(seed, maxTicks, userInputs: int32): pointer {
 proc pw_create_observation_inputs_v*(seed, maxTicks, obsVersion, userInputs: int32): pointer {.exportc, cdecl, dynlib.} =
   ## pw_create_observation_inputs with the base contract chosen: obsVersion 2 = v2u<K>
   ## (identical to pw_create_observation_inputs), 3 = v3u<K>: every pw_observe row is v3's
-  ## 514 floats followed by the K user-input floats. K = userInputs within 0 .. 64; K = 0 is
+  ## 514 floats followed by the K user-input floats. K = userInputs within 0 .. 128; K = 0 is
   ## pw_create_observation(seed, maxTicks, obsVersion). nil for another version, a bad K or
   ## a bad max_ticks.
   if obsVersion notin [ocV2.int32, ocV3.int32] or userInputs notin 0'i32..MaxUserInputs.int32: return nil
@@ -683,7 +683,7 @@ proc pw_handle_user_inputs*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
 
 proc pw_user_inputs_contract_hash*(userInputs: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
-  ## The 64-hex SHA-256 of observation contract v2u<K> (K = userInputs, 1 .. 64), the hash
+  ## The 64-hex SHA-256 of observation contract v2u<K> (K = userInputs, 1 .. 128), the hash
   ## an actor and manifest with K user inputs carry, NUL-terminated (capacity >= 65).
   ## 0, or -1 bad args.
   if output == nil or capacity < 65 or userInputs notin 1'i32..MaxUserInputs.int32: return -1
@@ -695,7 +695,7 @@ proc pw_user_inputs_contract_hash*(userInputs: int32, output: ptr UncheckedArray
 proc pw_user_inputs_contract_hash_v*(obsVersion, userInputs: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The 64-hex SHA-256 of observation contract v2u<K> (obsVersion 2; identical to
-  ## pw_user_inputs_contract_hash) or v3u<K> (obsVersion 3), K = userInputs within 1 .. 64,
+  ## pw_user_inputs_contract_hash) or v3u<K> (obsVersion 3), K = userInputs within 1 .. 128,
   ## NUL-terminated (capacity >= 65). 0, or -1 bad args.
   if output == nil or capacity < 65 or obsVersion notin [ocV2.int32, ocV3.int32] or
       userInputs notin 1'i32..MaxUserInputs.int32: return -1

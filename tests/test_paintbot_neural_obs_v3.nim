@@ -108,9 +108,17 @@ suite "Observation contract v3 (scoreboard)":
     check ObservationContractFfaV1Hash == "6b19dc324386542eb915d30c2ce1707a8f8e192a0425ee8b2ae9145969583fc7"
     check UserInputsContractHashes[0] == "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04"
     check UserInputsContractHashes[63] == "18a5141bf7d78fdf93524757bf261f367cfebe3b489fb6f2988936375bb8f4aa"
-    # v3u<K>: its own table, K = 1 .. 64, disjoint from v2u<K> and the plain contracts.
+    # v3u<K>: its own table, K = 1 .. 128, disjoint from v2u<K> and the plain contracts.
     check v3UserInputsContractId(3) == "paintbot-pw.rules43.obs.v3u3"
     check V3UserInputsContractHashes[0] == "8086b6f36b9c2cf07e9e6586e97221e484f809e08669075663c5dcf9cb63ac36"
+    check V3UserInputsContractHashes[63] == "1695203c740b769ff61f9bd18c4687f517db1664069b3ae47e7466060cb77dfb"
+    check V3UserInputsContractHashes[127] == "cbb429e7fa93d9bc478f30da689742751baf4c2a4fee50210f2a104de1410e88"
+    # Raising the cap from 64 to 128 appended v3u65 .. v3u128; v3u1 .. v3u64 are byte-identical
+    # (FNV-1a-64 digest of the concatenated original 64).
+    var digest = 0xcbf29ce484222325'u64
+    for k in 0..<64:
+      for c in V3UserInputsContractHashes[k]: digest = (digest xor uint64(ord(c))) * 0x100000001b3'u64
+    check digest == 0x14c778016822e2ab'u64
     for k in 1..MaxUserInputs:
       let h = V3UserInputsContractHashes[k-1]
       check v3UserInputsFromHash(h) == k and userInputsFromHash(h) == 0
@@ -123,7 +131,8 @@ suite "Observation contract v3 (scoreboard)":
     for h in [ObservationContractHash, ObservationContractV2Hash, ObservationContractV3Hash]:
       check v3UserInputsFromHash(h) == 0
     expect ValueError: discard userInputsContractHash(ocV3, 0)
-    expect ValueError: discard userInputsContractHash(ocV3, 65)
+    expect ValueError: discard userInputsContractHash(ocV3, 129)
+    expect ValueError: discard userInputsContractHash(ocV2, 129)
     expect ValueError: discard userInputsContractHash(ocV1, 1)
     let w = newWorld(3)
     var v2row: array[ObservationSizeV2, float32]
