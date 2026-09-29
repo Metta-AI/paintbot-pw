@@ -37,14 +37,14 @@
   // With a cog selected in FFA-kin, cogs unrelated to it are dimmed.
   // Families picked from the header chips (chip keys); Esc or a second click clears them.
   let kinFocus = new Set();
-  const kinEmphasis = () => kin.cogEmphasis(state, selected, kin.focusMask(state, kinFocus));
+  const kinEmphasis = () => kin.cogEmphasis(state, selected, kin.focusMask(state, kinFocus, index?.names));
   const kinDim = (i) => ffaOn() && kinEmphasis()[i].dim;
   function setKinFocus(next) {
     kinFocus = next;
     // The native kin focus is a 16-bit seat mask; crowd matches keep the HUD emphasis only.
-    const mask = kin.focusMask(state, kinFocus);
+    const mask = kin.focusMask(state, kinFocus, index?.names);
     if (ready() && Module._pw_kin_focus) Module._pw_kin_focus(typeof mask === "bigint" ? 0 : mask);
-    kinChipsKey = "";
+    kinChipsKey = kinPolicyKey = "";
     renderKin(state);
   }
   const cogReadout = $("cog-readout");
@@ -466,11 +466,17 @@
     e.stopPropagation();
     setKinFocus(kin.toggleFocus(kinFocus, chip.dataset.key));
   });
+  // Policy chips select every cog a policy controls, sharing the focus set with family chips.
+  $("kin-policies").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const chip = e.target.closest(".kin-policy[data-key]");
+    if (chip) setKinFocus(kin.toggleFocus(kinFocus, chip.dataset.key));
+  });
   $("kin-table").addEventListener("click", (e) => {
     const row = e.target.closest("tr[data-seat]");
     if (row) select(Number(row.dataset.seat));
   });
-  let kinTableKey = "", kinChipsKey = "", kinGreatKey = "";
+  let kinTableKey = "", kinChipsKey = "", kinGreatKey = "", kinPolicyKey = "";
   function renderKin(data) {
     if (!data || !kin.isFfa(data)) return;
     const w = data.world;
@@ -488,6 +494,17 @@
         const key = kin.chipKey(c);
         const on = kinFocus.has(key);
         return `<span class="kin-chip${text.out ? " out" : ""}${on ? " selected" : ""}" data-key="${key}" role="button" aria-pressed="${on}" style="--kin:${kin.kinColor(c.hue)}" title="${label} · ${text.badge} alive · ${c.hearts} hearts held · raw score ${c.score.toFixed(1)} · click to ${on ? "deselect" : "select"}"><span class="dot">${text.badge}</span><span class="hearts">${text.hearts}</span>${compact ? "" : '<span class="sep">·</span>'}<span class="score">${text.score}</span></span>`;
+      }).join("");
+    }
+    const policies = kin.policyChips(data, index?.names);
+    const policyKey = JSON.stringify(policies) + ":" + [...kinFocus].join(",");
+    if (policyKey !== kinPolicyKey) {
+      kinPolicyKey = policyKey;
+      $("kin-policies").innerHTML = policies.map((p) => {
+        const key = kin.policyKey(p);
+        const on = kinFocus.has(key);
+        const cogs = p.members.map((i) => i + 1).join(", ");
+        return `<span class="kin-policy${p.alive ? "" : " out"}${on ? " selected" : ""}" data-key="${escape(key)}" role="button" aria-pressed="${on}" title="${escape(p.policy)} · cogs ${cogs} · ${p.alive}/${p.members.length} alive · mean R ${p.meanR.toFixed(1)} · mean raw s ${p.meanS.toFixed(1)} · click to ${on ? "deselect" : "highlight its cogs"}"><span class="name">${escape(p.policy)}</span><span class="count">×${p.members.length}</span><span class="mean">${p.meanR.toFixed(1)}</span></span>`;
       }).join("");
     }
     const great = kin.greatStatus(data);
@@ -514,7 +531,7 @@
     const marks = $("kin-marks");
     const rect = $("canvas").getBoundingClientRect();
     const html = [];
-    const emphasis = kin.cogEmphasis(data, selected, kin.focusMask(data, kinFocus));
+    const emphasis = kin.cogEmphasis(data, selected, kin.focusMask(data, kinFocus, index?.names));
     for (let i = 0; i < emphasis.length; i++) {
       const p = data.screen?.[i];
       if (!emphasis[i].badge) continue;

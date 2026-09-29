@@ -146,3 +146,22 @@ assert.match(result.text, /Match ended · top cog Bot 5 \(R 50\.0\) · top loner
   assert.equal(kin.familyChips(crowd).length, 10);
 }
 console.log('Paintbot FFA-kin HUD sorting, family sums, dead flags, great hearts and R maths passed');
+
+// Policies: seats grouped by player name without the " (n)" copy suffix; mean R and raw s per cog.
+const names = Array.from({length: 16}, (_, i) => i < 2 ? `alpha (${i + 1})` : i === 4 ? 'solo' : `beta (${i})`);
+assert.equal(kin.policyOf(names, 1), 'alpha');
+assert.equal(kin.policyOf([], 3), 'Bot 4');
+const policies = kin.policyChips(state, names);
+assert.deepEqual(policies.map(p => p.policy), ['solo', 'alpha', 'beta']);
+assert.equal(policies[0].meanR, 50);
+const alpha = policies[1];
+assert.deepEqual(alpha.members, [0, 1]);
+assert.equal(alpha.alive, 1);
+assert.equal(alpha.meanR, (kin.kinScore(state, 0) + kin.kinScore(state, 1)) / 2);
+assert.equal(alpha.meanS, (10 + 30) / 2);
+assert.equal(policies[2].members.length, 13);
+assert.equal(kin.policyKey(alpha), 'p:alpha');
+// Policy keys share the focus set with family keys; the mask is the union.
+assert.equal(kin.focusMask(state, new Set(['p:alpha']), names), 0b11);
+assert.equal(kin.focusMask(state, new Set(['p:solo', 'f1']), names), 0b11100);
+assert.equal(kin.focusMask(state, new Set(['p:alpha'])), 0, 'no names: policy keys match nothing real');
