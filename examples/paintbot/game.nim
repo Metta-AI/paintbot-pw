@@ -199,8 +199,8 @@ proc ibdSeq(ibd: array[LegacySeats, array[LegacySeats, int8]]): seq[seq[int8]] =
   for row in ibd: result.add @row
 var replayRulesVersion* = LiveRules
 const
-  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1047 today).
-  FfaRulesVersions = [40, 41, 42, 43, 44, 45, 46, 47]
+  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1048 today).
+  FfaRulesVersions = [40, 41, 42, 43, 44, 45, 46, 47, 48]
   SeatCountRules* = 46 ## The first rules whose recordings carry their seat count.
   BehindCogsRules* = 47 ## The first rules whose recordings carry the behind-in-cogs award.
 proc toPreCogs(g: GloryConfig): PreCogsGloryConfig =
@@ -376,7 +376,8 @@ proc loadRecording*(path: string): Recording =
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
     if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
-  elif replayRulesVersion == BehindCogsRules:
+  elif replayRulesVersion in BehindCogsRules..LiveRules:
+    # Rules 48 (the FFA-kin fog of war) changed no recorded field: the rules 47 shape.
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")

@@ -3,7 +3,7 @@
 
 ffa_blind.bas is ffa.bas with every kinship read replaced: each `kin(x)` call becomes
 `blindKin(x)`, an array that is 100 for the cog itself (r_ii = 1, as the engine's kin(selfId)
-reads) and 0 for every other seat, so the bot treats all 15 others as strangers and still knows
+reads) and 0 for every other seat, so the bot treats all the others as strangers and still knows
 which hearts and shouts are its own. Nothing else changes: same movement, targeting, hearts and
 great-heart play. The incentive eval (tools/kin_eval.py --suite incentive) plays the two against
 each other to ask whether acting on kinship pays under the Heartland rules.
@@ -38,7 +38,7 @@ def blind(source: str) -> str:
     out, count = KIN_CALL.subn("blindKin(", source)
     if count == 0:
         raise SystemExit("ffa.bas has no kin( calls; nothing to blind")
-    out = out.replace(DIM_ANCHOR, DIM_ANCHOR + "dim blindKin(16)\n")
+    out = out.replace(DIM_ANCHOR, DIM_ANCHOR + "dim blindKin(256)\n")
     out = out.replace(INIT_ANCHOR, INIT_ANCHOR + "  blindKin(selfId) = 100\n")
     return HEADER + out
 

@@ -87,7 +87,7 @@ class KinEvalTest(unittest.TestCase):
         self.assertIsNone(re.search(r"(?<![A-Za-z0-9_])kin\(", body), "a kin( call survived the blinding")
         self.assertEqual(body.count("blindKin(selfId) = 100\n"), 1)
         # Undo exactly the blinding and nothing else: the rest of the program is ffa.bas byte for byte.
-        body = body.replace("dim blindKin(16)\n", "", 1).replace("  blindKin(selfId) = 100\n", "", 1)
+        body = body.replace("dim blindKin(256)\n", "", 1).replace("  blindKin(selfId) = 100\n", "", 1)
         self.assertEqual(body.replace("blindKin(", "kin("), ffa)
 
     def run_eval(self, *argv):
@@ -135,6 +135,15 @@ class KinEvalTest(unittest.TestCase):
         self.assertIn("same", json.dumps(results["crossplay"]["main"]))
         self.assertIn("defend_weak_minus_full", results["gap"])
         self.assertEqual(results["heldout"]["layouts"], ["cousins"])
+
+    def test_incentive_under_the_fog_rules(self):
+        # --rules plays every episode at those rules (48: the FFA-kin fog of war); the report
+        # carries them and the scripted seats never fail under the unknown kin reads.
+        out = self.dir / "out-rules-48"
+        results = kin_eval.main(["--suite", "incentive", "--rules", "48", "--episodes", "2", "--ticks", TICKS,
+                                 "--workers", "2", "--bootstrap", "100", "--lib", str(self.lib), "--out", str(out)])
+        self.assertNotIn("seat_failures", results["incentive"])
+        self.assertEqual(json.loads((out / "results.json").read_text())["meta"]["rules"], 48)
 
     def test_selfish_without_control(self):
         results, page = self.run_eval("--suite", "selfish")

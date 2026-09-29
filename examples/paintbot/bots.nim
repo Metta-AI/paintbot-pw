@@ -301,22 +301,30 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat): Host =
   # FFA-kin (Heartland) functions exist only in that mode: the teams game keeps exactly its
   # old host names, so submitted scripts using kin, gene, seatScore... as variables still compile.
   # gameMode is set before any seat is built (coworld config, replay header, native reset).
-  # Kinship, genes, raw scores and who is still in the match are public; no line of sight.
+  # Before rules 48 kinship, genes, raw scores and who is still in the match are public, with
+  # no line of sight. From rules 48 (the FFA-kin fog of war, sim.ffaFog) they are known only for
+  # the seat itself and the seats it can see now (visible(i)); for any other seat kin, gene,
+  # seatScore and seatAlive read -1, exactly what an invalid seat reads. seatCount, the hearts
+  # (heartOwner, controlOwner, capture fields: properties of the map heart, which every seat
+  # sees) and shouts (heard within range whatever the line of sight) are unchanged.
   if ffa():
     proc seatIndex(value: int32): bool = value >= 0 and value < Seats
     proc inMatch(i: int): bool = active.cogs[i].hp > 0 or active.equipment[i].lives > 0
+    proc known(value: int32): bool =
+      ## A valid seat whose per-seat facts this seat may read under the current rules.
+      seatIndex(value) and (not ffaFog() or value == slot.int32 or visibleToBot(slot, value.int))
     discard result.addFunction("gameMode",0,proc(a:openArray[int32]):int32 = 1,4)
     discard result.addFunction("seatCount",0,proc(a:openArray[int32]):int32 = Seats.int32,4)
     discard result.addFunction("kin",1,proc(a:openArray[int32]):int32 =
-      if not seatIndex(a[0]): -1'i32
+      if not known(a[0]): -1'i32
       else: activeKinship.rPercent(slot, a[0].int),4)
     discard result.addFunction("gene",2,proc(a:openArray[int32]):int32 =
-      if not seatIndex(a[0]) or a[1] < 0 or a[1] >= Loci or not inMatch(a[0].int): -1'i32
+      if not known(a[0]) or a[1] < 0 or a[1] >= Loci or not inMatch(a[0].int): -1'i32
       else: int32((activeKinship.genes[a[0]] shr a[1].uint32) and 1'u32),4)
     discard result.addFunction("seatScore",1,proc(a:openArray[int32]):int32 =
-      if seatIndex(a[0]): active.seatScore[a[0]] else: -1'i32,4)
+      if known(a[0]): active.seatScore[a[0]] else: -1'i32,4)
     discard result.addFunction("seatAlive",1,proc(a:openArray[int32]):int32 =
-      if seatIndex(a[0]): int32(inMatch(a[0].int)) else: -1'i32,4)
+      if known(a[0]): int32(inMatch(a[0].int)) else: -1'i32,4)
     discard result.addFunction("heartOwner",1,proc(a:openArray[int32]):int32 =
       if a[0] >= 0 and a[0] < active.controlHearts.len: active.controlHearts[a[0]].owner else: -1'i32,4)
     discard result.addFunction("territoryBoost",0,proc(a:openArray[int32]):int32 =

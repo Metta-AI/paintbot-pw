@@ -394,6 +394,8 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   ## map span).
   ##   0..7      self: centred x, centred z, hp/maxHp, armor/maxHp, cooldown/72, own score/1000,
   ##             alive, ticks left/8640
+  ## From rules 48 (FFA-kin fog of war, sim.ffaFog) the row of a seat this one cannot see is all
+  ## zero, alive included (unknown): genes, r, score and hearts held appear only for seats in view.
   ##   8+42j     identity row j (seat j, 0..15), columns:
   ##             0 dx/xspan, 1 dz/zspan (0 unless visible; own row 0), 2 visible (own 1),
   ##             3 alive, 4 hp/maxHp (0 unless visible), 5..36 gene bits 0..31 (+1 set, -1
@@ -440,9 +442,12 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   if kinOn:
     for heart in w.controlHearts:
       if heart.owner in 0'i32..<LegacySeats.int32: inc held[heart.owner]
+  let fog = ffaFog()
   for j in 0..<LegacySeats:
     let o = FfaIdentityOffset + j*FfaIdentityRowSize
     let body = bodies[j]
+    # Rules 48 fog of war: a seat this one cannot see has an all-zero row (alive unknown, 0).
+    if fog and j != slot and body < 0: continue
     if body >= 0:
       let other = w.cogs[body]
       output[o] = float32(other.pos.x-me.pos.x)/spanX

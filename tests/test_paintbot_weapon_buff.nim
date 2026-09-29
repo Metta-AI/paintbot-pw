@@ -25,9 +25,9 @@ suite "Stronger grenades and spray (rules 40)":
   teardown:
     visionRulesVersion = LiveRules
     replayRulesVersion = LiveRules
-  test "live rules are 47 (rules 40 weapons, generated maps, opt-in team vision, glory awards, lake routing in every mode, recordings carry their seat count, glory for cogs out)":
-    check visionRulesVersion == 47
-    check replayRulesVersion == 47
+  test "live rules are 48 (rules 40 weapons, generated maps, opt-in team vision, glory awards, lake routing in every mode, recordings carry their seat count, glory for cogs out, FFA-kin fog of war)":
+    check visionRulesVersion == 48
+    check replayRulesVersion == 48
   test "an open-ground blast deals 3 from rules 40, 2 before":
     check blastAt(39, 100) == 1
     check blastAt(40, 100) == 0

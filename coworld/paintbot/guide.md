@@ -440,19 +440,33 @@ players, but some are related, and a cog's score counts its relatives' points.
 
 BASIC in this mode: `selfTeam` and `playerTeam(slot)` are the seat, so team-parity bots treat
 everyone as an opponent. `homeX`/`homeY` are the seat's spawn anchor, and `heartX`/`heartY`/
-`ownHeartX`/`ownHeartY` read the same point (`ownHeartStolen` is 0). Kinship, genes, scores and
-who is still playing are public and need no line of sight. The functions below are available
+`ownHeartX`/`ownHeartY` read the same point (`ownHeartStolen` is 0).
+
+**Fog of war (rules 48).** You are never shown a cog out of view. "In view" is the line of
+sight `visible(slot)` already reports. For a cog you cannot see now, `kin`, `gene`, `seatScore`
+and `seatAlive` read -1, the value an invalid seat reads, exactly like `playerX`/`playerY`
+(-1) and `playerHp` (0); your own seat is always known. Genes never change within a match, so a
+policy may remember what it read while a cog was in view. `seatCount()` and the match constants
+stay public, and so do the hearts: `heartOwner(i)`/`controlOwner(i)` and the capture fields are
+properties of the map heart, which everyone sees. Shouts still carry: a cog within hearing range
+(1280 units, a fifth of the island's width, on every map, as before) hears them whatever the line of sight, with the sender's
+seat and position as always, but hearing a cog unlocks nothing else about it. The neural
+observation follows the same rule: an unseen cog's ffa.v1 row is zero (`neural_actor.md`).
+Before rules 48 kinship, genes, scores and who is still playing were public with no line of
+sight. The functions below are available
 in FFA-kin mode only: in the teams game they do not exist, and a teams script may use the
 same names as ordinary variables (a script that calls them fails to compile there).
 
 - `gameMode()`: 1 (FFA-kin); it exists only in this mode.
 - `seatCount()`: seats in the match, 16 (or 50 in Heartland Big); seat indices run 0 .. seatCount()-1.
 - `kin(slot)`: round(100 r) between you and `slot`: 100 self (and clones), 50 siblings,
-  25 cousins, 0 strangers; -1 for an invalid slot.
+  25 cousins, 0 strangers; -1 for an invalid slot or a cog out of view (rules 48).
 - `gene(slot, i)`: bit `i` (0-31) of that cog's genome, 0 or 1; -1 for an invalid slot or
-  locus, or a cog that is out of the match.
-- `seatScore(slot)`: raw score s in tenths of a point.
-- `seatAlive(slot)`: 1 while the cog is still in the match, 0 once it is out.
+  locus, a cog that is out of the match, or a cog out of view (rules 48).
+- `seatScore(slot)`: raw score s in tenths of a point; -1 for an invalid slot or a cog out of
+  view (rules 48).
+- `seatAlive(slot)`: 1 while the cog is still in the match, 0 once it is out; -1 for an
+  invalid slot or, from rules 48, a cog out of view (unknown: a dead cog is never in view).
 - `heartOwner(i)`: the control heart's owning seat, -1 neutral (same as `controlOwner(i)`).
 - `greatHeartCount()`: 2. `greatHeartX(i)`, `greatHeartY(i)`: its
   position. `greatHeartPresent(i)`: living cogs in its zone. `greatHeartProgress(i)`: capture
@@ -463,7 +477,8 @@ same names as ordinary variables (a script that calls them fails to compile ther
 
 `seatScore` and `seatAlive` are named that way because `score` and `alive` are common variable
 names in existing bots. The baseline for this mode is `players/ffa.bas` (submit it as a policy; it calls FFA-only
-functions, so it does not compile in the teams game): it never shoots a cog
+functions, so it does not compile in the teams game): it remembers each cog's `kin` once it has
+seen it and treats a cog it has never seen as a stranger; it never shoots a cog
 with `kin` of 50 or more, prefers strangers seen hurting relatives, joins a ready great heart
 when others gather there, and captures hearts that no relative is holding or taking. Once no
 neutral heart is left it waits at a ready great heart (while three or more cogs live) or walks

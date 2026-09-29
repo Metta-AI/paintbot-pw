@@ -234,9 +234,15 @@ type GameMode* = enum
   gmTeams, gmFfaKin
 # Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
 # still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
-const LiveRules* = 47
+const LiveRules* = 48
   ## The rules live games play and record (game.nim's replayRulesVersion starts here too). The
   ## training library defaults to its own NativeRules and accepts NativeRules .. LiveRules.
+const FfaFogRules* = 48
+  ## FFA-kin fog of war (rules 48): no agent-facing surface reveals anything about a cog the
+  ## observing seat cannot see (sim.visible, the line of sight that sets BASIC's visible() and
+  ## the ffa.v1 visible column). BASIC's kin, gene, seatScore and seatAlive read the unknown
+  ## value for such a cog, and the ffa.v1 observation zeroes its identity row. The teams game
+  ## is untouched; the privileged training reads (pw_kin, pw_scores, ...) are not agent-facing.
 when defined(pwTraining):
   var visionRulesVersion* {.threadvar.}: int
   var gameMode* {.threadvar.}: GameMode
@@ -281,6 +287,9 @@ else:
   var visionRulesVersion* = LiveRules
   var gameMode* = gmTeams
 proc ffa*(): bool = gameMode == gmFfaKin
+proc ffaFog*(): bool =
+  ## Whether the FFA-kin fog of war applies (FFA-kin at rules >= FfaFogRules).
+  ffa() and visionRulesVersion >= FfaFogRules
 proc wadesToWetGoals*(): bool =
   ## Whether a cog on dry land whose goal lies in the lake may route into the water (see
   ## waypoint): FFA-kin from rules 44, every mode from rules 45. Teams games at rules 44 and
