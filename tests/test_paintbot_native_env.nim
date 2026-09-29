@@ -17,10 +17,10 @@ suite "Native training environment":
       var reference = newWorld(int32(seed+13),ticks.int32)
       let handle = pw_create(int32(seed+13),ticks.int32)
       require handle != nil
-      var actions: array[Seats*ActionSizes.len,int32]
-      var commands: array[Seats,Command]
-      var rewards,terminals,resets: array[Seats,float32]
-      var observations: array[Seats*ObservationSize,float32]
+      var actions: array[LegacySeats*ActionSizes.len,int32]
+      var commands: array[LegacySeats,Command]
+      var rewards,terminals,resets: array[LegacySeats,float32]
+      var observations: array[LegacySeats*ObservationSize,float32]
       var expected: array[ObservationSize,float32]
       check pw_observe(handle,cast[ptr UncheckedArray[cfloat]](addr observations[0]),
         cast[ptr UncheckedArray[cfloat]](addr resets[0])) == 0

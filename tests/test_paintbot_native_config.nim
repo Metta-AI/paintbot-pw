@@ -17,7 +17,7 @@ const Base = Root / "coworld/paintbot/players/base.bas"
 const Manifest = Root / "coworld/paintbot/coworld_manifest_template.json"
 type
   Buffer = ptr UncheckedArray[cfloat]
-  Actions = array[Seats*ActionSizes.len, int32]
+  Actions = array[LegacySeats*ActionSizes.len, int32]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
 template cbuf(s: string): ptr UncheckedArray[char] =
@@ -64,7 +64,7 @@ proc defaultRun(seed: int32, explicit: bool): (uint64, uint32) =
   for slot in countup(1, Seats-1, 2):
     doAssert pw_set_seat_script(handle, slot.cint, cbuf(source), source.len.int32) == 0
   var actions: Actions
-  var rewards, terminals: array[Seats, float32]
+  var rewards, terminals: array[LegacySeats, float32]
   var digest = 14695981039346656037'u64
   var last: uint32
   for tick in 0..<DefaultTicks:
@@ -132,7 +132,7 @@ proc nativeHandle(config: string, rules: int, seed: int32, ticks: int): pointer 
 proc nativeStep(handle: pointer, run: var Run): bool =
   ## One tick with every seat scripted; false once the match is over.
   var actions: Actions
-  var rewards, terminals: array[Seats, float32]
+  var rewards, terminals: array[LegacySeats, float32]
   let rc = pw_step(handle, ibuf(actions), fbuf(rewards), fbuf(terminals))
   if rc != 0: return false
   run.hashes.add pw_state_hash(handle)

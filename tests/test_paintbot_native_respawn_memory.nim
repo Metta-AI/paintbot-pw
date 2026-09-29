@@ -19,7 +19,7 @@ type Buffer = ptr UncheckedArray[cfloat]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
 
-proc fightingActions(w: World, actions: var array[Seats*ActionSizes.len, int32], seed: int) =
+proc fightingActions(w: World, actions: var array[LegacySeats*ActionSizes.len, int32], seed: int) =
   ## Identity aims at the nearest apparent enemy (so respawned seats aim at identities at
   ## once), compass aims otherwise; objectives toward the centre hearts; fire on two ticks
   ## in three; compass walking on some ticks so the lead's own-step term moves.
@@ -59,11 +59,11 @@ suite "Native aim memory across death and respawn":
       let handle = pw_create(matchSeed, 3000)
       require handle != nil
       check pw_set_action_contract(handle, 2) == 0
-      var actions: array[Seats*ActionSizes.len, int32]
-      var commands: array[Seats, Command]
-      var rewards, terminals: array[Seats, float32]
-      var hosted, old: array[Seats, AimMemory]
-      var wasAlive: array[Seats, bool]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var commands: array[LegacySeats, Command]
+      var rewards, terminals: array[LegacySeats, float32]
+      var hosted, old: array[LegacySeats, AimMemory]
+      var wasAlive: array[LegacySeats, bool]
       for slot in 0..<Seats:
         hosted[slot].resetAimMemory()
         old[slot].resetAimMemory()
@@ -102,17 +102,17 @@ suite "Native aim memory across death and respawn":
     require handle != nil
     defer: pw_destroy(handle)
     check pw_set_action_contract(handle, 2) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     for pass in 0..1:
       var reference = newWorld(9, 600)
       if pass == 1: check pw_reset(handle, 9, 600) == 0
-      var hosted: array[Seats, AimMemory]
-      var wasAlive: array[Seats, bool]
+      var hosted: array[LegacySeats, AimMemory]
+      var wasAlive: array[LegacySeats, bool]
       for slot in 0..<Seats: hosted[slot].resetAimMemory()
       while reference.winner == -1 and reference.tick < reference.endTick:
         fightingActions(reference, actions, 5)
-        var commands: array[Seats, Command]
+        var commands: array[LegacySeats, Command]
         for slot in 0..<Seats:
           let alive = reference.cogs[slot].hp > 0
           if not alive or not wasAlive[slot]: hosted[slot].resetAimMemory()
@@ -138,7 +138,7 @@ suite "Hosted neural seats and the native ABI agree across respawns (every decod
     result.add ActionContractV2Hash
     for x in ActionSizes: result.u32(x.uint32)
     result.add repeat('\0', n*4)
-  proc neuralSeats(decoder: string): array[Seats, Bot] =
+  proc neuralSeats(decoder: string): seq[Bot] =
     # Per process: the sweep may run in several processes at once.
     let path = getTempDir()/("paintbot-native-respawn-memory-test-" & $getCurrentProcessId() & ".bas")
     writeFile(path, "paintbot_observe(neuralObservation())\n" &
@@ -166,7 +166,7 @@ suite "Hosted neural seats and the native ABI agree across respawns (every decod
       for side in 0..1:
         let on = neuralSeats(full)
         let off = neuralSeats(plainHold)
-        var players: array[Seats, Bot]
+        var players: seq[Bot]
         for slot in 0..<Seats: players[slot] = if team(slot) == side: on[slot] else: off[slot]
         var world = newWorld(seed, ticks.int32)
         let handle = pw_create(seed, ticks.int32)
@@ -184,11 +184,11 @@ suite "Hosted neural seats and the native ABI agree across respawns (every decod
           check pw_set_seat_aim_retarget(handle, slot.cint, 1, 5250, 160000, 2500000) == 0
           check pw_set_seat_shot_gate(handle, slot.cint, 5250) == 0
           check pw_set_seat_strafe(handle, slot.cint, 5250, 6, 9, 6, 9, 200) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var rewards, terminals: array[Seats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var rewards, terminals: array[LegacySeats, float32]
         var zero: array[LogitSize, float32]
-        var wasAlive: array[Seats, bool]
-        var oldMemory: array[Seats, AimMemory]   # the pre-fix library's rule: recorded every tick, never cleared
+        var wasAlive: array[LegacySeats, bool]
+        var oldMemory: array[LegacySeats, AimMemory]   # the pre-fix library's rule: recorded every tick, never cleared
         for slot in 0..<Seats: oldMemory[slot].resetAimMemory()
         var steps, seen, differs = 0
         while world.winner == -1 and world.tick < world.endTick:
@@ -201,7 +201,7 @@ suite "Hosted neural seats and the native ABI agree across respawns (every decod
             if alive:
               require pw_sample_actions(handle, slot.cint, fbuf(zero), ibuf(actions.toOpenArray(o, o+ActionSizes.len-1))) == 0
           let pre = world
-          var hostMemory: array[Seats, AimMemory]
+          var hostMemory: array[LegacySeats, AimMemory]
           for slot in 0..<Seats:
             hostMemory[slot] = players[slot].neural.memory
             if pre.cogs[slot].hp <= 0 or not wasAlive[slot] or pre.tick == 0: hostMemory[slot].resetAimMemory()
@@ -239,7 +239,7 @@ suite "Hosted neural seats and the native ABI agree across respawns (every decod
       for side in 0..0:
         let on = neuralSeats(full)
         let off = neuralSeats(plainHold)
-        var players: array[Seats, Bot]
+        var players: seq[Bot]
         for slot in 0..<Seats: players[slot] = if team(slot) == side: on[slot] else: off[slot]
         var world = newWorld(seed, ticks.int32)
         let handle = pw_create(seed, ticks.int32)
@@ -249,11 +249,11 @@ suite "Hosted neural seats and the native ABI agree across respawns (every decod
           check pw_set_seat_sampling(handle, slot.cint, 1000, 0) == 0
           if team(slot) != side: continue
           check pw_set_seat_fire_hold(handle, slot.cint, 1) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var rewards, terminals: array[Seats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var rewards, terminals: array[LegacySeats, float32]
         var zero: array[LogitSize, float32]
-        var wasAlive: array[Seats, bool]
-        var oldMemory: array[Seats, AimMemory]   # the pre-fix library's rule: recorded every tick, never cleared
+        var wasAlive: array[LegacySeats, bool]
+        var oldMemory: array[LegacySeats, AimMemory]   # the pre-fix library's rule: recorded every tick, never cleared
         for slot in 0..<Seats: oldMemory[slot].resetAimMemory()
         var steps, seen, differs = 0
         while world.winner == -1 and world.tick < world.endTick:
@@ -266,7 +266,7 @@ suite "Hosted neural seats and the native ABI agree across respawns (every decod
             if alive:
               require pw_sample_actions(handle, slot.cint, fbuf(zero), ibuf(actions.toOpenArray(o, o+ActionSizes.len-1))) == 0
           let pre = world
-          var hostMemory: array[Seats, AimMemory]
+          var hostMemory: array[LegacySeats, AimMemory]
           for slot in 0..<Seats:
             hostMemory[slot] = players[slot].neural.memory
             if pre.cogs[slot].hp <= 0 or not wasAlive[slot] or pre.tick == 0: hostMemory[slot].resetAimMemory()

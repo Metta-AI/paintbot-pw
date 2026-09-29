@@ -4,7 +4,7 @@ suite "Heartwick outside-in barrage":
   test "five minute start, coastal targets, and deterministic elimination":
     visionRulesVersion = 20
     var w = newWorld(2026)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.tick = BarrageStartTick-1
     w.step(commands)
     check w.grenades.len == 0
@@ -25,7 +25,7 @@ suite "Heartwick outside-in barrage":
   test "bombardment cancels pending respawns and removes spare lives":
     visionRulesVersion = 21
     var w = newWorld(2026)
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     w.tick = BarrageStartTick
     w.cogs[0].hp = 0
     w.cogs[0].respawn = 1
@@ -44,7 +44,7 @@ suite "Heartwick outside-in barrage":
   test "a respawn immediately before bombardment still happens":
     visionRulesVersion = 21
     var w = newWorld(2026)
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     w.tick = BarrageStartTick-1
     w.cogs[0].hp = 0
     w.cogs[0].respawn = 1

@@ -23,12 +23,12 @@ template firstPartTest(name: string, body: untyped) =
   when jevArmShard == 0:
     test name: body
 
-proc play(path: string, seed: int32, advised = false): (seq[uint32], array[Seats, Bot]) =
+proc play(path: string, seed: int32, advised = false): (seq[uint32], seq[Bot]) =
   resetOracle()
   oracleEnabled = advised
-  peakInstructions = default(array[Seats, int64])
-  peakWork = default(array[Seats, int64])
-  peakStrings = default(array[Seats, int64])
+  peakInstructions = default(array[MaxSeats, int64])
+  peakWork = default(array[MaxSeats, int64])
+  peakStrings = default(array[MaxSeats, int64])
   var w = newWorld(seed)
   let players = loadBots(@[BotGroup(path: path, count: Seats)])
   var hashes: seq[uint32]
@@ -79,9 +79,9 @@ suite "Jev-advised BASIC baseline":
     oracleEnabled = true
     var w = newWorld(4)
     var players = loadBots(@[BotGroup(path: Jev, count: Seats)])
-    var lines: array[Seats, string]
+    var lines: array[LegacySeats, string]
     var relays: seq[tuple[tick, slot, heart, kind: int]]
-    var firstAnswer: array[Seats, int]
+    var firstAnswer: array[LegacySeats, int]
     for slot in 0..<Seats: firstAnswer[slot] = -1
     proc printer(s: int): PrintProc =
       # A proc per slot: a closure made in a loop body would share one captured `slot`.
@@ -258,9 +258,9 @@ suite "Jev-advised BASIC baseline":
 
       resetOracle()
       oracleEnabled = true
-      peakInstructions = default(array[Seats, int64])
-      peakWork = default(array[Seats, int64])
-      peakStrings = default(array[Seats, int64])
+      peakInstructions = default(array[MaxSeats, int64])
+      peakWork = default(array[MaxSeats, int64])
+      peakStrings = default(array[MaxSeats, int64])
       var w = newWorld(4)
       let players = loadBots(@[BotGroup(path: path, count: Seats)])
       var asked = 0

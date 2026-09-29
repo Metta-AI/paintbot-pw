@@ -41,7 +41,9 @@
   const kinDim = (i) => ffaOn() && kinEmphasis()[i].dim;
   function setKinFocus(next) {
     kinFocus = next;
-    if (ready() && Module._pw_kin_focus) Module._pw_kin_focus(kin.focusMask(state, kinFocus));
+    // The native kin focus is a 16-bit seat mask; crowd matches keep the HUD emphasis only.
+    const mask = kin.focusMask(state, kinFocus);
+    if (ready() && Module._pw_kin_focus) Module._pw_kin_focus(typeof mask === "bigint" ? 0 : mask);
     kinChipsKey = "";
     renderKin(state);
   }
@@ -513,7 +515,7 @@
     const rect = $("canvas").getBoundingClientRect();
     const html = [];
     const emphasis = kin.cogEmphasis(data, selected, kin.focusMask(data, kinFocus));
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < emphasis.length; i++) {
       const p = data.screen?.[i];
       if (!emphasis[i].badge) continue;
       if (!(w.cogs[i].hp > 0) || !data.visible?.[i] || !p || p[0] < 0 || p[0] > 1 || p[1] < 0 || p[1] > 1) continue;
@@ -656,7 +658,7 @@
     if (loop) return;
     dialogMode = "stats";
     const w = state.world,
-      counts = Array.from({ length: 16 }, () => ({ deaths: 0, shots: 0 }));
+      counts = Array.from({ length: w.cogs.length }, () => ({ deaths: 0, shots: 0 }));
     for (const e of index.events)
       if (e.tick <= w.tick && e.kind === "down") counts[e.slot].deaths++;
     const rows = w.cogs
@@ -845,7 +847,7 @@
   window.addEventListener("blur", () => { rotating.q = rotating.e = false; });
   function renderSeats() {
     if (!state) return;
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < state.world.cogs.length; i++) {
       const c = state.world.cogs[i],
         b = $(`seat${i}`);
       b.classList.toggle("down", c.hp <= 0);
@@ -1315,7 +1317,7 @@
         ctx.fillText("♥", x, y);
       }
     }
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < w.cogs.length; i++) {
       const c = w.cogs[i];
       if (c.hp <= 0 || (state.celebrating && w.winner >= 0 && team(i) !== w.winner)) continue;
       const x = mapX(c.pos.x), y = mapY(c.pos.z);
@@ -1592,7 +1594,7 @@
   }
   Module.paintbotIndex = (data) => {
     index = data;
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < (data.names?.length || 16); i++) {
       const b = document.createElement("button");
       b.id = `seat${i}`;
       b.className = `seat ${team(i) ? "blue" : "red"}`;

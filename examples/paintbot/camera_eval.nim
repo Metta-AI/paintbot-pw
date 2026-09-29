@@ -95,7 +95,7 @@ proc evaluate*(path: string, speed: float32, totals: var Totals) =
     while accumulator >= 1 and world.tick < recording.frames.len and world.winner < 0:
       accumulator -= 1
       advance()
-    var poses: array[Seats, Vec3]
+    var poses: array[MaxSeats, Vec3]
     for i, c in world.cogs: poses[i] = world.worldPoint(c.pos)
     let tickChanged = director.tick != world.tick
     if tickChanged:

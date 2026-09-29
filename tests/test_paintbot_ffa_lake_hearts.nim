@@ -48,7 +48,7 @@ proc walkFor(w: var World, slot: int, goal: Point, ticks: int): int =
   let heart = w.heartAt(goal)
   result = -1
   for t in 0..<ticks:
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     commands[slot].walk = true
     commands[slot].goal = goal
     w.step(commands)
@@ -152,7 +152,7 @@ proc runTeams(rules, slot: int, start, goal: Point, ticks: int): (int, int, int3
   let firstOwner = if heart >= 0: w.controlHearts[heart].owner else: -2'i32
   result = (-1, 0, firstOwner)
   for t in 0..<ticks:
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     commands[slot].walk = true
     commands[slot].goal = goal
     w.step(commands)

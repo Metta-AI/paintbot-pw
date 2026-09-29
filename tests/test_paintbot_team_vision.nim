@@ -38,7 +38,7 @@ suite "Team vision (rules 42)":
       configureVision("team")
       var w = newWorld(2026)
       var rng = initRand(3)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       let g = w.teamSightGrid()
       var blocked = 0
       for b in g.blockers:
@@ -67,11 +67,11 @@ suite "Team vision (rules 42)":
     configureVision("team")
     recording = Recording(seed: 2026, endTick: HeartMeterMatchTicks, map: mapName(), vision: visionMode())
     world = newWorld(recording.seed, recording.endTick)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     for i in 0..<Seats: commands[i] = Command(walk: true, goal: home(1-team(i)), shoot: true)
     for tick in 0..<240:
       world.step(commands)
-      recording.frames.add Frame(commands: commands, hash: world.stateHash())
+      recording.frames.add Frame(commands: @(commands), hash: world.stateHash())
     let path = getTempDir()/"paintbot-team-vision.replay"
     defer: removeFile(path)
     saveRecording(path, recording)

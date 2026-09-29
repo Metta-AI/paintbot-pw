@@ -7,13 +7,18 @@ when defined(coworld): import polyworld/coworld
 
 type
   Frame* = object
-    commands*: array[Seats, Command]
+    ## One tick: every seat's command (one per seat) and the state hash after the step.
+    commands*: seq[Command]
     hash*: uint32
+  Frame16 = object
+    ## A frame as every recording before rules 46 stores it: exactly LegacySeats commands.
+    commands: array[LegacySeats, Command]
+    hash: uint32
   LegacyCommand = object
     walk, shoot, direct: bool
     goal, aim: Point
   LegacyFrame = object
-    commands: array[Seats, LegacyCommand]
+    commands: array[LegacySeats, LegacyCommand]
     hash: uint32
   LegacyRecording = object
     seed*: int32
@@ -26,155 +31,259 @@ type
     goal, aim: Point
     chargeGrenade: bool
   PreSoundFrame = object
-    commands: array[Seats, PreSoundCommand]
+    commands: array[LegacySeats, PreSoundCommand]
     hash: uint32
   PriorRecording = object
     seed*: int32
     frames*: seq[PreSoundFrame]
-    names*: array[Seats, string]
+    names*: array[LegacySeats, string]
     communications*: seq[Communication]
   PreSoundRecording = object
     seed: int32
     frames: seq[PreSoundFrame]
-    names: array[Seats, string]
+    names: array[LegacySeats, string]
     communications: seq[Communication]
     endTick: int32
   PreMapRecording = object
     seed: int32
-    frames: seq[Frame]
-    names: array[Seats, string]
+    frames: seq[Frame16]
+    names: array[LegacySeats, string]
     communications: seq[Communication]
     endTick: int32
   PreVisionRecording = object
     ## Teams recordings at rules 41: Recording without the vision mode.
     seed: int32
-    frames: seq[Frame]
-    names: array[Seats, string]
+    frames: seq[Frame16]
+    names: array[LegacySeats, string]
     communications: seq[Communication]
     endTick: int32
     map: string
   PreGloryRecording = object
     ## Teams recordings at rules 42: Recording without the glory awards.
     seed: int32
-    frames: seq[Frame]
-    names: array[Seats, string]
+    frames: seq[Frame16]
+    names: array[LegacySeats, string]
     communications: seq[Communication]
     endTick: int32
     map: string
     vision: string
+  Recording43 = object
+    ## Teams recordings at rules 43-45: Recording with 16 seats in fixed arrays.
+    seed: int32
+    frames: seq[Frame16]
+    names: array[LegacySeats, string]
+    communications: seq[Communication]
+    endTick: int32
+    map: string
+    vision: string
+    glory: GloryConfig = DefaultGloryConfig
   Recording* = object
+    ## A match as the engine and viewer hold it, and (from rules 46) as a teams recording
+    ## stores it: one command per seat in every frame and one name per seat.
     seed*: int32
     frames*: seq[Frame]
-    names*: array[Seats, string]
+    names*: seq[string]
     communications*: seq[Communication]
     endTick*: int32
     map*: string ## rules 41: a MapNames entry, or "" for the rules' own island
     vision*: string ## rules 42 teams games: "" per-cog sight lines, or "team" shared vision
     glory*: GloryConfig = DefaultGloryConfig ## rules 43 teams games: the glory awards the match paid
+    seats*: int32 ## rules 46: the match's seat count (LegacySeats for every older recording)
   PreMapRecordingFfa = object
-    ## FFA-kin recordings at gameVersion 1040: RecordingFfa without the map.
+    ## FFA-kin recordings at gameVersion 1040: RecordingFfa41 without the map.
     seed: int32
-    frames: seq[Frame]
-    names: array[Seats, string]
+    frames: seq[Frame16]
+    names: array[LegacySeats, string]
     communications: seq[Communication]
     endTick: int32
     mode: uint8
     layout: uint8
-    family: array[KinSeats, int8]
-    genes: array[KinSeats, uint32]
-    ibd: array[KinSeats, array[KinSeats, int8]]
+    family: array[LegacySeats, int8]
+    genes: array[LegacySeats, uint32]
+    ibd: array[LegacySeats, array[LegacySeats, int8]]
+  RecordingFfa41 = object
+    ## FFA-kin recordings at rules 41-45: RecordingFfa with 16 seats in fixed arrays.
+    seed: int32
+    frames: seq[Frame16]
+    names: array[LegacySeats, string]
+    communications: seq[Communication]
+    endTick: int32
+    map: string
+    mode: uint8
+    layout: uint8
+    family: array[LegacySeats, int8]
+    genes: array[LegacySeats, uint32]
+    ibd: array[LegacySeats, array[LegacySeats, int8]]
   RecordingFfa* = object
-    ## FFA-kin recordings (gameVersion 1000 + rules): Recording's fields (map included from
-    ## rules 41), then the mode and the match's kinship, so a replay plays the recorded
-    ## families even under a kinship override.
+    ## FFA-kin recordings (gameVersion 1000 + rules) from rules 46: Recording's fields, then
+    ## the mode and the match's kinship, so a replay plays the recorded families even under a
+    ## kinship override. Every per-seat list holds `seats` entries.
     seed*: int32
     frames*: seq[Frame]
-    names*: array[Seats, string]
+    names*: seq[string]
     communications*: seq[Communication]
     endTick*: int32
     map*: string
+    seats*: int32
     mode*: uint8
     layout*: uint8
-    family*: array[KinSeats, int8]
-    genes*: array[KinSeats, uint32]
-    ibd*: array[KinSeats, array[KinSeats, int8]]
+    family*: seq[int8]
+    genes*: seq[uint32]
+    ibd*: seq[seq[int8]]
   BridgeReply = object
     ## The host's answer to one bridge line: settled advisor-oracle requests, nothing else.
     oracle: seq[OracleReply]
 type LegacyMetadataRecording = object
   seed: int32
   frames: seq[LegacyFrame]
-  names: array[Seats, string]
+  names: array[LegacySeats, string]
   communications: seq[Communication]
 proc convertFrames(frames: seq[LegacyFrame]): seq[Frame] =
   for f in frames:
-    var next = Frame(hash: f.hash)
+    var next = Frame(hash: f.hash, commands: newSeq[Command](LegacySeats))
     for i, c in f.commands:
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
           goal: c.goal, aim: c.aim)
     result.add next
 proc convertFrames(frames: seq[PreSoundFrame]): seq[Frame] =
   for f in frames:
-    var next = Frame(hash: f.hash)
+    var next = Frame(hash: f.hash, commands: newSeq[Command](LegacySeats))
     for i, c in f.commands:
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
         goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
     result.add next
+proc convertFrames(frames: seq[Frame16]): seq[Frame] =
+  for f in frames: result.add Frame(hash: f.hash, commands: @(f.commands))
+proc toFrames16(frames: seq[Frame]): seq[Frame16] =
+  ## Frames for a pre-46 recording, which only 16-seat matches can make.
+  for f in frames:
+    if f.commands.len != LegacySeats:
+      raise newException(ReplayError, "Recordings before rules 46 hold exactly 16 seats")
+    var next = Frame16(hash: f.hash)
+    for i, c in f.commands: next.commands[i] = c
+    result.add next
+proc toLegacyFrames(frames: seq[Frame]): seq[LegacyFrame] =
+  for f in toFrames16(frames):
+    var next = LegacyFrame(hash: f.hash)
+    for i, c in f.commands:
+      next.commands[i] = LegacyCommand(walk: c.walk, shoot: c.shoot, direct: c.direct, goal: c.goal, aim: c.aim)
+    result.add next
+proc toPreSoundFrames(frames: seq[Frame]): seq[PreSoundFrame] =
+  for f in toFrames16(frames):
+    var next = PreSoundFrame(hash: f.hash)
+    for i, c in f.commands:
+      next.commands[i] = PreSoundCommand(walk: c.walk, shoot: c.shoot, direct: c.direct,
+        goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
+    result.add next
+proc toNames16(names: seq[string]): array[LegacySeats, string] =
+  for i in 0..<min(names.len, LegacySeats): result[i] = names[i]
+proc toArray16[T](values: seq[T]): array[LegacySeats, T] =
+  for i in 0..<min(values.len, LegacySeats): result[i] = values[i]
+proc toIbd16(ibd: seq[seq[int8]]): array[LegacySeats, array[LegacySeats, int8]] =
+  for i in 0..<min(ibd.len, LegacySeats): result[i] = toArray16(ibd[i])
+proc ibdSeq(ibd: array[LegacySeats, array[LegacySeats, int8]]): seq[seq[int8]] =
+  for row in ibd: result.add @row
 var replayRulesVersion* = LiveRules
 const
-  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1045 today).
-  FfaRulesVersions = [40, 41, 42, 43, 44, 45]
+  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1046 today).
+  FfaRulesVersions = [40, 41, 42, 43, 44, 45, 46]
+  SeatCountRules* = 46 ## The first rules whose recordings carry their seat count.
 proc replayGameVersion*(): uint16 =
   ## The header version a recording made now is saved with.
   uint16((if ffa(): FfaReplayVersionBase else: 0) + replayRulesVersion)
 proc toFfaRecording(r: Recording, k: Kinship): RecordingFfa =
   RecordingFfa(seed: r.seed, frames: r.frames, names: r.names, communications: r.communications,
-    endTick: r.endTick, map: r.map, mode: gameMode.uint8, layout: k.layout.uint8,
+    endTick: r.endTick, map: r.map, seats: r.seats, mode: gameMode.uint8, layout: k.layout.uint8,
     family: k.family, genes: k.genes, ibd: k.ibd)
-proc toPreMapFfaRecording(r: Recording, k: Kinship): PreMapRecordingFfa =
-  PreMapRecordingFfa(seed: r.seed, frames: r.frames, names: r.names,
-    communications: r.communications, endTick: r.endTick, mode: gameMode.uint8,
-    layout: k.layout.uint8, family: k.family, genes: k.genes, ibd: k.ibd)
-proc saveRecording*(path: string, r: Recording) =
-  ## Teams games keep the rules-numbered Recording; FFA-kin adds the mode and kinship.
-  if ffa():
-    if replayRulesVersion >= 41:
-      saveReplayFile(path, "paintbot_pw", replayGameVersion(), r.toFfaRecording(activeKinship))
-    else:
-      saveReplayFile(path, "paintbot_pw", replayGameVersion(),
-        r.toPreMapFfaRecording(activeKinship))
-  elif replayRulesVersion >= 43: saveReplayFile(path, "paintbot_pw", replayGameVersion(), r)
-  elif replayRulesVersion == 42:
-    saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreGloryRecording(seed: r.seed,
-      frames: r.frames, names: r.names, communications: r.communications, endTick: r.endTick,
-      map: r.map, vision: r.vision))
-  elif replayRulesVersion == 41:
-    # Each version is written in the shape its loader reads.
-    saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreVisionRecording(seed: r.seed,
-      frames: r.frames, names: r.names, communications: r.communications, endTick: r.endTick, map: r.map))
+proc saveRecordingAs*(path: string, version: int, r: Recording) =
+  ## A teams recording in exactly the shape loadRecording reads at `version`; every version
+  ## before rules 46 holds 16 seats.
+  let v = version.uint16
+  if version < SeatCountRules and r.frames.len > 0 and r.frames[0].commands.len != LegacySeats:
+    raise newException(ReplayError, "Recordings before rules 46 hold exactly 16 seats")
+  if version >= SeatCountRules:
+    var r = r
+    if r.seats == 0: r.seats = (if r.names.len > 0: r.names.len else: Seats).int32
+    saveReplayFile(path, "paintbot_pw", v, r)
+  elif version >= 43:
+    saveReplayFile(path, "paintbot_pw", v, Recording43(seed: r.seed, frames: toFrames16(r.frames),
+      names: toNames16(r.names), communications: r.communications, endTick: r.endTick, map: r.map,
+      vision: r.vision, glory: r.glory))
+  elif version == 42:
+    saveReplayFile(path, "paintbot_pw", v, PreGloryRecording(seed: r.seed, frames: toFrames16(r.frames),
+      names: toNames16(r.names), communications: r.communications, endTick: r.endTick, map: r.map,
+      vision: r.vision))
+  elif version == 41:
+    saveReplayFile(path, "paintbot_pw", v, PreVisionRecording(seed: r.seed, frames: toFrames16(r.frames),
+      names: toNames16(r.names), communications: r.communications, endTick: r.endTick, map: r.map))
+  elif version >= 26:
+    saveReplayFile(path, "paintbot_pw", v, PreMapRecording(seed: r.seed, frames: toFrames16(r.frames),
+      names: toNames16(r.names), communications: r.communications, endTick: r.endTick))
+  elif version >= 23:
+    saveReplayFile(path, "paintbot_pw", v, PreSoundRecording(seed: r.seed, frames: toPreSoundFrames(r.frames),
+      names: toNames16(r.names), communications: r.communications, endTick: r.endTick))
+  elif version >= 6:
+    saveReplayFile(path, "paintbot_pw", v, PriorRecording(seed: r.seed, frames: toPreSoundFrames(r.frames),
+      names: toNames16(r.names), communications: r.communications))
+  elif version >= 2:
+    saveReplayFile(path, "paintbot_pw", v, LegacyMetadataRecording(seed: r.seed,
+      frames: toLegacyFrames(r.frames), names: toNames16(r.names), communications: r.communications))
   else:
-    saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreMapRecording(seed: r.seed,
-      frames: r.frames, names: r.names, communications: r.communications, endTick: r.endTick))
+    saveReplayFile(path, "paintbot_pw", v, LegacyRecording(seed: r.seed, frames: toLegacyFrames(r.frames)))
+proc saveRecording*(path: string, r: Recording) =
+  ## Teams games keep the rules-numbered Recording; FFA-kin adds the mode and kinship. Each
+  ## version is written in the shape its loader reads; before rules 46 that is 16 fixed seats.
+  var r = r
+  if r.seats == 0: r.seats = Seats.int32
+  if replayRulesVersion < SeatCountRules and r.seats != LegacySeats:
+    raise newException(ReplayError, "Recordings before rules 46 hold exactly 16 seats")
+  if ffa():
+    let k = activeKinship
+    if replayRulesVersion >= SeatCountRules:
+      saveReplayFile(path, "paintbot_pw", replayGameVersion(), r.toFfaRecording(k))
+    elif replayRulesVersion >= 41:
+      saveReplayFile(path, "paintbot_pw", replayGameVersion(), RecordingFfa41(seed: r.seed,
+        frames: toFrames16(r.frames), names: toNames16(r.names), communications: r.communications,
+        endTick: r.endTick, map: r.map, mode: gameMode.uint8, layout: k.layout.uint8,
+        family: toArray16(k.family), genes: toArray16(k.genes), ibd: toIbd16(k.ibd)))
+    else:
+      saveReplayFile(path, "paintbot_pw", replayGameVersion(), PreMapRecordingFfa(seed: r.seed,
+        frames: toFrames16(r.frames), names: toNames16(r.names), communications: r.communications,
+        endTick: r.endTick, mode: gameMode.uint8, layout: k.layout.uint8,
+        family: toArray16(k.family), genes: toArray16(k.genes), ibd: toIbd16(k.ibd)))
+  else: saveRecordingAs(path, replayRulesVersion, r)
+proc validSeatCount(seats: int32): bool = seats.int in 2..MaxSeats
 proc loadFfaRecording(path: string, version: int): Recording =
   let rules = version - FfaReplayVersionBase
   if rules notin FfaRulesVersions:
     raise newException(ReplayError, "Unsupported Paintbot FFA replay version")
   let old =
-    if rules >= 41: loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa)
+    if rules >= SeatCountRules: loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa)
+    elif rules >= 41:
+      let pre = loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa41)
+      RecordingFfa(seed: pre.seed, frames: convertFrames(pre.frames), names: @(pre.names),
+        communications: pre.communications, endTick: pre.endTick, map: pre.map,
+        seats: LegacySeats, mode: pre.mode, layout: pre.layout, family: @(pre.family),
+        genes: @(pre.genes), ibd: ibdSeq(pre.ibd))
     else:
       let pre = loadReplayFile(path, "paintbot_pw", version.uint16, PreMapRecordingFfa)
-      RecordingFfa(seed: pre.seed, frames: pre.frames, names: pre.names,
-        communications: pre.communications, endTick: pre.endTick, mode: pre.mode,
-        layout: pre.layout, family: pre.family, genes: pre.genes, ibd: pre.ibd)
+      RecordingFfa(seed: pre.seed, frames: convertFrames(pre.frames), names: @(pre.names),
+        communications: pre.communications, endTick: pre.endTick, seats: LegacySeats,
+        mode: pre.mode, layout: pre.layout, family: @(pre.family), genes: @(pre.genes),
+        ibd: ibdSeq(pre.ibd))
   if old.map.len > 0 and old.map notin MapNames: # an unknown map is an invalid replay
     raise newException(ReplayError, "Unknown Paintbot map in FFA replay")
+  let n = old.seats.int
+  if not validSeatCount(old.seats) or old.names.len != n or old.family.len != n or
+      old.genes.len != n or old.ibd.len != n:
+    raise newException(ReplayError, "Invalid Paintbot FFA seat count")
   if old.mode != gmFfaKin.uint8 or old.layout > KinLayout.high.uint8:
     raise newException(ReplayError, "Invalid Paintbot FFA kinship")
   var k = Kinship(layout: KinLayout(old.layout), family: old.family, genes: old.genes, ibd: old.ibd)
-  for i in 0..<KinSeats:
-    if k.family[i] notin -1'i8..<KinSeats.int8 or k.ibd[i][i] != Loci.int8:
+  for i in 0..<n:
+    if k.ibd[i].len != n or k.family[i] notin -1'i8..<n.int8 or k.ibd[i][i] != Loci.int8:
       raise newException(ReplayError, "Invalid Paintbot FFA kinship")
-    for j in 0..<KinSeats:
+    for j in 0..<n:
       if k.ibd[i][j] notin 0'i8..Loci.int8 or k.ibd[i][j] != k.ibd[j][i]:
         raise newException(ReplayError, "Invalid Paintbot FFA kinship")
   replayRulesVersion = rules
@@ -183,8 +292,10 @@ proc loadFfaRecording(path: string, version: int): Recording =
   activeKinship = k
   kinshipOverride = some(k)
   Recording(seed: old.seed, frames: old.frames, names: old.names,
-    communications: old.communications, endTick: old.endTick, map: old.map)
+    communications: old.communications, endTick: old.endTick, map: old.map, seats: old.seats)
 proc loadRecording*(path: string): Recording =
+  ## Loads a recording, binds its rules, mode, map, vision, glory awards and seat count
+  ## (configureSeats), and checks its shape.
   let version = loadReplayFileHeader(path).gameVersion.int
   # A replay sets the mode it was played in; teams replays never inherit an FFA override.
   gameMode = gmTeams
@@ -200,36 +311,51 @@ proc loadRecording*(path: string): Recording =
   elif replayRulesVersion in [2, 3, 4, 5]:
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, LegacyMetadataRecording)
     result = Recording(seed: old.seed, frames: convertFrames(old.frames),
-        names: old.names, communications: old.communications)
+        names: @(old.names), communications: old.communications)
   elif replayRulesVersion in [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]:
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PriorRecording)
-    result = Recording(seed:old.seed,frames:convertFrames(old.frames),names:old.names,communications:old.communications)
+    result = Recording(seed:old.seed,frames:convertFrames(old.frames),names: @(old.names),communications:old.communications)
   elif replayRulesVersion in [23, 24, 25]:
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreSoundRecording)
-    result = Recording(seed:old.seed,frames:convertFrames(old.frames),names:old.names,
+    result = Recording(seed:old.seed,frames:convertFrames(old.frames),names: @(old.names),
       communications:old.communications,endTick:old.endTick)
   elif replayRulesVersion in [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]:
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreMapRecording)
-    result = Recording(seed: old.seed, frames: old.frames, names: old.names,
+    result = Recording(seed: old.seed, frames: convertFrames(old.frames), names: @(old.names),
       communications: old.communications, endTick: old.endTick)
   elif replayRulesVersion == 41:
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreVisionRecording)
-    result = Recording(seed: old.seed, frames: old.frames, names: old.names,
+    result = Recording(seed: old.seed, frames: convertFrames(old.frames), names: @(old.names),
       communications: old.communications, endTick: old.endTick, map: old.map)
     discard mapIndex(result.map) # an unknown map is an invalid replay
   elif replayRulesVersion == 42:
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, PreGloryRecording)
-    result = Recording(seed: old.seed, frames: old.frames, names: old.names,
+    result = Recording(seed: old.seed, frames: convertFrames(old.frames), names: @(old.names),
       communications: old.communications, endTick: old.endTick, map: old.map, vision: old.vision)
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
   elif replayRulesVersion in [43, 44, 45]: # 44 and 45 changed routing only; the format is 43's
+    let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording43)
+    result = Recording(seed: old.seed, frames: convertFrames(old.frames), names: @(old.names),
+      communications: old.communications, endTick: old.endTick, map: old.map, vision: old.vision,
+      glory: old.glory)
+    discard mapIndex(result.map) # an unknown map is an invalid replay
+    if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
+    if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
+  elif replayRulesVersion == SeatCountRules:
     result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
     if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
+  if replayRulesVersion < SeatCountRules: result.seats = LegacySeats
+  if not validSeatCount(result.seats) or result.names.len notin [0, result.seats.int]:
+    raise newException(ReplayError, "Invalid Paintbot seat count")
+  for f in result.frames:
+    if f.commands.len != result.seats.int: raise newException(ReplayError, "Invalid Paintbot seat count")
+  configureSeats(result.seats.int)
+  result.names.setLen(Seats)
   # Recordings before rules 43, and every FFA recording, paid the default awards.
   if replayRulesVersion < 43 or ffa(): result.glory = DefaultGloryConfig
   if replayRulesVersion < 23: result.endTick = MatchTicks
@@ -256,7 +382,7 @@ var
   recording*: Recording
   replayMode*: bool
   options*: GameOptions
-  players: array[Seats, Bot]
+  players: seq[Bot]
   bridge: File
   mapChoice*: string ## live games: --map:<name>, or the Coworld config's "map"
   visionChoice*: string ## live teams games: --vision:team, or the Coworld config's "vision"
@@ -281,14 +407,26 @@ proc newLiveWorld*(seed, maximumTicks: int32): World =
   newWorld(seed, maximumTicks)
 proc setup*() =
   when defined(coworld):
+    # The seat count is the game config's roster: one player token per seat.
+    let configText = readLocal(getEnv("COGAME_CONFIG_URI"))
+    configureSeats(parseJson(configText){"tokens"}.len)
     options = coworldOptions(Seats)
-    applyGameConfig(readLocal(getEnv("COGAME_CONFIG_URI")))
+    applyGameConfig(configText)
   else:
     options = GameOptions(seed: 2026, maximumTicks: HeartMeterMatchTicks, speed: 1)
     let args = commandLineParams(); var i = 0
     while i < args.len:
       if args[i].startsWith("--map:"):
         mapChoice = args[i]["--map:".len..^1]; discard mapIndex(mapChoice); inc i; continue
+      if args[i].startsWith("--mode:"):
+        # Local play and recording: "--mode:ffa_kin" plays Heartland (a match lasts at most 6:00).
+        gameMode = parseGameMode(%*{"mode": args[i]["--mode:".len..^1]})
+        if ffa(): options.maximumTicks = min(options.maximumTicks, FfaMatchTicks.int32)
+        inc i; continue
+      if args[i].startsWith("--kin-layout:"):
+        # With --mode:ffa_kin (earlier on the line): pin a kin layout, e.g. "--kin-layout:tribes".
+        kinLayoutPin = parseKinLayout(%*{"kin_layout": args[i]["--kin-layout:".len..^1]}, gameMode)
+        inc i; continue
       if args[i].startsWith("--vision:"):
         visionChoice = args[i]["--vision:".len..^1]; configureVision(visionChoice); inc i; continue
       if args[i].startsWith("--glory:"):
@@ -297,7 +435,10 @@ proc setup*() =
           ValueError, "Unknown argument: "&args[i])
       inc i
   when not defined(coworld):
-    options.validateGameOptions(Seats, "live games require exactly 16 bots")
+    # A live local game seats every --bot plus the human player; a replay sets its own count.
+    if options.replayPath.len == 0:
+      configureSeats(options.botGroups.botCount + (if options.playerSlot != 0: 1 else: 0))
+    options.validateGameOptions(Seats, "live games seat 2 to " & $MaxSeats & " bots")
   replayMode = options.replayPath.len > 0
   if replayMode:
     recording = loadRecording(options.replayPath)
@@ -317,6 +458,8 @@ proc setup*() =
     configureVision(visionChoice); recording.vision = visionMode()
     configureGlory(gloryChoice); recording.glory = gloryChoice
     world = newLiveWorld(options.seed, options.maximumTicks); recording.seed = options.seed
+    recording.seats = Seats.int32
+    recording.names = newSeq[string](Seats)
     recording.endTick = world.endTick
     players = loadBots(options.botGroups, options.playerSlot)
     for i in 0..<Seats:

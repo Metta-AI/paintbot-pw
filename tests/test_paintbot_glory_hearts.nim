@@ -3,7 +3,7 @@ import polyworld/[cli]
 import ../examples/paintbot/[sim, game, bots]
 
 proc idle(w: var World, ticks: int) =
-  var commands: array[Seats, Command]
+  var commands: array[LegacySeats, Command]
   for tick in 0..<ticks: w.step(commands)
 
 proc mirror(p: Point): Point = point(Width-p.x.int, Height-p.z.int)

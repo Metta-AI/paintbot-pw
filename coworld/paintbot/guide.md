@@ -125,7 +125,7 @@ not disclosed (-1). Nearby agents: `nearAgents(radius)` lists the agents you can
 `nearAgentY(k)`, `nearAgentHp(k)` and `nearAgentTeam(k)` read entry k (-1, or Hp 0, past the end).
 Identities follow the same disguise rules as `visible`. Its cost follows the neighbourhood rather than
 the roster, so prefer it to looping `visible(i)` over every seat; `players/nearby.bas` is `base.bas` rewritten
-this way. Available in FFA-kin mode only (Heartland): `gameMode()`, `kin(slot)`, `gene(slot,i)`,
+this way. Available in FFA-kin mode only (Heartland): `gameMode()`, `seatCount()`, `kin(slot)`, `gene(slot,i)`,
 `seatScore(slot)`, `seatAlive(slot)`, `heartOwner(i)`, `greatHeartCount()`, `greatHeartX(i)`,
 `greatHeartY(i)`, `greatHeartPresent(i)`, `greatHeartProgress(i)`, `greatHeartDormant(i)` and
 `territoryBoost()`; see "FFA-kin mode (Heartland)". In the teams game these names are not defined, so scripts may
@@ -394,7 +394,8 @@ players, but some are related, and a cog's score counts its relatives' points.
   share all 32 (r = 1); strangers 0. A cog's r to itself is 1. Other matching bits are chance
   and do not count. Families spawn together around one anchor each, spread over the map.
 - **Kin layout.** The optional `"kin_layout"` config key pins every match to one layout:
-  `"fours"`, `"pairs"`, `"trios_loner"`, `"cousins"`, `"strangers"` or `"clones"`
+  `"fours"`, `"pairs"`, `"trios_loner"`, `"cousins"`, `"strangers"`, `"clones"` or `"tribes"`
+  (families of five full siblings filling the seats: Heartland Big's 50 seats are 10 tribes of 5)
   (`"sampled"` or absent draws one per seed, as above). Which seats form which family and
   every genome still come from the seed. The key is FFA-kin only; a teams config that sets it
   is rejected. The Heartland league (the `heartland` Coworld's `heartland` variant) sets `"kin_layout": "cousins"`,
@@ -432,6 +433,7 @@ in FFA-kin mode only: in the teams game they do not exist, and a teams script ma
 same names as ordinary variables (a script that calls them fails to compile there).
 
 - `gameMode()`: 1 (FFA-kin); it exists only in this mode.
+- `seatCount()`: seats in the match, 16 (or 50 in Heartland Big); seat indices run 0 .. seatCount()-1.
 - `kin(slot)`: round(100 r) between you and `slot`: 100 self (and clones), 50 siblings,
   25 cousins, 0 strangers; -1 for an invalid slot.
 - `gene(slot, i)`: bit `i` (0-31) of that cog's genome, 0 or 1; -1 for an invalid slot or

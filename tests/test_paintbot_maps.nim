@@ -77,15 +77,15 @@ suite "Paintbot generated maps":
       configureMap(name)
       recording = Recording(seed: 2026, endTick: HeartMeterMatchTicks, map: mapName())
       world = newWorld(recording.seed, recording.endTick)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for i in 0..<Seats:
         commands[i] = Command(walk: true, goal: world.controlHearts[2+i mod 8].pos, shoot: i mod 3 == 0)
       for tick in 0..<360:
         world.step(commands)
-        recording.frames.add Frame(commands: commands, hash: world.stateHash())
+        recording.frames.add Frame(commands: @(commands), hash: world.stateHash())
       let path = getTempDir()/("paintbot-map-" & name & ".replay")
       defer: removeFile(path)
-      saveReplayFile(path, "paintbot_pw", 45, recording)
+      saveRecordingAs(path, 45, recording)
       configureMap("")
       let loaded = loadRecording(path)
       check loaded.map == name

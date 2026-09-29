@@ -8,7 +8,7 @@ suite "Expanded Heartwick navigation":
     for target in 0..<initial.controlHearts.len:
       var w=initial
       for i in 1..<Seats:w.cogs[i].hp=0;w.equipment[i].lives=0
-      var commands:array[Seats,Command]
+      var commands:array[LegacySeats,Command]
       let goal=w.controlHearts[target].pos
       for tick in 0..<1200:
         commands[0]=Command(walk:true,goal:goal)

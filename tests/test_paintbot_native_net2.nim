@@ -139,11 +139,11 @@ suite "Hosted PWNET002 seats and the native ABI":
       let handle = pw_create(seed, 1500)
       require handle != nil
       var obs = newSeq[float32](Seats*ObservationSize)
-      var resets: array[Seats, float32]
+      var resets: array[LegacySeats, float32]
       var states = newSeq[float32](Seats*S)
       var logits = newSeq[float32](LogitSize)
-      var actions: array[Seats*ActionSizes.len, int32]
-      var rewards, terminals: array[Seats, float32]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var rewards, terminals: array[LegacySeats, float32]
       var steps, stateResets, deaths = 0
       while world.winner == -1 and world.tick < world.endTick:
         require pw_observe(handle, fbuf(obs), fbuf(resets)) == 0
@@ -156,7 +156,7 @@ suite "Hosted PWNET002 seats and the native ABI":
           let picked = argmaxActions(logits)
           for head in 0..<ActionSizes.len: actions[slot*ActionSizes.len+head] = picked[head].int32
           if world.cogs[slot].hp <= 0: inc deaths
-        var decided: array[Seats, bool]
+        var decided: array[LegacySeats, bool]
         for slot in 0..<Seats: decided[slot] = world.cogs[slot].hp > 0
         let commands = players.decide(world)
         for slot in 0..<Seats: require not players[slot].failed

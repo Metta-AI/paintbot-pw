@@ -81,7 +81,7 @@ type
     sprayGates*: int
     # The seat's apparent identities for this tick, resolved once for the observation
     # and the action decode (both read the same pre-action world).
-    bodies: array[Seats, int]
+    bodies: array[LegacySeats, int]
     bodiesReady: bool
     # Neural BASIC I/O (PLAN-neural-basic-io). Every field below is unused, and every
     # path byte-identical, unless the bundle or policy.bas asks for it.
@@ -559,6 +559,9 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result = NeuralSeat(slot: slot, previousTick: -1)
   let modelPath = sourcePath & ".model.bin"
   if not fileExists(modelPath): return
+  if Seats != LegacySeats:
+    # Every observation contract lays out 16 seats; other seat counts disable the seat instead.
+    raise newException(ValueError, "neural policies need a 16-seat match; this match has " & $Seats & " seats")
   let actor = loadActorFile(modelPath)
   # Model metadata is authoritative even when running a local unpacked package. The
   # observation contract hash selects the encoder (v1; v2 = v1 + terrain block; v3 = v2 + scoreboard) and
@@ -664,7 +667,7 @@ proc beginTick*(seat: NeuralSeat, w: var World) =
   seat.sampled = false
   seat.decoded = false
 
-proc bodiesFor(seat: NeuralSeat): array[Seats, int] =
+proc bodiesFor(seat: NeuralSeat): array[LegacySeats, int] =
   if not seat.bodiesReady:
     seat.bodies = seat.world[].observedBodies(seat.slot)
     seat.bodiesReady = true

@@ -26,7 +26,7 @@ proc randomModel(seed: int, inputs: int, observationContract: string): string =
     result.u32(cast[uint32](float32(r.rand(2.0) - 1.0) * float32(scale)))
 
 proc idle(w: var World, ticks: int) =
-  var commands: array[Seats, Command]
+  var commands: array[LegacySeats, Command]
   for tick in 0..<ticks: w.step(commands)
 
 proc firstSeat(side: int): int =
@@ -50,7 +50,7 @@ proc expected(ownLives, enemyLives, ownGlory, enemyGlory, behind, behindSeconds,
 
 var fixtureCount = 0
 proc bundle(source: string, observationContract: string, inputs: int, userInputs = 0,
-    init = ""): array[Seats, Bot] =
+    init = ""): seq[Bot] =
   ## Every seat runs `source` over a seeded random actor naming `observationContract`
   ## with `inputs` inputs; `userInputs` > 0 adds manifest user_inputs.
   inc fixtureCount
@@ -142,7 +142,7 @@ suite "Observation contract v3 (scoreboard)":
       configureGlory(parseGloryConfig(parseJson("""{"behind_lives": 5}""")))
       var w = newWorld(seed, 2400)
       var actions: array[ActionSizes.len, int32]
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       var a: array[ObservationSizeV2, float32]
       while w.winner == -1 and w.tick < w.endTick:
         if w.tick mod 8 == 0:
@@ -278,7 +278,7 @@ suite "Observation contract v3 (scoreboard)":
       check withInputs[slot].neural.observationContract == ocV3
       check withInputs[slot].neural.observation.len == ObservationSizeV3 + 3
     var u = newWorld(22)
-    var lastRun: array[Seats, int] # the last tick the seat's script ran (-1: never)
+    var lastRun: array[LegacySeats, int] # the last tick the seat's script ran (-1: never)
     for slot in 0..<Seats: lastRun[slot] = -1
     for tick in 0..<120:
       if u.winner != -1: break
@@ -306,7 +306,7 @@ suite "Observation contract v3 (scoreboard)":
                     bundle(InputsAct, V3UserInputsContractHashes[2], ObservationSizeV2 + 3, 3)]:
       for slot in 0..<Seats: check players[slot].failed
 
-proc ask(w: World, a, b: string): array[Seats, (int32, int32)] =
+proc ask(w: World, a, b: string): array[LegacySeats, (int32, int32)] =
   ## Runs `walkTo(a, b)` for every seat on this world; every seat's goal.
   let path = getTempDir() / ("paintbot-scoreboard-probe-" & $getCurrentProcessId() & ".bas")
   writeFile(path, "walkTo(" & a & ", " & b & ")\n")

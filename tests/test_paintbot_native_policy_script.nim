@@ -70,7 +70,7 @@ neuralIssue()
 """
 
 proc hostRun(model, manifest: string, seed: int32, ticks: int, policySeats: set[int8]):
-    (seq[uint32], seq[array[Seats, array[ActionSizes.len, int32]]], seq[array[Seats, bool]], seq[array[Seats, seq[int32]]]) =
+    (seq[uint32], seq[array[LegacySeats, array[ActionSizes.len, int32]]], seq[array[LegacySeats, bool]], seq[array[LegacySeats, seq[int32]]]) =
   ## The game's own loop over staged bundle files: policy seats run the bundle, the rest base.bas.
   let path = getTempDir()/("paintbot-policy-host-" & $getCurrentProcessId() & ".bas")
   writeFile(path, Policy)
@@ -79,7 +79,7 @@ proc hostRun(model, manifest: string, seed: int32, ticks: int, policySeats: set[
   defer:
     for suffix in ["", ".model.bin", ".neural.json"]: removeFile(path & suffix)
   resetOracle()
-  var players: array[Seats, Bot]
+  var players: seq[Bot]
   let neural = loadBots(@[BotGroup(path: path, count: Seats)])
   let plain = loadBots(@[BotGroup(path: Base, count: Seats)])
   for slot in 0..<Seats: players[slot] = if slot.int8 in policySeats: neural[slot] else: plain[slot]
@@ -87,9 +87,9 @@ proc hostRun(model, manifest: string, seed: int32, ticks: int, policySeats: set[
   while w.tick < ticks and w.winner == -1:
     let commands = players.decide(w)
     deliverSpeech(w)
-    var selected: array[Seats, array[ActionSizes.len, int32]]
-    var sampled: array[Seats, bool]
-    var inputs: array[Seats, seq[int32]]
+    var selected: array[LegacySeats, array[ActionSizes.len, int32]]
+    var sampled: array[LegacySeats, bool]
+    var inputs: array[LegacySeats, seq[int32]]
     for slot in 0..<Seats:
       if slot.int8 notin policySeats: continue
       check not players[slot].failed
@@ -148,9 +148,9 @@ suite "Native policy-script seats":
     check setPolicy(handle, 0, "walkTo(", manifest) == 1
     check setPolicy(handle, 0, Policy, manifest) == 0
     check pw_seat_script_status(handle, 0, nil, 0) == 1
-    var actions: array[Seats*ActionSizes.len, int32]
-    var logits: array[Seats*LogitSize, float32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var logits: array[LegacySeats*LogitSize, float32]
+    var rewards, terminals: array[LegacySeats, float32]
     check pw_step(handle, ibuf(actions), fbuf(rewards), fbuf(terminals)) == -4
     check pw_script_decide(handle) == -4
     check pw_step_logits(handle, ibuf(actions), nil, fbuf(rewards), fbuf(terminals)) == -1
@@ -188,14 +188,14 @@ suite "Native policy-script seats":
         if pass == 1: check pw_reset(handle, seed, ticks.int32) == 0
         # The trainer's side: the actor on each seat's pw_observe row, its state reset by
         # the hosted rule (dead, or alive after death, or a new match).
-        var states: array[Seats, seq[float32]]
-        var alive: array[Seats, bool]
+        var states: array[LegacySeats, seq[float32]]
+        var alive: array[LegacySeats, bool]
         for slot in 0..<Seats: states[slot] = newSeq[float32](actor.hiddenSize)
         var observations = newSeq[float32](Seats*n)
-        var resets: array[Seats, float32]
-        var actions: array[Seats*ActionSizes.len, int32]
-        var logits: array[Seats*LogitSize, float32]
-        var rewards, terminals: array[Seats, float32]
+        var resets: array[LegacySeats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var logits: array[LegacySeats*LogitSize, float32]
+        var rewards, terminals: array[LegacySeats, float32]
         var respawns = 0
         for t, hash in expected:
           require pw_observe(handle, fbuf(observations), fbuf(resets)) == 0

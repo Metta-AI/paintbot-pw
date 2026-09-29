@@ -33,7 +33,7 @@ proc walk(version: int, a, b: Point, maxTicks = 2400): tuple[wetTicks, ticks: in
   for i in 0..<Seats:
     w.cogs[i].hp = 0; w.cogs[i].respawn = 100000
   w.cogs[0].hp = 3; w.cogs[0].pos = a; w.cogs[0].goal = a
-  var commands: array[Seats, Command]
+  var commands: array[LegacySeats, Command]
   commands[0].walk = true; commands[0].goal = b
   while result.ticks < maxTicks:
     w.step(commands, version)

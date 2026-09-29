@@ -16,7 +16,7 @@ type Buffer = ptr UncheckedArray[cfloat]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
 
-proc mixedActions(w: World, actions: var array[Seats*ActionSizes.len, int32], seed: int) =
+proc mixedActions(w: World, actions: var array[LegacySeats*ActionSizes.len, int32], seed: int) =
   ## Identity aims at the nearest apparent enemy, else a changing compass aim; heart
   ## objectives; fire, grenade and sneak on schedules (the fire-hold suite's policy).
   for slot in 0..<Seats:
@@ -67,11 +67,11 @@ suite "Native decoder fire hold radius":
         for slot in 0..<Seats:
           check pw_set_seat_fire_hold(handle, slot.cint, 1) == 0
           if slot mod 2 == 0: check pw_set_seat_fire_hold_radius(handle, slot.cint, 150) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var commands: array[Seats, Command]
-        var rewards, terminals: array[Seats, float32]
-        var memories: array[Seats, AimMemory]
-        var held: array[Seats, int]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var commands: array[LegacySeats, Command]
+        var rewards, terminals: array[LegacySeats, float32]
+        var memories: array[LegacySeats, AimMemory]
+        var held: array[LegacySeats, int]
         for pass in 0..1:
           reference = newWorld(matchSeed, 720)
           if pass == 1: check pw_reset(handle, matchSeed, 720) == 0
@@ -111,14 +111,14 @@ suite "Native decoder fire hold radius":
       check pw_set_seat_fire_hold_radius(r0, slot.cint, 0) == 0
       check pw_set_seat_fire_hold_radius(noHold, slot.cint, 150) == 0
     var reference = newWorld(9, 600)
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     while reference.winner == -1 and reference.tick < reference.endTick:
       mixedActions(reference, actions, 9)
       for h in [plain, r55, r0, noHold, bare]: require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       require pw_state_hash(r55) == pw_state_hash(plain) and pw_state_hash(r0) == pw_state_hash(plain)
       require pw_state_hash(noHold) == pw_state_hash(bare)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for slot in 0..<Seats:
         let o = slot*ActionSizes.len
         commands[slot] = reference.decodeActions(slot, actions.toOpenArray(o, o+ActionSizes.len-1),
@@ -148,7 +148,7 @@ suite "Hosted neural seats and the native ABI take the same fire hold (radius)":
     result.add ActionContractV2Hash
     for x in ActionSizes: result.u32(x.uint32)
     result.add repeat('\0', n*4)
-  proc neuralSeats(decoder: string): array[Seats, Bot] =
+  proc neuralSeats(decoder: string): seq[Bot] =
     let path = getTempDir()/"paintbot-native-fire-hold-radius-test.bas"
     writeFile(path, "paintbot_observe(neuralObservation())\n" &
       "run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())\n" &
@@ -168,7 +168,7 @@ suite "Hosted neural seats and the native ABI take the same fire hold (radius)":
       for side in 0..1:
         let wide = neuralSeats("{\"fire_hold_teammates\": {\"radius\": 150}, \"sampling\": {\"mode\": \"categorical\"}}")
         let plain = neuralSeats("{\"fire_hold_teammates\": true, \"sampling\": {\"mode\": \"categorical\"}}")
-        var players: array[Seats, Bot]
+        var players: seq[Bot]
         for slot in 0..<Seats: players[slot] = if team(slot) == side: wide[slot] else: plain[slot]
         var world = newWorld(seed, ticks.int32)
         let handle = pw_create(seed, ticks.int32)
@@ -178,8 +178,8 @@ suite "Hosted neural seats and the native ABI take the same fire hold (radius)":
           check pw_set_seat_sampling(handle, slot.cint, 1000, 0) == 0
           check pw_set_seat_fire_hold(handle, slot.cint, 1) == 0
           if team(slot) == side: check pw_set_seat_fire_hold_radius(handle, slot.cint, 150) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var rewards, terminals: array[Seats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var rewards, terminals: array[LegacySeats, float32]
         var zero: array[LogitSize, float32]
         var steps = 0
         while world.winner == -1 and world.tick < world.endTick:

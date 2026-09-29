@@ -18,7 +18,7 @@ type
     tick*, owner*: int32
   ReplayIndex* = object
     heartTenures*: seq[seq[HeartTenure]]
-    combat*: seq[array[Seats, CombatStats]]
+    combat*: seq[seq[CombatStats]]
     events*: seq[Moment]
     hits*: seq[Moment]
     momentum*: seq[Sample]
@@ -86,7 +86,7 @@ proc advanceIndexed*(index: var ReplayIndex) =
   ## Keep spectator counters outside World so rules and replay hashes are unchanged.
   ## Detects this tick's events too, so a live match's index fills like a replay's.
   if index.combat.len == 0:
-    index.combat.add default(array[Seats, CombatStats])
+    index.combat.add newSeq[CombatStats](Seats)
   doAssert index.combat.len == world.tick + 1
   index.sampleHeartTenures(world)
   let previous = world.cogs
@@ -168,7 +168,7 @@ proc advanceIndexed*(index: var ReplayIndex) =
 
 proc indexReplay*(progress: proc(tick, total: int) = nil): ReplayIndex =
   world = newWorld(recording.seed, recording.endTick)
-  result.combat.add default(array[Seats, CombatStats])
+  result.combat.add newSeq[CombatStats](Seats)
   result.checkpoints.add Checkpoint(state: snapshot(world))
   result.sampleGraphs(world)
   while world.tick < recording.frames.len:

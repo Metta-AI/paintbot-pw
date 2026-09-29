@@ -9,7 +9,7 @@ proc eliminate(w: var World, side: int) =
       w.equipment[i].lives = 0
 
 proc idle(w: var World, ticks: int) =
-  var commands: array[Seats, Command]
+  var commands: array[LegacySeats, Command]
   for tick in 0..<ticks: w.step(commands)
 
 proc secondsBetween(a, b: int): int32 =
@@ -89,7 +89,7 @@ suite "Glory":
     # Red cog 0 stands on neutral heart 2 until the claim completes: no glory for winning play.
     w.cogs[0].pos = w.controlHearts[2].pos
     w.cogs[0].goal = w.cogs[0].pos
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     var ticks = 0
     while w.controlHearts[2].owner != 0 and ticks < 100:
       w.step(commands); inc ticks
@@ -134,7 +134,7 @@ suite "Glory":
   test "the loser's glory drops to zero and the winner's is every seat's score":
     for loser in 0..1:
       var w = newWorld(2026)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       w.scoreTicks[1-loser] = w.heartMeterTarget()-1
       w.step(commands)
       check w.winner == 1-loser
@@ -148,7 +148,7 @@ suite "Glory":
       check w.stateHash() == hash
   test "a draw pays nobody":
     var w = newWorld(2026)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     w.scoreTicks = [w.heartMeterTarget()-1, w.heartMeterTarget()-1]
     w.step(commands)
     check w.winner == -2
@@ -157,7 +157,7 @@ suite "Glory":
   test "an eliminated team loses its glory":
     for loser in 0..1:
       var w = newWorld(2026)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       w.eliminate(loser)
       w.step(commands)
       check w.winner == 1-loser
@@ -206,14 +206,14 @@ suite "Glory":
   test "rules 37 recording round trips to the same glory":
     var w = newWorld(2026, 48)
     var r = Recording(seed: w.seed, endTick: w.endTick)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     for tick in 0..<48:
       w.step(commands)
-      r.frames.add Frame(commands: commands, hash: w.stateHash())
+      r.frames.add Frame(commands: @(commands), hash: w.stateHash())
     check w.winner == -2
     let path = getTempDir()/"paintbot-glory.replay"
     defer: removeFile(path)
-    saveReplayFile(path, "paintbot_pw", 37, r)
+    saveRecordingAs(path, 37, r)
     let loaded = loadRecording(path)
     check replayRulesVersion == 37
     var replay = newWorld(loaded.seed, loaded.endTick)

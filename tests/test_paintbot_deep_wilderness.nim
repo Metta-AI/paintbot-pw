@@ -28,7 +28,7 @@ suite "Expanded Heartwick woodland":
     var w=newWorld(2026)
     w.cogs[0].pos=point(-1700,700)
     let goal=point(-1700,3300)
-    var commands:array[Seats,Command]
+    var commands:array[LegacySeats,Command]
     commands[0]=Command(walk:true,goal:goal,aim:goal)
     for i in 0..<240:w.step(commands)
     check distance2(w.cogs[0].pos,goal)<20000

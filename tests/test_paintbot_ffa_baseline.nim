@@ -17,7 +17,7 @@ type MatchStats = object
 proc play(seed: int32): MatchStats =
   gameMode = gmFfaKin
   var w = newWorld(seed)
-  var hits: array[Seats, array[Seats, int]]
+  var hits: array[LegacySeats, array[LegacySeats, int]]
   observeHit = proc(tick: int32, victim, attacker: int, pos: Point) =
     if attacker in 0..<Seats and attacker != victim: inc hits[attacker][victim]
   defer: observeHit = nil

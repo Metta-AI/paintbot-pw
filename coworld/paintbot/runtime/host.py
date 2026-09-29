@@ -83,10 +83,13 @@ def basic_oracle_round(oracle, world, pending):
     return replies
 
 
+MAX_SEATS = 256  # kinship.nim MaxSeats
+
 def run(engine):
     doc = load_seats(os.environ["COGAME_PLAYER_SEATS_URI"])
-    if len(doc["seats"]) != 16:
-        raise ValueError("Paintbot requires 16 seats")
+    # The engine takes its seat count from the roster (one token per seat): 2 .. MaxSeats.
+    if not 2 <= len(doc["seats"]) <= MAX_SEATS:
+        raise ValueError(f"Paintbot seats must be 2 .. {MAX_SEATS}, got {len(doc['seats'])}")
     child = None
     oracle = Oracle.from_env()
     try:

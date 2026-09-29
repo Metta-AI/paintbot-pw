@@ -9,22 +9,46 @@ export options
 import polyworld/rngs
 
 const
-  KinSeats* = 16 # Seats in sim.nim; kept separate so sim can import this module.
+  MaxSeats* = 256 ## The most seats a match may have (Heartland Big plays 50).
+  LegacySeats* = 16 ## The seat count every match had before rules 46; old replays store it.
   Loci* = 32
   SiblingLoci = 16 # r = 1/2
   CousinLoci = 8 # r = 1/4
   KinSalt = 0x6B696E'i32 # "kin"
 
+# The seat count is per match: the game config's players (tokens) or the local --bot counts,
+# set once with configureSeats before the match's world is built. Each thread plays one
+# match (hosted game, viewer, verifier) or trains at LegacySeats, so it is thread-local.
+var seatCount {.threadvar.}: int
+proc configureSeats*(n: int) =
+  ## Sets this thread's seat count. 2 .. MaxSeats.
+  if n notin 2..MaxSeats:
+    raise newException(ValueError, "Paintbot seats must be 2 .. " & $MaxSeats & ", got " & $n)
+  seatCount = n
+template Seats*: int =
+  ## The current match's seat count (LegacySeats until configureSeats is called).
+  (if seatCount == 0: LegacySeats else: seatCount)
+template KinSeats*: int = Seats
+
 type
   KinLayout* = enum
-    klFours, klPairs, klTriosLoner, klCousins, klStrangers, klClones
+    klFours, klPairs, klTriosLoner, klCousins, klStrangers, klClones,
+    klTribes ## families of TribeSize full siblings filling the seats (Heartland Big: 10 of 5)
   Kinship* = object
     layout*: KinLayout
-    family*: array[KinSeats, int8] # family id per seat, -1 = loner
-    genes*: array[KinSeats, uint32] # 32 loci as bits
-    ibd*: array[KinSeats, array[KinSeats, int8]] # loci shared by descent, 0..32
+    family*: seq[int8] # family id per seat, -1 = loner
+    genes*: seq[uint32] # 32 loci as bits
+    ibd*: seq[seq[int8]] # loci shared by descent, 0..32
 
-const LayoutWeights: array[KinLayout, int32] = [25'i32, 25, 20, 20, 5, 5]
+const LayoutWeights: array[KinLayout, int32] = [25'i32, 25, 20, 20, 5, 5, 0] # tribes: pinned only
+const TribeSize* = 5
+
+proc initKinship*(seats = Seats): Kinship =
+  ## An empty kinship for `seats` seats (every family -1, no descent).
+  result.family = newSeq[int8](seats)
+  result.genes = newSeq[uint32](seats)
+  result.ibd = newSeq[seq[int8]](seats)
+  for i in 0..<seats: result.ibd[i] = newSeq[int8](seats)
 static: doAssert LayoutWeights.sum == 100
 
 when defined(pwTraining):
@@ -61,13 +85,18 @@ proc lociMask(positions: openArray[int]): uint32 =
   for p in positions: result = result or (1'u32 shl p)
 
 proc build(layout: KinLayout, rng: var Rng): Kinship =
+  result = initKinship()
   result.layout = layout
   let sizes = case layout
     of klFours, klCousins: @[4, 4, 4, 4]
     of klPairs: @[2, 2, 2, 2, 2, 2, 2, 2]
     of klTriosLoner: @[3, 3, 3, 3, 3]
     of klStrangers: newSeq[int]()
-    of klClones: @[16]
+    of klClones: @[KinSeats]
+    of klTribes: (block:
+      var tribes: seq[int]
+      for unused in 0..<KinSeats div TribeSize: tribes.add TribeSize
+      tribes)
   # Seats join families in shuffled order; whoever is left over is a loner.
   let order = rng.shuffled(KinSeats)
   for i in 0..<KinSeats: result.family[i] = -1

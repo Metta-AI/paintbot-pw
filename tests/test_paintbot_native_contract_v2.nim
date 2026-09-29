@@ -20,7 +20,7 @@ proc setScript(handle: pointer, seat: int, source: string): cint =
   let text = if source.len > 0: cast[ptr UncheckedArray[char]](unsafeAddr source[0]) else: nil
   pw_set_seat_script(handle, seat.cint, text, source.len.int32)
 
-proc mixedActions(w: World, actions: var array[Seats*ActionSizes.len, int32], seed: int) =
+proc mixedActions(w: World, actions: var array[LegacySeats*ActionSizes.len, int32], seed: int) =
   ## Identity aims at the nearest apparent enemy, else a changing compass aim; heart
   ## objectives; fire, grenade and sneak on schedules.
   for slot in 0..<Seats:
@@ -65,11 +65,11 @@ suite "Native action contract v2":
       let handle = pw_create(seed+41, 720)
       require handle != nil
       check pw_set_action_contract(handle, 2) == 0
-      var memories: array[Seats, AimMemory]
+      var memories: array[LegacySeats, AimMemory]
       for m in memories.mitems: m.resetAimMemory()
-      var actions: array[Seats*ActionSizes.len, int32]
-      var commands: array[Seats, Command]
-      var rewards, terminals: array[Seats, float32]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var commands: array[LegacySeats, Command]
+      var rewards, terminals: array[LegacySeats, float32]
       var leads = 0
       for pass in 0..1:
         if pass == 1:
@@ -98,9 +98,9 @@ suite "Native action contract v2":
     require a != nil and b != nil
     check pw_set_action_contract(b, 2) == 0
     var reference = newWorld(9, 480)
-    var actions: array[Seats*ActionSizes.len, int32]
-    var commands: array[Seats, Command]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var commands: array[LegacySeats, Command]
+    var rewards, terminals: array[LegacySeats, float32]
     var diverged = false
     while reference.winner == -1 and reference.tick < reference.endTick:
       mixedActions(reference, actions, 0)
@@ -117,12 +117,12 @@ suite "Native action contract v2":
   test "candidates report what the decoder resolves, under both contracts":
     let handle = pw_create(5, 480)
     require handle != nil
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, float32]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
     var goals: array[ActionSizes[0]*2, int32]
     var aims: array[ActionSizes[1]*2, int32]
     var reference = newWorld(5, 480)
-    var memories: array[Seats, AimMemory]
+    var memories: array[LegacySeats, AimMemory]
     for m in memories.mitems: m.resetAimMemory()
     for version in [1'i32, 2]:
       check pw_set_action_contract(handle, version) == 0
@@ -153,7 +153,7 @@ suite "Native action contract v2":
               else:
                 check c.aim == reference.cogs[slot].aim
         mixedActions(reference, actions, 0)
-        var commands: array[Seats, Command]
+        var commands: array[LegacySeats, Command]
         for slot in 0..<Seats:
           let o = slot*ActionSizes.len
           let bodies = reference.observedBodies(slot)
@@ -175,8 +175,8 @@ suite "Native action contract v2":
         let handle = pw_create(seed, 600)
         require handle != nil
         for slot in 0..<Seats: check setScript(handle, slot, baseSource) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var rewards, terminals: array[Seats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var rewards, terminals: array[LegacySeats, float32]
         while terminals[0] == 0 and expected.len < 600:
           require pw_step(handle, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
           expected.add pw_state_hash(handle)
@@ -188,8 +188,8 @@ suite "Native action contract v2":
           check setScript(handle, slot, baseSource) == 0
           check pw_set_seat_override(handle, slot.cint, 0) == 0
         check pw_set_seat_override(handle, 0, 32) == -1
-        var actions: array[Seats*ActionSizes.len, int32]
-        var rewards, terminals: array[Seats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var rewards, terminals: array[LegacySeats, float32]
         var orders: array[10, int32]
         for hash in expected:
           check pw_script_decide(handle) == 1
@@ -207,10 +207,10 @@ suite "Native action contract v2":
         for slot in 0..<Seats:
           check setScript(handle, slot, baseSource) == 0
           if team(slot) == 0: check pw_set_seat_override(handle, slot.cint, 12) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var rewards, terminals: array[Seats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var rewards, terminals: array[LegacySeats, float32]
         var orders: array[10, int32]
-        var stats: array[Seats*8, int32]
+        var stats: array[LegacySeats*8, int32]
         var diverged = false
         var shootOrders = 0
         for hash in expected:

@@ -22,7 +22,7 @@ paintbot_act(neuralLogits())
 """
 proc fixture(source: string, model = true, actionContract = ActionContractHash,
     manifest = "", observationContract = ObservationContractHash,
-    inputs = ObservationSize): array[Seats,Bot] =
+    inputs = ObservationSize): seq[Bot] =
   let path = getTempDir()/"paintbot-neural-host-test.bas"
   writeFile(path,source)
   if model: writeFile(path & ".model.bin", zeroModel(actionContract, observationContract, inputs))
@@ -38,7 +38,7 @@ proc manifestJson(schema: string, actionContract: string, decoder = ""): string 
     "\", \"action_contract\": \"" & actionContract & "\", \"sha256\": {}"
   if decoder.len > 0: result.add ", \"decoder\": " & decoder
   result.add "}"
-proc mixedFixture(): array[Seats,Bot] =
+proc mixedFixture(): seq[Bot] =
   ## Slot 0 runs the neural package; every other seat is plain BASIC.
   let neuralPath = getTempDir()/"paintbot-neural-host-test-neural.bas"
   let plainPath = getTempDir()/"paintbot-neural-host-test-plain.bas"

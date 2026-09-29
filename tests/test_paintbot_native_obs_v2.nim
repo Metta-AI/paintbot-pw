@@ -45,11 +45,11 @@ suite "Native observation contract v2":
       let v1 = pw_create(int32(seed+31), ticks.int32)
       let v2 = pw_create_observation(int32(seed+31), ticks.int32, 2)
       require v1 != nil and v2 != nil
-      var actions: array[Seats*ActionSizes.len, int32]
-      var commands: array[Seats, Command]
-      var rewards, terminals, resets, resets2: array[Seats, float32]
-      var obs1: array[Seats*ObservationSize, float32]
-      var obs2: array[Seats*ObservationSizeV2, float32]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var commands: array[LegacySeats, Command]
+      var rewards, terminals, resets, resets2: array[LegacySeats, float32]
+      var obs1: array[LegacySeats*ObservationSize, float32]
+      var obs2: array[LegacySeats*ObservationSizeV2, float32]
       var expected: array[ObservationSizeV2, float32]
       var rows = 0
       while reference.winner == -1 and reference.tick < reference.endTick:
@@ -76,8 +76,8 @@ suite "Native observation contract v2":
 
   test "pw_observe_seats writes only the chosen v2 rows":
     let handle = pw_create_observation(9, 24, 2)
-    var obs: array[Seats*ObservationSizeV2, float32]
-    var resets: array[Seats, float32]
+    var obs: array[LegacySeats*ObservationSizeV2, float32]
+    var resets: array[LegacySeats, float32]
     for i in 0..<obs.len: obs[i] = -9
     for i in 0..<resets.len: resets[i] = -9
     check pw_observe_seats(handle, (1'u32 shl 3) or (1'u32 shl 12), fp(obs), fp(resets)) == 0

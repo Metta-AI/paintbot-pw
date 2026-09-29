@@ -71,7 +71,7 @@ const
   FfaGreatRows* = 2
   FfaGreatRowSize* = 6
   FfaIdentityOffset* = FfaSelfSize
-  FfaHeartOffset* = FfaIdentityOffset + Seats*FfaIdentityRowSize
+  FfaHeartOffset* = FfaIdentityOffset + LegacySeats*FfaIdentityRowSize
   FfaGreatOffset* = FfaHeartOffset + FfaHeartRows*FfaHeartRowSize
   FfaTerrainOffset* = FfaGreatOffset + FfaGreatRows*FfaGreatRowSize
   ObservationSizeFfaV1* = FfaTerrainOffset + TerrainBlockSize
@@ -111,8 +111,8 @@ type
     ## identity, the body it resolved to and that body's position. Contract v2 derives
     ## the target's velocity from it; contract v1 never reads it.
     tick*: int32 # -1 when nothing is recorded
-    bodies*: array[Seats, int]
-    positions*: array[Seats, Point]
+    bodies*: array[LegacySeats, int]
+    positions*: array[LegacySeats, Point]
 
 proc actionContractHash*(version: ActionContractVersion): string =
   case version
@@ -154,16 +154,16 @@ proc observationContractVersion*(hash: string): ObservationContractVersion =
   elif hash == ObservationContractFfaV1Hash: ocFfaV1
   else: raise newException(ValueError, "unknown neural observation contract")
 
-proc observedBodies*(w: World, slot: int): array[Seats, int] =
+proc observedBodies*(w: World, slot: int): array[LegacySeats, int] =
   ## Match BASIC identity resolution, including uniforms and duplicate identities.
   ## Pure in the world: hosts that observe, decode and drive bots on one unchanged
   ## tick may compute it once per seat and pass it to the overloads below.
-  for i in 0..<Seats: result[i] = -1
+  for i in 0..<LegacySeats: result[i] = -1
   result[slot] = slot
-  for body in 0..<Seats:
+  for body in 0..<LegacySeats:
     if body == slot or not w.visible(slot, body): continue
     let identity = w.observedSeat(slot, body)
-    if identity notin 0..<Seats or identity == slot: continue
+    if identity notin 0..<LegacySeats or identity == slot: continue
     let previous = result[identity]
     if previous < 0 or distance2(w.cogs[slot].pos, w.cogs[body].pos) <
         distance2(w.cogs[slot].pos, w.cogs[previous].pos): result[identity] = body
@@ -179,8 +179,8 @@ proc relativeTeam(value, side: int): float32 =
   else: -1'f32
 
 proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
-    bodies: array[Seats, int]) =
-  if slot notin 0..<Seats or output.len != ObservationSize:
+    bodies: array[LegacySeats, int]) =
+  if slot notin 0..<LegacySeats or output.len != ObservationSize:
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   for i in 0..<output.len: output[i] = 0
   let me = w.cogs[slot]
@@ -235,7 +235,7 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
     else: k += 3
     put(float32(w.heartPoints(i))/5)
   # Fog-gated apparent identities (16 * 8). No true-team or real-seat leakage.
-  for identity in 0..<Seats:
+  for identity in 0..<LegacySeats:
     let body = bodies[identity]
     if body < 0: k += 8; continue
     let other = w.cogs[body]
@@ -276,7 +276,7 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
     put(float32(w.elevation(p)-w.elevation(me.pos))/1000)
   doAssert k == 442 # Six reserved zeros preserve the fixed-width contract.
 proc encodeObservation*(w: World, slot: int, output: var openArray[float32]) =
-  if slot notin 0..<Seats or output.len != ObservationSize:
+  if slot notin 0..<LegacySeats or output.len != ObservationSize:
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   w.encodeObservation(slot, output, w.observedBodies(slot))
 
@@ -287,7 +287,7 @@ proc inWater*(p: Point): bool =
     terrainHeight(p.x.int, p.z.int) < RiverWaterHeight
 
 proc encodeTerrainBlock*(w: World, slot: int, output: var openArray[float32],
-    bodies: array[Seats, int]) =
+    bodies: array[LegacySeats, int]) =
   ## Observation contract v2's terrain block (TerrainBlockSize floats), written at
   ## output[0 ..< TerrainBlockSize]. Public terrain only, read at points the v1 block
   ## already reveals: the seat's own position, the ten public hearts and the bodies the
@@ -304,7 +304,7 @@ proc encodeTerrainBlock*(w: World, slot: int, output: var openArray[float32],
   ##   55     visible apparent enemies dry / 8
   ##   56     visible apparent teammates wet / 8 (the seat itself excluded)
   ##   57     visible apparent teammates dry / 8 (the seat itself excluded)
-  if slot notin 0..<Seats or output.len != TerrainBlockSize:
+  if slot notin 0..<LegacySeats or output.len != TerrainBlockSize:
     raise newException(ValueError, "invalid neural terrain block dimensions or seat")
   for i in 0..<output.len: output[i] = 0
   let me = w.cogs[slot]
@@ -319,7 +319,7 @@ proc encodeTerrainBlock*(w: World, slot: int, output: var openArray[float32],
     output[2+2*i] = inWater(p).float32
     output[3+2*i] = float32(w.elevation(p)-own)/scale
   var enemyWet, enemyDry, mateWet, mateDry = 0
-  for identity in 0..<Seats:
+  for identity in 0..<LegacySeats:
     let body = bodies[identity]
     if body < 0: continue
     let p = w.cogs[body].pos
@@ -362,7 +362,7 @@ proc encodeScoreboardBlock*(w: World, slot: int, output: var openArray[float32])
   ##   6  quiet-supplies award (gloryRules().quietSupplies) / 100
   ##   7  ticks remaining, max(0, endTick - tick) / max(1, endTick)
   ## The teams game only: ValueError in FFA-kin (no teams, lives or glory there).
-  if slot notin 0..<Seats or output.len != ScoreboardBlockSize:
+  if slot notin 0..<LegacySeats or output.len != ScoreboardBlockSize:
     raise newException(ValueError, "invalid neural scoreboard block dimensions or seat")
   if ffa(): raise newException(ValueError, "observation contract v3 is for the teams game only")
   let side = team(slot)
@@ -378,7 +378,7 @@ proc encodeScoreboardBlock*(w: World, slot: int, output: var openArray[float32])
 static: doAssert 8 == ScoreboardBlockSize
 
 proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
-    bodies: array[Seats, int], kin: Kinship, mask = 0'u32) =
+    bodies: array[LegacySeats, int], kin: Kinship, mask = 0'u32) =
   ## Observation contract ffa.v1 (ObservationSizeFfaV1 = 810 floats), for FFA-kin. No map
   ## flip: positions are in the absolute frame for every seat. "Centred x" is
   ## (x - Width/2) / (maxX - minX), "centred z" likewise with Height and the z span; score is
@@ -410,7 +410,7 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   ##   752..809  v2's terrain block (encodeTerrainBlock) columns 0..53, then 54 visible
   ##             other seats wet/8, 55 visible other seats dry/8, 56..57 reserved 0 (the
   ##             v2 team split means nothing without teams)
-  if slot notin 0..<Seats or output.len != ObservationSizeFfaV1:
+  if slot notin 0..<LegacySeats or output.len != ObservationSizeFfaV1:
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   for i in 0..<output.len: output[i] = 0
   let kinOn = ffa()
@@ -436,11 +436,11 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   output[6] = float32((me.hp > 0).int)
   output[7] = float32(max(0'i32, w.endTick-w.tick))/8640
   # Identity rows, indexed by seat.
-  var held: array[Seats, int]
+  var held: array[LegacySeats, int]
   if kinOn:
     for heart in w.controlHearts:
-      if heart.owner in 0'i32..<Seats.int32: inc held[heart.owner]
-  for j in 0..<Seats:
+      if heart.owner in 0'i32..<LegacySeats.int32: inc held[heart.owner]
+  for j in 0..<LegacySeats:
     let o = FfaIdentityOffset + j*FfaIdentityRowSize
     let body = bodies[j]
     if body >= 0:
@@ -493,7 +493,7 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   # Terrain.
   w.encodeTerrainBlock(slot, output.toOpenArray(FfaTerrainOffset, ObservationSizeFfaV1-1), bodies)
   var wet, dry = 0
-  for j in 0..<Seats:
+  for j in 0..<LegacySeats:
     let body = bodies[j]
     if body < 0 or j == slot: continue
     if inWater(w.cogs[body].pos): inc wet else: inc dry
@@ -503,11 +503,11 @@ proc encodeFfaObservation*(w: World, slot: int, output: var openArray[float32],
   output[FfaTerrainOffset+57] = 0
 
 proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
-    bodies: array[Seats, int], version: ObservationContractVersion) =
+    bodies: array[LegacySeats, int], version: ObservationContractVersion) =
   ## The observation of the given contract. v1 is the encoder above, called unchanged;
   ## v2 writes the same v1 floats in columns 0 .. ObservationSize-1 and the terrain
   ## block after them; v3 writes v2's floats and the scoreboard block after them.
-  if slot notin 0..<Seats or output.len != observationSize(version):
+  if slot notin 0..<LegacySeats or output.len != observationSize(version):
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   case version
   of ocV1: w.encodeObservation(slot, output, bodies)
@@ -523,21 +523,21 @@ proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
     w.encodeFfaObservation(slot, output, bodies, activeKinship)
 proc encodeObservation*(w: World, slot: int, output: var openArray[float32],
     version: ObservationContractVersion) =
-  if slot notin 0..<Seats or output.len != observationSize(version):
+  if slot notin 0..<LegacySeats or output.len != observationSize(version):
     raise newException(ValueError, "invalid neural observation dimensions or seat")
   w.encodeObservation(slot, output, w.observedBodies(slot), version)
 
 proc resetAimMemory*(m: var AimMemory) =
   m.tick = -1
-  for i in 0..<Seats:
+  for i in 0..<LegacySeats:
     m.bodies[i] = -1
     m.positions[i] = Point()
 
-proc recordAimMemory*(m: var AimMemory, w: World, slot: int, bodies: array[Seats, int]) =
+proc recordAimMemory*(m: var AimMemory, w: World, slot: int, bodies: array[LegacySeats, int]) =
   ## Record once per decided tick, on the same pre-step world the actions were decoded
   ## against, with the identities that decode resolved.
   m.tick = w.tick
-  for identity in 0..<Seats:
+  for identity in 0..<LegacySeats:
     let body = bodies[identity]
     m.bodies[identity] = body
     m.positions[identity] = if body >= 0: w.cogs[body].pos else: Point()
@@ -606,7 +606,7 @@ proc goalCandidate*(w: World, slot, movement: int): (bool, Point) =
                         clamp(me.pos.z.int+flip*delta[1]*200,minZ(),maxZ())))
   (false, me.pos)
 
-proc aimCandidate*(w: World, slot, aim: int, bodies: array[Seats, int],
+proc aimCandidate*(w: World, slot, aim: int, bodies: array[LegacySeats, int],
     version: ActionContractVersion, memory: AimMemory, ownStep: Point): (bool, Point) =
   ## Where aim head index `aim` points under `version`, and whether that candidate
   ## exists now (an identity nobody visible carries keeps the aim). `ownStep` is the
@@ -641,7 +641,7 @@ proc teammateInLine*(w: World, slot: int, aim: Point, radius = FireHoldRadius.in
   let dz = int64(aim.z) - origin.z
   let len2 = dx*dx + dz*dz
   if len2 == 0: return false
-  for body in 0..<Seats:
+  for body in 0..<LegacySeats:
     if body == slot or w.cogs[body].hp <= 0: continue
     if not w.visible(slot, body) or w.observedTeam(slot, body) != team(slot): continue
     let p = w.cogs[body].pos
@@ -670,13 +670,13 @@ proc holdFire*(w: World, slot: int, command: var Command, radius = FireHoldRadiu
   true
 
 proc decodeActions*(w: World, slot: int, actions: openArray[int32],
-    bodies: array[Seats, int], version: ActionContractVersion,
+    bodies: array[LegacySeats, int], version: ActionContractVersion,
     memory: AimMemory, fireHold = false): Command =
   ## The shared decoder of every host. `version` selects the identity-aim rule; the
   ## memory is read only under contract v2 (the host records it with recordAimMemory
   ## after decoding each tick). `fireHold` applies holdFire to the decoded command (the
   ## bundle's decoder option; false decodes exactly as before).
-  if slot notin 0..<Seats or actions.len != ActionSizes.len:
+  if slot notin 0..<LegacySeats or actions.len != ActionSizes.len:
     raise newException(ValueError, "invalid neural action dimensions or seat")
   for i,size in ActionSizes:
     if actions[i] < 0 or actions[i] >= size.int32:
@@ -698,18 +698,18 @@ proc decodeActions*(w: World, slot: int, actions: openArray[int32],
   if aimFound: result.aim = aim
   if fireHold: discard w.holdFire(slot, result)
 proc decodeActions*(w: World, slot: int, actions: openArray[int32],
-    bodies: array[Seats, int]): Command =
+    bodies: array[LegacySeats, int]): Command =
   ## Contract v1: an identity aim is the body's current position.
   w.decodeActions(slot, actions, bodies, acV1, default(AimMemory))
 proc decodeActions*(w: World, slot: int, actions: openArray[int32],
     version: ActionContractVersion, memory: AimMemory): Command =
-  if slot notin 0..<Seats or actions.len != ActionSizes.len:
+  if slot notin 0..<LegacySeats or actions.len != ActionSizes.len:
     raise newException(ValueError, "invalid neural action dimensions or seat")
   # Identity aim is the only head that resolves bodies; keep the cost to that case.
   if actions.len == ActionSizes.len and actions[1] in 1'i32..16'i32:
     return w.decodeActions(slot, actions, w.observedBodies(slot), version, memory)
-  var none: array[Seats, int]
-  for i in 0..<Seats: none[i] = -1
+  var none: array[LegacySeats, int]
+  for i in 0..<LegacySeats: none[i] = -1
   w.decodeActions(slot, actions, none, version, memory)
 proc decodeActions*(w: World, slot: int, actions: openArray[int32]): Command =
   w.decodeActions(slot, actions, acV1, default(AimMemory))
@@ -1133,7 +1133,7 @@ proc userInputFeature*(value: int32): float32 =
   float32(value) / 1000'f32
 proc clampUserInput*(value: int32): int32 = clamp(value, -UserInputLimit, UserInputLimit)
 proc encodeObservationInputs*(w: World, slot: int, output: var openArray[float32],
-    bodies: array[Seats, int], inputs: openArray[int32], version = ocV2) =
+    bodies: array[LegacySeats, int], inputs: openArray[int32], version = ocV2) =
   ## Observation contract v2u<K> (version ocV2) or v3u<K> (ocV3), K = inputs.len: the
   ## version's 506 or 514 floats, then the K user inputs.
   if version notin {ocV2, ocV3}:
@@ -1221,7 +1221,7 @@ proc isqrt64(n: int64): int64 =
   x
 
 proc strafeActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
-    bodies: array[Seats, int], options: StrafeOptions, state: var StrafeState, rng: var Rng,
+    bodies: array[LegacySeats, int], options: StrafeOptions, state: var StrafeState, rng: var Rng,
     forbidden: ObjectiveMask = default(ObjectiveMask)): bool =
   ## Apply the strafe to the seat's selected head indices on the pre-step world, before
   ## they are decoded: returns whether the movement head was replaced (by a compass index
@@ -1234,7 +1234,7 @@ proc strafeActions*(w: World, slot: int, actions: var array[ActionSizes.len, int
     return false
   var threat = -1
   var best = int64(options.range) * options.range
-  for identity in 0..<Seats:
+  for identity in 0..<LegacySeats:
     let body = bodies[identity]
     if body < 0 or body == slot or w.cogs[body].hp <= 0: continue
     if w.observedTeam(slot, body) == team(slot): continue
@@ -1338,7 +1338,7 @@ proc aimSnapOptions*(maxAngleMillideg: int32): AimSnapOptions =
     cosQ15: max(0'i64, int64(round(cos(radians) * float64(AimSnapCosScale)))))
 
 proc aimSnapActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
-    bodies: array[Seats, int], options: AimSnapOptions): bool =
+    bodies: array[LegacySeats, int], options: AimSnapOptions): bool =
   ## Apply the aim snap to the seat's selected head indices on the pre-step world, before
   ## they are decoded: returns whether the aim head was replaced (by an identity index
   ## 1..16). Only a live seat's shoot order (head 2 = 1) with a compass aim (17..24) is
@@ -1356,7 +1356,7 @@ proc aimSnapActions*(w: World, slot: int, actions: var array[ActionSizes.len, in
   const scale2 = AimSnapCosScale * AimSnapCosScale
   var best = -1
   var bestDot, bestE2 = 0'i64
-  for identity in 0..<Seats:
+  for identity in 0..<LegacySeats:
     let body = bodies[identity]
     if body < 0 or body == slot or w.cogs[body].hp <= 0: continue
     if w.observedTeam(slot, body) == team(slot): continue
@@ -1482,7 +1482,7 @@ proc plannedOwnStep(w: World, slot: int, actions: array[ActionSizes.len, int32],
   w.plannedStep(slot, if found: goal else: w.cogs[slot].pos, actions[4] != 0)
 
 proc aimRetargetActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
-    bodies: array[Seats, int], version: ActionContractVersion, memory: AimMemory,
+    bodies: array[LegacySeats, int], version: ActionContractVersion, memory: AimMemory,
     options: AimRetargetOptions): bool =
   ## Apply the aim retarget to the seat's selected head indices on the pre-step world,
   ## before the aim snap and the decode: returns whether the aim head was replaced (by
@@ -1497,7 +1497,7 @@ proc aimRetargetActions*(w: World, slot: int, actions: var array[ActionSizes.len
   let reach2 = int64(options.maxRange) * options.maxRange
   var best = -1
   var bestCost = 0'i64
-  for identity in 0..<Seats:
+  for identity in 0..<LegacySeats:
     let body = bodies[identity]
     if body < 0 or w.observedTeam(slot, body) == team(slot): continue
     let (found, aim) = w.aimCandidate(slot, identity + 1, bodies, version, memory, ownStep)
@@ -1553,7 +1553,7 @@ proc shotGateOptions*(maxRange = DefaultShotGateRange): ShotGateOptions =
   ShotGateOptions(enabled: true, maxRange: maxRange)
 
 proc shotGateActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
-    beforeSnap: array[ActionSizes.len, int32], snapped: bool, bodies: array[Seats, int],
+    beforeSnap: array[ActionSizes.len, int32], snapped: bool, bodies: array[LegacySeats, int],
     version: ActionContractVersion, memory: AimMemory, options: ShotGateOptions): bool =
   ## Apply the shot gate to the heads as they stand after the aim snap (`snapped`: the
   ## snap replaced the aim; `beforeSnap`: the heads it received): returns whether the
@@ -1645,23 +1645,23 @@ proc sprayConeHolds*(w: World, origin, aim, target: Point): bool =
   let halfWidth = sprayHalfWidth(along)
   along > 0 and along <= SprayReach+Radius and across <= halfWidth+Radius and w.lineClear(origin, target)
 
-proc sprayCone*(w: World, slot: int, aim: Point, bodies: array[Seats, int]): (int, int) =
+proc sprayCone*(w: World, slot: int, aim: Point, bodies: array[LegacySeats, int]): (int, int) =
   ## (apparent enemies, apparent teammates) among the seat's visible bodies that a spray
   ## aimed at `aim` from the seat's position would touch.
   let origin = w.cogs[slot].pos
-  for identity in 0..<Seats:
+  for identity in 0..<LegacySeats:
     let body = bodies[identity]
     if body < 0 or body == slot or w.cogs[body].hp <= 0: continue
     if not w.sprayConeHolds(origin, aim, w.cogs[body].pos): continue
     if w.observedTeam(slot, body) == team(slot): inc result[1] else: inc result[0]
 
-proc orderAim(w: World, slot: int, actions: array[ActionSizes.len, int32], bodies: array[Seats, int],
+proc orderAim(w: World, slot: int, actions: array[ActionSizes.len, int32], bodies: array[LegacySeats, int],
     version: ActionContractVersion, memory: AimMemory): Point =
   ## The aim the world holds once these heads are decoded and applied (orderedAim).
   w.orderedAim(slot, w.decodeActions(slot, actions, bodies, version, memory))
 
 proc sprayAimActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
-    bodies: array[Seats, int], version: ActionContractVersion, memory: AimMemory,
+    bodies: array[LegacySeats, int], version: ActionContractVersion, memory: AimMemory,
     options: SprayAimOptions): bool =
   ## decoder.spray_aim: on a shoot order with a ready spray can, the aim head becomes the
   ## visible apparent enemy identity whose resulting cone (aimed at that identity's decoded
@@ -1674,7 +1674,7 @@ proc sprayAimActions*(w: World, slot: int, actions: var array[ActionSizes.len, i
   var best = -1
   var bestCount, bestHp = 0
   var bestD2 = 0'i64
-  for identity in 0..<Seats:
+  for identity in 0..<LegacySeats:
     let body = bodies[identity]
     if body < 0 or body == slot or w.cogs[body].hp <= 0: continue
     if w.observedTeam(slot, body) == team(slot): continue
@@ -1695,7 +1695,7 @@ proc sprayAimActions*(w: World, slot: int, actions: var array[ActionSizes.len, i
   true
 
 proc sprayGateActions*(w: World, slot: int, actions: var array[ActionSizes.len, int32],
-    bodies: array[Seats, int], version: ActionContractVersion, memory: AimMemory,
+    bodies: array[LegacySeats, int], version: ActionContractVersion, memory: AimMemory,
     options: SprayGateOptions): bool =
   ## decoder.spray_gate: drop a shoot order with a ready spray can unless the cone it would
   ## produce holds at least minEnemies apparent enemies and at most maxTeammates apparent
@@ -1707,14 +1707,14 @@ proc sprayGateActions*(w: World, slot: int, actions: var array[ActionSizes.len, 
   true
 
 proc decodeLogits*(w: World, slot: int, logits: openArray[float32],
-    bodies: array[Seats, int], version: ActionContractVersion,
+    bodies: array[LegacySeats, int], version: ActionContractVersion,
     memory: AimMemory, fireHold = false): Command =
   w.decodeActions(slot, argmaxActions(logits), bodies, version, memory, fireHold)
 proc decodeLogits*(w: World, slot: int, logits: openArray[float32]): Command =
   w.decodeActions(slot, argmaxActions(logits))
 
 proc trainingBotActions*(w: World, slot, level: int,
-    actions: var openArray[int32], bodies: array[Seats, int]) =
+    actions: var openArray[int32], bodies: array[LegacySeats, int]) =
   ## Deliberately simple policy-visible curriculum opponent, never the learner.
   ## Level 1 idles; level 2 captures and fires at the nearest apparent enemy.
   if actions.len != ActionSizes.len or level notin 1..2:
@@ -1742,7 +1742,7 @@ proc trainingBotActions*(w: World, slot, level: int,
 proc trainingBotActions*(w: World, slot, level: int, actions: var openArray[int32]) =
   if actions.len != ActionSizes.len or level notin 1..2:
     raise newException(ValueError,"invalid training bot configuration")
-  if level == 1 or slot notin 0..<Seats or w.cogs[slot].hp <= 0:
+  if level == 1 or slot notin 0..<LegacySeats or w.cogs[slot].hp <= 0:
     for i in 0..<actions.len: actions[i] = 0
     return
   w.trainingBotActions(slot, level, actions, w.observedBodies(slot))

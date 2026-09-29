@@ -17,7 +17,7 @@ proc record(ticks: int32): Recording =
     let commands = players.decide(world)
     deliverSpeech(world)
     world.step(commands)
-    result.frames.add Frame(commands: commands, hash: world.stateHash())
+    result.frames.add Frame(commands: @(commands), hash: world.stateHash())
   for slot in 0..<Seats: doAssert not players[slot].failed, "seat " & $slot & " failed"
 
 suite "FFA-kin replay payload":
@@ -74,21 +74,21 @@ suite "FFA-kin replay payload":
     advance() # past the last frame: a no-op, not "frames after victory"
     check world.tick == 240
 
-  test "a teams recording still saves under the live rules (45) with the teams type":
+  test "a teams recording still saves under the live rules with the teams type":
     let path = getTempDir() / "paintbot-teams-replay-test.replay"
     defer: removeFile(path)
-    visionRulesVersion = 45
-    replayRulesVersion = 45
+    visionRulesVersion = LiveRules
+    replayRulesVersion = LiveRules
     gameMode = gmTeams
     world = newWorld(2026, 14400)
     recording = Recording(seed: 2026, endTick: world.endTick)
-    var commands: array[Seats, Command]
+    var commands: array[LegacySeats, Command]
     for tick in 0..<24:
       world.step(commands)
-      recording.frames.add Frame(commands: commands, hash: world.stateHash())
+      recording.frames.add Frame(commands: @(commands), hash: world.stateHash())
     saveRecording(path, recording)
-    check loadReplayFileHeader(path).gameVersion == 45
-    check loadReplayFile(path, "paintbot_pw", 45, Recording).frames == recording.frames
+    check loadReplayFileHeader(path).gameVersion == LiveRules.uint16
+    check loadReplayFile(path, "paintbot_pw", LiveRules.uint16, Recording).frames == recording.frames
     kinshipOverride = some(kinshipFor(klClones, 1))
     gameMode = gmFfaKin
     check loadRecording(path).frames == recording.frames
@@ -100,23 +100,23 @@ suite "FFA-kin replay payload":
     let path = getTempDir() / "paintbot-ffa-bad-replay-test.replay"
     defer: removeFile(path)
     let k = kinshipFor(klFours, 3)
-    var bad = RecordingFfa(seed: 1, endTick: 240, mode: 1, layout: k.layout.uint8,
-      family: k.family, genes: k.genes, ibd: k.ibd)
+    var bad = RecordingFfa(seed: 1, endTick: 240, seats: LegacySeats, names: newSeq[string](LegacySeats),
+      mode: 1, layout: k.layout.uint8, family: k.family, genes: k.genes, ibd: k.ibd)
     saveReplayFile(path, "paintbot_pw", 1039, bad)
     expect ReplayError: discard loadRecording(path)
     bad.ibd[0][1] = 33
-    saveReplayFile(path, "paintbot_pw", 1041, bad)
+    saveReplayFile(path, "paintbot_pw", 1046, bad)
     expect ReplayError: discard loadRecording(path)
     bad.ibd = k.ibd
     bad.layout = 9
-    saveReplayFile(path, "paintbot_pw", 1041, bad)
+    saveReplayFile(path, "paintbot_pw", 1046, bad)
     expect ReplayError: discard loadRecording(path)
     bad.layout = k.layout.uint8
     template refused(field, value: untyped) =
       ## One corrupt field, restored afterwards, must make the loader refuse the replay.
       let saved = field
       field = value
-      saveReplayFile(path, "paintbot_pw", 1041, bad)
+      saveReplayFile(path, "paintbot_pw", 1046, bad)
       expect ReplayError: discard loadRecording(path)
       field = saved
     refused(bad.mode, 0'u8) # a teams mode inside an FFA payload
@@ -127,7 +127,7 @@ suite "FFA-kin replay payload":
     refused(bad.ibd[2][5], (if k.ibd[2][5] == 0: 8'i8 else: 0'i8)) # asymmetric
     refused(bad.ibd[7][1], -1'i8)
     refused(bad.map, "nowhere") # an unknown map is an invalid replay
-    saveReplayFile(path, "paintbot_pw", 1041, bad)
+    saveReplayFile(path, "paintbot_pw", 1046, bad)
     check loadRecording(path).endTick == 240
     check activeKinship == k
 
@@ -135,7 +135,8 @@ suite "FFA-kin replay payload":
     let path = getTempDir() / "paintbot-ffa-override-test.replay"
     defer: removeFile(path)
     let k = kinshipFor(klPairs, 5)
-    saveReplayFile(path, "paintbot_pw", 1041, RecordingFfa(seed: 1, endTick: 240, mode: 1,
+    saveReplayFile(path, "paintbot_pw", 1046, RecordingFfa(seed: 1, endTick: 240,
+      seats: LegacySeats, names: newSeq[string](LegacySeats), mode: 1,
       layout: k.layout.uint8, family: k.family, genes: k.genes, ibd: k.ibd))
     discard loadRecording(path)
     check kinshipOverride == some(k) # replay analysis rebuilds the recorded world from it

@@ -28,7 +28,7 @@ proc riverMask(): ObjectiveMask =
   result[9] = true
   result[10] = true
 
-proc mixedActions(w: World, actions: var array[Seats*ActionSizes.len, int32], seed: int, avoid: ObjectiveMask) =
+proc mixedActions(w: World, actions: var array[LegacySeats*ActionSizes.len, int32], seed: int, avoid: ObjectiveMask) =
   ## Heart objectives (never an avoided one), identity aim at the nearest apparent enemy
   ## else a changing compass aim, fire, grenade and sneak on schedules.
   for slot in 0..<Seats:
@@ -127,8 +127,8 @@ suite "Native decoder objective forbid":
       pw_destroy(plain)
     var river = River
     check pw_set_seat_forbid_objectives(h, 4, ibuf(river), 2) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, cfloat]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, cfloat]
     let before = pw_state_hash(h)
     actions[4*ActionSizes.len] = 10
     check pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == -3
@@ -192,14 +192,14 @@ suite "Native decoder strafe legs":
         for slot in countup(0, Seats-1, 2): check strafeDefaults(handle, slot) == 0
         var river = River
         check pw_set_seat_forbid_objectives(handle, 0, ibuf(river), 2) == 0
-        var avoid: array[Seats, ObjectiveMask]
+        var avoid: array[LegacySeats, ObjectiveMask]
         avoid[0] = riverMask()
-        var actions: array[Seats*ActionSizes.len, int32]
-        var commands: array[Seats, Command]
-        var rewards, terminals: array[Seats, float32]
-        var states: array[Seats, StrafeState]
-        var rngs: array[Seats, Rng]
-        var memories: array[Seats, AimMemory]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var commands: array[LegacySeats, Command]
+        var rewards, terminals: array[LegacySeats, float32]
+        var states: array[LegacySeats, StrafeState]
+        var rngs: array[LegacySeats, Rng]
+        var memories: array[LegacySeats, AimMemory]
         var totalLegs, replaced = 0
         for pass in 0..1:
           reference = newWorld(matchSeed, 900)
@@ -210,7 +210,7 @@ suite "Native decoder strafe legs":
             memories[slot].resetAimMemory()
           while reference.winner == -1 and reference.tick < reference.endTick:
             mixedActions(reference, actions, seed.int, avoid[0])
-            var executed: array[Seats, int32]
+            var executed: array[LegacySeats, int32]
             for slot in 0..<Seats:
               let o = slot*ActionSizes.len
               var heads: array[ActionSizes.len, int32]
@@ -247,8 +247,8 @@ suite "Native decoder strafe legs":
       check pw_set_seat_forbid_objectives(toggled, slot.cint, ibuf(river), 2) == 0
       check pw_set_seat_strafe(toggled, slot.cint, 0, 0, 0, 0, 0, 0) == 0
       check pw_set_seat_forbid_objectives(toggled, slot.cint, nil, 0) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, cfloat]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, cfloat]
     var none: ObjectiveMask
     var w = newWorld(2026, 600)
     for tick in 0..<600:
@@ -256,7 +256,7 @@ suite "Native decoder strafe legs":
       check pw_step(plain, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       check pw_step(toggled, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       check pw_state_hash(plain) == pw_state_hash(toggled)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for slot in 0..<Seats:
         let o = slot*ActionSizes.len
         commands[slot] = w.decodeActions(slot, actions.toOpenArray(o, o+ActionSizes.len-1), w.observedBodies(slot))
@@ -278,7 +278,7 @@ suite "Hosted neural seats and the native ABI take the same decoder path":
     result.add ActionContractV2Hash
     for x in ActionSizes: result.u32(x.uint32)
     result.add repeat('\0', n*4)
-  proc neuralSeats(decoder: string): array[Seats, Bot] =
+  proc neuralSeats(decoder: string): seq[Bot] =
     let path = getTempDir()/"paintbot-native-river-strafe-test.bas"
     writeFile(path, "paintbot_observe(neuralObservation())\n" &
       "run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())\n" &
@@ -310,11 +310,11 @@ suite "Hosted neural seats and the native ABI take the same decoder path":
             check pw_set_seat_fire_hold(handle, slot.cint, 1) == 0
           else:
             check pw_set_seat_strafe(handle, slot.cint, 5250, 2, 4, 6, 9, 500) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var rewards, terminals: array[Seats, float32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var rewards, terminals: array[LegacySeats, float32]
         var zero: array[LogitSize, float32]
         var steps = 0
-        var decisions: array[Seats, int]
+        var decisions: array[LegacySeats, int]
         while world.winner == -1 and world.tick < world.endTick:
           # A hosted seat decides (and draws) only while alive on the pre-step world, so the
           # ABI caller selects actions for exactly those seats; a dead seat's are ignored.

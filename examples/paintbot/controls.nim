@@ -17,7 +17,7 @@ proc queueWalkTo*(point: Point) =
 proc queueShootAt*(point: Point) =
   pending.add Command(shoot: true, aim: point)
 
-proc flushPlayerCommands*(commands: var array[Seats, Command], slot: int) =
+proc flushPlayerCommands*(commands: var openArray[Command], slot: int) =
   if slot notin 0..<Seats:
     pending.setLen(0)
     return

@@ -18,7 +18,7 @@ suite "Uniform disguises and friendly fire":
     var w = arena()
     w.pickups = @[Pickup(pos:w.cogs[0].pos,kind:uniformPickup)]
     w.scoreTicks = [24'i32, 48'i32]
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     w.step(commands)
     check w.uniforms[0]
     check w.apparentTeam(0) == 1
@@ -34,7 +34,7 @@ suite "Uniform disguises and friendly fire":
       var w = arena()
       w.uniforms[0] = true
       w.equipment[0].sprayCan = spray
-      var commands: array[Seats,Command]
+      var commands: array[LegacySeats,Command]
       commands[0] = Command(shoot:true,aim:point(3000,200))
       w.step(commands)
       check not w.uniforms[0]
@@ -42,7 +42,7 @@ suite "Uniform disguises and friendly fire":
     var w = arena()
     w.uniforms[0] = true
     w.equipment[0].grenade = true
-    var commands: array[Seats,Command]
+    var commands: array[LegacySeats,Command]
     commands[0].chargeGrenade = true
     w.step(commands)
     check w.uniforms[0]

@@ -18,7 +18,7 @@ type Buffer = ptr UncheckedArray[cfloat]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
 
-proc shootingActions(w: World, actions: var array[Seats*ActionSizes.len, int32], seed: int) =
+proc shootingActions(w: World, actions: var array[LegacySeats*ActionSizes.len, int32], seed: int) =
   ## Heart objectives or compass legs on a schedule; aims cycle through compass headings,
   ## arbitrary identities and keep; fire on two ticks in three; grenade and sneak on
   ## schedules. Many shoot orders are aimed badly, so the retarget and the gate both act.
@@ -75,13 +75,13 @@ suite "Native decoder aim retarget and shot gate":
     # Options persist across reset; counts reset.
     check pw_set_seat_aim_retarget(h, 3, 1, 5250, 160000, 2500000) == 0
     check pw_set_seat_shot_gate(h, 3, 5250) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, cfloat]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, cfloat]
     var w = newWorld(1, 240)
     for tick in 0..<200:
       shootingActions(w, actions, 0)
       require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       w.step(commands)   # only the tick matters to shootingActions' schedules
     check pw_seat_shot_gate_stats(h, 3, ibuf(stats)) == 0
     check stats[0] > 0
@@ -101,10 +101,10 @@ suite "Native decoder aim retarget and shot gate":
         let version = ActionContractVersion(contract)
         # Seats 0 mod 4: retarget + snap + gate + steady; 1 mod 4: retarget (custom weights)
         # only; 2 mod 4: gate (3000) + snap 45 + strafe, no retarget; 3 mod 4: plain.
-        var retargetOn: array[Seats, AimRetargetOptions]
-        var gateOn: array[Seats, ShotGateOptions]
-        var snapOn: array[Seats, AimSnapOptions]
-        var steadyOn, strafeOn: array[Seats, bool]
+        var retargetOn: array[LegacySeats, AimRetargetOptions]
+        var gateOn: array[LegacySeats, ShotGateOptions]
+        var snapOn: array[LegacySeats, AimSnapOptions]
+        var steadyOn, strafeOn: array[LegacySeats, bool]
         for slot in 0..<Seats:
           case slot mod 4
           of 0:
@@ -121,13 +121,13 @@ suite "Native decoder aim retarget and shot gate":
           if snapOn[slot].enabled: check pw_set_seat_aim_snap(handle, slot.cint, snapOn[slot].maxAngleMillideg) == 0
           if steadyOn[slot]: check pw_set_seat_steady_shot(handle, slot.cint, 1) == 0
           if strafeOn[slot]: check pw_set_seat_strafe(handle, slot.cint, 5250, 3, 6, 6, 9, 800) == 0
-        var actions: array[Seats*ActionSizes.len, int32]
-        var commands: array[Seats, Command]
-        var rewards, terminals: array[Seats, float32]
-        var states: array[Seats, StrafeState]
-        var rngs: array[Seats, Rng]
-        var memories: array[Seats, AimMemory]
-        var retargets, snaps, gates, shots, ticks: array[Seats, int32]
+        var actions: array[LegacySeats*ActionSizes.len, int32]
+        var commands: array[LegacySeats, Command]
+        var rewards, terminals: array[LegacySeats, float32]
+        var states: array[LegacySeats, StrafeState]
+        var rngs: array[LegacySeats, Rng]
+        var memories: array[LegacySeats, AimMemory]
+        var retargets, snaps, gates, shots, ticks: array[LegacySeats, int32]
         var totalRetargets, totalGates, snappedDrops, totalSnaps = 0
         for pass in 0..1:
           reference = newWorld(matchSeed, 900)
@@ -139,7 +139,7 @@ suite "Native decoder aim retarget and shot gate":
             retargets[slot] = 0; snaps[slot] = 0; gates[slot] = 0; shots[slot] = 0; ticks[slot] = 0
           while reference.winner == -1 and reference.tick < reference.endTick:
             shootingActions(reference, actions, seed.int)
-            var retargetLast, snapLast, gateLast, strafeLast, steadyLast: array[Seats, int32]
+            var retargetLast, snapLast, gateLast, strafeLast, steadyLast: array[LegacySeats, int32]
             for slot in 0..<Seats:
               let o = slot*ActionSizes.len
               var heads: array[ActionSizes.len, int32]
@@ -206,17 +206,17 @@ suite "Native decoder aim retarget and shot gate":
       check pw_set_seat_shot_gate(toggled, slot.cint, 5250) == 0
       check pw_set_seat_aim_retarget(toggled, slot.cint, 0, 0, 0, 0) == 0
       check pw_set_seat_shot_gate(toggled, slot.cint, 0) == 0
-    var actions: array[Seats*ActionSizes.len, int32]
-    var rewards, terminals: array[Seats, cfloat]
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, cfloat]
     var w = newWorld(2026, 600)
-    var memories: array[Seats, AimMemory]
+    var memories: array[LegacySeats, AimMemory]
     for slot in 0..<Seats: memories[slot].resetAimMemory()
     for tick in 0..<600:
       shootingActions(w, actions, 3)
       check pw_step(plain, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       check pw_step(toggled, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       check pw_state_hash(plain) == pw_state_hash(toggled)
-      var commands: array[Seats, Command]
+      var commands: array[LegacySeats, Command]
       for slot in 0..<Seats:
         let o = slot*ActionSizes.len
         let bodies = w.observedBodies(slot)
@@ -242,7 +242,7 @@ suite "Hosted neural seats and the native ABI take the same decoder path (aim re
     result.add ActionContractV2Hash
     for x in ActionSizes: result.u32(x.uint32)
     result.add repeat('\0', n*4)
-  proc neuralSeats(decoder: string): array[Seats, Bot] =
+  proc neuralSeats(decoder: string): seq[Bot] =
     let path = getTempDir()/"paintbot-native-retarget-gate-test.bas"
     writeFile(path, "paintbot_observe(neuralObservation())\n" &
       "run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())\n" &
@@ -274,7 +274,7 @@ suite "Hosted neural seats and the native ABI take the same decoder path (aim re
         for side in 0..1:
           let on = neuralSeats(config.decoder)
           let off = neuralSeats(plainSeats)
-          var players: array[Seats, Bot]
+          var players: seq[Bot]
           for slot in 0..<Seats: players[slot] = if team(slot) == side: on[slot] else: off[slot]
           var world = newWorld(seed, ticks.int32)
           let handle = pw_create(seed, ticks.int32)
@@ -293,8 +293,8 @@ suite "Hosted neural seats and the native ABI take the same decoder path (aim re
               check pw_set_seat_forbid_objectives(handle, slot.cint, ibuf(river), 2) == 0
               check pw_set_seat_strafe(handle, slot.cint, 5250, 3, 6, 6, 9, 800) == 0
               check pw_set_seat_fire_hold(handle, slot.cint, 1) == 0
-          var actions: array[Seats*ActionSizes.len, int32]
-          var rewards, terminals: array[Seats, float32]
+          var actions: array[LegacySeats*ActionSizes.len, int32]
+          var rewards, terminals: array[LegacySeats, float32]
           var zero: array[LogitSize, float32]
           var steps = 0
           while world.winner == -1 and world.tick < world.endTick:
