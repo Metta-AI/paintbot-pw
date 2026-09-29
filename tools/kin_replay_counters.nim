@@ -124,8 +124,7 @@ proc recordMatch(output: string, bots: seq[string], seed, ticks, layout: int32) 
     for _ in 0..<count: names.add bot.extractFilename
   var players = loadBots(groups)
   world = newWorld(seed, ticks)
-  var rec = Recording(seed: seed, endTick: world.endTick)
-  for i in 0..<LegacySeats: rec.names[i] = names[i]
+  var rec = Recording(seed: seed, endTick: world.endTick, names: names, seats: LegacySeats)
   while world.winner == -1:
     let commands = players.decide(world)
     deliverSpeech(world)
