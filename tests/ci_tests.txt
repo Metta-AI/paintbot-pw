@@ -59,6 +59,7 @@ nim r tests/test_paintbot_map_modes.nim
 nim r tests/test_paintbot_seat_counts.nim
 nim r tests/test_paintbot_glory_behind.nim
 nim r tests/test_paintbot_glory_config.nim
+nim r tests/test_paintbot_glory_behind_cogs.nim
 nim r tests/test_paintbot_weapon_buff.nim
 nim r tests/test_paintbot_rules40_golden.nim
 nim r tests/test_paintbot_rules41_golden.nim

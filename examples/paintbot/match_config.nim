@@ -8,16 +8,18 @@ const
   GloryAwardLimit* = 1000 ## the most one glory award may pay
   GloryPeriodLimit* = 600 ## the longest glory period, in seconds
   GloryConfigKeys = ["quiet_supplies", "quiet_supplies_seconds", "behind_lives",
-    "behind_lives_seconds", "heart"]
+    "behind_lives_seconds", "heart", "behind_cogs", "behind_cogs_seconds"]
 proc validGloryConfig*(g: GloryConfig): bool =
   g.quietSupplies in 0..GloryAwardLimit and g.behindLives in 0..GloryAwardLimit and
-    g.heart in 0..GloryAwardLimit and g.quietSupplySeconds in 1..GloryPeriodLimit and
-    g.behindLivesSeconds in 1..GloryPeriodLimit
+    g.heart in 0..GloryAwardLimit and g.behindCogs in 0..GloryAwardLimit and
+    g.quietSupplySeconds in 1..GloryPeriodLimit and g.behindLivesSeconds in 1..GloryPeriodLimit and
+    g.behindCogsSeconds in 1..GloryPeriodLimit
 proc parseGloryConfig*(node: JsonNode): GloryConfig =
   ## The Coworld config's optional "glory" object (rules 43, teams game). Each key overrides
   ## one default award; absent keys keep the default. Keys: quiet_supplies (glory per quiet
   ## stretch), quiet_supplies_seconds (its length), behind_lives (glory per life behind),
-  ## behind_lives_seconds (its period), heart (a glory heart's award).
+  ## behind_lives_seconds (its period), heart (a glory heart's award), and from rules 47
+  ## behind_cogs (glory per cog out of the match beyond the enemy's) and behind_cogs_seconds.
   result = DefaultGloryConfig
   if node.isNil or node.kind == JNull: return
   if node.kind != JObject: raise newException(ValueError, "Paintbot glory must be an object")
@@ -33,6 +35,8 @@ proc parseGloryConfig*(node: JsonNode): GloryConfig =
     of "behind_lives": result.behindLives = n.int32
     of "behind_lives_seconds": result.behindLivesSeconds = n.int32
     of "heart": result.heart = n.int32
+    of "behind_cogs": result.behindCogs = n.int32
+    of "behind_cogs_seconds": result.behindCogsSeconds = n.int32
   if not validGloryConfig(result):
     raise newException(ValueError, "Paintbot glory awards must be 0.." & $GloryAwardLimit &
       " and periods 1.." & $GloryPeriodLimit & " seconds")

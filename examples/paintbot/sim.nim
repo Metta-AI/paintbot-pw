@@ -45,6 +45,10 @@ const
   # than the enemy (lives left summed over its cogs); the team ahead in lives earns nothing.
   GloryBehindLives* = 1
   GloryBehindLivesTicks* = 5*TickRate
+  # Rules 47: every GloryBehindCogsTicks a team also earns GloryBehindCogs per cog it has out
+  # of the match (no lives left and dead) beyond the enemy's count; the team ahead earns nothing.
+  GloryBehindCogs* = 1
+  GloryBehindCogsTicks* = 5*TickRate
   SpawnTemperature* = 1000
   HeartSpawnRadius* = 350
   # FFA-kin great hearts (a stag hunt): GreatHeartQuorum living cogs inside GreatHeartRadius
@@ -136,7 +140,7 @@ type
   SoundCue* = object
     listener*, kind*, direction*, distance*, tick*: int32
   GloryKind* = enum
-    gloryQuietSupplies, gloryFriendlyFire, gloryHeart, gloryBehindLives
+    gloryQuietSupplies, gloryFriendlyFire, gloryHeart, gloryBehindLives, gloryBehindCogs
   GloryEvent* = object
     tick*, team*, amount*: int32
     kind*: GloryKind
@@ -230,7 +234,7 @@ type GameMode* = enum
   gmTeams, gmFfaKin
 # Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
 # still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
-const LiveRules* = 46
+const LiveRules* = 47
   ## The rules live games play and record (game.nim's replayRulesVersion starts here too). The
   ## training library defaults to its own NativeRules and accepts NativeRules .. LiveRules.
 when defined(pwTraining):
@@ -597,11 +601,14 @@ proc configureVision*(mode: string) =
 proc visionMode*(): string = (if teamVision: "team" else: "")
 type GloryConfig* = object
   ## Rules 43: the glory awards a match pays, from the Coworld config's "glory" (see
-  ## parseGloryConfig in game.nim). Periods are whole seconds; teams recordings carry it.
+  ## parseGloryConfig in match_config.nim). Periods are whole seconds; teams recordings carry
+  ## it. behindCogs and behindCogsSeconds are rules 47's (recordings from rules 47 on).
   quietSupplies*, quietSupplySeconds*, behindLives*, behindLivesSeconds*, heart*: int32
+  behindCogs*, behindCogsSeconds*: int32
 const DefaultGloryConfig* = GloryConfig(quietSupplies: GloryQuietSupplies,
   quietSupplySeconds: GloryQuietSupplyTicks div TickRate, behindLives: GloryBehindLives,
-  behindLivesSeconds: GloryBehindLivesTicks div TickRate, heart: GloryHeartAward)
+  behindLivesSeconds: GloryBehindLivesTicks div TickRate, heart: GloryHeartAward,
+  behindCogs: GloryBehindCogs, behindCogsSeconds: GloryBehindCogsTicks div TickRate)
 when defined(pwTraining):
   var gloryConfigured {.threadvar.}: bool
   var gloryOverride {.threadvar.}: GloryConfig
@@ -909,10 +916,17 @@ proc teamLives*(w: World, side: int): int32 =
   for i in 0..<Seats:
     if team(i) == side: result += w.equipment[i].lives
 
+proc teamCogsOut*(w: World, side: int): int32 =
+  ## The side's cogs out of the match (dead with no lives left): the count the rules-47
+  ## behind-in-cogs glory award compares (updateGlory) and BASIC teamCogsOut(t).
+  for i in 0..<Seats:
+    if team(i) == side and w.cogs[i].hp <= 0 and w.equipment[i].lives <= 0: inc result
+
 proc updateGlory*(w: var World) =
   ## Rules 37, once per tick after the tick counter advances: forget old awards, count
   ## down one glory per second, pay a team that went thirty seconds without supplies, and
-  ## (rules 39) pay a team behind in lives every five seconds.
+  ## (rules 39) pay a team behind in lives every five seconds, and (rules 47) pay a team
+  ## with more cogs out of the match than the enemy.
   var recent: seq[GloryEvent]
   for event in w.gloryEvents:
     if w.tick-event.tick < GloryEventLifetime: recent.add event
@@ -929,6 +943,11 @@ proc updateGlory*(w: var World) =
     for side in 0..1:
       let behind = lives[1-side]-lives[side]
       if behind > 0: w.earnGlory(side, gloryBehindLives, behind*rules.behindLives)
+  if visionRulesVersion >= 47 and w.tick mod (rules.behindCogsSeconds*TickRate) == 0:
+    let down = [w.teamCogsOut(0), w.teamCogsOut(1)]
+    for side in 0..1:
+      let behind = down[side]-down[1-side]
+      if behind > 0: w.earnGlory(side, gloryBehindCogs, behind*rules.behindCogs)
 
 proc gloryHeartSpot(w: var World): (bool, Point) =
   ## A random open spot on dry land whose mirror is open too; false after 32 misses.

@@ -892,7 +892,7 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(_schema_errors(schema, certification), [])
         self.assertNotIn("mode", self.manifest["certification"]["game_config"])
 
-    def test_teams_variants_pay_five_glory_per_life_behind(self):
+    def test_teams_variants_pay_five_glory_per_life_and_cog_behind(self):
         schema = self.manifest["game"]["config_schema"]
         for variant in self.manifest["variants"]:
             with self.subTest(variant["id"]):
@@ -900,13 +900,14 @@ class ManifestTests(unittest.TestCase):
                 if config.get("mode") == "ffa_kin":
                     self.assertNotIn("glory", config)
                 else:
-                    self.assertEqual(config["glory"], {"behind_lives": 5})
+                    self.assertEqual(config["glory"], {"behind_lives": 5, "behind_cogs": 5})
         competition = self._config("competition")
         self.assertEqual(_schema_errors(schema, dict(competition, glory={
             "quiet_supplies": 0, "quiet_supplies_seconds": 600, "behind_lives": 1000,
-            "behind_lives_seconds": 1, "heart": 20})), [])
+            "behind_lives_seconds": 1, "heart": 20, "behind_cogs": 1000, "behind_cogs_seconds": 600})), [])
         for bad in ({"behind": 5}, {"behind_lives": -1}, {"behind_lives": 1001},
-                    {"behind_lives_seconds": 0}, {"behind_lives": 1.5}, []):
+                    {"behind_lives_seconds": 0}, {"behind_lives": 1.5}, {"behind_cogs": 1001},
+                    {"behind_cogs_seconds": 0}, {"behind_cogs": -1}, []):
             self.assertTrue(_schema_errors(schema, dict(competition, glory=bad)), bad)
 
     def test_heartland_is_competition_in_ffa_kin_mode(self):
