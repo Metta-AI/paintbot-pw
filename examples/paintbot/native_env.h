@@ -286,6 +286,13 @@ int pw_seat_spray_stats(void *handle, int seat, int32_t *stats);
  * telemetry, never part of the world or its hash; -1 bad args. */
 int pw_seat_weapon_stats(void *handle, int seat, int32_t *stats);
 
+/* pw_seat_state (training library only): float[16 * 8], per seat in seat order {x, z (world
+ * units), hp, armor, lives, respawn (ticks until the seat respawns, 0 while alive), carrying (1 =
+ * holds a heart), equipment bits (1 = grenade, 2 = spray can)}: every seat's public body state in
+ * one call, for training-side critics. Pure read: the world and its hash are unchanged. -1 bad
+ * args. */
+int pw_seat_state(void *handle, float *sixteen_seats_times_eight);
+
 /* pw_world_json (training library only): the whole world as one JSON object, {"rulesVersion": R,
  * "heard": {}, then every World field} -- the object the engine streamed to PW_POLICY_FD each tick
  * before seats stopped acting through the host (#51) -- for external controllers that plan from
