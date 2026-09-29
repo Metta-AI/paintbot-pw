@@ -153,7 +153,65 @@
     };
     handle.onpointercancel = () => { drag=null; };
   }
-  window.addEventListener('resize', containMap);
+  // The map keeps the arena's aspect ratio; its width is the viewer's choice (grip or arrow
+  // keys) and is remembered. The canvas is backed at device resolution so small markers stay crisp.
+  const mapStore = "paintbot.minimapWidth";
+  let mapWidth = 0;
+  try { mapWidth = +localStorage.getItem(mapStore) || 0; } catch {}
+  const mapAspect = () => {
+    const b = state?.bounds || [0, 0, 6400, 4000];
+    return (b[2] - b[0]) / (b[3] - b[1]);
+  };
+  let mapLayout = null;
+  function layoutMap() {
+    const aspect = mapAspect(), dpr = devicePixelRatio || 1;
+    const key = [aspect, mapWidth, innerWidth, innerHeight, dpr].join();
+    if (mapLayout?.key === key) return mapLayout;
+    const canvas = $("minimap");
+    const auto = Math.min(innerWidth * 0.22, innerHeight * 0.3 * aspect);
+    const limit = Math.max(120, Math.min(innerWidth - 24, (innerHeight - 140) * aspect));
+    const width = Math.round(Math.max(120, Math.min(limit, mapWidth || Math.max(180, auto))));
+    const height = Math.round(width / aspect);
+    canvas.style.width = `${width}px`; canvas.style.height = `${height}px`;
+    canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+    containMap();
+    return (mapLayout = { key, width, height, dpr });
+  }
+  function resizeMap(width) {
+    mapWidth = Math.max(120, width);
+    const r = mapPanel.getBoundingClientRect();
+    // Pin the bottom-left corner (the map's home) so it grows up and right, toward the grip.
+    mapPanel.style.left = `${r.left}px`; mapPanel.style.bottom = `${innerHeight - r.bottom}px`; mapPanel.style.top = 'auto';
+    mapWidth = layoutMap().width;
+    try { localStorage.setItem(mapStore, String(mapWidth)); } catch {}
+    redrawMap();
+  }
+  // Resizing clears the canvas; repaint at once, since a paused replay sends no new frames.
+  const redrawMap = () => { if (state?.world) minimap(); else layoutMap(); };
+  {
+    const grip = $("map-resize");
+    let drag = null;
+    grip.onpointerdown = e => {
+      if (e.button !== 0) return;
+      const r = $("minimap").getBoundingClientRect();
+      drag = { x: e.clientX, y: e.clientY, width: r.width, height: r.height };
+      grip.setPointerCapture(e.pointerId);
+      e.stopPropagation();
+    };
+    grip.onpointermove = e => {
+      if (!drag) return;
+      const aspect = mapAspect();
+      resizeMap(Math.max(drag.width + e.clientX - drag.x, (drag.height - e.clientY + drag.y) * aspect));
+    };
+    grip.onpointerup = grip.onpointercancel = () => { drag = null; };
+    grip.onkeydown = e => {
+      const step = { ArrowRight: 32, ArrowUp: 32, ArrowLeft: -32, ArrowDown: -32 }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      resizeMap($("minimap").getBoundingClientRect().width + step);
+    };
+  }
+  window.addEventListener('resize', redrawMap);
   $("territorytoggle").lastChild.textContent = "";
   $("territorytoggle").insertAdjacentHTML("beforeend", icon("map"));
   $("territorytoggle").title = "Territory overlay";
@@ -1133,16 +1191,19 @@
       return memo.get(css);
     };
   })();
+  // Territory and cover are cached at a fixed resolution (independent of the on-screen size)
+  // and scaled onto the canvas, so resizing the map never recomputes them.
   function minimapLayers(w, bounds) {
     const hearts = w.controlHearts || [];
+    const spanX = bounds[2] - bounds[0], spanZ = bounds[3] - bounds[1];
+    const LW = 480, LH = Math.max(1, Math.round(LW * spanZ / spanX));
     const geometry = [bounds.join(","), hearts.map((h) => h.pos.x + "," + h.pos.z).join(";"),
       (w.cover || []).length, landMask ? landMask.length : 0, w.rulesVersion].join("|");
     if (!minimapCache || minimapCache.geometry !== geometry) {
-      const spanX = bounds[2] - bounds[0], spanZ = bounds[3] - bounds[1];
-      const nearest = new Int16Array(320 * 200).fill(-1);
-      for (let py = 0; py < 200; py++)
-        for (let px = 0; px < 320; px++) {
-          const x = bounds[0] + (px + 0.5) * spanX / 320, z = bounds[1] + (py + 0.5) * spanZ / 200;
+      const nearest = new Int16Array(LW * LH).fill(-1);
+      for (let py = 0; py < LH; py++)
+        for (let px = 0; px < LW; px++) {
+          const x = bounds[0] + (px + 0.5) * spanX / LW, z = bounds[1] + (py + 0.5) * spanZ / LH;
           if (landMask) {
             const cols = spanX / 100;
             if (landMask[Math.floor((z - bounds[1]) / 100) * cols + Math.floor((x - bounds[0]) / 100)] !== "1") continue;
@@ -1152,27 +1213,27 @@
             const d = (h.pos.x - x) ** 2 + (h.pos.z - z) ** 2;
             if (d < distance) { best = k; distance = d; }
           });
-          nearest[py * 320 + px] = best;
+          nearest[py * LW + px] = best;
         }
       const cover = document.createElement("canvas");
-      cover.width = 320; cover.height = 200;
+      cover.width = 2 * LW; cover.height = 2 * LH;
       const cc = cover.getContext("2d");
-      cc.scale(6400 / spanX, 4000 / spanZ);
-      cc.translate(-bounds[0] / 20, -bounds[1] / 20);
+      cc.scale(cover.width / spanX, cover.height / spanZ);
+      cc.translate(-bounds[0], -bounds[1]);
       cc.fillStyle = "#c0b68b";
       for (const c of w.cover || []) {
         if (c.h === 0) {
           cc.beginPath();
-          cc.arc((c.x + c.w / 2) / 20, (c.z + c.w / 2) / 20, c.w / 40, 0, Math.PI * 2);
+          cc.arc(c.x + c.w / 2, c.z + c.w / 2, c.w / 2, 0, Math.PI * 2);
           cc.fill();
-        } else cc.fillRect(c.x / 20, c.z / 20, c.w / 20, c.h / 20);
+        } else cc.fillRect(c.x, c.z, c.w, c.h);
       }
-      minimapCache = { geometry, nearest, cover, owners: null, territory: null };
+      minimapCache = { geometry, nearest, cover, owners: null, territory: null, LW, LH };
     }
     const owners = hearts.map((h) => h.owner).join(",") + (ffaOn() ? "|ffa" : "");
     if (hearts.length && minimapCache.owners !== owners) {
-      const territory = minimapCache.territory || Object.assign(document.createElement("canvas"), { width: 320, height: 200 });
-      const tc = territory.getContext("2d"), image = tc.createImageData(320, 200);
+      const territory = minimapCache.territory || Object.assign(document.createElement("canvas"), { width: LW, height: LH });
+      const tc = territory.getContext("2d"), image = tc.createImageData(LW, LH);
       const palette = hearts.map((h) => cssRgb(h.owner < 0 ? "#747e80" : ffaOn() ? seatColor(h.owner) : colors[h.owner]));
       for (let k = 0; k < minimapCache.nearest.length; k++) {
         const n = minimapCache.nearest[k];
@@ -1186,27 +1247,43 @@
     }
     return minimapCache;
   }
+  // A heart of half-width s centred on (x, y), drawn as a path so it stays legible at any size.
+  function heartPath(ctx, x, y, s) {
+    ctx.beginPath();
+    ctx.moveTo(x, y + s);
+    ctx.bezierCurveTo(x - 1.7 * s, y - 0.1 * s, x - 0.7 * s, y - 1.35 * s, x, y - 0.45 * s);
+    ctx.bezierCurveTo(x + 0.7 * s, y - 1.35 * s, x + 1.7 * s, y - 0.1 * s, x, y + s);
+    ctx.closePath();
+  }
   function minimap() {
     const canvas = $("minimap"),
       ctx = canvas.getContext("2d"),
       w = state.world;
+    const { width: W, height: H, dpr } = layoutMap();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = w.rulesVersion >= 16 ? "#398b96" : "#294835";
-    ctx.fillRect(0, 0, 320, 200);
+    ctx.fillRect(0, 0, W, H);
     const bounds = state.bounds || [0, 0, 6400, 4000];
-    // Territory and cover are cached as canvas-resolution layers: the territory is repainted
-    // only when a heart changes hands, the cover only when the map does. (Drawing them per
-    // metre every frame cost hundreds of thousands of fills on a large map.)
+    // Territory and cover are cached layers: the territory is repainted only when a heart
+    // changes hands, the cover only when the map does. (Drawing them per metre every frame cost
+    // hundreds of thousands of fills on a large map.)
     const layers = minimapLayers(w, bounds);
-    if (layers.territory) ctx.drawImage(layers.territory, 0, 0);
-    ctx.drawImage(layers.cover, 0, 0);
+    ctx.imageSmoothingEnabled = true;
+    if (layers.territory) ctx.drawImage(layers.territory, 0, 0, W, H);
+    ctx.drawImage(layers.cover, 0, 0, W, H);
     ctx.save();
-    const mapX = x => (x - bounds[0]) * 320 / (bounds[2] - bounds[0]);
-    const mapY = z => (z - bounds[1]) * 200 / (bounds[3] - bounds[1]);
+    const mapX = x => (x - bounds[0]) * W / (bounds[2] - bounds[0]);
+    const mapY = z => (z - bounds[1]) * H / (bounds[3] - bounds[1]);
+    // Marker sizes follow density: a ten-heart arena gets big hearts, a hundred-heart one gets
+    // small ones that do not overlap. The territory tint carries ownership at any density.
+    const heartCount = Math.max(1, (w.controlHearts || w.hearts || []).length);
+    const hr = Math.max(2.5, Math.min(8, 0.16 * Math.sqrt(W * H / heartCount)));
+    const cr = Math.max(2, Math.min(4, 0.12 * Math.sqrt(W * H / Math.max(1, w.cogs.length))));
     // Trench footprints are independent of ownership and remain readable over paint.
     for (const trench of w.trenches || []) {
       const x = mapX(trench.x), y = mapY(trench.z);
-      const width = Math.max(5, mapX(trench.x + trench.w) - x);
-      const height = Math.max(4, mapY(trench.z + trench.h) - y);
+      const width = Math.max(3, mapX(trench.x + trench.w) - x);
+      const height = Math.max(3, mapY(trench.z + trench.h) - y);
       ctx.fillStyle = "#302419"; ctx.fillRect(x, y, width, height);
       ctx.strokeStyle = "#d6b274"; ctx.lineWidth = 1.5;
       ctx.strokeRect(x, y, width, height);
@@ -1253,7 +1330,7 @@
         const age = w.tick - cue.tick;
         if (cue.listener !== listener || age < 0 || age > 24) continue;
         const angle = cue.direction * Math.PI / 4;
-        const radius = 15 + cue.distance * 7;
+        const radius = (15 + cue.distance * 7) * W / 320;
         ctx.strokeStyle = ["#e4d8b0", "#ffc06e", "#ff8269", "#99dddd"][cue.kind];
         ctx.globalAlpha = 0.85 * (1 - age / 25); ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(mapX(p.x), mapY(p.z), radius, angle - 0.35, angle + 0.35); ctx.stroke();
@@ -1266,57 +1343,73 @@
       : w.hearts.map((h, owner) => ({ ...h, owner }));
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "bold 20px sans-serif";
     ctx.lineJoin = "round";
-    for (const [i, h] of hearts.entries()) {
+    // Neutral hearts first and faint, so the owned ones read on top of them.
+    const order = [...hearts.keys()].sort((a, b) => (hearts[a].owner >= 0) - (hearts[b].owner >= 0));
+    for (const i of order) {
+      const h = hearts[i];
       const x = mapX(h.pos.x), y = mapY(h.pos.z);
       const big = state.rulesVersion >= 25 && w.bigHeart === i;
-      ctx.font = big ? "bold 30px sans-serif" : "bold 20px sans-serif";
-      ctx.strokeStyle = "#081a18";
-      ctx.lineWidth = 4;
-      ctx.strokeText("♥", x, y);
-      ctx.fillStyle = h.owner < 0 ? "#ffe8a3" : ffaOn() ? seatColor(h.owner) : markerColors[h.owner];
-      ctx.fillText("♥", x, y);
+      const s = big ? hr * 1.5 : hr;
+      heartPath(ctx, x, y, s);
+      if (h.owner < 0) {
+        ctx.fillStyle = "#ffe8a3";
+        ctx.globalAlpha = 0.55;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = "#081a18a0";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = ffaOn() ? seatColor(h.owner) : markerColors[h.owner];
+        ctx.fill();
+        ctx.strokeStyle = "#081a18";
+        ctx.lineWidth = Math.max(1, s / 3.5);
+        ctx.stroke();
+      }
       if (big) {
         ctx.strokeStyle = "#ffd755";
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(x, y, 19, 0, Math.PI * 2);
+        ctx.arc(x, y, s * 2, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.fillStyle = "#ffd755";
-        ctx.font = "bold 12px sans-serif";
-        ctx.fillText("5", x + 23, y);
+        if (s >= 6) {
+          ctx.fillStyle = "#ffd755";
+          ctx.font = "bold 12px sans-serif";
+          ctx.fillText("5", x + s * 2 + 5, y);
+        }
       }
       const capture = w.heartCaptures?.[i];
       if (capture && (capture.ticks > 0 || capture.contested)) {
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = "#27313a";
+        const ring = s + 2.5;
+        ctx.lineWidth = Math.max(1.5, s / 4);
+        ctx.strokeStyle = capture.contested ? "#ffd652" : "#27313a";
         ctx.beginPath();
-        ctx.arc(x, y, 13, 0, Math.PI * 2);
+        ctx.arc(x, y, ring, 0, Math.PI * 2);
         ctx.stroke();
         if (capture.ticks > 0) {
           ctx.strokeStyle = ffaOn() ? seatColor(capture.team) : markerColors[capture.team];
           ctx.beginPath();
-          ctx.arc(x, y, 13, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * capture.ticks / 72);
+          ctx.arc(x, y, ring, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * capture.ticks / 72);
           ctx.stroke();
         }
-        if (capture.contested) {
+        if (capture.contested && s >= 5) {
           ctx.fillStyle = "#ffd652";
           ctx.font = "bold 13px sans-serif";
-          ctx.fillText("!", x, y - 18);
+          ctx.fillText("!", x, y - ring - 6);
         }
       }
     }
     if (ffaOn()) {
       // Great hearts: gold when awake, grey while dormant.
       for (const g of w.greatHearts || []) {
-        const x = mapX(g.pos.x), y = mapY(g.pos.z);
-        ctx.font = "bold 30px sans-serif";
-        ctx.strokeStyle = "#081a18";
-        ctx.lineWidth = 4;
-        ctx.strokeText("♥", x, y);
+        const x = mapX(g.pos.x), y = mapY(g.pos.z), s = Math.max(4, hr * 1.8);
+        heartPath(ctx, x, y, s);
         ctx.fillStyle = w.tick < g.dormantUntil ? "#80848a" : "#ffc43c";
-        ctx.fillText("♥", x, y);
+        ctx.fill();
+        ctx.strokeStyle = "#081a18";
+        ctx.lineWidth = Math.max(1.25, s / 3.5);
+        ctx.stroke();
       }
     }
     for (let i = 0; i < w.cogs.length; i++) {
@@ -1324,29 +1417,30 @@
       if (c.hp <= 0 || (state.celebrating && w.winner >= 0 && team(i) !== w.winner)) continue;
       const x = mapX(c.pos.x), y = mapY(c.pos.z);
       ctx.beginPath();
-      ctx.arc(x, y, i === selected ? 5 : 4, 0, Math.PI * 2);
+      ctx.arc(x, y, i === selected ? cr + 1 : cr, 0, Math.PI * 2);
       ctx.fillStyle = ffaOn() ? seatColor(i) : markerColors[w.uniforms?.[i] ? 1-team(i) : team(i)];
       ctx.globalAlpha = kinDim(i) ? 0.4 : 1;
       ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = cr >= 3 ? 1.5 : 1;
       ctx.strokeStyle = "#081a18";
       ctx.stroke();
       if (i === selected) {
         ctx.beginPath();
-        ctx.arc(x, y, 7, 0, Math.PI * 2);
+        ctx.arc(x, y, cr + 3.5, 0, Math.PI * 2);
         ctx.strokeStyle = "#fff3b0";
         ctx.stroke();
       }
     }
-    ctx.scale(6400 / (bounds[2] - bounds[0]), 4000 / (bounds[3] - bounds[1]));
-    ctx.translate(-bounds[0] / 20, -bounds[1] / 20);
+    // The footprint is in camera units (metres, origin at the arena centre): map it point by
+    // point so the outline stays one pixel wide on any arena size.
     ctx.lineWidth = 1;
     ctx.strokeStyle = "#ffffff88";
     ctx.beginPath();
     state.footprint.forEach((p, i) => {
-      if (i === 0) ctx.moveTo((p[0] + 32) * 5, (p[1] + 20) * 5);
-      else ctx.lineTo((p[0] + 32) * 5, (p[1] + 20) * 5);
+      const x = mapX((p[0] + 32) * 100), y = mapY((p[1] + 20) * 100);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
     });
     ctx.closePath();
     ctx.stroke();

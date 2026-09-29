@@ -1059,20 +1059,27 @@
   }
   #map-panel {
     position: fixed; left: 0; bottom: 84px; z-index: 34;
-    width: min(9.9vw, calc(15.84vh - 2px));
+    width: fit-content;
     background: var(--panel); border: 1px solid var(--line);
     border-radius: 12px; box-shadow: 0 8px 24px #0004; overflow: hidden;
   }
   #map-panel.collapsed { width: 36px; height: 36px; border-radius: 10px; }
   #map-panel [hidden] { display: none; }
   #map-collapse {
-    position: absolute; right: 4px; top: 4px; z-index: 1;
+    position: absolute; left: 4px; top: 4px; z-index: 1;
     width: 24px; height: 24px; padding: 2px; border: 0;
     background: #10231fcc; border-radius: 5px;
   }
   #map-expand { width: 34px; height: 34px; padding: 8px; border: 0; background: transparent; touch-action: none; }
   .map-content { padding: 0; }
-  #map-panel #minimap { border: 0; border-radius: 0; cursor: grab; }
+  #map-panel #minimap { width: 100%; max-height: none; border: 0; border-radius: 0; cursor: grab; }
+  #map-resize {
+    position: absolute; right: 0; top: 0; z-index: 1;
+    width: 24px; height: 24px; padding: 0; border: 0;
+    border-bottom-left-radius: 8px; background: #10231fcc;
+    color: var(--gold); font-size: 13px; line-height: 24px;
+    cursor: nesw-resize; touch-action: none;
+  }
   #comms summary {
     padding: 7px 10px;
     font-size: 10px;
@@ -1366,6 +1373,7 @@
     <div class="map-content">
       <canvas id="minimap" width="320" height="200" aria-label="Tactical minimap. Click to move the camera; drag to reposition the map."></canvas>
     </div>
+    <button id="map-resize" aria-label="Resize tactical map" title="Drag to resize (arrow keys also work)">⤢</button>
   </div>
 </section>
 <div id="viewbar" class="collapsed">
