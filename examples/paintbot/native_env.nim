@@ -540,7 +540,6 @@ proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): p
     env.resetDecoders()
     env.resetSampling()
     env.labelMemory.resetLabelMemory()
-    env.labelMemory.resetLabelMemory()
     result = env
   except CatchableError:
     `=destroy`(env[])
@@ -730,6 +729,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     env.resetCurriculum()
     env.resetDecoders()
     env.resetSampling()
+    env.labelMemory.resetLabelMemory()
     for slot in 0..<env.n:
       env.commandPending[slot] = false
       env.commandShown[slot] = false
@@ -1595,9 +1595,9 @@ proc pw_seat_spray_stats*(handle: pointer, seat: cint, output: ptr UncheckedArra
 
 proc pw_seat_privileged_labels*(handle: pointer, seat: cint, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
   ## TRAINING-ONLY supervision labels for one seat on the current pre-step world,
-  ## PrivilegedLabelCount = 12 floats (training_labels.privilegedLabels documents each): gun
+  ## PrivilegedLabelCount = 21 floats (training_labels.privilegedLabels documents each): gun
   ## cooldown, windup, spray cooldown, shield, respawn, aim x, aim z, own and enemy heart
-  ## meter, lead valid, lead x, lead z. State no seat can perceive: for auxiliary losses only,
+  ## meter, lead valid, lead x, lead z, then 9 traversable probe flags. State no seat can perceive: for auxiliary losses only,
   ## never an input to a policy (the hosted engine has no such call). 0, or -1 bad args.
   if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)

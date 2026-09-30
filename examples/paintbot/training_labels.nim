@@ -2,8 +2,9 @@
 ##
 ## These are facts a seat cannot perceive through its SeatView (docs/neural/seat-view.md):
 ## its gun cooldown and windup, spray cooldown, shield, respawn countdown, current aim, both
-## heart meters, and the lead-compensated aim point of the nearest enemy it can see (the
-## retired contract-v2 lead formula, recomputed here). They exist only to supervise a
+## heart meters, the lead-compensated aim point of the nearest enemy it can see (the
+## retired contract-v2 lead formula, recomputed here) and the retired v1 cover probes (whether
+## the seat could walk to each point 200 units out). They exist only to supervise a
 ## trainer's auxiliary heads. They never feed an observation, a BASIC builtin or a neural
 ## builtin: the hosted engine never imports this module (it refuses to compile without
 ## -d:pwTraining), and tests/test_paintbot_seat_view_boundary.nim checks that seat_view,
@@ -12,10 +13,11 @@ when not defined(pwTraining): {.error: "training_labels is training-only (-d:pwT
 import sim
 
 const
-  PrivilegedLabelCount* = 12
+  PrivilegedLabelCount* = 21
   LabelLeadTargetMoves = GunWindupTicks + 1  # the ray leaves after the order tick's move and the windup
   LabelLeadOwnMoves = GunWindupTicks
   LabelTeleportStep = 60                     # a larger per-axis step is a respawn, not a velocity
+  LabelProbes = [(0, 0), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]
 
 type LabelMemory* = object
   ## The pre-step positions of every body on the last labelled tick (-1 = none).
@@ -57,8 +59,17 @@ proc privilegedLabels*(w: World, slot: int, m: LabelMemory): array[PrivilegedLab
   ##   team's heart meter (both 0 in FFA-kin), 9 lead valid (1 when an enemy is visible),
   ##   10 lead x, 11 lead z: for the nearest visible enemy body (true team, sim.visible),
   ##   body + 6 * u - 5 * v, u its displacement since the last labelled tick (zero on a gap or
-  ##   a step beyond 60 per axis) and v the seat's own planned step towards its current goal.
+  ##   a step beyond 60 per axis) and v the seat's own planned step towards its current goal,
+  ##   12 .. 20 traversable probes (the retired v1 cover probes): for the seat's position and
+  ##   the eight compass points 200 units out (mirrored for team 1 in the teams game, compass
+  ##   order E, NE, N, NW, W, SW, S, SE as the old contracts), 1 when the point is inside the
+  ##   map, not blocked and traversable from the seat's position, else 0.
   let me = w.cogs[slot]
+  let flip = if team(slot) == 0 or ffa(): 1 else: -1
+  for k, d in LabelProbes:
+    let p = point(me.pos.x.int + flip*d[0]*200, me.pos.z.int + flip*d[1]*200)
+    result[12+k] = float32((p.x.int >= minX() and p.x.int <= maxX() and p.z.int >= minZ() and
+      p.z.int <= maxZ() and not w.blocked(p) and w.traversable(me.pos, p)).int)
   let gear = w.equipment[slot]
   result[0] = me.cooldown.float32
   result[1] = gear.windup.float32

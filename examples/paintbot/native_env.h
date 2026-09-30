@@ -150,16 +150,18 @@ int pw_seat_spray_stats(void *handle, int seat, int32_t *stats);
  * slowdown), high = terrainHeight >= 216, trench = inside a trench; classes may overlap. Pure
  * telemetry, never part of the world or its hash; -1 bad args. */
 int pw_seat_weapon_stats(void *handle, int seat, int32_t *stats);
-/* pw_seat_privileged_labels (TRAINING-ONLY supervision labels; training_labels.nim): float[12]
+/* pw_seat_privileged_labels (TRAINING-ONLY supervision labels; training_labels.nim): float[21]
  * for the seat on the current pre-step world = {gun cooldown, gun windup, spray cooldown,
  * shield, respawn (ticks), aim x, aim z, own heart meter, enemy heart meter (scoreTicks; 0 in
  * FFA-kin), lead valid, lead x, lead z}: the lead is the retired contract-v2 formula for the
  * nearest visible enemy body (body + 6 * its last-step displacement - 5 * the seat's planned
- * step towards its current goal). None of this is perceivable by a seat (docs/neural/
+ * step towards its current goal), then 9 traversable probes (the retired v1 cover probes: the
+ * seat's position and the 8 compass points 200 units out, mirrored for team 1; 1 = inside the
+ * map, not blocked and traversable from the seat). None of this is perceivable by a seat (docs/neural/
  * seat-view.md): use it only as auxiliary-loss targets, never as a policy input. The hosted
  * engine has no such call. 0, or -1 bad args. */
-#define PW_PRIVILEGED_LABELS 12
-int pw_seat_privileged_labels(void *handle, int seat, float *twelve);
+#define PW_PRIVILEGED_LABELS 21
+int pw_seat_privileged_labels(void *handle, int seat, float *twenty_one);
 
 /* pw_seat_state (training library only): float[16 * 8], per seat in seat order {x, z (world
  * units), hp, armor, lives, respawn (ticks until the seat respawns, 0 while alive), carrying (1 =
