@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>@@title@@ · Paintbot tournament</title>
+<style>
+@font-face{font-family:Rubik;src:url("@@regular@@") format("truetype");font-weight:400}
+@font-face{font-family:Rubik;src:url("@@bold@@") format("truetype");font-weight:700}
+:root{color-scheme:dark;--bg:#0f1014;--text:#e4e7ef;--muted:#b0b8c8;--gold:#a1d8ee;--line:#384d5c;--well:#101318;--green:#6ad36a;--red:#ef7b87}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:radial-gradient(ellipse at top,#1c2028,var(--bg) 900px);color:var(--text);font-family:Rubik,sans-serif;font-size:16px;font-weight:400;line-height:1.5}
+b,strong,th,.kicker,.badge,nav{font-weight:700}
+small,.note,.tie,.ladder-stability,footer{font-size:14px;font-weight:400}
+h1,h2{font-size:28px;font-weight:700}
+h3,.fact b{font-size:22px;font-weight:700}
+a{color:var(--gold);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--gold);outline-offset:3px}
+.wrap{width:min(1440px,calc(100% - 32px));margin:auto}
+.logo{display:block;width:min(540px,100%);height:auto;margin:auto}
+.kicker{color:var(--gold);letter-spacing:.1em;text-transform:uppercase}
+h1,h2{margin:8px 0;overflow-wrap:anywhere}
+h3{margin:0}
+p{line-height:1.6}
+.muted{color:var(--muted)}
+.panel{background:linear-gradient(180deg,#1b1e26,#14171d);border:1px solid var(--line);border-radius:16px;padding:22px}
+.run-panel{margin:0 0 22px}
+.run-head,.between{display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.badge{border:1px solid var(--line);color:var(--gold);background:var(--well);border-radius:30px;padding:8px 14px;text-transform:uppercase;letter-spacing:.03em}
+.badge.completed{color:var(--green)}
+.badge.failed{color:var(--red)}
+.progress{height:14px;border:1px solid var(--line);background:var(--well);border-radius:20px;overflow:hidden;margin:16px 0}
+.progress div{height:100%;background:linear-gradient(90deg,#477c99,var(--gold))}
+.counts{display:flex;gap:22px;flex-wrap:wrap;color:var(--muted)}
+.counts b{color:var(--text)}
+.error{white-space:pre-wrap;overflow-wrap:anywhere;color:#ffadb0;border-left:3px solid var(--red);padding:10px;background:var(--well)}
+nav{display:flex;flex-wrap:wrap;gap:24px;margin:24px 0;color:var(--muted)}
+.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:30px}
+.fact{display:flex;align-items:center;gap:12px;padding:16px}
+.fact img{width:26px;height:26px}
+.fact b{display:block}
+.fact small{color:var(--muted)}
+.format-head{margin:32px 0 18px}
+.format-head p{margin:6px 0;color:var(--muted)}
+.ladders{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.ladder{min-width:0;padding:18px}
+.ladder-head{display:flex;gap:12px;align-items:center;margin-bottom:16px}
+.ladder-head img{width:44px;height:44px}
+.ladder-stability{color:var(--muted);font-variant-numeric:tabular-nums;margin:12px 0 0}
+.stability-chart{display:block;width:100%;height:48px;margin-top:8px;color:var(--gold);overflow:visible}
+.swap-baseline{fill:none;stroke:var(--muted);stroke-opacity:.22;stroke-width:1;vector-effect:non-scaling-stroke}
+.swap-line{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.swap-point{fill:currentColor}
+.swap-point.stable{fill:var(--green)}
+.stability-axis{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums;margin-top:4px}
+.stability-empty{margin:8px 0 0}
+.site-header{display:flex;align-items:center;gap:24px;padding:24px 0}.site-header img{width:100px;height:80px;object-fit:contain}.site-header nav{margin:0}.site-brand{font-size:22px;font-weight:700}.rankings{width:100%;min-width:0}th,td{white-space:nowrap}td.policy{white-space:normal}.policy-version{font-weight:400}details{margin-top:16px}summary{cursor:pointer}
+table{border-collapse:collapse;width:100%;font-size:inherit;font-variant-numeric:tabular-nums}
+th,td{padding:10px 6px;text-align:right;border-bottom:1px solid rgba(247,221,143,.10)}
+th{color:var(--muted)}
+.ladder thead th{white-space:nowrap}
+th:nth-child(2),td:nth-child(2){text-align:left}
+td.policy{width:100%;min-width:90px;max-width:0;overflow-wrap:anywhere}
+td.policy small{display:block;color:var(--muted);margin-top:3px}
+.policy-version{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+tbody tr:first-child td{color:var(--gold)}
+.up{color:var(--green)}
+.down{color:var(--red)}
+.tie{color:var(--muted)}
+.note{color:var(--muted);line-height:1.5}
+footer{margin:30px 0 40px;color:var(--muted);line-height:1.8;overflow-wrap:anywhere}
+@media(max-width:1150px){.ladders{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:800px){.ladders{grid-template-columns:1fr}}
+@media(max-width:650px){.facts{grid-template-columns:1fr}.panel{padding:16px}nav{gap:14px}.wrap{width:calc(100% - 20px)}.counts{gap:12px}.logo{width:340px;max-width:100%}}
+@media(max-width:500px){
+  .site-header{gap:12px}.site-header img{width:64px;height:64px}
+  .rankings thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .rankings tbody{display:block}
+  .rankings tr{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:4px 10px;padding:10px 0;border-bottom:1px solid #ffffff12}
+  .rankings td{padding:0;border:0;min-width:0}
+  .rankings td:first-child{grid-row:1/3;text-align:left;color:var(--muted)}
+  .rankings td.policy{grid-column:2;grid-row:1;max-width:none;width:auto}
+  .rankings td:nth-child(3){grid-column:2;grid-row:2;text-align:left;color:var(--muted);font-size:14px}
+  .rankings td:nth-child(3):after{content:' games'}
+  .rankings td:nth-child(4){grid-column:3;grid-row:1}
+  .rankings td:nth-child(5){grid-column:3;grid-row:2;font-size:14px}
+}
+</style>
+</head>
+<body data-run="@@id@@" data-status="@@status@@">
+@@body@@
+<script type="application/json" id="report-data">@@data@@</script>
+</body>
+</html>

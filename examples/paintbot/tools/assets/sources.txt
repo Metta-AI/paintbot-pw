@@ -1,0 +1,5 @@
+Paintbot tournament artwork, copied 2026-09-30.
+paint-crew.png: Metta-AI/polyworld_art, paintbot/art/paint-crew.png.
+This is an unmodified concept illustration, not a gameplay screenshot.
+Original project artwork dedicated under CC0-1.0; see license.md.
+https://github.com/Metta-AI/polyworld_art/tree/main/paintbot

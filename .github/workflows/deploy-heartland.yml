@@ -104,7 +104,7 @@ jobs:
           fi
           # Paths that never reach the game image or the Heartland manifest (tools/slurm/ holds cluster
           # job scripts). Anything else deploys.
-          ignore='^(tests/|\.github/|coworld/paintbot/DEPLOYMENT\.md$|examples/(call_to_adventure|gods_of_the_arena|heartleaf|light_vs_dark)/|coworld/(cta|gota|lvd)/|coworld/paintbot/(coworld_manifest_template\.json|campaign\.json|[A-Z_]+\.(md|json))$|tools/slurm/)'
+          ignore='^(tests/|\.github/|coworld/paintbot/DEPLOYMENT\.md$|examples/paintbot/tools/|examples/(call_to_adventure|gods_of_the_arena|heartleaf|light_vs_dark)/|coworld/(cta|gota|lvd)/|coworld/paintbot/(coworld_manifest_template\.json|campaign\.json|[A-Z_]+\.(md|json))$|tools/slurm/)'
           shipped="$(git diff --name-only "$base" "$sha" | grep -Ev "$ignore" || true)"
           if [ -z "$shipped" ]; then
             echo "Nothing shipped changed since $last ($base); not deploying."
