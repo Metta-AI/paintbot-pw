@@ -1,7 +1,7 @@
 ## decoder.joint_sampling: a head's selection conditioned on another head's (neural_contract.jointSelect,
 ## neural_host). The condition false takes no draw and changes nothing; the condition true re-selects the head from its
 ## logits plus the bundle's offsets under the same exclusions and temperature (argmax at 0, else exactly one draw);
-## the hosted seat applies it before the aim-phase options and logs it; the manifest parser rejects malformed options.
+## the hosted seat applies it within the tick's selection (neuralSample) and logs it; the manifest parser rejects malformed options.
 ## Synthetic weights only.
 import std/[unittest, os, random, strutils, json, math]
 import polyworld/[cli, rngs]
@@ -107,19 +107,20 @@ suite "joint sampling (manifest and hosted seat)":
     check "head index" in parses("""{"when": {"head": 5, "value": 1}, "head": 0, "offsets": """ & zeros(51) & "}")
     check "numbers" in parses("""{"when": {"head": 2, "value": 1}, "head": 0, "offsets": """ & "[" & repeat("\"0\", ", 50) & "\"0\"]}")
 
+  # The policy selects the heads (neuralSample) and acts through the reference BASIC decode.
   const Source = """
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
-paintbot_act(neuralLogits())
-"""
+neuralSample()
+""" & staticRead("../examples/paintbot/players/neural_decode.bas")
   proc seats(decoder: string): seq[Bot] =
     var r = initRand(77)
-    let (model, _, _, _) = r.pwnet001(ObservationSize, 64)
+    let (model, _, _, _) = r.pwnet001(TeamsViewSize, 64)
     let path = getTempDir()/("paintbot-neural-joint-" & $getCurrentProcessId() & ".bas")
     writeFile(path, Source)
     writeFile(path & ".model.bin", model)
     writeFile(path & ".neural.json", "{\"schema\": \"paintbot-neural-basic/2\", \"observation_contract\": \"" &
-      ObservationContractHash & "\", \"action_contract\": \"" & ActionContractHash & "\", \"sha256\": {}, " &
+      ObservationContractTeamsView1Hash & "\", \"action_contract\": \"" & ActionContractTeamsView1Hash & "\", \"sha256\": {}, " &
       "\"decoder\": " & decoder & "}")
     defer:
       for suffix in ["", ".model.bin", ".neural.json"]: removeFile(path & suffix)
@@ -148,8 +149,8 @@ paintbot_act(neuralLogits())
     check (" joint_sampling=h2=1->h0 held=" & $players[0].neural.jointDraws) in players[0].neural.telemetry(1, 120)
 
   test "argmax seats: the option applies at temperature 0; without it nothing changes":
-    let plain = seats("""{"fire_hold_teammates": true}""")
-    let withJoint = seats("""{"fire_hold_teammates": true, "joint_sampling": {"when": {"head": 3, "value": 0}, """ &
+    let plain = seats("""{}""")
+    let withJoint = seats("""{"joint_sampling": {"when": {"head": 3, "value": 0}, """ &
       """"head": 4, "offsets": [0, 0]}}""")
     var a = newWorld(5)
     var b = newWorld(5)

@@ -122,7 +122,9 @@ proc hostRun(config: string, seed: int32, ticks: int, rules = LiveRules): Run =
   configureMap(""); configureVision(""); configureVisionRange(0); configureGlory(DefaultGloryConfig)
 
 proc nativeHandle(config: string, rules: int, seed: int32, ticks: int): pointer =
-  result = pw_create(seed, ticks.int32)
+  # teams.view.1 handles play the teams game only: an FFA-kin config needs ffa.view.1 (202).
+  result = if "ffa_kin" in config: pw_create_observation(seed, ticks.int32, ocFfaView1.int32)
+    else: pw_create(seed, ticks.int32)
   doAssert result != nil
   var message: string
   doAssert pw_set_rules(result, rules.cint) == 0
@@ -225,6 +227,36 @@ suite "Native per-handle rules and game config":
     expect ValueError: configureVisionRange(201)
     kinLayoutPin = none(KinLayout); gameMode = gmTeams
     pw_destroy(handle)
+
+  test "an FFA-kin config is refused on a teams.view.1 handle; the glory config reaches its columns 21..24":
+    # Migrated from the retired contract v3's test (tests/test_paintbot_native_obs_v3.nim).
+    var message: string
+    for handle in [pw_create(5, 480), pw_create_observation_inputs_v(5, 480, 201, 2)]:
+      require handle != nil
+      check handle.setConfig("""{"mode": "ffa_kin"}""", message) == -2
+      check message == "observation contract teams.view.1 is for the teams game only"
+      check pw_reset(handle, 5, 480) == 0 and pw_game_mode(handle) == 0
+      check handle.setConfig("""{"glory": {"behind_lives": 5, "behind_lives_seconds": 3, "behind_cogs": 4, "behind_cogs_seconds": 6}}""", message) == 0
+      check message == ""
+      check pw_reset(handle, 5, 480) == 0
+      let n = pw_handle_observation_size(handle).int
+      check n == TeamsViewSize + pw_handle_user_inputs(handle).int
+      var observations = newSeq[float32](Seats*n)
+      var resets: array[LegacySeats, float32]
+      require pw_observe(handle, fbuf(observations), fbuf(resets)) == 0
+      for slot in 0..<Seats:
+        check observations[slot*n+21] == 5'f32/10
+        check observations[slot*n+22] == 3'f32/60
+        check observations[slot*n+23] == 4'f32/10
+        check observations[slot*n+24] == 6'f32/60
+      pw_destroy(handle)
+    # An ffa.view.1 handle takes it.
+    let ffa = pw_create_observation(5, 480, 202)
+    require ffa != nil
+    check ffa.setConfig("""{"mode": "ffa_kin"}""", message) == 0
+    check pw_reset(ffa, 5, 480) == 0 and pw_game_mode(ffa) == 1
+    pw_destroy(ffa)
+    kinLayoutPin = none(KinLayout); gameMode = gmTeams
 
   test "default handles, and explicit defaults, are byte-identical to the library before":
     for (seed, digest, last) in DefaultGolden:

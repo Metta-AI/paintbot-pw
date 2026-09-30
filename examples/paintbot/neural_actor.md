@@ -84,8 +84,8 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 |---|---|
 | magic | ASCII `PWNET002` |
 | version | 2 |
-| I | input count, 1..4096 (the observation contract's width: 448, 506, 514, or 506 + K / 514 + K for user-input contracts v2u<K> / v3u<K>; ffa.v2: the match's width, usually the layout word `0xFFFEE000`) |
-| O | output count, 2..1024 (the logits; no value row; action contract ffa.v2 pointer: the match's, usually `0xFFFEE100`) |
+| I | input count, 1..4096 (the observation contract's width: 512 for teams.view.1, 512 + K for teams.view.1u<K>; ffa.view.1: the match's width, usually the layout word `0xFFFEE000`) |
+| O | output count, 2..1024 (the logits; no value row: 82, or 128 for the aim-offset variant; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
 | head count | 1..32 |
 | head sizes | one uint32 per head, each 2..1024, summing to O (layout words allowed) |
 | observation contract | 64 lowercase hex bytes (as PWNET001) |
@@ -93,9 +93,9 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 | L | layer count, 1..64 |
 | L layer records | `type`, `param[8]`, payload (below) |
 
-A PWNET002 actor may name any observation contract the host knows, including v2u<K>
-(`neural_basic.md`, manifest `user_inputs`): its input count is then 506 + K, the K user inputs are
-ordinary input columns 506.. (DENSE, CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP and SEGMENT_NEAR slices may read them), and the operation
+A PWNET002 actor may name any observation contract the host knows, including teams.view.1u<K>
+(`neural_basic.md`, manifest `user_inputs`): its input count is then 512 + K, the K user inputs are
+ordinary input columns 512.. (DENSE, CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP and SEGMENT_NEAR slices may read them), and the operation
 count includes them like any other input. Staging reads the input count and contract from the PWNET002
 header. The file length must be exact: no trailing bytes. The package manifest binds the SHA-256
 of the whole file, as for PWNET001. Every weight must be finite; every unused `param` word
@@ -131,13 +131,13 @@ Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1
 1..4, at most 1024 gathered floats per token, TOKEN_MLP widths and TOKEN_MIX `z` 1..256;
 ENTITY_ATTN at most 256 tokens over all groups; SEGMENT_NEAR only as layer 0, tokens 1..256;
 ATTN_POOL heads 1..32, `key` and `value` 1..256, heads x key and heads x value at most 1024;
-PAD `at` <= the current width, `len` 0..4096. (The token caps were 64 before observation
-contract ffa.v2; a model within the old caps loads and costs exactly as before.)
+PAD `at` <= the current width, `len` 0..4096. (The token caps were 64 before the per-match
+FFA contract; a model within the old caps loads and costs exactly as before.)
 
 ### Layout words
 
-Observation contract ffa.v2's width, section row counts and offsets, and action contract
-ffa.v2 pointer's head sizes follow the match (seats and control hearts). A model states any
+Observation contract ffa.view.1's width, section row counts and offsets, and action contract
+ffa.view.1 pointer's head sizes follow the match (seats and control hearts). A model states any
 of them as a **layout word** instead of a number, and the host resolves every word against
 the match layout when the seat loads (the training library: `pw_net_load_layout`), so one
 `model.bin` serves Heartland (16 seats) and Heartland Big (50). A layout word is a uint32
@@ -147,7 +147,7 @@ its low 16 bits are section `s` (bits 12..15), field `f` (bits 8..11) and an add
 
 | s | section | f = 0 | f = 1 | f = 2 | f = 3 |
 |---|---|---|---|---|---|
-| 0 | cog rows | rows (seats - 1) | offset of row 0 | row width (44) | logit offset of row 0's pointer target (the aim head's cog rows) |
+| 0 | cog rows | rows (min(seats - 1, 64)) | offset of row 0 | row width (44) | logit offset of row 0's pointer target (the aim head's cog rows) |
 | 1 | control heart rows | rows (hearts) | offset | 12 | its target (the objective head's heart rows) |
 | 2 | great heart rows | rows (2) | offset | 12 | its target |
 | 3 | control + great heart rows (contiguous, both 12 wide) | rows | offset | 12 | its target |
@@ -193,8 +193,8 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
     the input (`stride` and `width` 1..I). `valid` is the index within the token of its
     presence flag (a token is valid when that float is > 0.5), or `0xFFFFFFFF` for
     always valid. T, the total token count, is at most 64. For example, observation
-    contract v1/v2's visible identities are `(104, 8, 16, 8, 0)` and its hearts
-    `(24, 8, 10, 8, 0)`.
+    contract teams.view.1's visible identities are `(125, 10, 16, 10, 0)` and its hearts
+    `(25, 10, 10, 10, 0)`.
   - Tensors: for each group in order `E_g[d, width]`, `e_g[d]`; then for each of `blocks`
     (0..8) blocks in order `g1[d]`, `Wqkv[3d, d]`, `bqkv[3d]`, `Wo[d, d]`, `bo[d]`,
     `g2[d]`, `W1[ff, d]`, `b1[ff]`, `W2[d, ff]`, `b2[d]`. `d` is 1..256, `heads` divides
@@ -248,7 +248,7 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
 - **POINTER** (per-token scores into chosen outputs): `source` names an earlier TOKEN_MIX,
   TOKEN_MLP or ENTITY_ATTN with the same tokens. `y = x`, then for each valid token n: `y[offset + n] = x[offset + n] +
   (sum_i z_n[i]*v[i] + c)`; invalid tokens add nothing. `offset + tokens` must not exceed the
-  width. E.g. the 16 identity aim logits of contract v1/v2 are outputs 52..67 (`offset` 52).
+  width. E.g. the 16 identity aim logits of action contract teams.view.1 are outputs 52..67 (`offset` 52).
 - **SEGMENT_NEAR** (the input view; parameter-free geometry over tokens already in the input):
   allowed only as layer 0. Its output (width I) is a copy of the observation with one strided
   slice overwritten by per-token 0/1 flags, and every later layer that reads the input
@@ -272,7 +272,8 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
     token n, measured perpendicular to it, and not behind the origin or beyond token n.
   - `y = in`, then `y[dst + n*dst_stride] = flag_n` (1.0 or 0.0). The flags are computed
     from `in` alone, so `dst` may overlap the token block.
-  - Example (documentation only): over contract v2u32 (I = 538) with T = 16, base 104,
+  - Example (documentation only; the column offsets are the retired contract v2u32's, the
+    arithmetic is the same over any layout): over I = 538 with T = 16, base 104,
     stride 8, x 1, z 2, valid 0, exclude 6, candidate 3, scale_x 16000, scale_z 9600,
     radius 150, dst 522, dst_stride 1, user inputs 522..537 become, for each observed
     identity (the fog-gated identity block), "an observed teammate is within 150 units of
@@ -376,7 +377,7 @@ pool  = T + 2*T*d + d + 8 + P          valid flags, mean, max, reciprocal, passt
 
 and for the token layers `pool(d) = T + 2*T*d + d + 8` (T tokens; the counts, like every
 other, do not depend on which tokens are valid). Example (an entity-factored actor over
-contract v2u32): TOKEN_MLP over the 16 identities with segments (104, 8, 8), (470, 2, 2),
+the retired contract v2u32's column layout; the counts depend only on the widths): TOKEN_MLP over the 16 identities with segments (104, 8, 8), (470, 2, 2),
 (0, 0, 24), (448, 0, 2), (506, 1, 1), (522, 1, 1) (identity j's block, its terrain floats,
 the seat's own features for every token, two user inputs of its own), widths 128, 128; then
 CONCAT_INPUT(0, 538), DENSE(794, 128), MINGRU(128, 128, highway), TOKEN_MIX(0, 64),
@@ -385,7 +386,7 @@ DENSE(256, 82, bias), POINTER(4, 52) costs 1,327,278 operations per tick. SEGMEN
 T = 16) costs 3,738, so the same actor behind it (sources shifted by one) costs 1,331,016.
 
 The model's count is the sum over its layers. PWNET001's `2*(I*H + 3H*H + O*H) + 32*H` is
-the same formula applied to its three layers. Example: ENTITY_ATTN over contract v2's 16
+the same formula applied to its three layers. Example: ENTITY_ATTN over the retired contract v2's 16
 identities and 10 hearts (T = 26), d = 64, 4 heads, 2 blocks, ff = 64, pass_len = 24, then
 CONCAT_INPUT(232, 274), MINGRU(426, 128, no highway, bias), DENSE(128, 82, bias) costs
 3,307,774 operations per tick, 692,226 under the budget (`neural: peak_ops=3307774`).
@@ -395,308 +396,87 @@ The telemetry line's model field is `w<hidden>` for PWNET001 (unchanged) and
 
 # Native training ABI (`native_env.nim`, `-d:pwTraining`)
 
-Version 1, declared in `native_env.h`: `pw_create/pw_reset/pw_destroy`,
-`pw_observe` (all seats) and `pw_observe_seats` (chosen seats), `pw_step`,
-`pw_results`, `pw_bot_actions`, `pw_state_hash`, and the telemetry call below. Every
-entry is additive to v1; a host that ignores the newer ones sees the same bytes.
+Declared in `native_env.h`: `pw_create/pw_reset/pw_destroy`, `pw_observe` (all seats) and
+`pw_observe_seats` (chosen seats), `pw_step`, `pw_step_logits`, `pw_results`, `pw_bot_actions`,
+`pw_state_hash`, scripts, policy seats, telemetry, and the training-only supervision labels
+(`pw_seat_privileged_labels`). `pw_step` decodes a caller-driven seat's heads with the reference
+BASIC decoder (`players/neural_decode.bas`, `neural_decode_ffa.bas`) through the seat's SeatView,
+exactly as a hosted `policy.bas` would: nothing native turns heads into a command.
 
 ## Observation contracts
 
-The observation contracts below exist. The actor file and the package manifest carry the
-contract's SHA-256 (the hash of the id string); the host encodes each seat with the
-contract its actor names and requires the actor's input count to be that contract's
-width, so a v1 bundle keeps byte-identical behaviour on a host that also knows v2. An
-unknown hash fails the seat, as before.
+Every column is computed from the seat's SeatView (`seat_view.nim`, docs/neural/seat-view.md):
+the values its BASIC builtins read on the same tick, under the same fog, disguise and
+one-body-per-identity rules. `tests/test_paintbot_seat_view_parity.nim` re-derives every
+column from the SeatView procs. The actor file and the package manifest carry the contract's
+SHA-256 (the hash of the id string).
 
-| version | id | SHA-256 | floats |
+| contract | id | inputs | native version |
 |---|---|---|---|
-| v1 | `paintbot-pw.rules37.obs.v1.float448` | `ed5d16768e3144a04a28420ce227ff2d6a831be9f64f3633326b133a5335b7e2` | 448 |
-| v2 | `paintbot-pw.rules37.obs.v2.float506` | `e0d7b0b97975725c470ef6119ca2a6caf4aaa6f34cd15bee02bd306489c029e5` | 506 |
-| v3 | `paintbot-pw.rules43.obs.v3.float514` | `06f16d62adedda6995d393696c0d2ed257aa9380b86341e73d1d6a3c7ea374f1` | 514 |
+| teams.view.1 | `paintbot-pw.teams.view.1` | 512 | 201 (`pw_create`) |
+| teams.view.1u<K> | `paintbot-pw.teams.view.1u<K>`, K = 1..128 | 512 + K | 201 + `pw_create_observation_inputs` |
+| ffa.view.1 | `paintbot-pw.ffa.view.1` | per match (`ffaViewLayout`) | 202 |
 
-v2 is v1 followed by a terrain block: columns 0..447 are the v1 observation, same order,
-same values (`encodeObservation` v1 is called unchanged on that slice), and columns
-448..505 are `encodeTerrainBlock` (`neural_contract.nim`). Why: the river decides
-fights (a wading seat moves at a quarter speed and stands about 200 below the bank,
-where it is hit two to four times as often), and v1 shows neither water nor absolute
-height, only nine height samples around the seat.
+`neural_contract.encodeTeamsView` and `encodeFfaView` document every column. teams.view.1 (the
+teams game, 16 seats): self and scoreboard (0..24), ten heart rows of 10 (25..124), sixteen
+apparent identity rows of 10 (125..284), thirty-two pickup rows of 5 (285..444), eight sound rows
+of 5 (445..484), nine terrain probes of 3 (485..511: in bounds, `waterAt`, `terrainHeight` delta).
+Team 1's positions and compass probes are mirrored. ffa.view.1 (FFA-kin): a 24-float header, then
+`min(seats - 1, 64)` cog rows of 44 in `nearAgents(20000)` order, one 12-float row per control
+heart and two great heart rows, nearest first; column 0 of every row is its valid flag.
 
-"Wet" is `inWater(p)`, exactly the predicate `mechanics.nim` uses to quarter a seat's
-speed (rules >= 30: inside the river and below `RiverWaterHeight` = -162). "Height" is
-`w.elevation(p)` (terrain plus the trench's -60, the height the gun's spread reads)
-divided by `TerrainHeightScale` = 800; the rules-37 playable span measures -260..551, so
-every height and delta lies within about [-1, 1] (river bed under a level bank: -0.25).
-
-| column | field |
-|---|---|
-| 448 | self wet (0/1) |
-| 449 | self height |
-| 450 + 2i, i = 0..9 | heart i wet (0 when the heart is absent) |
-| 451 + 2i | heart i height minus self height (0 when absent; negative = below the seat) |
-| 470 + 2j, j = 0..15 | apparent identity j wet (0 when v1's identity slot j is empty) |
-| 471 + 2j | apparent identity j height minus self height (0 when empty; the seat's own slot is 0) |
-| 502 | visible apparent enemies wet / 8 |
-| 503 | visible apparent enemies dry / 8 |
-| 504 | visible apparent teammates wet / 8 (the seat itself excluded) |
-| 505 | visible apparent teammates dry / 8 (the seat itself excluded) |
-
-No hidden information: the block reads terrain only at points v1 already reveals (the
-seat's own position, the ten public hearts, the bodies v1 resolves under apparent
-identities). Identity slots follow v1's fog and uniform resolution (`observedBodies`),
-so a slot can be non-zero only when v1's visibility flag for that slot (column
-104 + 8j) is 1 (a visible seat on dry ground level with the observer reads 0, 0; the
-flag tells the two apart), and the counts use the apparent team v1 shows (a disguised enemy counts
-as a teammate, at the identity it wears).
-
-Native ABI: `pw_create_observation(seed, max_ticks, version)` creates a handle encoding
-contract 1 or 2 (NULL otherwise; `pw_create` is contract 1); the version is kept across
-`pw_reset`, and `pw_observe` / `pw_observe_seats` rows are that contract's width apart.
-`pw_observation_size_for(version)` (448 / 506, -1 unknown), `pw_handle_observation_size
-(handle)`, `pw_observation_contract(handle)` and `pw_observation_contract_hash(version,
-out, 65)` report it; `pw_observation_size()` stays 448. The observation contract never
-touches the world or its hash.
-
-**v2u<K>: v2 + K user inputs** (PLAN-neural-basic-io part A). Id
-`paintbot-pw.rules39.obs.v2u<K>`, K = 1..128, SHA-256 of the id (all 128 listed in
-`neural_contract.UserInputsContractHashes`; K = 1 is `bd80f4d3…`, K = 2 `b064de43…`, K = 3
-`a8c43d03…`); 506 + K floats. Columns 0..505 are v2 unchanged; column 506 + i is
-`float32(v_i) / 1000` where v_i is the value the seat's policy.bas last set with
-`neuralInput(i, v)` (clamped to +-1,000,000) before this tick, or the manifest's
-`user_inputs.init[i]` at match start (`neural_contract.encodeObservationInputs`). The
-manifest's `user_inputs.count` must be K. Training: `pw_create_observation_inputs(seed,
-max_ticks, K)`; a policy seat's rows carry its inputs, every other seat's user columns are 0.
-
-**v3: v2 + the scoreboard** (teams game only). Columns 0..505 are v2 unchanged; columns
-506..513 are `encodeScoreboardBlock` (`neural_contract.nim`), from the seat's team's side:
-
-| column | field |
-|---|---|
-| 506 | own team's lives left (`sim.teamLives`: the sum the behind-in-lives award compares) / 32 |
-| 507 | enemy team's lives left / 32 |
-| 508 | own team's glory / 1000 |
-| 509 | enemy team's glory / 1000 |
-| 510 | behind-in-lives award, glory per life trailed (the match's `glory.behind_lives`) / 10 |
-| 511 | its period in seconds (`glory.behind_lives_seconds`) / 60 |
-| 512 | quiet-supplies award (`glory.quiet_supplies`) / 100 |
-| 513 | ticks remaining, max(0, end tick - tick) / max(1, end tick) |
-
-Only what the HUD shows every viewer: each seat's lives (the header's life pips), both glory
-totals (the header score), the match's glory awards (the scoreboard and the score tooltip,
-rules 43) and the clock. An FFA-kin match refuses a v3 seat at load (no teams, lives or
-glory there). Native: `pw_create_observation(seed, max_ticks, 3)`; `pw_set_game_mode(h, 1)`
-returns -1 on a v3 handle.
-
-**v3u<K>: v3 + K user inputs.** Id `paintbot-pw.rules43.obs.v3u<K>`, K = 1..128, SHA-256 of
-the id (all 128 in `neural_contract.V3UserInputsContractHashes`; K = 1 is `8086b6f3…`);
-514 + K floats: v3 unchanged, then the K user inputs exactly as v2u<K> feeds them. The
-manifest's `user_inputs.count` must be K. Training: `pw_create_observation_inputs_v(seed,
-max_ticks, 3, K)` (version 2 there is `pw_create_observation_inputs`);
-`pw_user_inputs_contract_hash_v(3, K, out, 65)` writes the hash.
-
-**ffa.v1: FFA-kin** (mode `ffa_kin`). Id `paintbot-pw.rules40.obs.ffa.v1.float810`, SHA-256
-`6b19dc324386542eb915d30c2ce1707a8f8e192a0425ee8b2ae9145969583fc7`, 810 floats, native version
-101 (`pw_create_observation(seed, max_ticks, 101)`). A separate encoder
-(`neural_contract.encodeFfaObservation`, which documents every column), not a v1/v2 prefix.
-There is no map flip, for observations or for the compass heads of either action contract
-(in FFA mode no seat is mirrored). Layout:
-
-| columns | block |
-|---|---|
-| 0..7 | self: centred x, centred z, hp/maxHp, armor/maxHp, cooldown/72, own score/1000, alive, ticks left/8640 |
-| 8 + 42j, j = 0..15 | seat j: dx, dz, visible, alive, hp/maxHp, 32 gene bits (+-1), r to me, score/1000, hearts held/10, territory boost/30 (own row only; 0 elsewhere), 1 reserved |
-| 680 + 6i, i = 0..9 | control heart i: centred x, centred z, owner's r to me (-1 neutral, 1 mine), capture progress, contested, owned by me |
-| 740 + 6g, g = 0..1 | great heart g: centred x, centred z, state (-1 dormant, 0 awake, 1 charging), present/16, progress, dormant ticks left/1440 |
-| 752..809 | v2's terrain block columns 0..53, then visible other seats wet/8 and dry/8, 2 reserved |
-
-Positions and hp of other seats are fog-gated; before rules 48 alive, genes, r, score and hearts
-held are public. From rules 48 (the FFA-kin fog of war, `sim.ffaFog`) the whole row of a seat the
-observer cannot see is zero, alive included (unknown), so genes, r, score and hearts held appear
-only for seats in view; the seat's own row, the hearts and the great hearts are unchanged. The
-layout, id and hash stay: like team vision (rules 42), the rules decide what is in view, the
-contract how it is laid out. hp and armor are divided by `maxHp()` (FfaMaxHp = 10 in FFA, 3 otherwise).
-Scores are raw scores s_j in points / 1000, the only columns that can exceed 1. Under
-the training-only mask bit 0 every r column reads 0, the seat's own row included, and so does
-the own row's territory-boost column (it is r to the local owner). Identity rows are indexed by seat, and the
-aim head's identity index 1..16 aims at that seat. Outside FFA the kin, score and
-seat-ownership columns are zero.
-
-**ffa.v2: FFA-kin at any seat count** (Heartland and Heartland Big). Id
-`paintbot-pw.rules48.obs.ffa.v2`, SHA-256
-`d0a10cee5ae4a3b73a13e018fc1904e40f943768483498d896b9915e6313c592`, native version 102
-(`pw_create_observation(seed, max_ticks, 102)`, `pw_set_seats`). A fixed header, then three
-entity sections of fixed-width rows. The row counts follow the match, so **the width is
-fixed per match, not per contract**: `24 + (N-1)*44 + H*12 + 2*12` for N seats and H control
-hearts (828 in Heartland: 16 seats, 10 hearts; 3,404 in Heartland Big: 50 seats, 100 hearts).
-Read it from `pw_handle_observation_size` / `pw_observation_layout` (native), `neuralLayout`
-(BASIC) or `neural_contract.ffaV2Layout` (Nim). Column 0 of every row is its valid flag. No
-map flip. The encoder is `neural_contract.encodeFfaV2Observation`, which documents every
-column; the row order is `ffaV2Rows`.
-
-| columns | block |
-|---|---|
-| 0..7 | self: ffa.v1's 8 floats (centred x, centred z, hp/maxHp, armor/maxHp, cooldown/72, own score/1000, alive, ticks left/8640) |
-| 8..23 | match and own state: seats/64, control hearts/100, ticks remaining/end tick, hearts owned by self/hearts, territory boost here/30, self wet, self height/800, seen cogs/64, cog rows/64, heart rows/100, great rows/2, 5 reserved |
-| 24 + 44k, k < N-1 | cog row k: valid, dx, dz, visible (1), hp/maxHp, 32 gene bits (+-1), r to me, score/1000, hearts held/10, distance/diagonal, wet, height minus own/800, seat id/255 |
-| after the cogs, 12 per heart | control heart row: valid (1), dx, dz, centred x, centred z, owner's r to me (-1 neutral, 1 mine), capture progress, contested, owned by me, distance, wet, height minus own |
-| the last 24 | 2 great heart rows: valid (1), dx, dz, centred x, centred z, state (-1 dormant, 0 awake, 1 charging), present/16, progress, dormant ticks left/1440, distance, wet, height minus own |
-
-- **Only the cogs the seat can see.** The cog section holds only the cogs in view (`sim.visible`,
-  the line of sight that sets ffa.v1's visible column and BASIC's `visible`), packed first,
-  nearest first, ties by seat id; every row after them is all zero (valid 0). Nothing about an
-  unseen cog appears anywhere (position, hp, genes, r, score, hearts held, id, or any count or
-  order that depends on it), whatever the rules. The header carries only the seat's own state
-  and match constants (no alive count, no family or R figure).
-- **Hearts** are static map entities: every control heart and both great hearts, nearest first
-  (ties by index), all valid. Their owner and capture columns are ffa.v1's.
-- **Row -> entity map.** Row k of each section names one seat, control heart or great heart
-  for this tick; the host keeps that map from the observation to the decode (action contract
-  ffa.v2 pointer). Native `pw_observation_rows`, BASIC `neuralRow(section, k)`.
-- The training-only kin mask (`pw_set_obs_mask` bit 0) zeroes cog column 37, heart column 5
-  of a heart another seat owns, and header column 12.
-- The v1 / v2 action contracts address 16 identities, so an ffa.v2 bundle must name action
-  contract ffa.v2 pointer, and that contract needs ffa.v2 (the host rejects either alone).
+Retired for BASIC parity (refused by the host and by staging): v1 (`...obs.v1.float448`), v2
+(`...obs.v2.float506`), v3 (`...obs.v3.float514`), v2u<K>, v3u<K>, ffa.v1 and ffa.v2. They read
+gun cooldown, windup, spray cooldown, shield, respawn, the seat's current aim, heart meters,
+`endTick` progress and blocked/traversable probes, none of which a BASIC seat can read.
 
 ## Action contracts
 
-Two action contracts share the five heads `[51,25,2,2,2]` and differ only in what an
-identity aim (aim head index 1..16) resolves to. The actor file and the package
-manifest carry the contract's SHA-256 (the hash of the id string), and the host decodes
-each seat by the contract its actor names; a v1 bundle keeps byte-identical behaviour on
-a host that also knows v2.
-
-| version | id | SHA-256 | identity aim |
+| contract | id | heads | native version |
 |---|---|---|---|
-| v1 | `paintbot-pw.rules37.action.v1.51-25-2-2-2` | `55922d42d4065a069b3193f31e056c3a53cd34175b10fed7ff0d8c22b50a473e` | the body's current position |
-| v2 | `paintbot-pw.rules37.action.v2.51-25-2-2-2` | `51f602ef167919ca825595f9d81777cb807afbb0938a20102457d0594e2b4317` | the body's lead-compensated aim point |
+| teams.view.1 | `paintbot-pw.teams.view.1.action.51-25-2-2-2` | 51, 25, 2, 2, 2 | 11 |
+| teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 | 13 |
+| ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 | 12 |
 
-**ffa.v2 pointer** (observation contract ffa.v2 only; native version 3). Id
-`paintbot-pw.rules48.action.ffa.v2.pointer`, SHA-256
-`068fc9816d515cc7df281ce94c7ecb973ca83f8f268021ef06707f934d2d83a5`. The same five heads,
-sized by the match (N seats, H control hearts); the objective and aim heads point at the rows
-of the observation of the same tick (`neural_contract.decodePointerActions`):
+An action contract names head sizes; what each index means is the `policy.bas`'s business. The
+reference reading (`players/neural_decode.bas`, the training library's decoder):
 
-| head | size | index |
+| head | teams.view.1 | ffa.view.1 pointer |
 |---|---|---|
-| 0 objective | 11 + H | 0 stay; 1..8 compass `pos + 200*d` for d = (1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1) in (x, z), clamped to the map; 9 + k control heart row k; 9 + H + g great heart row g |
-| 1 aim | 8 + N | 0 keep the current aim; 1..8 compass `pos + 5000*compass`; 9 + k cog row k: that cog's lead-compensated aim point (contract v2's rule, memory keyed by seat id); a row past the seen cogs keeps the aim |
-| 2, 3, 4 | 2 each | fire, charge grenade, sneak |
+| 0 movement / objective | 0 stay; 1..10 control heart m-1; 11..42 pickup m-11 when visible; 43..50 compass `pos + 200*d` (mirrored for team 1) | 0 stay; 1..8 compass; 9 + k control heart row k; 9 + H + g great heart row g |
+| 1 aim | 0 keep; 1..16 identity a-1 when visible (its current position); 17..24 compass `pos + 5000*d` | 0 keep; 1..8 compass; 9 + k cog row k (`neuralRow(0, k)`) |
+| 2, 3, 4 | fire, charge grenade, sneak | the same |
+| 5, 6 (aim-offset) | `((ix - 11) * 28, (iz - 11) * 28)`, mirrored for team 1, added to an identity aim | |
 
-The logits are `11 + H + 8 + N + 6` floats (175 in Heartland Big, 51 in Heartland). With
-layout words a model's POINTERs target the cog rows at `0xFFFE0300` (the aim head's row 0,
-`20 + H`) and the heart rows at `0xFFFE3300` (9). Selection is argmax, or `decoder.sampling`
-(the only decoder option this contract takes; the others read the fixed contracts' head
-indices) and BASIC `neuralTemperature`; `neuralMask` is refused. Native: `pw_set_action_contract(h, 3)`
-on a 102 handle, `pw_action_layout` for the heads, `pw_step` decodes the caller's heads through
-the rows of the observation `pw_observe` wrote for that world (at any seat count), and
-`pw_step_logits` rows are the layout's logit width.
+with d = (1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1). "Keep" re-issues the aim the
+script last left the seat with. There is no native lead: the retired contract v2 and ffa.v2
+pointer computed a lead-compensated aim point natively; a policy that wants a lead writes it in
+BASIC, or (aim-offset) lets the network choose the offset.
 
-Decoder options are not contracts. A schema-2 bundle may ask for `decoder.fire_hold_teammates`
-(`neural_basic.md`): the decoded shoot order is dropped when a visible teammate stands in
-the gun's corridor to the aim point. The candidates every head resolves to and both
-contract hashes are unchanged by it; the training ABI's `pw_set_seat_fire_hold` (with
-`pw_set_seat_fire_hold_radius` for the object form's `radius`) is the same rule
-(`native_env.h`). It may also ask for `decoder.sampling` (`neural_basic.md`):
-the listed heads are drawn from `softmax(logits / temperature)` on a seat-owned SplitMix64
-stream seeded from the match seed and the slot (`neural_contract.sampleActions`,
-`samplingRng`), the rest keep argmax; the candidates and hashes are again unchanged, and
-the training ABI's `pw_set_seat_sampling` / `pw_sample_actions` draw from the same stream.
-`decoder.forbid_objectives` removes movement-head candidates from selection and
-`decoder.strafe_legs` replaces the movement head with base.bas's contact legs
-(`neural_basic.md`); candidates and hashes are unchanged, and the training ABI's
-`pw_set_seat_forbid_objectives` / `pw_set_seat_strafe` are the same rules.
-`decoder.aim_snap` turns a compass shoot order toward a visible enemy's identity and
-`decoder.steady_shot` stands the seat from a shoot order until the ray leaves
-(`neural_basic.md`); candidates and hashes are unchanged, and the training ABI's
-`pw_set_seat_aim_snap` / `pw_set_seat_steady_shot` are the same rules.
-`decoder.aim_retarget` turns every shoot order toward base.bas's target (the visible enemy
-minimising `d^2 - (3 - hp) * 160000 - carrying * 2500000` within 5250) and
-`decoder.shot_gate` drops a shoot order that is not aimed at an enemy in range after the
-retarget and the snap (`neural_basic.md`); candidates and hashes are unchanged, and the
-training ABI's `pw_set_seat_aim_retarget` / `pw_set_seat_shot_gate` are the same rules.
-`decoder.spray_aim` / `decoder.spray_gate` re-aim or drop a shoot order with a ready spray
-can by the cone it would produce (`neural_basic.md`); the training ABI's
-`pw_set_seat_spray_aim` / `pw_set_seat_spray_gate` are the same rules, and
-`pw_seat_spray_stats` (training library only) counts spray damage and kills per seat.
-`decoder.joint_sampling` re-selects one head when another was selected as a given value,
-from its logits plus the bundle's offsets (`neural_basic.md`); candidates and hashes are
-unchanged. A model's COND_HEAD layers (PWNET002) re-select a head from its logits plus a
-learned column of weights chosen by another head's selection (above); the training ABI's
-`pw_set_seat_conditionals(handle, seat, count, heads[2*count], weights, weight_count)` gives
-a policy seat the same layers (pairs of condition head and re-selected head, their weights
-concatenated; count 0 clears; they stay across `pw_reset`; -1 bad arguments or not a policy
-seat, -2 against COND_HEAD's rules).
+Selection is not part of a contract: argmax, `decoder.sampling`, `decoder.forbid_objectives`,
+`decoder.joint_sampling` and the model's COND_HEAD layers (above; heads 0..4 only) choose the
+heads, on the seat's own SplitMix64 stream seeded from the match seed and the slot
+(`neural_contract.samplingRng`); the training ABI's `pw_set_seat_sampling` / `pw_sample_actions`
+draw from the same stream, and `pw_set_seat_conditionals(handle, seat, count, heads[2*count],
+weights, weight_count)` gives a policy seat the same COND_HEAD layers (pairs of condition head and
+re-selected head, their weights concatenated; count 0 clears; they stay across `pw_reset`; -1 bad
+arguments or not a policy seat, -2 against COND_HEAD's rules). The native decoder rules
+(`fire_hold_teammates`, `strafe_legs`, `aim_snap`, `steady_shot`, `aim_retarget`, `shot_gate`,
+`spray_aim`, `spray_gate`) were retired for BASIC parity: write them in `policy.bas`.
 
-Movement (heart, visible pickup or `pos+200*compass`), directional aim
-(`pos+5000*compass`), fire, grenade and sneak decode identically under both.
-
-**v2 lead (`leadAimPoint` in `neural_contract.nim`).** The gun (`mechanics.nim`, rules
->= 10) processes a shoot order on tick T after that tick's movement: `gunAim = aim -
-pos_T` is locked as a vector and the ray leaves `GunWindupTicks` = 5 ticks later from
-`pos_(T+5)`, along the locked vector. Between the pre-step world the policy observed and
-the ray, the shooter makes 6 moves, and the direction was fixed after the first. For a
-shooter with per-tick velocity `v` and a target with per-tick velocity `u` observed at
-`P`, the ray `pos_(T+5) + s*(aim - pos_T)` passes through `P + 6u` when
-
-```
-aim = P + (GunWindupTicks+1)*u - GunWindupTicks*v = P + 6u - 5v
-```
-
-which is base.bas's own rule ("the ray leaves six moves after the order ... aim where
-they will be, minus our own drift": target velocity x 6, own drift x 5; base.bas uses
-its planned leg as the drift while in contact and its last measured move otherwise).
-`u` is the body's last-tick displacement as the seat itself could observe it, kept by
-the host in an `AimMemory` outside the world (never hashed or serialized, recorded with
-`recordAimMemory` after every decode): only when the same body was seen under the same
-identity one tick ago; a first tick, a gap, a respawn or a teleport (a per-axis
-displacement above `TeleportStep` = 60, more than any one-tick move) counts as zero.
-`v` is not remembered but known: the move the world will make for the seat on this
-tick from the goal and sneak flag decoded from the same action (`plannedStep`: the
-same waypoint, speed and trench damping as `mechanics.nim`, before blocking and
-yielding; zero when the seat holds still). With a still target and a still seat the v2
-aim is the v1 aim. The memory follows the recurrent state in the hosted seat (cleared
-at initial use, match reset, death and respawn) and is cleared by `pw_create`,
-`pw_reset` and `pw_set_action_contract` in the native ABI, and there too on every decided
-tick the seat is dead or alive after a tick it was dead, so both agree after a respawn.
-
-Native ABI: `pw_set_action_contract(handle, 1|2)` selects the decoder for the caller's
-actions (default 1, kept across resets), `pw_action_contract(handle)` reads it,
-`pw_action_contract_hash(version, out, 65)` returns the hash; the Nim bot
-(`pw_bot_actions`) expresses identity aims and is therefore lead-compensated under v2.
-`pw_action_candidates(handle, seat, movement, sneak, int32[51*2], int32[25*2])` reports
-the point each head index resolves to on the current pre-step world (INT32_MIN for a
-candidate that does not exist; a v2 identity aim depends on the movement and sneak
-indices given), for exact demonstration mapping. `pw_script_decide(handle)` runs the
-scripted seats' decision ahead of `pw_step` and `pw_set_seat_override(handle, seat,
-mask)` (bits 1 walk, 2 aim, 4 shoot, 8 grenade, 16 sneak) makes a scripted seat execute
-the caller's decoded action for the masked heads: the mapping-ceiling diagnostics, exact
-with mask 0. `pw_set_seat_sampling(handle, seat, temperature_permille, head_mask)` and
+`pw_script_decide(handle)` runs the scripted seats' decision ahead of `pw_step` and
+`pw_set_seat_override(handle, seat, mask)` (bits 1 walk, 2 aim, 4 shoot, 8 grenade, 16 sneak)
+makes a scripted seat execute the caller's action (decoded by the reference decoder) for the
+masked heads: the mapping-ceiling diagnostics, exact with mask 0.
+`pw_set_seat_sampling(handle, seat, temperature_permille, head_mask)` and
 `pw_sample_actions(handle, seat, float[82], int32[5])` select a seat's head actions from
-logits the way a sampling bundle would (the seat's stream is seeded from the match seed
-and the seat on every create/reset; `pw_seat_sample_draws` counts); with sampling off
-(the default) it is plain argmax, and `pw_step` is untouched either way (a hosted seat
-decides only while alive, so a probe matching its draws calls it for live seats only).
-`pw_set_seat_forbid_objectives(handle, seat, int32 indices[], count)` masks movement-head
-candidates out of `pw_sample_actions` and makes `pw_step` return -3 (nothing stepped) when
-the caller hands a live seat a forbidden one; `pw_seat_forbidden_objectives(handle, seat,
-int32 out[51])` returns the mask for a trainer's logits. `pw_set_seat_strafe(handle, seat,
-range, leg_min, leg_max, shot_min, shot_max, reverse_permille)` (range 0 = off) applies
-the strafe to the caller's heads inside `pw_step`; `pw_seat_strafe_stats(handle, seat,
-int32 out[3])` = {legs, replaced decisions, movement index executed last step or -1}.
-`pw_set_seat_aim_snap(handle, seat, max_angle_millideg)` (0 = off, 22500 = 22.5 degrees)
-and `pw_set_seat_steady_shot(handle, seat, 0|1)` apply those rules to the caller's heads
-inside `pw_step` (aim snap, strafe, steady shot, decode, hold); `pw_seat_aim_snap_stats(handle,
-seat, int32 out[3])` = {snaps, aim index executed last step or -1, cosine threshold} and
-`pw_seat_steady_stats(handle, seat, int32 out[3])` = {order ticks held, decisions held,
-movement index executed last step (0) or -1}. The steady shot refuses a seat whose forbid
-mask lists index 0, and the forbid call refuses index 0 while the steady shot is on.
-`pw_set_seat_aim_retarget(handle, seat, enabled, max_range, hp_weight, carry_weight)`
-(enabled 0 = off; 1, 5250, 160000, 2500000 = the bundle defaults) and
-`pw_set_seat_shot_gate(handle, seat, max_range)` (0 = off, 5250 = the default) apply those
-rules inside `pw_step` in the hosted order (aim retarget, aim snap, shot gate, strafe,
-steady shot, decode, hold); `pw_seat_aim_retarget_stats(handle, seat, int32 out[3])` =
-{retargets, aim index executed last step or -1, max_range} and
-`pw_seat_shot_gate_stats(handle, seat, int32 out[3])` = {orders dropped, shoot head
-executed last step (0) or -1, max_range}.
+logits the way a sampling bundle would (`pw_seat_sample_draws` counts; with sampling off it is
+plain argmax). `pw_set_seat_forbid_objectives(handle, seat, int32 indices[], count)` masks
+movement-head candidates out of `pw_sample_actions` and makes `pw_step` return -3 (nothing
+stepped) when the caller hands a live caller-driven seat a forbidden one;
+`pw_seat_forbidden_objectives(handle, seat, int32 out[51])` returns the mask.
+`pw_set_action_contract(handle, 11|13)` (201 handles; 12 on 202) selects the action contract
+the caller's heads are read under (seven per seat under 13; `pw_action_layout_ext`).
 
 `pw_seat_stats(handle, int32 out[16*8])` fills, per seat in seat order,
 `{damage_dealt_enemy, damage_dealt_team, hits_enemy, hits_taken, kills, deaths,
@@ -721,16 +501,16 @@ Compile or runtime errors disable the seat exactly as they disable a hosted seat
 running, 2 compile failed, 3 disabled, with the error text. `pw_seat_orders(handle,
 seat, int32[10])` reports the command a scripted seat issued on the last step
 (`walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct, scripted`),
-for demonstration collection: it maps exactly onto the action contract only when the
-goal is a heart or visible pickup position or `pos+200*compass` (clamped) and the aim
-is a visible body's position or `pos+5000*compass` (clamped); other orders have no
-exact head candidate and any mapping is an approximation. Worlds without scripts are
+for demonstration collection: it maps onto the reference reading of action contract
+teams.view.1 only when the goal is a heart or visible pickup position or `pos+200*compass`
+(clamped) and the aim is a visible body's position or `pos+5000*compass` (clamped); other
+orders have no exact head choice and any mapping is an approximation. Worlds without scripts are
 byte-identical to a build without this call.
 `pw_set_seat_command(handle, seat, int32[9])` takes the same nine fields the other way:
 the seat executes that raw command on the next `pw_step` only, instead of its decoded
 heads or its script's order. It is built as BASIC builds one (goal verbatim, aim clamped
 to the map as `lookAt` clamps it), skips the seat's head decode and forbid check for that
-step, applies the fire hold and fire period only if already set, and is echoed by
+step, applies the fire period only if already set, and is echoed by
 `pw_seat_orders`. A command-space opponent, or a recording's commands replayed seat by
 seat, reproduces the recorded world hash for hash. Never calling it is byte-identical.
 

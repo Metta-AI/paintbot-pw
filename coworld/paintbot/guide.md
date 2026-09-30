@@ -133,6 +133,11 @@ this way. Available in FFA-kin mode only (Heartland): `gameMode()`, `seatCount()
 `territoryBoost()`; see "FFA-kin mode (Heartland)". In the teams game these names are not defined, so scripts may
 use them as ordinary variables.
 
+Randomness: `rnd(n)` returns 0 .. n-1 from your seat's own stream, seeded from the match seed and
+your seat, so a replay of the match draws the same numbers; it never touches the world's random
+stream or another seat's. `n` below 1 is an error that disables the seat. (A script that used
+`rnd` as a variable name must rename it.)
+
 Actions: `walkTo(x,y)`, `lookAt(x,y)`, `shootAt(x,y)`, `chargeGrenade(held)`.
 Release by calling `chargeGrenade(0)` or not calling it on the next tick.
 `shout(stringHandle)` is public communication; PRINT remains private.
@@ -462,7 +467,7 @@ stay public, and so do the hearts: `heartOwner(i)`/`controlOwner(i)` and the cap
 properties of the map heart, which everyone sees. Shouts still carry: a cog within hearing range
 (1280 units, a fifth of the island's width, on every map, as before) hears them whatever the line of sight, with the sender's
 seat and position as always, but hearing a cog unlocks nothing else about it. The neural
-observation follows the same rule: an unseen cog's ffa.v1 row is zero (`neural_actor.md`).
+observation follows the same rule: an unseen cog has no ffa.view.1 row (`neural_basic.md`).
 Before rules 48 kinship, genes, scores and who is still playing were public with no line of
 sight. The functions below are available
 in FFA-kin mode only: in the teams game they do not exist, and a teams script may use the
@@ -854,32 +859,41 @@ and `model.bin`. Submit it through the same file-policy upload route as a plain
 BASIC source. The BASIC script calls native floating-point inference; it does not
 interpret the network's matrix arithmetic or quantize observations to integers.
 
+A neural seat sees and acts exactly like a plain BASIC seat. Its observation is built only
+from values your BASIC builtins can read on the same tick (the same fog, disguises and
+one-body-per-identity rule), and the network's output reaches the game only through your
+script: the neural functions return numbers (observation values, logits, head choices), and
+your `policy.bas` turns them into `walkTo`, `lookAt`, `shootAt`, `chargeGrenade` and `sneak`.
+
 ```basic
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
-paintbot_act(neuralLogits())
+neuralSample()
+' then decode: m = neuralChoice(0), a = neuralChoice(1), ... and call walkTo / shootAt
 ```
 
-The four handle functions identify this seat's model, observation, output, and
-recurrent state. Handles cannot access another seat. Each living seat can observe,
-infer, and decode one action per tick, in that order. Recurrent state resets on
-match start, death, and respawn. The decoder deterministically selects the largest
-logit in each action head. Other BASIC actuators remain available for orchestration.
+`examples/paintbot/players/neural_decode.bas` is the reference decode of the action heads
+(the training library runs the same file), and `players/neural_policy.bas` is a complete
+policy built on it. The four handle functions identify this seat's model, observation,
+output, and recurrent state. Handles cannot access another seat. Each living seat can
+observe and infer once per tick, in that order. Recurrent state resets on match start,
+death, and respawn. Selection is headwise argmax unless the bundle or the script asks for
+sampling.
 
-The restricted FP32 actor uses 448 policy-visible inputs (observation contract v1; v2
-adds a 58-float public terrain block, water and height, for 506), one MinGRU layer of
-width 64, 128, or 256, and categorical action heads `[51,25,2,2,2]`. It receives
-public objectives, own state, visible apparent identities/pickups, sound cues,
-and local terrain; it receives no hidden enemy identities or positions. The
-shared training/deployment contract includes public cooldown and heart-meter
-information beyond the older BASIC scalar getters.
+Observation contracts: `teams.view.1` (the teams game, 512 inputs; `teams.view.1u<K>` adds K
+inputs your script sets with `neuralInput`) and `ffa.view.1` (Heartland, any seat count).
+Action contracts: `teams.view.1` (heads `[51,25,2,2,2]`), its aim-offset variant (two more
+23-bin heads), and `ffa.view.1` pointer. The older contracts (v1, v2, v3, ffa.v1, ffa.v2)
+were retired: their observations carried state a BASIC seat cannot read (gun cooldown,
+shield, current aim, heart meters, the end tick, cover probes) and their actions were
+decoded natively. A package naming one is refused at upload.
 
-The bundle manifest uses schema `paintbot-neural-basic/1`, hashes both payloads,
-and binds the versioned observation/action contracts. Expanded files are bounded
+The bundle manifest uses schema `paintbot-neural-basic/1` or `/2`, hashes both payloads,
+and binds the observation/action contracts. Expanded files are bounded
 to 128 KiB BASIC, 16 MiB model, and 8 KiB manifest. Native inference is separately
 limited to 4,000,000 counted operations per seat/tick; BASIC's bytecode limits
 still apply. Invalid models, buffers, or inference results disable the offending
-seat with an explicit policy error and a safe action.
+seat with an explicit policy error.
 
 See [package and host API](../../examples/paintbot/neural_basic.md) and
 [FP32 actor format](../../examples/paintbot/neural_actor.md) for the exact manifest,

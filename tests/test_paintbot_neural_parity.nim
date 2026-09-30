@@ -1,138 +1,193 @@
-## Parity of the fixed-width neural contracts across engine changes. Every observation
-## contract with a fixed width (v1, v2, v3, v2u<K>, ffa.v1) and both action contracts (v1, v2)
-## are driven through the training library for a few hundred ticks with seeded actions, the
-## decoder options on some seats, a scripted seat and a mid-match reset; every observation
-## row, reset flag, action candidate, terminal, tick, winner and world hash is folded into one
-## FNV-1a digest per scenario. The digests were recorded on origin/main 0ff41d2 (before
-## observation contract ffa.v2 and N-seat handles); an engine change that moves any byte a
-## fixed contract's policy sees or any decoded command fails here.
-import std/[unittest, os, strutils]
-import ../examples/paintbot/[sim, neural_contract, native_env]
+## Training == host parity for the view contracts. Each scenario drives the training library
+## for two episodes (a mid-match reset between them) with seeded head choices for every seat
+## but one scripted seat: pw_step decodes each seat's heads with the reference decoder script.
+## The same match is then replayed the hosted way from the same starting worlds: every
+## caller-driven seat is a hosted policy seat whose policy.bas is neuralSample + the reference
+## decode (players/neural_decode.bas, neural_decode_ffa.bas), fed the chosen heads as one-hot
+## logits, and the scripted seat runs the same script; the world steps as the game's loop steps
+## it (decide, deliverSpeech, step). Every tick, the observation row the trainer read must equal
+## the one the hosted policy.bas observed, the selection must be the chosen heads, and the
+## world hashes must agree: what a policy is trained on and what it plays are the same bytes.
+import std/[unittest, os, importutils]
+import ../examples/paintbot/[sim, kinship, neural_contract, native_env, bots, seat_view]
+privateAccess(NativeEnv)
 
 const Root = currentSourcePath().parentDir.parentDir
-
-type Digest = object
-  h: uint64
-
-proc init(): Digest = Digest(h: 0xcbf29ce484222325'u64)
-proc add(d: var Digest, p: pointer, n: int) =
-  let bytes = cast[ptr UncheckedArray[uint8]](p)
-  for i in 0..<n:
-    d.h = (d.h xor bytes[i].uint64) * 0x100000001b3'u64
-proc add[T](d: var Digest, v: T) =
-  var x = v
-  d.add(addr x, sizeof(T))
-proc add[T](d: var Digest, s: seq[T]) =
-  if s.len > 0: d.add(unsafeAddr s[0], s.len*sizeof(T))
+const
+  Decoder = staticRead("../examples/paintbot/players/neural_decode.bas")
+  DecoderFfa = staticRead("../examples/paintbot/players/neural_decode_ffa.bas")
+  Head = "paintbot_observe(neuralObservation())\nrun_neural_net(neuralModel(), neuralObservation(), " &
+    "neuralLogits(), neuralState())\nneuralSample()\n"
+  ScriptedSeat = 9
 
 proc fp(buffer: var seq[float32]): ptr UncheckedArray[cfloat] =
   cast[ptr UncheckedArray[cfloat]](addr buffer[0])
 proc ip(buffer: var seq[int32]): ptr UncheckedArray[int32] =
   cast[ptr UncheckedArray[int32]](addr buffer[0])
+proc envOf(h: pointer): ptr NativeEnv = cast[ptr NativeEnv](h)
 
 type Scenario = object
   name: string
-  obs, contract, inputs: int32
+  obs, inputs: int32
   ffa: bool
   rules: int32  # 0 = the library default
   map: int32    # -1 = the rules' own island
-  options: bool # decoder options on seats 2..7
 
-proc script(name: string): string = readFile(Root / "coworld/paintbot/players" / name)
+type Tick = object
+  ## What the trainer saw and did on one native tick.
+  rows: seq[float32]      # every seat's pw_observe row
+  actions: seq[int32]
+  hash: uint32
+  terminal: float32
+type Episode = object
+  start: World            # the world right after the reset
+  kinship: Kinship        # the episode's kinship (FFA-kin draws one per reset)
+  ticks: seq[Tick]
 
-var steps: int  # pw_step calls that stepped, for the print mode
+proc script(ffa: bool): string =
+  readFile(Root / "coworld/paintbot/players" / (if ffa: "ffa.bas" else: "base.bas"))
 
-proc run(s: Scenario): uint64 =
-  var d = init()
-  steps = 0
-  let h = if s.inputs > 0: pw_create_observation_inputs_v(7, 0, s.obs, s.inputs)
-          else: pw_create_observation(7, 0, s.obs)
-  doAssert h != nil
+proc observationHash(s: Scenario): string =
+  if s.obs == ocFfaView1.int32: ObservationContractFfaView1Hash
+  elif s.inputs > 0: userInputsContractHash(s.inputs.int)
+  else: ObservationContractTeamsView1Hash
+
+proc manifest(s: Scenario): string =
+  result = """{"schema": "paintbot-neural-basic/2", "observation_contract": """" & s.observationHash &
+    """", "action_contract": """" & (if s.ffa: ActionContractFfaView1PointerHash else: ActionContractTeamsView1Hash) & "\""
+  if s.inputs > 0:
+    # Zero inputs, as the training library writes for a seat without a policy script.
+    result.add ", \"user_inputs\": {\"count\": " & $s.inputs & ", \"init\": ["
+    for i in 0..<s.inputs.int: result.add (if i > 0: ", 0" else: "0")
+    result.add "]}"
+  result.add "}"
+
+proc draw(rng: var uint64, n: int): int32 =
+  rng = rng * 6364136223846793005'u64 + 1442695040888963407'u64
+  int32((rng shr 33) mod uint64(n))
+
+proc train(s: Scenario, h: pointer): seq[Episode] =
+  ## The native half: two episodes of seeded heads, every row and hash recorded.
   if s.ffa: doAssert pw_set_game_mode(h, 1) == 0
   if s.rules > 0: doAssert pw_set_rules(h, s.rules) == 0
   doAssert pw_set_map(h, s.map) == 0
-  doAssert pw_set_action_contract(h, s.contract) == 0
-  if s.options:
-    doAssert pw_set_seat_strafe(h, 2, 5250, 3, 6, 6, 9, 800) == 0
-    doAssert pw_set_seat_aim_snap(h, 3, 22500) == 0
-    doAssert pw_set_seat_steady_shot(h, 4, 1) == 0
-    doAssert pw_set_seat_aim_retarget(h, 5, 1, 5250, 160000, 2500000) == 0
-    doAssert pw_set_seat_shot_gate(h, 6, 5250) == 0
-    doAssert pw_set_seat_fire_hold(h, 7, 1) == 0
-  let source = script(if s.ffa: "ffa.bas" else: "base.bas")
-  doAssert pw_reset(h, 2026, 360) == 0
-  doAssert pw_set_seat_script(h, 9, cast[ptr UncheckedArray[char]](unsafeAddr source[0]), source.len.int32) == 0
-  let width = pw_handle_observation_size(h).int
-  var obs = newSeq[float32](LegacySeats*width)
-  var resets = newSeq[float32](LegacySeats)
-  var actions = newSeq[int32](LegacySeats*ActionSizes.len)
-  var rewards = newSeq[float32](LegacySeats)
-  var terminals = newSeq[float32](LegacySeats)
-  var goals = newSeq[int32](ActionSizes[0]*2)
-  var aims = newSeq[int32](ActionSizes[1]*2)
-  var results = newSeq[float32](8)
+  let source = script(s.ffa)
   var rng = 0x9E3779B97F4A7C15'u64
-  proc draw(rng: var uint64, n: int): int32 =
-    rng = rng * 6364136223846793005'u64 + 1442695040888963407'u64
-    int32((rng shr 33) mod uint64(n))
   for episode in 0..1:
-    if episode == 1: doAssert pw_reset(h, 2027, 240) == 0
+    doAssert pw_reset(h, int32(2026 + episode), int32(360 - 120*episode)) == 0
+    if episode == 0:
+      doAssert pw_set_seat_script(h, ScriptedSeat, cast[ptr UncheckedArray[char]](unsafeAddr source[0]),
+        source.len.int32) == 0
+    var e = Episode(start: envOf(h).world, kinship: envOf(h).kinship)
+    let width = pw_handle_observation_size(h).int
+    var heads = newSeq[int32](8)
+    doAssert pw_action_layout(h, ip(heads)) == 0
+    var rewards = newSeq[float32](LegacySeats)
+    var terminals = newSeq[float32](LegacySeats)
+    var resets = newSeq[float32](LegacySeats)
     for tick in 0..<400:
-      doAssert pw_observe(h, fp(obs), fp(resets)) == 0
-      d.add obs
-      d.add resets
+      var t = Tick(rows: newSeq[float32](LegacySeats*width), actions: newSeq[int32](LegacySeats*ActionSizes.len))
+      doAssert pw_observe(h, fp(t.rows), fp(resets)) == 0
       for slot in 0..<LegacySeats:
         let o = slot*ActionSizes.len
-        actions[o] = draw(rng, ActionSizes[0])
-        actions[o+1] = draw(rng, ActionSizes[1])
-        actions[o+2] = int32(draw(rng, 3) == 0)
-        actions[o+3] = int32(draw(rng, 20) == 0)
-        actions[o+4] = int32(draw(rng, 8) == 0)
-      let probe = tick mod LegacySeats
-      doAssert pw_action_candidates(h, probe.cint, actions[probe*ActionSizes.len],
-        actions[probe*ActionSizes.len+4], ip(goals), ip(aims)) == 0
-      d.add goals
-      d.add aims
-      let code = pw_step(h, ip(actions), fp(rewards), fp(terminals))
-      d.add code
-      if code != 0: break
-      inc steps
-      # Rewards stay out of the digest: the FFA reward sums float64 products a C compiler may
-      # fuse (FMA) on some targets, and the world hash below already pins what was played.
-      d.add terminals
-      d.add pw_state_hash(h)
-      doAssert pw_results(h, fp(results)) == 0
-      d.add results[0 .. 1]  # tick and winner (the FFA scores are float sums, like the rewards)
-  pw_destroy(h)
-  d.h
+        t.actions[o] = draw(rng, heads[1])
+        t.actions[o+1] = draw(rng, heads[2])
+        t.actions[o+2] = int32(draw(rng, 3) == 0)
+        t.actions[o+3] = int32(draw(rng, 20) == 0)
+        t.actions[o+4] = int32(draw(rng, 8) == 0)
+      let code = pw_step(h, ip(t.actions), fp(rewards), fp(terminals))
+      if code == -2: break
+      doAssert code == 0, "pw_step failed: " & $code
+      t.hash = pw_state_hash(h)
+      t.terminal = terminals[0]
+      e.ticks.add t
+      if terminals[0] == 1: break
+    result.add e
+
+proc host(s: Scenario, h: pointer, episodes: seq[Episode]): int =
+  ## The hosted half: the same starting worlds and head choices through hosted policy seats.
+  ## Returns the ticks compared.
+  discard pw_state_hash(h) # installs the handle's rules, map, mode and kinship on this thread
+  let policy = Head & (if s.ffa: DecoderFfa else: Decoder)
+  let source = script(s.ffa)
+  for e in episodes:
+    var bots = newSeq[Bot](LegacySeats)
+    for slot in 0..<LegacySeats:
+      bots[slot] = if slot == ScriptedSeat: loadScriptBot(source, slot)
+                   else: loadPolicyBot(policy, s.manifest, slot, s.observationHash)
+    heard = newSeq[seq[HeardMessage]](LegacySeats)
+    activeKinship = e.kinship
+    var w = e.start
+    for t in e.ticks:
+      let width = t.rows.len div LegacySeats
+      var alive: array[LegacySeats, bool]
+      for slot in 0..<LegacySeats:
+        alive[slot] = w.cogs[slot].hp > 0
+        if slot == ScriptedSeat: continue
+        let bot = bots[slot]
+        for i in 0..<bot.neural.fedLogits.len: bot.neural.fedLogits[i] = 0
+        var offset = 0
+        for head in 0..<ActionSizes.len:
+          bot.neural.fedLogits[offset + t.actions[slot*ActionSizes.len + head].int] = 1
+          offset += bot.neural.heads[head]
+        bot.neural.logitsFed = true
+      let commands = decide(bots, w)
+      deliverSpeech(w)
+      for slot in 0..<LegacySeats:
+        if slot == ScriptedSeat or not alive[slot]: continue
+        let bot = bots[slot]
+        check not bot.failed
+        if bot.failed: echo "seat ", slot, ": ", bot.error
+        check bot.neural.sampled
+        check @(bot.neural.selected) == t.actions[slot*ActionSizes.len ..< (slot+1)*ActionSizes.len]
+        let row = t.rows[slot*width ..< (slot+1)*width]
+        check bot.neural.observation == row
+        if bot.neural.observation != row:
+          for i in 0..<width:
+            if bot.neural.observation[i] != row[i]:
+              echo "DIFF tick ", w.tick, " seat ", slot, " col ", i, " host ", bot.neural.observation[i], " native ", row[i]
+          return
+      check not bots[ScriptedSeat].failed
+      w.step(commands)
+      check w.stateHash() == t.hash
+      if w.stateHash() != t.hash: return
+      check float32((w.winner != -1 or w.tick >= w.endTick).int) == t.terminal
+      inc result
 
 const Scenarios = [
-  Scenario(name: "v1 obs, v1 actions, teams", obs: 1, contract: 1, map: -1, options: true),
-  Scenario(name: "v2 obs, v2 actions, teams, rules 47", obs: 2, contract: 2, rules: 47, map: -1, options: true),
-  Scenario(name: "v3 obs, v2 actions, teams, rules 47, crater", obs: 3, contract: 2, rules: 47, map: 3, options: true),
-  Scenario(name: "v2u4 obs, v1 actions, teams", obs: 2, inputs: 4, contract: 1, map: -1),
-  Scenario(name: "v3u2 obs, v2 actions, teams, rules 47", obs: 3, inputs: 2, contract: 2, rules: 47, map: -1),
-  Scenario(name: "ffa.v1 obs, v1 actions, FFA-kin", obs: 101, contract: 1, ffa: true, map: -1),
-  Scenario(name: "ffa.v1 obs, v2 actions, FFA-kin, rules 47", obs: 101, contract: 2, ffa: true, rules: 47, map: -1, options: true),
-  Scenario(name: "ffa.v1 obs, v2 actions, FFA-kin, rules 47, twin-mesas", obs: 101, contract: 2, ffa: true, rules: 47, map: 0)]
+  Scenario(name: "teams.view.1, teams", obs: 201, map: -1),
+  Scenario(name: "teams.view.1, teams, rules 47", obs: 201, rules: 47, map: -1),
+  Scenario(name: "teams.view.1, teams, rules 47, crater", obs: 201, rules: 47, map: 3),
+  Scenario(name: "teams.view.1u4, teams", obs: 201, inputs: 4, map: -1),
+  Scenario(name: "ffa.view.1, FFA-kin", obs: 202, ffa: true, map: -1),
+  Scenario(name: "ffa.view.1, FFA-kin, rules 48 (fog of war)", obs: 202, ffa: true, rules: 48, map: -1),
+  Scenario(name: "ffa.view.1, FFA-kin, rules 47, twin-mesas", obs: 202, ffa: true, rules: 47, map: 0)]
 
-# Recorded on origin/main 0ff41d2 (PWPARITY_PRINT=1 prints them).
-const Golden: array[Scenarios.len, uint64] = [
-  0xDF80AC7227887D07'u64, 0xD04F07C05217E7A1'u64, 0xAAD92B85A1D61D66'u64, 0xC49A997E0E75C672'u64,
-  0xE2BF1FE51D49FC45'u64, 0x2BB355999AFDA0FB'u64, 0x66C91BEE84EB8CF8'u64, 0xF729E5FF6B53E866'u64]
+proc handleFor(s: Scenario): pointer =
+  result = if s.inputs > 0: pw_create_observation_inputs_v(7, 0, s.obs, s.inputs)
+           else: pw_create_observation(7, 0, s.obs)
+  doAssert result != nil
 
-suite "Fixed-width neural contracts are byte-identical":
-  for i, s in Scenarios:
+suite "Training == host parity on the view contracts":
+  for s in Scenarios:
     test s.name:
-      let digest = run(s)
-      if existsEnv("PWPARITY_PRINT"): echo "  ", s.name, ": 0x", digest.toHex, " (", steps, " steps)"
-      check digest == Golden[i]
+      let h = handleFor(s)
+      let episodes = train(s, h)
+      check episodes.len == 2 and episodes[0].ticks.len > 100 and episodes[1].ticks.len > 100
+      let compared = host(s, h, episodes)
+      check compared == episodes[0].ticks.len + episodes[1].ticks.len
+      pw_destroy(h)
 
   test "the teams game at rules 48 plays and observes exactly as at rules 47":
     # Rules 48 (the FFA-kin fog of war) changes nothing in the teams game.
-    var teams48 = Scenarios[1]
-    teams48.rules = 48
-    check run(teams48) == Golden[1]
-    var v3at48 = Scenarios[2]
-    v3at48.rules = 48
-    check run(v3at48) == Golden[2]
+    proc record(s: Scenario): seq[(seq[float32], uint32)] =
+      let h = handleFor(s)
+      for e in train(s, h):
+        for t in e.ticks: result.add (t.rows, t.hash)
+      pw_destroy(h)
+    for base in [Scenarios[1], Scenarios[2]]:
+      var at48 = base
+      at48.rules = 48
+      let a = record(base)
+      check a.len > 200
+      check record(at48) == a

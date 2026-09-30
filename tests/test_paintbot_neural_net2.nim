@@ -268,8 +268,7 @@ suite "PWNET002 token layers (TOKEN_MLP, TOKEN_MIX, POINTER)":
 
   test "the published operation count (an entity-factored actor: 1,327,278)":
     var r = initRand(71)
-    let a = loadActor(encode2(538, ActionSizes, r.entityFactored(), UserInputsContractHashes[31],
-      ActionContractV2Hash))
+    let a = loadActor(encode2(538, ActionSizes, r.entityFactored()))
     let (T, din, d, z, H, I) = (16, 38, 128, 64, 128, 538)
     let tokenMlp = T*din + T*(2*din*d + 2*d) + T*(2*d*d + 2*d) + (T + 2*T*d + d + 8)
     let tokenMix = 2*H*z + H + T*(2*d*z + 3*z) + (T + 2*T*z + z + 8)
@@ -320,8 +319,7 @@ suite "PWNET002 token layers (TOKEN_MLP, TOKEN_MIX, POINTER)":
 
   test "an entity-factored actor runs recurrently and does not allocate":
     var r = initRand(74)
-    let actor = loadActor(encode2(538, ActionSizes, r.entityFactored(), UserInputsContractHashes[31],
-      ActionContractV2Hash))
+    let actor = loadActor(encode2(538, ActionSizes, r.entityFactored()))
     var state = newSeq[float32](128)
     var logits = newSeq[float32](LogitSize)
     var obs = r.observation(538)
@@ -411,9 +409,8 @@ suite "PWNET002 SEGMENT_NEAR (the input view)":
     check segmentNearOps(538, 16) == 3738
     var r = initRand(81)
     let base = r.entityFactored()
-    let a = loadActor(encode2(538, ActionSizes, base, UserInputsContractHashes[31], ActionContractV2Hash))
-    let b = loadActor(encode2(538, ActionSizes, base.shifted(identityNear(522)), UserInputsContractHashes[31],
-      ActionContractV2Hash))
+    let a = loadActor(encode2(538, ActionSizes, base))
+    let b = loadActor(encode2(538, ActionSizes, base.shifted(identityNear(522))))
     check a.operationCount == 1_327_278
     check b.operationCount == 1_331_016 and b.operationCount - a.operationCount == 538 + 12*16*16 + 8*16
     check b.layerCount == 8 and b.stateSize == 128 and b.modelTag == "pwnet2-l8-s128"
@@ -483,16 +480,16 @@ suite "PWNET002 SEGMENT_NEAR (the input view)":
       @[r.tokenMlp(16, [[104'u32, 8, 8], [392'u32, 1, 1]], 0, 0, [8]), concat(392, 16), r.dense(32, LogitSize)],
       @[r.attention([[104'u32, 8, 16, 8, 0], [392'u32, 1, 16, 1, AttnAlwaysValid]], 8, 2, 1, 8, 390, 20),
         r.dense(36, LogitSize, bias = true)],
-      @[r.dense(ObservationSize, LogitSize)]]
+      @[r.dense(TeamsViewSize, LogitSize)]]
     for specs in stacks:
-      let withView = loadActor(encode2(ObservationSize, ActionSizes, specs.shifted(near)))
-      let raw = loadActor(encode2(ObservationSize, ActionSizes, specs))
-      check withView.operationCount == raw.operationCount + segmentNearOps(ObservationSize, 16)
+      let withView = loadActor(encode2(TeamsViewSize, ActionSizes, specs.shifted(near)))
+      let raw = loadActor(encode2(TeamsViewSize, ActionSizes, specs))
+      check withView.operationCount == raw.operationCount + segmentNearOps(TeamsViewSize, 16)
       var state: seq[float32]
       var a, b, c = newSeq[float32](LogitSize)
       var differs, positives = 0
       for trial in 0..<200:
-        var obs = r.observation(ObservationSize)
+        var obs = r.observation(TeamsViewSize)
         r.nearScene(obs)
         let viewed = near.withNearFlags(obs)
         for n in 0..<16: positives += int(viewed[392+n])
@@ -563,8 +560,7 @@ suite "PWNET002 SEGMENT_NEAR (the input view)":
 
   test "SEGMENT_NEAR in front of an entity-factored actor does not allocate":
     var r = initRand(85)
-    let actor = loadActor(encode2(538, ActionSizes, r.entityFactored().shifted(identityNear(522)),
-      UserInputsContractHashes[31], ActionContractV2Hash))
+    let actor = loadActor(encode2(538, ActionSizes, r.entityFactored().shifted(identityNear(522))))
     var state = newSeq[float32](128)
     var logits = newSeq[float32](LogitSize)
     var obs = r.observation(538)
@@ -574,11 +570,13 @@ suite "PWNET002 SEGMENT_NEAR (the input view)":
     for i in 0..<20: actor.infer(obs, state, logits)
     check getOccupiedMem() == before
 
+# The reference BASIC decode of the heads (the policy selects them with neuralSample first).
+const Decode = staticRead("../examples/paintbot/players/neural_decode.bas")
 const NeuralSource = """
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
-paintbot_act(neuralLogits())
-"""
+neuralSample()
+""" & Decode
 
 proc seatFixture(model: string): seq[Bot] =
   let path = getTempDir()/"paintbot-neural-net2-test.bas"
@@ -592,7 +590,7 @@ proc seatFixture(model: string): seq[Bot] =
 suite "PWNET002 hosted seat":
   test "a PWNET002 package plays, its telemetry names the model, state resets like PWNET001":
     var r = initRand(42)
-    let model = encode2(ObservationSize, ActionSizes, [
+    let model = encode2(TeamsViewSize, ActionSizes, [
       r.attention([[104'u32, 8, 16, 8, 0], [24'u32, 8, 10, 8, 0]], 32, 4, 1, 32, 0, 24),
       r.mingru(88, 64, highway = false, bias = true),
       r.dense(64, LogitSize, bias = true)])
@@ -610,8 +608,8 @@ suite "PWNET002 hosted seat":
 
   test "an entity-factored package (token layers) plays on the hosted seat":
     var r = initRand(44)
-    let model = encode2(ObservationSize, ActionSizes,
-      r.entityFactored(inputs = ObservationSize, segments = [[104'u32, 8, 8], [0'u32, 0, 24]]))
+    let model = encode2(TeamsViewSize, ActionSizes,
+      r.entityFactored(inputs = TeamsViewSize, segments = [[104'u32, 8, 8], [0'u32, 0, 24]]))
     let players = seatFixture(model)
     var w = newWorld(2027)
     for tick in 0..<40:
@@ -625,7 +623,7 @@ suite "PWNET002 hosted seat":
 
   test "SEGMENT_NEAR in front of an entity-factored actor plays on the hosted seat":
     var r = initRand(45)
-    let model = encode2(ObservationSize, ActionSizes, r.entityFactored(inputs = ObservationSize,
+    let model = encode2(TeamsViewSize, ActionSizes, r.entityFactored(inputs = TeamsViewSize,
       segments = [[104'u32, 8, 8], [392'u32, 1, 1], [0'u32, 0, 24]]).shifted(identityNear(392)))
     let players = seatFixture(model)
     var w = newWorld(2028)
@@ -640,7 +638,7 @@ suite "PWNET002 hosted seat":
 
   test "an over-budget PWNET002 model is rejected at load with its cost":
     var r = initRand(43)
-    let model = encode2(ObservationSize, ActionSizes, [
+    let model = encode2(TeamsViewSize, ActionSizes, [
       r.attention([[104'u32, 8, 16, 8, 0], [24'u32, 8, 10, 8, 0], [232'u32, 5, 32, 5, 0]], 128, 4, 2, 256, 0, 24),
       r.dense(280, LogitSize)])
     let actor = loadActor(model)
@@ -660,19 +658,19 @@ suite "PWNET002 hosted seat":
       check neuralTelemetry(e.operations, e.model, 0) ==
         "neural: peak_ops=" & $actor.operationCount & " budget=4000000 model=pwnet2-l2-s0 ticks=0"
 
-suite "PWNET002 with user inputs (observation contract v2u<K>)":
-  proc userInputNet(k: int, contract: string, inputs = ObservationSizeV2 + k): string =
-    ## DENSE(inputs -> 8) picking the K user-input columns (506..) into y[0..K-1], then
+suite "PWNET002 with user inputs (observation contract teams.view.1u<K>)":
+  proc userInputNet(k: int, contract: string, inputs = TeamsViewSize + k): string =
+    ## DENSE(inputs -> 8) picking the K user-input columns (512..) into y[0..K-1], then
     ## DENSE(8 -> 82) copying y[0..K-1] to logits[0..K-1]: the logits read the user inputs.
     var w1 = newSeq[float32](8*inputs)
     for j in 0..<min(k, 8):
-      if ObservationSizeV2 + j < inputs: w1[j*inputs + ObservationSizeV2 + j] = 1
+      if TeamsViewSize + j < inputs: w1[j*inputs + TeamsViewSize + j] = 1
     var w2 = newSeq[float32](LogitSize*8)
     for j in 0..<min(k, 8): w2[j*8 + j] = 1
     encode2(inputs, ActionSizes, [
       Spec(code: 1, params: [inputs.uint32, 8, 0, 0, 0, 0, 0, 0], tensors: w1),
       Spec(code: 1, params: [8, LogitSize.uint32, 0, 0, 0, 0, 0, 0], tensors: w2)],
-      observationContract = contract, actionContract = ActionContractV2Hash)
+      observationContract = contract, actionContract = ActionContractTeamsView1Hash)
   proc inputsBundle(source, model: string, count: int, contract: string): seq[Bot] =
     let path = getTempDir()/("paintbot-neural-net2-inputs-" & $getCurrentProcessId() & ".bas")
     writeFile(path, source)
@@ -680,7 +678,7 @@ suite "PWNET002 with user inputs (observation contract v2u<K>)":
     var init: seq[string]
     for i in 0..<count: init.add $(5*(i+1))
     writeFile(path & ".neural.json", "{\"schema\": \"paintbot-neural-basic/2\", \"observation_contract\": \"" &
-      contract & "\", \"action_contract\": \"" & ActionContractV2Hash & "\", \"sha256\": {}, " &
+      contract & "\", \"action_contract\": \"" & ActionContractTeamsView1Hash & "\", \"sha256\": {}, " &
       "\"user_inputs\": {\"count\": " & $count & ", \"init\": [" & init.join(", ") & "]}}")
     defer:
       for suffix in ["", ".model.bin", ".neural.json"]: removeFile(path & suffix)
@@ -690,19 +688,19 @@ neuralInput(0, worldTick * 10)
 neuralInput(2, -worldTick)
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
-paintbot_act(neuralLogits())
-"""
+neuralSample()
+""" & Decode
 
-  test "a PWNET002 v2u3 bundle loads, costs its 509 inputs, and its net reads the inputs one tick later":
+  test "a PWNET002 teams.view.1u3 bundle loads, costs its 515 inputs, and its net reads the inputs one tick later":
     const k = 3
-    let contract = UserInputsContractHashes[k-1]
+    let contract = userInputsContractHash(k)
     let model = userInputNet(k, contract)
     let actor = loadActor(model)
-    check actor.inputSize == ObservationSizeV2 + k
-    check actor.operationCount == 2*(ObservationSizeV2 + k)*8 + 2*8*LogitSize
+    check actor.inputSize == TeamsViewSize + k
+    check actor.operationCount == 2*(TeamsViewSize + k)*8 + 2*8*LogitSize
     let players = inputsBundle(Source, model, k, contract)
     check not players[0].failed
-    check players[0].neural.observation.len == ObservationSizeV2 + k
+    check players[0].neural.observation.len == TeamsViewSize + k
     var world = newWorld(33)
     var ranBefore: array[LegacySeats, bool]
     for tick in 0..<60:
@@ -726,10 +724,10 @@ paintbot_act(neuralLogits())
       "neural: peak_ops=" & $actor.operationCount & " budget=4000000 model=pwnet2-l2-s0 ticks=60"
 
   test "a mismatched K, contract or width is rejected":
-    let k3 = UserInputsContractHashes[2]
-    let k2 = UserInputsContractHashes[1]
+    let k3 = userInputsContractHash(3)
+    let k2 = userInputsContractHash(2)
     check not inputsBundle(Source, userInputNet(3, k3), 3, k3)[0].failed
-    check inputsBundle(Source, userInputNet(3, k3), 2, k3)[0].failed                 # manifest K 2, contract v2u3
-    check inputsBundle(Source, userInputNet(3, k2, ObservationSizeV2 + 3), 3, k3)[0].failed  # actor names v2u2
-    check inputsBundle(Source, userInputNet(3, k2, ObservationSizeV2 + 3), 2, k2)[0].failed  # v2u2 with 509 inputs
-    check inputsBundle(Source, userInputNet(3, k3, ObservationSizeV2), 3, k3)[0].failed      # v2u3 with 506 inputs
+    check inputsBundle(Source, userInputNet(3, k3), 2, k3)[0].failed                 # manifest K 2, contract teams.view.1u3
+    check inputsBundle(Source, userInputNet(3, k2, TeamsViewSize + 3), 3, k3)[0].failed  # actor names teams.view.1u2
+    check inputsBundle(Source, userInputNet(3, k2, TeamsViewSize + 3), 2, k2)[0].failed  # teams.view.1u2 with 515 inputs
+    check inputsBundle(Source, userInputNet(3, k3, TeamsViewSize), 3, k3)[0].failed      # teams.view.1u3 with 512 inputs

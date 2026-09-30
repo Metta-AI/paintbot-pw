@@ -51,7 +51,7 @@ proc counters(path: string): JsonNode =
   if r.endTick > HeartMeterMatchTicks:
     result["error"] = %("end tick " & $r.endTick & " exceeds the library limit")
     return
-  let h = pw_create(r.seed, r.endTick.int32)
+  let h = pw_create_observation(r.seed, r.endTick.int32, 202)  # ffa.view.1: an FFA-kin handle
   defer: pw_destroy(h)
   var family: array[LegacySeats, int8]
   var genes: array[LegacySeats, uint32]

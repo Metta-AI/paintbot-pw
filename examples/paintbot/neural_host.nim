@@ -1,8 +1,11 @@
-## Seat-owned FP32 buffers. Integer handles never index shared state.
+## Seat-owned FP32 buffers. Integer handles never index shared state. A neural seat reads
+## only its SeatView (the observation it encodes) and hands BASIC numbers: observation values,
+## logits and head choices. Its policy.bas turns those into the BASIC action verbs; nothing
+## here writes a command (docs/neural/seat-view.md).
 import std/[os, json, strutils, math]
 import polyworld/rngs
 import polyworld/basic
-import sim, kinship, neural_actor, neural_contract
+import seat_view, neural_actor, neural_contract
 
 const MaxNeuralOperations* = 4_000_000'i64
 
@@ -21,29 +24,21 @@ type
     actor*: Actor
     observation*, logits*, state*: seq[float32]
     slot*: int
-    world: ptr World
-    observed, inferred, acted: bool
+    # The tick's view (beginTick) and the match seed the seat's streams are seeded from.
+    view: SeatView
+    viewReady: bool
+    matchSeed: int32
+    observed, inferred: bool
     previousTick: int32
     previouslyAlive: bool
     nativeWork*: int64
-    # The action contract the actor was trained against (named by its embedded hash)
-    # and, for contract v2, the seat's one-tick aim memory. The memory follows the
-    # recurrent state: cleared at initial use, match reset, death and respawn.
+    # The action contract the actor was trained against (named by its embedded hash) and the
+    # observation contract (teams.view.1, teams.view.1u<K> or ffa.view.1): selects the encoder.
     contract*: ActionContractVersion
-    memory*: AimMemory
-    # The observation contract the actor was trained against (named by its embedded
-    # hash): v1 (448 floats) or v2 (v1 + terrain block); selects the encoder.
     observationContract*: ObservationContractVersion
-    # The bundle's decoder options (manifest "decoder", schema 2): fireHoldTeammates
-    # applies holdFire to every decoded command; fireHolds counts the orders it held.
-    fireHoldTeammates*: bool
-    fireHolds*: int
-    # decoder.fire_hold_teammates {"radius": r}: the hold's radius (FireHoldRadius = 55 for
-    # the boolean form and when the field is absent).
-    fireHoldRadius*: int32
     # decoder.sampling: the seat's own draw stream (seeded from the match seed and the
-    # slot the first time the seat sees the world; never part of the world or its hash),
-    # the options, and how many decisions were drawn. Off = argmax, no stream, no draw.
+    # slot the first time the seat draws; never part of the world or its hash), the options,
+    # and how many decisions were drawn. Off = argmax, no stream, no draw.
     sampling*: SamplingOptions
     joint*: JointSampling      # decoder.joint_sampling (disabled = absent)
     jointDraws*: int           # decisions the joint condition held on
@@ -59,42 +54,7 @@ type
     forbidden*: ObjectiveMask
     forbidAny*: bool
     forbidHits*: int
-    # decoder.strafe_legs: the options, the seat's leg state and its own draw stream
-    # (seeded like the sampling stream, with its own salt, the first time the seat sees
-    # the world; never part of the world or its hash).
-    strafe*: StrafeOptions
-    strafeState*: StrafeState
-    strafeRng: Rng
-    strafeSeeded: bool
-    # decoder.aim_snap: the options (stateless rule); aimSnaps counts the decisions whose
-    # compass aim it replaced with an identity.
-    aimSnap*: AimSnapOptions
-    aimSnaps*: int
-    # decoder.steady_shot: on/off (stateless rule, read from the gun's windup state);
-    # steadyShots counts the order ticks it held, steadyTicks every decision it held.
-    steadyShot*: bool
-    steadyShots*, steadyTicks*: int
-    # decoder.aim_retarget: the options (stateless rule); aimRetargets counts the decisions
-    # whose aim it replaced with the rule's enemy identity.
-    aimRetarget*: AimRetargetOptions
-    aimRetargets*: int
-    # decoder.shot_gate: the options (stateless rule); shotGates counts the shoot orders it
-    # dropped.
-    shotGate*: ShotGateOptions
-    shotGates*: int
-    # decoder.spray_aim / decoder.spray_gate: the options (stateless rules for a ready spray
-    # can); sprayAims counts re-aimed shoot orders, sprayGates dropped ones.
-    sprayAim*: SprayAimOptions
-    sprayAims*: int
-    sprayGate*: SprayGateOptions
-    sprayGates*: int
-    # The seat's apparent identities for this tick, resolved once for the observation
-    # and the action decode (both read the same pre-action world).
-    bodies: array[LegacySeats, int]
-    bodiesReady: bool
-    # Neural BASIC I/O (PLAN-neural-basic-io). Every field below is unused, and every
-    # path byte-identical, unless the bundle or policy.bas asks for it.
-    # Part A, user inputs (manifest "user_inputs", observation contract v2u<K>): the live
+    # User inputs (manifest "user_inputs", observation contract teams.view.1u<K>): the live
     # values neuralInput writes (K = len), their match-start values, and the snapshot the
     # tick's observation reads (taken at beginTick: one tick of latency).
     userInputs*, userInputInit*: seq[int32]
@@ -105,35 +65,43 @@ type
     external*: bool
     fedLogits*: seq[float32]
     logitsFed*: bool
-    # Part B, the tick's head-level phase: BASIC masks and temperatures (before
-    # selection), the selection and its applied masks / temperatures (milli, 0 = argmax),
-    # the working heads, and the command buffer neuralDecode fills and neuralIssue issues.
+    # A training decoder seat (native pw_step's caller heads): no actor, no logits; the
+    # caller's head choices are the tick's selection (neuralChoice reads them).
+    fedChoices*: array[ActionSizes.len, int32]
+    fedOffsetChoices*: array[AimOffsetHeads, int32]
+    choicesFed*: bool
+    # Action contract teams.view.1 aim-offset: its heads 5 and 6 (23 bins each), selected after
+    # the five main heads by argmax or a temperature (neuralTemperature(5 / 6 / -1), or
+    # decoder.sampling), on the seat's own stream, and read back with neuralChoice(5 / 6).
+    offsetHeads*: bool
+    offsetTemperatures: array[AimOffsetHeads, float32]
+    offsetTemperatureSet: array[AimOffsetHeads, bool]
+    offsetSelected*, offsetChoices*: array[AimOffsetHeads, int32]
+    appliedOffsetTemperatures*: array[AimOffsetHeads, int32]
+    # The tick's head-level phase: BASIC masks and temperatures (before selection), the
+    # selection and its applied masks / temperatures (milli, 0 = argmax).
     masks: HeadMasks
     maskSet: bool
     temperatures: HeadTemperatures
     temperatureSet: array[ActionSizes.len, bool]
-    sampled*, decoded*: bool
+    sampled*: bool
     selected*, choices*: array[ActionSizes.len, int32]
     appliedMasks*: HeadMasks
     appliedTemperatures*: array[ActionSizes.len, int32]
-    buffer: Command
-    decodeMemory: AimMemory
-    # Action contract ffa.v2 pointer (observation contract ffa.v2): the match layout the seat
-    # was loaded for, its heads' sizes (every other contract: ActionSizes), the tick's row ->
-    # entity map (the observation's and the decode's) and the lead memory keyed by seat id.
+    # Action contract ffa.view.1 pointer (observation contract ffa.view.1): the match layout
+    # the seat was loaded for, its heads' sizes (teams.view.1: ActionSizes) and the tick's
+    # row -> entity map (the observation's, which neuralRow reads back).
     pointer*: bool
-    layout*: FfaV2Layout
+    layout*: FfaViewLayout
     heads*: seq[int]
-    rows: FfaV2Rows
+    rows: FfaViewRows
     rowsReady: bool
-    pmemory*: PointerMemory
-    decodePMemory: PointerMemory
 
 proc samplingLogSeed(seat: NeuralSeat): uint64 =
   ## The stream's initial state for the log (the state before any draw), recomputed from
   ## the match seed so the line does not depend on how far the stream has advanced; 0
-  ## until the seat has seen a world.
-  if seat.sampleSeeded and not seat.world.isNil: samplingSeed(seat.world[].seed, seat.slot) else: 0
+  ## until the seat has drawn.
+  if seat.sampleSeeded: samplingSeed(seat.matchSeed, seat.slot) else: 0
 
 proc samplingTelemetry*(options: SamplingOptions, seed: uint64, draws: int): string =
   ## The sampling part of the seat log line: mode, temperature, the heads sampled, the
@@ -169,84 +137,39 @@ proc forbidTelemetry*(forbidden: ObjectiveMask, hits: int): string =
     first = false
   result.add " forbid_hits=" & $hits
 
-proc strafeTelemetry*(options: StrafeOptions, state: StrafeState): string =
-  ## The strafe part of the seat log line: the parameters, legs started and decisions
-  ## whose movement head the strafe replaced.
-  " strafe=r" & $options.range & ",legs" & $options.legTicks[0] & "-" & $options.legTicks[1] &
-    ",shot" & $options.shotLegTicks[0] & "-" & $options.shotLegTicks[1] & ",rev" & $options.reversePermille &
-    " strafe_legs=" & $state.legs & " strafe_ticks=" & $state.ticks
-
-proc aimSnapTelemetry*(options: AimSnapOptions, snaps: int): string =
-  ## The aim-snap part of the seat log line: the angle, its integer threshold and the
-  ## decisions snapped.
-  " aim_snap=" & formatFloat(options.maxAngleMillideg.float / 1000, ffDecimal, 3) &
-    "deg,cos_q15=" & $options.cosQ15 & " aim_snaps=" & $snaps
-
-proc steadyShotTelemetry*(shots, ticks: int): string =
-  ## The steady-shot part of the seat log line: order ticks held and decisions held.
-  " steady_shot=on steady_shots=" & $shots & " steady_ticks=" & $ticks
-
-proc aimRetargetTelemetry*(options: AimRetargetOptions, retargets: int): string =
-  ## The aim-retarget part of the seat log line: the parameters and the decisions retargeted.
-  " aim_retarget=r" & $options.maxRange & ",hp" & $options.hpWeight & ",carry" & $options.carryWeight &
-    " aim_retargets=" & $retargets
-
-proc shotGateTelemetry*(options: ShotGateOptions, gates: int): string =
-  ## The shot-gate part of the seat log line: the range and the shoot orders dropped.
-  " shot_gate=r" & $options.maxRange & " shot_gates=" & $gates
-
-proc sprayAimTelemetry*(options: SprayAimOptions, aims: int): string =
-  " spray_aim=r" & $options.maxRange & " spray_aims=" & $aims
-
-proc sprayGateTelemetry*(options: SprayGateOptions, gates: int): string =
-  " spray_gate=t" & $options.maxTeammates & ",e" & $options.minEnemies & " spray_gates=" & $gates
-
-proc neuralTelemetry*(peakOperations: int64, model: string, ticks: int,
-    fireHolds = -1, sampling = "", options = "", fireHoldRadius = FireHoldRadius.int32): string =
+proc neuralTelemetry*(peakOperations: int64, model: string, ticks: int, sampling = "", options = ""): string =
   ## One private seat-log line: peak native operations in a tick against the budget, the
   ## model (`modelTag`: `w<hidden>` for PWNET001, `pwnet2-l<layers>-s<state>` for PWNET002)
-  ## and the ticks played; with the fire-hold decoder option on, also the
-  ## number of shoot orders it held (omitted, and the line unchanged, when it is off).
-  ## Diagnostics only; it reads no simulation state.
+  ## and the ticks played, then the selection options' parts. Diagnostics only.
   result = "neural: peak_ops=" & $peakOperations & " budget=" & $neuralOperationBudget(Seats) &
     " model=" & model & " ticks=" & $ticks
-  if fireHolds >= 0: result.add " fire_holds=" & $fireHolds
-  if fireHoldRadius != FireHoldRadius.int32 and fireHolds >= 0: result.add " fire_hold_radius=" & $fireHoldRadius
   result.add sampling
   result.add options
 
-proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int,
-    fireHolds = -1, sampling = "", options = "", fireHoldRadius = FireHoldRadius.int32): string =
+proc neuralTelemetry*(peakOperations: int64, hiddenSize, ticks: int, sampling = "", options = ""): string =
   ## The PWNET001 form: model `w<hiddenSize>`.
-  neuralTelemetry(peakOperations, "w" & $hiddenSize, ticks, fireHolds, sampling, options, fireHoldRadius)
+  neuralTelemetry(peakOperations, "w" & $hiddenSize, ticks, sampling, options)
 
 proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
   ## Empty for a seat without a loaded neural model, so plain BASIC seats log nothing.
   if seat.isNil or seat.actor.isNil: ""
   else: neuralTelemetry(peakOperations, seat.actor.modelTag, ticks,
-    if seat.fireHoldTeammates: seat.fireHolds else: -1,
     if seat.sampling.enabled: samplingTelemetry(seat.sampling, seat.samplingLogSeed, seat.sampleDraws) else: "",
     (if seat.forbidAny: forbidTelemetry(seat.forbidden, seat.forbidHits) else: "") &
-    (if seat.strafe.enabled: strafeTelemetry(seat.strafe, seat.strafeState) else: "") &
-    (if seat.aimSnap.enabled: aimSnapTelemetry(seat.aimSnap, seat.aimSnaps) else: "") &
-    (if seat.steadyShot: steadyShotTelemetry(seat.steadyShots, seat.steadyTicks) else: "") &
-    (if seat.aimRetarget.enabled: aimRetargetTelemetry(seat.aimRetarget, seat.aimRetargets) else: "") &
-    (if seat.shotGate.enabled: shotGateTelemetry(seat.shotGate, seat.shotGates) else: "") &
-    (if seat.sprayAim.enabled: sprayAimTelemetry(seat.sprayAim, seat.sprayAims) else: "") &
-    (if seat.sprayGate.enabled: sprayGateTelemetry(seat.sprayGate, seat.sprayGates) else: "") &
     (if seat.joint.enabled: jointTelemetry(seat.joint, seat.jointDraws) else: "") &
-    (if seat.conditionals.len > 0: conditionalTelemetry(seat.conditionals, seat.conditionalDraws) else: ""),
-    seat.fireHoldRadius)
+    (if seat.conditionals.len > 0: conditionalTelemetry(seat.conditionals, seat.conditionalDraws) else: ""))
 
 proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
   ## decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}. mode is
   ## required and only "categorical" is known; temperature is optional (1.0) within
   ## [MinSamplingTemperature, MaxSamplingTemperature]; heads is optional (every head) and
-  ## lists distinct head indices 0 ..< ActionSizes.len. Anything else rejects the bundle.
+  ## lists distinct head indices 0 ..< ActionSizes.len, or 5 and 6 (the aim-offset heads; the
+  ## seat's action contract must have them). Anything else rejects the bundle.
   if value.kind != JObject: raise newException(ValueError, "decoder.sampling must be an object")
   result.enabled = true
   result.temperature = 1'f32
   for head in 0..<ActionSizes.len: result.heads[head] = true
+  for e in 0..<AimOffsetHeads: result.offsetHeads[e] = true
   var sawMode = false
   for key, field in value:
     case key
@@ -263,18 +186,26 @@ proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
     of "heads":
       if field.kind != JArray or field.len == 0: raise newException(ValueError, "decoder.sampling.heads must be a non-empty array")
       for head in 0..<ActionSizes.len: result.heads[head] = false
+      for e in 0..<AimOffsetHeads: result.offsetHeads[e] = false
       for item in field:
-        if item.kind != JInt or item.getInt notin 0..<ActionSizes.len:
-          raise newException(ValueError, "decoder.sampling.heads entries must be head indices 0 .. " & $(ActionSizes.len-1))
-        if result.heads[item.getInt]: raise newException(ValueError, "decoder.sampling.heads repeats a head")
-        result.heads[item.getInt] = true
+        if item.kind != JInt or item.getInt notin 0..<ActionSizesOffset.len:
+          raise newException(ValueError, "decoder.sampling.heads entries must be head indices 0 .. " & $(ActionSizesOffset.len-1))
+        let h = item.getInt
+        if h >= ActionSizes.len:
+          if result.offsetHeads[h - ActionSizes.len]: raise newException(ValueError, "decoder.sampling.heads repeats a head")
+          result.offsetHeads[h - ActionSizes.len] = true
+          result.offsetListed = true
+          continue
+        if result.heads[h]: raise newException(ValueError, "decoder.sampling.heads repeats a head")
+        result.heads[h] = true
     else: raise newException(ValueError, "unknown decoder.sampling field: " & key)
   if not sawMode: raise newException(ValueError, "decoder.sampling.mode is required")
 
 proc setConditionals*(seat: NeuralSeat, conditionals: seq[Conditional]) =
   ## The model's COND_HEAD layers onto the seat. A bundle cannot also ask for
   ## decoder.joint_sampling: both re-select a head after the tick's selection.
-  checkConditionals(conditionals, seat.heads)
+  # COND_HEAD names the five main heads only (the aim-offset heads are selected after it).
+  checkConditionals(conditionals, seat.heads[0 ..< min(seat.heads.len, ActionSizes.len)])
   if conditionals.len > 0 and seat.joint.enabled:
     raise newException(ValueError, "decoder.joint_sampling cannot be combined with the model's COND_HEAD layers")
   seat.conditionals = conditionals
@@ -338,129 +269,6 @@ proc parseForbidObjectives*(value: JsonNode): ObjectiveMask =
     result[item.getInt] = true
   if value.len >= ActionSizes[0]: raise newException(ValueError, "decoder.forbid_objectives must leave an objective allowed")
 
-proc parseStrafeOptions*(value: JsonNode): StrafeOptions =
-  ## decoder.strafe_legs: {"range": r, "legs": [min, max], "shot_legs": [min, max],
-  ## "reverse_permille": p}; every field optional (the pw-diag / base.bas values
-  ## 5250, [3, 6], [6, 9], 800); anything else rejects the bundle.
-  if value.kind != JObject: raise newException(ValueError, "decoder.strafe_legs must be an object")
-  result = defaultStrafeOptions()
-  proc integer(field: JsonNode, name: string): int32 =
-    if field.kind != JInt or field.getBiggestInt < int32.low or field.getBiggestInt > int32.high:
-      raise newException(ValueError, "decoder.strafe_legs." & name & " must be an integer")
-    int32(field.getBiggestInt)
-  proc pair(field: JsonNode, name: string): array[2, int32] =
-    if field.kind != JArray or field.len != 2:
-      raise newException(ValueError, "decoder.strafe_legs." & name & " must be [min, max]")
-    [integer(field[0], name), integer(field[1], name)]
-  for key, field in value:
-    case key
-    of "range": result.range = integer(field, key)
-    of "legs": result.legTicks = pair(field, key)
-    of "shot_legs": result.shotLegTicks = pair(field, key)
-    of "reverse_permille": result.reversePermille = integer(field, key)
-    else: raise newException(ValueError, "unknown decoder.strafe_legs field: " & key)
-  let problem = strafeOptionsError(result)
-  if problem.len > 0: raise newException(ValueError, "decoder.strafe_legs." & problem)
-
-proc parseAimSnapOptions*(value: JsonNode): AimSnapOptions =
-  ## decoder.aim_snap: {"max_angle_deg": a}; a is optional (22.5), a number that is a
-  ## multiple of 0.001 within 0.001 .. 90; anything else rejects the bundle.
-  if value.kind != JObject: raise newException(ValueError, "decoder.aim_snap must be an object")
-  var millideg = DefaultAimSnapMillideg
-  for key, field in value:
-    case key
-    of "max_angle_deg":
-      if field.kind notin {JFloat, JInt}: raise newException(ValueError, "decoder.aim_snap.max_angle_deg must be a number")
-      let degrees = field.getFloat
-      let scaled = degrees * 1000
-      if degrees != degrees or scaled < 0.5 or scaled > float(MaxAimSnapMillideg) + 0.5 or
-          abs(scaled - round(scaled)) > 1e-6:
-        raise newException(ValueError, "decoder.aim_snap." & aimSnapOptionsError(0))
-      millideg = int32(round(scaled))
-    else: raise newException(ValueError, "unknown decoder.aim_snap field: " & key)
-  aimSnapOptions(millideg)
-
-proc parseSteadyShot*(value: JsonNode): bool =
-  ## decoder.steady_shot: {} (no parameters); anything else rejects the bundle.
-  if value.kind != JObject: raise newException(ValueError, "decoder.steady_shot must be an object")
-  for key, field in value: raise newException(ValueError, "unknown decoder.steady_shot field: " & key)
-  true
-
-proc optionInteger(field: JsonNode, name: string): int32 =
-  ## An integer manifest field that fits int32; ValueError naming the field otherwise.
-  if field.kind != JInt or field.getBiggestInt < int32.low or field.getBiggestInt > int32.high:
-    raise newException(ValueError, name & " must be an integer")
-  int32(field.getBiggestInt)
-
-proc parseAimRetargetOptions*(value: JsonNode): AimRetargetOptions =
-  ## decoder.aim_retarget: {"max_range": r, "hp_weight": h, "carry_weight": c}; every
-  ## field optional (base.bas's 5250, 160000, 2500000), integers, r within 1 .. 20000 and
-  ## h, c within 0 .. 1e9; anything else rejects the bundle.
-  if value.kind != JObject: raise newException(ValueError, "decoder.aim_retarget must be an object")
-  var maxRange = DefaultRetargetRange
-  var hpWeight = DefaultRetargetHpWeight
-  var carryWeight = DefaultRetargetCarryWeight
-  for key, field in value:
-    case key
-    of "max_range": maxRange = optionInteger(field, "decoder.aim_retarget.max_range")
-    of "hp_weight": hpWeight = optionInteger(field, "decoder.aim_retarget.hp_weight")
-    of "carry_weight": carryWeight = optionInteger(field, "decoder.aim_retarget.carry_weight")
-    else: raise newException(ValueError, "unknown decoder.aim_retarget field: " & key)
-  aimRetargetOptions(maxRange, hpWeight, carryWeight)
-
-proc parseShotGateOptions*(value: JsonNode): ShotGateOptions =
-  ## decoder.shot_gate: {"max_range": r}; r optional (5250), an integer within 1 .. 20000;
-  ## anything else rejects the bundle.
-  if value.kind != JObject: raise newException(ValueError, "decoder.shot_gate must be an object")
-  var maxRange = DefaultShotGateRange
-  for key, field in value:
-    case key
-    of "max_range": maxRange = optionInteger(field, "decoder.shot_gate.max_range")
-    else: raise newException(ValueError, "unknown decoder.shot_gate field: " & key)
-  shotGateOptions(maxRange)
-
-proc parseFireHold*(value: JsonNode): (bool, int32) =
-  ## decoder.fire_hold_teammates: a boolean (true = the hold at the gun's hit tolerance,
-  ## 55; false = off), or an object {"radius": r} with r optional (55), an integer within
-  ## 1 .. MaxFireHoldRadius (the object form turns the hold on); anything else rejects the
-  ## bundle.
-  case value.kind
-  of JBool: return (value.getBool, FireHoldRadius.int32)
-  of JObject:
-    result = (true, FireHoldRadius.int32)
-    for key, field in value:
-      case key
-      of "radius":
-        if field.kind != JInt: raise newException(ValueError, "decoder.fire_hold_teammates.radius must be an integer")
-        let r = field.getBiggestInt
-        if r < 1 or r > MaxFireHoldRadius:
-          raise newException(ValueError, "decoder.fire_hold_teammates.radius must be within 1 .. " & $MaxFireHoldRadius)
-        result[1] = int32(r)
-      else: raise newException(ValueError, "unknown decoder.fire_hold_teammates field: " & key)
-  else: raise newException(ValueError, "decoder.fire_hold_teammates must be a boolean or an object")
-
-proc parseSprayAimOptions*(value: JsonNode): SprayAimOptions =
-  ## decoder.spray_aim: {"max_range": r}; r optional (850), an integer within 1 .. 850.
-  if value.kind != JObject: raise newException(ValueError, "decoder.spray_aim must be an object")
-  var maxRange = DefaultSprayAimRange
-  for key, field in value:
-    case key
-    of "max_range": maxRange = optionInteger(field, "decoder.spray_aim.max_range")
-    else: raise newException(ValueError, "unknown decoder.spray_aim field: " & key)
-  sprayAimOptions(maxRange)
-
-proc parseSprayGateOptions*(value: JsonNode): SprayGateOptions =
-  ## decoder.spray_gate: {"max_teammates": t, "min_enemies": e}; both optional (0, 1),
-  ## integers, t within 0 .. 7 and e within 0 .. 8.
-  if value.kind != JObject: raise newException(ValueError, "decoder.spray_gate must be an object")
-  var maxTeammates = DefaultSprayMaxTeammates
-  var minEnemies = DefaultSprayMinEnemies
-  for key, field in value:
-    case key
-    of "max_teammates": maxTeammates = optionInteger(field, "decoder.spray_gate.max_teammates")
-    of "min_enemies": minEnemies = optionInteger(field, "decoder.spray_gate.min_enemies")
-    else: raise newException(ValueError, "unknown decoder.spray_gate field: " & key)
-  sprayGateOptions(maxTeammates, minEnemies)
 
 proc parseUserInputs*(value: JsonNode): seq[int32] =
   ## Manifest "user_inputs": {"count": K, "init": [K integers]}, K within 1 .. 128, every
@@ -489,23 +297,18 @@ proc parseUserInputs*(value: JsonNode): seq[int32] =
   if not sawInit: raise newException(ValueError, "user_inputs.init is required")
   if result.len != count: raise newException(ValueError, "user_inputs.init must have user_inputs.count entries")
 
-proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int,
-    observationContract = ocV2, pointer = false) =
-  ## The manifest's decoder options and user inputs onto the seat (nil manifest = none).
-  ## `userInputs` is the K the actor's (or handle's) observation contract names, and
-  ## `observationContract` that contract's base (v2 for v2u<K>, v3 for v3u<K>).
-  var fireHold = false
-  var fireHoldRadius = FireHoldRadius.int32
+
+const RetiredDecoderOptions* = ["fire_hold_teammates", "strafe_legs", "aim_snap", "steady_shot",
+  "aim_retarget", "shot_gate", "spray_aim", "spray_gate"]
+  ## Native decoder rules retired for BASIC parity (docs/neural/seat-view.md): a manifest
+  ## naming one is refused; write the rule in policy.bas instead.
+
+proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointer = false, offset = false) =
+  ## The manifest's selection options and user inputs onto the seat (nil manifest = none).
+  ## `userInputs` is the K the actor's (or handle's) observation contract names.
   var sampling: SamplingOptions
   var joint: JointSampling
   var forbidden: ObjectiveMask
-  var strafe: StrafeOptions
-  var aimSnap: AimSnapOptions
-  var steadyShot = false
-  var aimRetarget: AimRetargetOptions
-  var shotGate: ShotGateOptions
-  var sprayAim: SprayAimOptions
-  var sprayGate: SprayGateOptions
   var init: seq[int32]
   var sawInputs = false
   if not manifest.isNil:
@@ -518,209 +321,153 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int,
       if decoder.kind != JObject: raise newException(ValueError, "decoder options must be an object")
       for key, value in decoder:
         case key
-        of "fire_hold_teammates":
-          (fireHold, fireHoldRadius) = parseFireHold(value)
         of "sampling":
           sampling = parseSamplingOptions(value)
+          if sampling.offsetListed and not offset:
+            raise newException(ValueError, "decoder.sampling.heads 5 and 6 need action contract teams.view.1 aim-offset")
         of "joint_sampling":
           joint = parseJointSampling(value)
         of "forbid_objectives":
           forbidden = parseForbidObjectives(value)
-        of "strafe_legs":
-          strafe = parseStrafeOptions(value)
-        of "aim_snap":
-          aimSnap = parseAimSnapOptions(value)
-        of "steady_shot":
-          steadyShot = parseSteadyShot(value)
-        of "aim_retarget":
-          aimRetarget = parseAimRetargetOptions(value)
-        of "shot_gate":
-          shotGate = parseShotGateOptions(value)
-        of "spray_aim":
-          sprayAim = parseSprayAimOptions(value)
-        of "spray_gate":
-          sprayGate = parseSprayGateOptions(value)
-        else: raise newException(ValueError, "unknown decoder option: " & key)
+        else:
+          if key in RetiredDecoderOptions:
+            raise newException(ValueError, "decoder." & key &
+              " was retired for BASIC parity (docs/neural/seat-view.md); write the rule in policy.bas")
+          raise newException(ValueError, "unknown decoder option: " & key)
         if pointer and key != "sampling":
-          # The other options read head indices of the fixed contracts (identities, hearts by index).
-          raise newException(ValueError, "decoder." & key & " is not available under action contract ffa.v2 pointer")
-      # The steady shot stands the seat still with movement index 0; a bundle that also
-      # forbids index 0 asks for both, so it is rejected rather than resolved either way.
-      if steadyShot and forbidden[SteadyMovement]:
-        raise newException(ValueError, "decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
+          # The other options read head indices of the fixed teams contract.
+          raise newException(ValueError, "decoder." & key & " is not available under action contract ffa.view.1 pointer")
     if manifest.hasKey("user_inputs"):
       if manifest{"schema"}.getStr != "paintbot-neural-basic/2":
         raise newException(ValueError, "user_inputs need package schema 2")
       init = parseUserInputs(manifest["user_inputs"])
       sawInputs = true
-  let family = if observationContract == ocV3: "v3u" else: "v2u"
   if sawInputs and userInputs == 0:
-    raise newException(ValueError, "user_inputs need observation contract v2u<K> or v3u<K>")
+    raise newException(ValueError, "user_inputs need observation contract teams.view.1u<K>")
   if userInputs > 0 and not sawInputs:
-    raise newException(ValueError, "observation contract " & family & $userInputs & " needs manifest user_inputs")
+    raise newException(ValueError, "observation contract teams.view.1u" & $userInputs & " needs manifest user_inputs")
   if sawInputs and init.len != userInputs:
-    raise newException(ValueError, "user_inputs.count does not match observation contract " & family & $userInputs)
-  seat.fireHoldTeammates = fireHold
-  seat.fireHoldRadius = fireHoldRadius
+    raise newException(ValueError, "user_inputs.count does not match observation contract teams.view.1u" & $userInputs)
   seat.sampling = sampling
   seat.joint = joint
   seat.forbidden = forbidden
   seat.forbidAny = forbidden.forbidsAny
-  seat.strafe = strafe
-  seat.strafeState = initStrafeState(seat.slot)
-  seat.aimSnap = aimSnap
-  seat.steadyShot = steadyShot
-  seat.aimRetarget = aimRetarget
-  seat.shotGate = shotGate
-  seat.sprayAim = sprayAim
-  seat.sprayGate = sprayGate
   seat.userInputInit = init
   seat.userInputs = init
   seat.userInputView = init
-  seat.memory.resetAimMemory()
   seat.pointer = pointer
-  seat.heads = @ActionSizes
-  seat.logits = newSeq[float32](LogitSize)
+  seat.offsetHeads = offset
+  seat.heads = if offset: @ActionSizesOffset else: @ActionSizes
+  seat.logits = newSeq[float32](if offset: LogitSizeOffset else: LogitSize)
 
 proc observationFor(hash: string): (ObservationContractVersion, int) =
-  ## The encoder and user-input count an observation contract hash names: v1, v2, v3,
-  ## ffa.v1, v2u<K> (= v2 + K) or v3u<K> (= v3 + K); ValueError for anything else.
+  ## The encoder and user-input count an observation contract hash names: teams.view.1,
+  ## teams.view.1u<K> (= teams.view.1 + K) or ffa.view.1; ValueError for anything else
+  ## (a retired contract says so).
   let k = userInputsFromHash(hash)
-  if k > 0: return (ocV2, k)
-  let k3 = v3UserInputsFromHash(hash)
-  if k3 > 0: return (ocV3, k3)
+  if k > 0: return (ocTeamsView1, k)
   (observationContractVersion(hash), 0)
 
-proc requireTeamsFor(observationContract: ObservationContractVersion) =
-  ## Observation contract v3 (and v3u<K>) reads the teams game's scoreboard: an FFA-kin
-  ## match refuses it at load, as it refuses the teams-only glory and vision options.
-  if observationContract == ocV3 and ffa():
-    raise newException(ValueError, "observation contract v3 is for the teams game only")
+proc requireMode(observationContract: ObservationContractVersion) =
+  ## teams.view.1 is the teams game's 16-seat contract, ffa.view.1 FFA-kin's.
+  if observationContract == ocTeamsView1:
+    if ffa(): raise newException(ValueError, "observation contract teams.view.1 is for the teams game only")
+    if Seats != LegacySeats:
+      raise newException(ValueError, "observation contract teams.view.1 needs a 16-seat match; this match has " &
+        $Seats & " seats")
+  elif not ffa():
+    raise newException(ValueError, "observation contract ffa.view.1 is for FFA-kin only")
 
 proc requirePairing(observationContract: ObservationContractVersion, contract: ActionContractVersion) =
-  ## Observation contract ffa.v2 and action contract ffa.v2 pointer go together: the pointer
-  ## heads name ffa.v2's rows, and ffa.v2 orders its rows per tick, which v1 / v2 cannot address.
-  if (observationContract == ocFfaV2) != (contract == acFfaV2Pointer):
-    raise newException(ValueError, "observation contract ffa.v2 needs action contract ffa.v2 pointer, and the other way round")
+  ## teams.view.1 goes with its five-head action contract or the aim-offset variant,
+  ## ffa.view.1 with its pointer contract.
+  if not pairs(observationContract, contract):
+    raise newException(ValueError, "observation contract " & observationContractId(observationContract) &
+      " cannot be played under action contract " & actionContractId(contract))
 
-proc pointerSetup(seat: NeuralSeat, layout: FfaV2Layout) =
-  ## A pointer seat's heads, logits and memory for the match layout.
+proc matchLayout*(): FfaViewLayout =
+  ## The ffa.view.1 layout of the match about to be played: its seats and control hearts.
+  ffaViewLayout(Seats, controlHeartCount())
+
+proc pointerSetup(seat: NeuralSeat, layout: FfaViewLayout) =
+  ## A pointer seat's heads and logits for the match layout.
   seat.layout = layout
   seat.heads = pointerHeads(layout)
   var total = 0
   for h in seat.heads: total += h
   seat.logits = newSeq[float32](total)
-  seat.pmemory.resetPointerMemory(layout.seats)
 
-proc matchLayout*(): FfaV2Layout =
-  ## The ffa.v2 layout of the match about to be played: its seats and control hearts.
-  ffaV2Layout(Seats, controlHeartCount())
+proc readManifest(sourcePath: string, actor: Actor): JsonNode =
+  let manifestPath = sourcePath & ".neural.json"
+  if not fileExists(manifestPath): return nil
+  if getFileSize(manifestPath) > 8192: raise newException(ValueError, "oversized neural manifest")
+  result = parseJson(readFile(manifestPath))
+  if result{"observation_contract"}.getStr != actor.observationContract or
+      result{"action_contract"}.getStr != actor.actionContract:
+    raise newException(ValueError, "package and actor contract mismatch")
 
-proc loadPointerSeat(seat: NeuralSeat, sourcePath, data: string) =
-  ## A bundle under observation contract ffa.v2 and action contract ffa.v2 pointer, at any seat
-  ## count: its layout words resolve against this match's layout, its widths must be the
-  ## layout's, and the budget is the seat count's (neuralOperationBudget).
-  let layout = matchLayout()
-  let heads = pointerHeads(layout)
-  var total = 0
-  for h in heads: total += h
-  let actor = loadActor(data, actorLayout(layout, heads, pointerTargets(layout)))
-  var contract: ActionContractVersion
-  var observationContract: ObservationContractVersion
-  try:
-    contract = actionContractVersion(actor.actionContract)
-    observationContract = observationContractVersion(actor.observationContract)
-  except ValueError: raise newException(ValueError, "neural actor contract mismatch")
-  requirePairing(observationContract, contract)
-  if actor.inputSize != layout.size or actor.outputSize != total or actor.headSizes != heads:
-    raise newException(ValueError, "neural actor dimensions do not match this match's ffa.v2 layout (" &
-      $layout.seats & " seats, " & $layout.hearts & " control hearts)")
-  let budget = neuralOperationBudget(Seats)
-  if actor.operationCount > budget:
+proc budgetCheck(actor: Actor) =
+  if actor.operationCount > neuralOperationBudget(Seats):
     let e = newException(NeuralBudgetError, "neural actor exceeds native operation budget")
     e.operations = actor.operationCount
     e.hiddenSize = actor.hiddenSize
     e.model = actor.modelTag
     raise e
-  let manifestPath = sourcePath & ".neural.json"
-  var manifest: JsonNode = nil
-  if fileExists(manifestPath):
-    if getFileSize(manifestPath) > 8192: raise newException(ValueError, "oversized neural manifest")
-    manifest = parseJson(readFile(manifestPath))
-    if manifest{"observation_contract"}.getStr != actor.observationContract or
-        manifest{"action_contract"}.getStr != actor.actionContract:
-      raise newException(ValueError, "package and actor contract mismatch")
-    if manifest.hasKey("user_inputs"):
-      raise newException(ValueError, "user_inputs need observation contract v2u<K> or v3u<K>")
-  seat.configureSeat(manifest, 0, observationContract, pointer = true)
-  seat.pointerSetup(layout)
-  seat.setConditionals(actor.conditionals)
-  seat.actor = actor
-  seat.contract = contract
-  seat.observationContract = observationContract
-  seat.observation = newSeq[float32](layout.size)
-  seat.state = newSeq[float32](actor.stateSize)
 
 proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
+  ## The seat's neural model beside its policy.bas (`.model.bin`, `.neural.json`); a seat
+  ## without one gets an empty neural seat. Contracts are checked first (a retired contract
+  ## is refused by name), then the match mode, dimensions and budget.
   result = NeuralSeat(slot: slot, previousTick: -1)
   let modelPath = sourcePath & ".model.bin"
   if not fileExists(modelPath): return
   let data = readActorFile(modelPath)
   let (peekObservation, peekAction) = peekContracts(data)
-  if peekObservation == ObservationContractFfaV2Hash or peekAction == ActionContractFfaV2PointerHash:
-    result.loadPointerSeat(sourcePath, data)
+  let (observationContract, userInputs) = observationFor(peekObservation)
+  let contract = actionContractVersion(peekAction)
+  requirePairing(observationContract, contract)
+  requireMode(observationContract)
+  if observationContract == ocFfaView1:
+    let layout = matchLayout()
+    let heads = pointerHeads(layout)
+    var total = 0
+    for h in heads: total += h
+    let actor = loadActor(data, actorLayout(layout, heads, pointerTargets(layout)))
+    if actor.inputSize != layout.size or actor.outputSize != total or actor.headSizes != heads:
+      raise newException(ValueError, "neural actor dimensions do not match this match's ffa.view.1 layout (" &
+        $layout.seats & " seats, " & $layout.hearts & " control hearts)")
+    budgetCheck(actor)
+    let manifest = readManifest(sourcePath, actor)
+    if not manifest.isNil and manifest.hasKey("user_inputs"):
+      raise newException(ValueError, "user_inputs need observation contract teams.view.1u<K>")
+    result.configureSeat(manifest, 0, pointer = true)
+    result.pointerSetup(layout)
+    result.setConditionals(actor.conditionals)
+    result.actor = actor
+    result.contract = contract
+    result.observationContract = observationContract
+    result.observation = newSeq[float32](layout.size)
+    result.state = newSeq[float32](actor.stateSize)
     return
-  if Seats != LegacySeats:
-    # Every other observation contract lays out 16 seats; other seat counts disable the seat instead.
-    raise newException(ValueError, "neural policies need a 16-seat match; this match has " & $Seats & " seats")
   let actor = loadActor(data)
-  # Model metadata is authoritative even when running a local unpacked package. The
-  # observation contract hash selects the encoder (v1; v2 = v1 + terrain block; v3 = v2 + scoreboard) and
-  # fixes the input width; the action contract hash selects the decoder: v1 (identity
-  # aim = body position) or v2 (lead-compensated identity aim); anything else is rejected.
-  # Checks run in the order they always have (dimensions, then contracts), so a bundle
-  # rejected before v2 existed is rejected with the same message; an unknown observation
-  # hash is held to v1's width for the dimension check.
-  var observationContract = ocV1
-  var userInputs = 0
-  var observationKnown = true
-  try: (observationContract, userInputs) = observationFor(actor.observationContract)
-  except ValueError: observationKnown = false
-  if actor.inputSize != observationSize(observationContract) + userInputs or actor.outputSize != LogitSize or
-      actor.headSizes != @ActionSizes:
+  let heads = actionHeadSizes(contract)
+  var outputs = 0
+  for h in heads: outputs += h
+  if actor.inputSize != TeamsViewSize + userInputs or actor.outputSize != outputs or actor.headSizes != heads:
     raise newException(ValueError, "neural actor dimensions do not match Paintbot contract")
-  if not observationKnown:
-    raise newException(ValueError, "neural actor contract mismatch")
-  var contract: ActionContractVersion
-  try: contract = actionContractVersion(actor.actionContract)
-  except ValueError: raise newException(ValueError, "neural actor contract mismatch")
-  if actor.operationCount > MaxNeuralOperations:
-    let e = newException(NeuralBudgetError, "neural actor exceeds native operation budget")
-    e.operations = actor.operationCount
-    e.hiddenSize = actor.hiddenSize
-    e.model = actor.modelTag
-    raise e
-  let manifestPath = sourcePath & ".neural.json"
-  var manifest: JsonNode = nil
-  if fileExists(manifestPath):
-    if getFileSize(manifestPath) > 8192: raise newException(ValueError, "oversized neural manifest")
-    manifest = parseJson(readFile(manifestPath))
-    if manifest{"observation_contract"}.getStr != actor.observationContract or
-        manifest{"action_contract"}.getStr != actor.actionContract:
-      raise newException(ValueError, "package and actor contract mismatch")
-  requireTeamsFor(observationContract)
-  result.configureSeat(manifest, userInputs, observationContract)
+  budgetCheck(actor)
+  result.configureSeat(readManifest(sourcePath, actor), userInputs, offset = contract == acTeamsView1Offset)
   result.setConditionals(actor.conditionals)
   result.actor = actor
   result.contract = contract
   result.observationContract = observationContract
-  result.observation = newSeq[float32](observationSize(observationContract) + userInputs)
+  result.observation = newSeq[float32](TeamsViewSize + userInputs)
   result.state = newSeq[float32](actor.stateSize)
 
 proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string): NeuralSeat =
   ## A training policy-script seat (native pw_set_seat_policy_script): the bundle's
-  ## manifest governs the seat exactly as on the host (decoder options, sampling, user
-  ## inputs, action contract), but there is no actor: the trainer feeds each tick's logits.
+  ## manifest governs the seat exactly as on the host (selection options, user inputs,
+  ## action contract), but there is no actor: the trainer feeds each tick's logits.
   ## The manifest's observation contract must be `observationHash`, the handle's.
   ## ValueError when the manifest would be rejected.
   result = NeuralSeat(slot: slot, previousTick: -1, external: true)
@@ -732,79 +479,91 @@ proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string)
   if manifest{"observation_contract"}.getStr != observationHash:
     raise newException(ValueError, "manifest observation contract does not match the handle's")
   let (observationContract, userInputs) = observationFor(observationHash)
-  var contract: ActionContractVersion
-  try: contract = actionContractVersion(manifest{"action_contract"}.getStr)
-  except ValueError: raise newException(ValueError, "neural actor contract mismatch")
+  let contract = actionContractVersion(manifest{"action_contract"}.getStr)
   requirePairing(observationContract, contract)
-  requireTeamsFor(observationContract)
-  let pointer = contract == acFfaV2Pointer
-  result.configureSeat(manifest, userInputs, observationContract, pointer)
+  requireMode(observationContract)
+  let pointer = contract == acFfaView1Pointer
+  result.configureSeat(manifest, userInputs, pointer, offset = contract == acTeamsView1Offset)
+  result.contract = contract
+  result.observationContract = observationContract
   if pointer:
     result.pointerSetup(matchLayout())
-    result.contract = contract
-    result.observationContract = observationContract
     result.observation = newSeq[float32](result.layout.size)
     result.fedLogits = newSeq[float32](result.logits.len)
     return
+  result.observation = newSeq[float32](TeamsViewSize + userInputs)
+  result.fedLogits = newSeq[float32](result.logits.len)
+
+proc decoderNeuralSeat*(slot: int, observationHash: string, contract: ActionContractVersion): NeuralSeat =
+  ## A training decoder seat (native pw_step's caller heads): no model and no manifest; the
+  ## caller's head choices, fed before each decision (fedChoices, choicesFed), are the tick's
+  ## selection, and neuralChoice / neuralRow / neuralLayout read them for the seat's decoder
+  ## script. ValueError for an observation contract this match cannot play.
+  result = NeuralSeat(slot: slot, previousTick: -1, external: true)
+  let (observationContract, _) = observationFor(observationHash)
+  requireMode(observationContract)
+  requirePairing(observationContract, contract)
+  let pointer = observationContract == ocFfaView1
+  result.configureSeat(nil, 0, pointer, offset = contract == acTeamsView1Offset)
   result.contract = contract
   result.observationContract = observationContract
-  result.observation = newSeq[float32](observationSize(observationContract) + userInputs)
-  result.fedLogits = newSeq[float32](LogitSize)
+  if pointer: result.pointerSetup(matchLayout())
 
-proc beginTick*(seat: NeuralSeat, w: var World) =
-  let alive = w.cogs[seat.slot].hp > 0
-  if not alive or not seat.previouslyAlive or w.tick <= seat.previousTick:
+proc beginTick*(seat: NeuralSeat, view: SeatView, matchSeed: int32) =
+  ## The seat's tick starts on `view` (the pre-step world's): the recurrent state resets at
+  ## initial use, match reset, death and respawn; the tick's phase starts over.
+  let alive = view.selfHp > 0
+  let tick = view.worldTick
+  if not alive or not seat.previouslyAlive or tick <= seat.previousTick:
     for i in 0..<seat.state.len: seat.state[i] = 0
-    seat.memory.resetAimMemory()
-    if seat.pointer: seat.pmemory.resetPointerMemory(seat.layout.seats)
   if seat.userInputs.len > 0:
     # User inputs persist across ticks and deaths; a new match starts from init. The
     # tick's observation reads what the previous tick's script left.
-    if seat.previousTick < 0 or w.tick <= seat.previousTick: seat.userInputs = seat.userInputInit
+    if seat.previousTick < 0 or tick <= seat.previousTick: seat.userInputs = seat.userInputInit
     seat.userInputView = seat.userInputs
   seat.previouslyAlive = alive
-  seat.bodiesReady = false
   seat.rowsReady = false
-  seat.previousTick = w.tick
-  seat.world = addr w
-  if seat.sampling.enabled and not seat.sampleSeeded:
-    # One stream per seat per match, from the match seed: its position depends only on
-    # the decisions taken, and it survives death and respawn (the stream is not state
-    # the network reads; resetting it would only correlate draws after every respawn).
-    seat.sampleRng = samplingRng(w.seed, seat.slot)
-    seat.sampleSeeded = true
-  if seat.strafe.enabled:
-    if not seat.strafeSeeded:
-      # Seeded like the sampling stream: one per seat per match, from the match seed.
-      seat.strafeRng = strafeRng(w.seed, seat.slot)
-      seat.strafeSeeded = true
-    if not alive: seat.strafeState.leg = 0
+  seat.previousTick = tick
+  seat.view = view
+  seat.viewReady = true
+  if seat.matchSeed != matchSeed and seat.sampleSeeded:
+    # Another match on the same seat object: its streams start over from the new seed.
+    seat.sampleSeeded = false
+  seat.matchSeed = matchSeed
   seat.observed = false
   seat.inferred = false
-  seat.acted = false
   seat.nativeWork = 0
   seat.observationFresh = false
   if seat.maskSet: seat.masks = default(HeadMasks)
   seat.maskSet = false
   seat.temperatureSet = default(array[ActionSizes.len, bool])
+  seat.offsetTemperatureSet = default(array[AimOffsetHeads, bool])
   seat.sampled = false
-  seat.decoded = false
+  if seat.choicesFed:
+    seat.selected = seat.fedChoices
+    seat.choices = seat.fedChoices
+    seat.offsetSelected = seat.fedOffsetChoices
+    seat.offsetChoices = seat.fedOffsetChoices
+    seat.appliedMasks = default(HeadMasks)
+    seat.appliedTemperatures = default(array[ActionSizes.len, int32])
+    seat.sampled = true
 
-proc bodiesFor(seat: NeuralSeat): array[LegacySeats, int] =
-  if not seat.bodiesReady:
-    seat.bodies = seat.world[].observedBodies(seat.slot)
-    seat.bodiesReady = true
-  seat.bodies
+proc seedStream(seat: NeuralSeat) =
+  ## One stream per seat per match, from the match seed: its position depends only on the
+  ## decisions taken, and it survives death and respawn.
+  if not seat.sampleSeeded:
+    seat.sampleRng = samplingRng(seat.matchSeed, seat.slot)
+    seat.sampleSeeded = true
 
 proc headSize(seat: NeuralSeat, head: int): int =
   ## The size of action head `head` for this seat (a seat without a model: ActionSizes').
   if seat.heads.len > 0: seat.heads[head] else: ActionSizes[head]
 
-proc rowsFor(seat: NeuralSeat): FfaV2Rows =
-  ## The tick's ffa.v2 row -> entity map (once per tick: the observation and the decode read
-  ## the same pre-action world).
+proc rowsFor(seat: NeuralSeat): FfaViewRows =
+  ## The tick's ffa.view.1 row -> entity map (once per tick: the observation and neuralRow
+  ## read the same view).
   if not seat.rowsReady:
-    seat.rows = seat.world[].ffaV2Rows(seat.slot)
+    seat.rows = ffaViewRows(seat.view)
     seat.rowsReady = true
   seat.rows
 
@@ -813,22 +572,16 @@ proc require(seat: NeuralSeat, condition: bool, message: string) =
   if not condition: raise newException(BasicError, message)
 
 proc ensureObservation(seat: NeuralSeat) =
-  ## Encode this tick's observation into the seat's buffer (once per tick; the world is
-  ## the unchanged pre-action world, so every encode of a tick is the same bytes).
+  ## Encode this tick's observation into the seat's buffer (once per tick; the view is the
+  ## unchanged pre-action tick's, so every encode of a tick is the same bytes).
   if seat.observationFresh: return
-  if seat.observationContract == ocFfaV2:
-    if ffaV2Layout(seat.world[]) != seat.layout:
-      raise newException(ValueError, "the match's ffa.v2 layout differs from the one the seat was loaded for")
-    encodeFfaV2Observation(seat.world[], seat.slot, seat.observation, seat.rowsFor(), activeKinship)
-    seat.observationFresh = true
-    return
-  if seat.userInputView.len > 0:
-    encodeObservationInputs(seat.world[], seat.slot, seat.observation, seat.bodiesFor(), seat.userInputView,
-      seat.observationContract)
-  elif seat.observationContract == ocV1:
-    encodeObservation(seat.world[], seat.slot, seat.observation, seat.bodiesFor())
+  assert seat.viewReady, "neural observation before the seat's first tick"
+  if seat.observationContract == ocFfaView1:
+    if ffaViewLayout(seat.view) != seat.layout:
+      raise newException(ValueError, "the match's ffa.view.1 layout differs from the one the seat was loaded for")
+    encodeObservation(seat.view, ocFfaView1, seat.observation, rows = seat.rowsFor())
   else:
-    encodeObservation(seat.world[], seat.slot, seat.observation, seat.bodiesFor(), seat.observationContract)
+    encodeObservation(seat.view, ocTeamsView1, seat.observation, seat.userInputView)
   seat.observationFresh = true
 
 proc selectConditionals(seat: NeuralSeat, actions: var array[ActionSizes.len, int32],
@@ -839,9 +592,7 @@ proc selectConditionals(seat: NeuralSeat, actions: var array[ActionSizes.len, in
   ## Nothing runs without COND_HEAD layers.
   for c in seat.conditionals:
     let t = temperatures[c.head]
-    if t > 0 and not seat.sampleSeeded:
-      seat.sampleRng = samplingRng(seat.world[].seed, seat.slot)
-      seat.sampleSeeded = true
+    if t > 0: seat.seedStream()
     var offset = 0
     for h in 0..<c.head: offset += seat.heads[h]
     let size = seat.heads[c.head]
@@ -860,7 +611,7 @@ proc selectConditionals(seat: NeuralSeat, actions: var array[ActionSizes.len, in
     if t > 0: inc seat.conditionalDraws
 
 proc pointerSample(seat: NeuralSeat) =
-  ## Selection under action contract ffa.v2 pointer: per head argmax (first maximum), or with
+  ## Selection under action contract ffa.view.1 pointer: per head argmax (first maximum), or with
   ## decoder.sampling / neuralTemperature a categorical draw from softmax(logits / T) on the
   ## seat's stream (pointerSelect). No masks (neuralMask is refused for pointer seats).
   var temperatures = newSeq[float32](ActionSizes.len)
@@ -874,9 +625,7 @@ proc pointerSample(seat: NeuralSeat) =
   var anyDraw = false
   for t in temperatures:
     if t > 0: anyDraw = true
-  if anyDraw and not seat.sampleSeeded:
-    seat.sampleRng = samplingRng(seat.world[].seed, seat.slot)
-    seat.sampleSeeded = true
+  if anyDraw: seat.seedStream()
   var draws = 0
   let picked = pointerSelect(seat.logits, seat.heads, temperatures, seat.sampleRng, draws)
   if draws > 0: inc seat.sampleDraws
@@ -886,15 +635,34 @@ proc pointerSample(seat: NeuralSeat) =
   seat.choices = seat.selected
   seat.sampled = true
 
+proc selectOffsets(seat: NeuralSeat) =
+  ## The aim-offset heads (5 and 6) after the five main heads: argmax (first maximum) or, with
+  ## a temperature (neuralTemperature(5 / 6 / -1), else decoder.sampling), one draw each from
+  ## the seat's stream (pointerSelect's rule), in head order.
+  var temperatures: array[AimOffsetHeads, float32]
+  var anyDraw = false
+  for e in 0..<AimOffsetHeads:
+    temperatures[e] =
+      if seat.offsetTemperatureSet[e]: seat.offsetTemperatures[e]
+      elif seat.sampling.enabled and seat.sampling.offsetHeads[e]: seat.sampling.temperature
+      else: 0'f32
+    seat.appliedOffsetTemperatures[e] =
+      if temperatures[e] > 0: int32(round(float64(temperatures[e]) * 1000)) else: 0'i32
+    if temperatures[e] > 0: anyDraw = true
+  if anyDraw: seat.seedStream()
+  var draws = 0
+  let picked = pointerSelect(seat.logits.toOpenArray(LogitSize, LogitSizeOffset-1), [AimOffsetBins, AimOffsetBins],
+    temperatures, seat.sampleRng, draws)
+  for e in 0..<AimOffsetHeads:
+    seat.offsetSelected[e] = picked[e]
+    seat.offsetChoices[e] = picked[e]
+
 proc samplePhase(seat: NeuralSeat) =
-  ## Selection (forbid / BASIC masks, argmax or sampling / BASIC temperatures), then the
-  ## aim-phase decoder options in the hosted order: aim retarget, aim snap, spray aim,
-  ## shot gate, spray gate. Leaves the heads in seat.choices. With no BASIC mask or
-  ## temperature this is exactly the selection paintbot_act has always made.
+  ## Selection: forbid / BASIC masks, argmax or sampling / BASIC temperatures, joint sampling
+  ## and COND_HEAD. Leaves the heads in seat.choices.
   if seat.pointer:
     seat.pointerSample()
     return
-  let bodies = seat.bodiesFor()
   var actions: array[ActionSizes.len, int32]
   var anyTemperature = false
   for on in seat.temperatureSet:
@@ -913,11 +681,9 @@ proc samplePhase(seat: NeuralSeat) =
         if seat.temperatureSet[head]: int32(round(float64(seat.temperatures[head]) * 1000))
         elif temperatures[head] > 0: int32(round(float64(temperatures[head]) * 1000))
         else: 0'i32
-    if not seat.sampleSeeded:
-      seat.sampleRng = samplingRng(seat.world[].seed, seat.slot)
-      seat.sampleSeeded = true
+    seat.seedStream()
     var draws = 0
-    actions = sampleHeads(seat.logits, temperatures, masks, seat.sampleRng, draws)
+    actions = sampleHeads(seat.logits.toOpenArray(0, LogitSize-1), temperatures, masks, seat.sampleRng, draws)
     if draws > 0: inc seat.sampleDraws
     if seat.joint.enabled and jointSelect(seat.logits, seat.joint, masks[seat.joint.head],
         temperatures[seat.joint.head], seat.sampleRng, actions):
@@ -925,15 +691,14 @@ proc samplePhase(seat: NeuralSeat) =
     if seat.conditionals.len > 0: seat.selectConditionals(actions, temperatures, masks, masked = true)
     seat.appliedMasks = masks
   else:
-    actions = if seat.sampling.enabled: sampleActions(seat.logits, seat.sampling, seat.sampleRng, seat.forbidden)
-              else: argmaxActions(seat.logits, seat.forbidden)
+    if seat.sampling.enabled: seat.seedStream()
+    actions = if seat.sampling.enabled: sampleActions(seat.logits.toOpenArray(0, LogitSize-1), seat.sampling, seat.sampleRng, seat.forbidden)
+              else: argmaxActions(seat.logits.toOpenArray(0, LogitSize-1), seat.forbidden)
     if seat.sampling.enabled: inc seat.sampleDraws
     if seat.joint.enabled:
       let jointTemperature = if seat.sampling.enabled and seat.sampling.heads[seat.joint.head]:
                                seat.sampling.temperature else: 0'f32
-      if jointTemperature > 0 and not seat.sampleSeeded:
-        seat.sampleRng = samplingRng(seat.world[].seed, seat.slot)
-        seat.sampleSeeded = true
+      if jointTemperature > 0: seat.seedStream()
       let held = if seat.joint.head == 0 and seat.forbidAny:
                    jointSelect(seat.logits, seat.joint, seat.forbidden, jointTemperature, seat.sampleRng, actions)
                  else:
@@ -952,104 +717,34 @@ proc samplePhase(seat: NeuralSeat) =
       seat.appliedTemperatures[head] =
         if seat.sampling.enabled and seat.sampling.heads[head]: int32(round(float64(seat.sampling.temperature) * 1000))
         else: 0'i32
-  if seat.forbidAny and seat.forbidden[argmaxActions(seat.logits)[0]]: inc seat.forbidHits
+  if seat.forbidAny and seat.forbidden[argmaxActions(seat.logits.toOpenArray(0, LogitSize-1))[0]]: inc seat.forbidHits
   seat.selected = actions
-  if seat.aimRetarget.enabled and seat.world[].aimRetargetActions(seat.slot, actions, bodies,
-      seat.contract, seat.memory, seat.aimRetarget):
-    inc seat.aimRetargets
-  let beforeSnap = actions
-  var snapped = seat.aimSnap.enabled and seat.world[].aimSnapActions(seat.slot, actions, bodies, seat.aimSnap)
-  var sprayAimed = seat.sprayAim.enabled and seat.world[].sprayAimActions(seat.slot, actions, bodies,
-    seat.contract, seat.memory, seat.sprayAim)
-  if seat.shotGate.enabled and seat.world[].shotGateActions(seat.slot, actions, beforeSnap, snapped,
-      bodies, seat.contract, seat.memory, seat.shotGate):
-    snapped = false   # a dropped order never shot, so it was never snapped or re-aimed
-    sprayAimed = false
-    inc seat.shotGates
-  if snapped: inc seat.aimSnaps
-  if sprayAimed: inc seat.sprayAims
-  if seat.sprayGate.enabled and seat.world[].sprayGateActions(seat.slot, actions, bodies, seat.contract,
-      seat.memory, seat.sprayGate):
-    inc seat.sprayGates
   seat.choices = actions
+  if seat.offsetHeads: seat.selectOffsets()
   seat.sampled = true
-
-proc decodePhase(seat: NeuralSeat) =
-  ## The movement-phase options (strafe, steady shot), the decode, the fire hold; the
-  ## command goes to the buffer, not the world. Records the contract-v2 aim memory.
-  if seat.pointer:
-    seat.decodePMemory = seat.pmemory
-    let rows = seat.rowsFor()
-    seat.buffer = decodePointerActions(seat.world[], seat.slot, seat.choices, rows, seat.pmemory)
-    seat.decoded = true
-    seat.pmemory.recordPointerMemory(seat.world[], rows)
-    return
-  let bodies = seat.bodiesFor()
-  var actions = seat.choices
-  if seat.strafe.enabled:
-    var forbidden = seat.forbidden
-    if seat.maskSet:
-      for i in 0..<ActionSizes[0]:
-        if seat.masks[0][i]: forbidden[i] = true
-    discard seat.world[].strafeActions(seat.slot, actions, bodies, seat.strafe, seat.strafeState,
-      seat.strafeRng, forbidden)
-  if seat.steadyShot:
-    let held = seat.world[].steadyShotActions(seat.slot, actions, true)
-    if held != ssNone: inc seat.steadyTicks
-    if held == ssOrder: inc seat.steadyShots
-  seat.choices = actions
-  seat.decodeMemory = seat.memory
-  var command = decodeActions(seat.world[], seat.slot, actions, bodies, seat.contract, seat.memory)
-  if seat.fireHoldTeammates and seat.world[].holdFire(seat.slot, command, seat.fireHoldRadius): inc seat.fireHolds
-  seat.buffer = command
-  seat.decoded = true
-  if seat.contract == acV2:
-    seat.memory.recordAimMemory(seat.world[], seat.slot, bodies)
-
-proc candidateMemory(seat: NeuralSeat): AimMemory =
-  ## The memory this tick's decode reads (the recorded one replaces it after decoding).
-  if seat.decoded: seat.decodeMemory else: seat.memory
-
-proc aimCandidatePoint(seat: NeuralSeat, aim: int): (bool, Point) =
-  ## neuralAimX/Z: aim head index `aim` under the seat's contract, with the tick's current
-  ## movement and sneak heads for a contract-v2 identity lead (pw_action_candidates' rule).
-  let w = seat.world
-  if w[].cogs[seat.slot].hp <= 0: return (false, Point())
-  if aim == 0: return (true, w[].cogs[seat.slot].aim)
-  if seat.pointer:
-    let rows = seat.rowsFor()
-    let memory = if seat.decoded: seat.decodePMemory else: seat.pmemory
-    var ownStep = Point()
-    if aim >= PointerAimFirstRow:
-      let (found, goal) = w[].pointerGoal(seat.slot, seat.choices[0].int, rows)
-      ownStep = w[].plannedStep(seat.slot, if found: goal else: w[].cogs[seat.slot].pos, seat.choices[4] != 0)
-    return w[].pointerAim(seat.slot, aim, rows, memory, ownStep)
-  var ownStep = Point()
-  if seat.contract == acV2 and aim in 1..16:
-    let (found, goal) = w[].goalCandidate(seat.slot, seat.choices[0].int)
-    ownStep = w[].plannedStep(seat.slot, if found: goal else: w[].cogs[seat.slot].pos, seat.choices[4] != 0)
-  w[].aimCandidate(seat.slot, aim, seat.bodiesFor(), seat.contract, seat.candidateMemory(), ownStep)
 
 proc neuralLayoutWords(seat: NeuralSeat): array[16, int32] =
   ## pw_observation_layout's 16 words for the seat's observation.
   let width = seat.observation.len.int32
   result[0] = width
   result[12] = Seats.int32
-  if seat.observationContract != ocFfaV2:
+  if seat.observationContract != ocFfaView1:
     result[1] = width
     result[11] = -1
-    if not seat.world.isNil: result[13] = seat.world[].controlHearts.len.int32
+    if seat.viewReady: result[13] = seat.view.heartCount
     return
   let l = seat.layout
-  result[1] = FfaV2HeaderSize
-  result[2] = l.cogOffset.int32; result[3] = l.cogRows.int32; result[4] = FfaV2CogWidth
-  result[5] = l.heartOffset.int32; result[6] = l.heartRows.int32; result[7] = FfaV2HeartWidth
-  result[8] = l.greatOffset.int32; result[9] = l.greatRows.int32; result[10] = FfaV2GreatWidth
-  result[11] = FfaV2ValidColumn
+  result[1] = FfaHeaderSize
+  result[2] = l.cogOffset.int32; result[3] = l.cogRows.int32; result[4] = FfaCogWidth
+  result[5] = l.heartOffset.int32; result[6] = l.heartRows.int32; result[7] = FfaHeartWidth
+  result[8] = l.greatOffset.int32; result[9] = l.greatRows.int32; result[10] = FfaGreatWidth
+  result[11] = FfaValidColumn
   result[13] = l.hearts.int32
 
-proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
-    apply: proc(command: Command) {.closure.}) =
+proc addNeuralFunctions*(h: var Host, seat: NeuralSeat) =
+  ## The neural builtins. Each returns a number (a handle, an observation value, a logit, a
+  ## head choice, a layout word or a row's entity); none acts: the seat's policy.bas turns the
+  ## numbers into BASIC verbs.
   # A handle is a typed capability interpreted only within this seat's closure.
   discard h.addFunction("neuralModel", 0, proc(a: openArray[int32]): int32 = 1, 4)
   discard h.addFunction("neuralObservation", 0, proc(a: openArray[int32]): int32 = 2, 4)
@@ -1079,19 +774,7 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
       seat.nativeWork = seat.actor.operationCount
     seat.inferred = true
     1, 16)
-  discard h.addFunction("paintbot_act", 1, proc(a: openArray[int32]): int32 =
-    # = neuralDecode + neuralIssue (sampling first when neuralSample was not called).
-    seat.require(a[0] == 3 and seat.inferred and not seat.acted, "neural action requires fresh logits")
-    try:
-      if not seat.sampled: seat.samplePhase()
-      if not seat.decoded: seat.decodePhase()
-      apply(seat.buffer)
-    except ValueError as e:
-      raise newException(BasicError, "neural action failed: " & e.msg)
-    seat.acted = true
-    1, 128)
-
-  # Neural BASIC I/O (PLAN-neural-basic-io). Part A: user inputs.
+  # User inputs (BASIC -> net).
   discard h.addFunction("neuralInput", 2, proc(a: openArray[int32]): int32 =
     seat.require(seat.userInputs.len > 0, "no user inputs in policy package")
     seat.require(a[0] >= 0 and a[0] < seat.userInputs.len.int32, "neuralInput index out of range")
@@ -1104,10 +787,14 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
     except ValueError as e:
       raise newException(BasicError, "neural observation failed: " & e.msg)
     int32(clamp(round(float64(seat.observation[a[0]]) * 1000), float64(int32.low), float64(int32.high))), 4)
-  # Part B: the head-level phase. Masks and temperatures apply to this tick's selection.
+  discard h.addFunction("neuralLogit", 1, proc(a: openArray[int32]): int32 =
+    seat.require(seat.inferred, "neuralLogit requires run_neural_net first")
+    seat.require(a[0] >= 0 and a[0] < seat.logits.len.int32, "neuralLogit index out of range")
+    int32(clamp(round(float64(seat.logits[a[0]]) * 1000), float64(int32.low), float64(int32.high))), 4)
+  # The head-level phase. Masks and temperatures apply to this tick's selection.
   proc maskFrom(head, first, bits: int32): int32 =
     seat.require(not seat.sampled, "neuralMask must come before the tick's selection")
-    seat.require(not seat.pointer, "neuralMask is not available under action contract ffa.v2 pointer")
+    seat.require(not seat.pointer, "neuralMask is not available under action contract ffa.view.1 pointer")
     seat.require(head in 0'i32..<ActionSizes.len.int32, "neuralMask head out of range")
     seat.require(first >= 0 and first < ActionSizes[head].int32, "neuralMaskFrom first choice out of range")
     for bit in 0..31:
@@ -1120,7 +807,7 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
   discard h.addFunction("neuralMaskFrom", 3, proc(a: openArray[int32]): int32 = maskFrom(a[0], a[1], a[2]), 4)
   discard h.addFunction("neuralTemperature", 2, proc(a: openArray[int32]): int32 =
     seat.require(not seat.sampled, "neuralTemperature must come before the tick's selection")
-    seat.require(a[0] in -1'i32..<ActionSizes.len.int32, "neuralTemperature head out of range")
+    seat.require(a[0] in -1'i32..<seat.heads.len.int32, "neuralTemperature head out of range")
     seat.require(a[1] == 0 or a[1] in MinBasicTemperatureMilli..MaxBasicTemperatureMilli,
       "neuralTemperature must be 0 (argmax) or within 1 .. 100000 milli")
     let t = float32(float64(a[1]) / 1000.0)
@@ -1128,114 +815,56 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat,
       if a[0] == -1 or a[0] == head.int32:
         seat.temperatures[head] = t
         seat.temperatureSet[head] = true
+    if seat.offsetHeads:
+      for e in 0..<AimOffsetHeads:
+        if a[0] == -1 or a[0] == int32(ActionSizes.len + e):
+          seat.offsetTemperatures[e] = t
+          seat.offsetTemperatureSet[e] = true
     1, 4)
   discard h.addFunction("neuralSample", 0, proc(a: openArray[int32]): int32 =
     seat.require(seat.inferred and not seat.sampled, "neuralSample requires fresh logits; once per tick")
     try: seat.samplePhase()
-    except ValueError as e: raise newException(BasicError, "neural action failed: " & e.msg)
+    except ValueError as e: raise newException(BasicError, "neural selection failed: " & e.msg)
     1, 48)
   discard h.addFunction("neuralChoice", 1, proc(a: openArray[int32]): int32 =
-    seat.require(seat.sampled, "neuralChoice requires neuralSample or neuralDecode first")
-    seat.require(a[0] in 0'i32..<ActionSizes.len.int32, "neuralChoice head out of range")
-    seat.choices[a[0]], 4)
+    seat.require(seat.sampled, "neuralChoice requires neuralSample first")
+    seat.require(a[0] in 0'i32..<seat.heads.len.int32, "neuralChoice head out of range")
+    if a[0] >= ActionSizes.len: seat.offsetChoices[a[0] - ActionSizes.len] else: seat.choices[a[0]], 4)
   discard h.addFunction("neuralSetChoice", 2, proc(a: openArray[int32]): int32 =
-    seat.require(seat.sampled and not seat.decoded, "neuralSetChoice must come between neuralSample and neuralDecode")
-    seat.require(a[0] in 0'i32..<ActionSizes.len.int32, "neuralSetChoice head out of range")
+    # Records the choice the script acted on (pw_seat_policy_choices reports it).
+    seat.require(seat.sampled, "neuralSetChoice requires neuralSample first")
+    seat.require(a[0] in 0'i32..<seat.heads.len.int32, "neuralSetChoice head out of range")
     seat.require(a[1] >= 0 and a[1] < seat.headSize(a[0].int).int32, "neuralSetChoice choice out of range")
-    seat.choices[a[0]] = a[1]
+    if a[0] >= ActionSizes.len: seat.offsetChoices[a[0] - ActionSizes.len] = a[1]
+    else: seat.choices[a[0]] = a[1]
     1, 4)
-  discard h.addFunction("neuralDecode", 0, proc(a: openArray[int32]): int32 =
-    seat.require(seat.inferred and not seat.decoded, "neuralDecode requires fresh logits; once per tick")
-    try:
-      if not seat.sampled: seat.samplePhase()
-      seat.decodePhase()
-    except ValueError as e: raise newException(BasicError, "neural action failed: " & e.msg)
-    1, 64)
-  discard h.addFunction("neuralIssue", 0, proc(a: openArray[int32]): int32 =
-    seat.require(seat.decoded and not seat.acted, "neuralIssue requires neuralDecode; once per tick")
-    apply(seat.buffer)
-    seat.acted = true
-    1, 16)
-  proc cmdRead(field: int): HostProc =
-    result = proc(a: openArray[int32]): int32 =
-      seat.require(seat.decoded, "command readers require neuralDecode first")
-      let c = seat.buffer
-      case field
-      of 0: c.walk.int32
-      of 1: c.goal.x
-      of 2: c.goal.z
-      of 3: c.shoot.int32
-      of 4: c.aim.x
-      of 5: c.aim.z
-      of 6: c.chargeGrenade.int32
-      of 7: c.sneak.int32
-      else: c.direct.int32
-  for field, name in ["cmdWalk", "cmdGoalX", "cmdGoalZ", "cmdShoot", "cmdAimX", "cmdAimZ",
-      "cmdGrenade", "cmdSneak", "cmdDirect"]:
-    discard h.addFunction(name, 0, cmdRead(field), 4)
-  discard h.addFunction("cmdSet", 2, proc(a: openArray[int32]): int32 =
-    # Field ids as the readers (pw_seat_orders' layout): 0 walk, 1 goal x, 2 goal z,
-    # 3 shoot, 4 aim x, 5 aim z, 6 grenade, 7 sneak, 8 direct. Flags are value != 0; an
-    # aim coordinate is clamped to the map as lookAt clamps it; a goal is kept verbatim
-    # as walkTo keeps it.
-    seat.require(seat.decoded and not seat.acted, "cmdSet requires neuralDecode and comes before neuralIssue")
-    seat.require(a[0] in 0'i32..8'i32, "cmdSet field out of range")
-    let v = a[1]
-    case a[0]
-    of 0: seat.buffer.walk = v != 0
-    of 1: seat.buffer.goal.x = v
-    of 2: seat.buffer.goal.z = v
-    of 3: seat.buffer.shoot = v != 0
-    of 4: seat.buffer.aim.x = clamp(v, minX().int32, maxX().int32)
-    of 5: seat.buffer.aim.z = clamp(v, minZ().int32, maxZ().int32)
-    of 6: seat.buffer.chargeGrenade = v != 0
-    of 7: seat.buffer.sneak = v != 0
-    else: seat.buffer.direct = v != 0
-    1, 4)
-  # Candidate readers (pw_action_candidates for the seat): INT32_MIN when the candidate
-  # does not exist now. Goal 0 is the seat's position, aim 0 its current aim.
-  proc goalRead(axis: int): HostProc =
-    result = proc(a: openArray[int32]): int32 =
-      seat.require(a[0] in 0'i32..<seat.headSize(0).int32, "neuralGoal index out of range")
-      let w = seat.world
-      if w[].cogs[seat.slot].hp <= 0: return low(int32)
-      let (found, p) = if a[0] == 0: (true, w[].cogs[seat.slot].pos)
-                       elif seat.pointer: w[].pointerGoal(seat.slot, a[0].int, seat.rowsFor())
-                       else: w[].goalCandidate(seat.slot, a[0].int)
-      if not found: low(int32) elif axis == 0: p.x else: p.z
-  discard h.addFunction("neuralGoalX", 1, goalRead(0), 8)
-  discard h.addFunction("neuralGoalZ", 1, goalRead(1), 8)
-  proc aimRead(axis: int): HostProc =
-    result = proc(a: openArray[int32]): int32 =
-      seat.require(seat.sampled, "neuralAim readers require neuralSample or neuralDecode first")
-      seat.require(a[0] in 0'i32..<seat.headSize(1).int32, "neuralAim index out of range")
-      let (found, p) = seat.aimCandidatePoint(a[0].int)
-      if not found: low(int32) elif axis == 0: p.x else: p.z
-  discard h.addFunction("neuralAimX", 1, aimRead(0), 16)
-  discard h.addFunction("neuralAimZ", 1, aimRead(1), 16)
   # The observation and action layout (pw_observation_layout's 16 words, then the head
-  # sizes at 16 .. 20): neuralLayout(i). ffa.v2 seats only for the section words; any seat for
-  # its width and head sizes.
+  # sizes at 16 .. 22, 0 for a head the seat's action contract lacks): neuralLayout(i).
+  # ffa.view.1 seats only for the section words; any seat for its width and head sizes.
   discard h.addFunction("neuralLayout", 1, proc(a: openArray[int32]): int32 =
-    seat.require(a[0] in 0'i32..20'i32, "neuralLayout index out of range")
+    seat.require(a[0] in 0'i32..22'i32, "neuralLayout index out of range")
     let i = a[0].int
-    if i >= 16: return seat.headSize(i-16).int32
+    if i >= 16:
+      let head = i-16
+      return (if seat.heads.len == 0: (if head < ActionSizes.len: ActionSizes[head].int32 else: 0'i32)
+              elif head < seat.heads.len: seat.heads[head].int32 else: 0'i32)
     let words = neuralLayoutWords(seat)
     words[i], 4)
-  # The tick's row -> entity map (ffa.v2): neuralRow(section, k) is the seat id (section 0,
-  # -1 past the seen cogs), control heart index (1) or great heart index (2) of row k.
+  # The tick's row -> entity map (ffa.view.1): neuralRow(section, k) is the identity of cog
+  # row k (section 0; nearAgentId(k) after nearAgents(20000); -1 past the agents the seat
+  # sees), the control heart index (1) or the great heart index (2) of row k.
   discard h.addFunction("neuralRow", 2, proc(a: openArray[int32]): int32 =
-    seat.require(seat.observationContract == ocFfaV2, "neuralRow needs observation contract ffa.v2")
+    seat.require(seat.observationContract == ocFfaView1, "neuralRow needs observation contract ffa.view.1")
     seat.require(a[0] in 0'i32..2'i32, "neuralRow section out of range")
     let rows = seat.rowsFor()
     let k = a[1].int
     case a[0]
     of 0:
       seat.require(k in 0..<seat.layout.cogRows, "neuralRow row out of range")
-      (if k < rows.cogs.len: rows.cogs[k].int32 else: -1'i32)
+      (if k < rows.agents.len: rows.agents[k].identity else: -1'i32)
     of 1:
       seat.require(k in 0..<rows.hearts.len, "neuralRow row out of range")
       rows.hearts[k].int32
     else:
-      seat.require(k in 0..<FfaV2GreatRows, "neuralRow row out of range")
+      seat.require(k in 0..<FfaGreatRows, "neuralRow row out of range")
       rows.greats[k].int32, 8)

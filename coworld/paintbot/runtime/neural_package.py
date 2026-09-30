@@ -11,71 +11,65 @@ import zipfile
 MAX_MODEL_BYTES = 16 * 1024 * 1024
 MAX_SOURCE_BYTES = 128 * 1024  # matches maxSourceBytes in bots.nim
 MAX_MANIFEST_BYTES = 8192
-# Schema 1: bundles built against action contract v1. Schema 2: the same three files;
-# the manifest may name action contract v2 (lead-compensated identity aim), which only
-# hosts that know schema 2 can decode. Both stay accepted; the actor's own embedded
-# contract hashes are what the host binds and decodes by.
+# Schema 1 and schema 2 carry the same three files; only schema 2 may carry "decoder" options and
+# "user_inputs". The actor's own embedded contract hashes are what the host binds and decodes by.
 SCHEMA = "paintbot-neural-basic/1"
 SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
-# Schema-2 decoder options: "decoder": {"fire_hold_teammates": true (or {"radius": 150}), "sampling": {...},
-# "forbid_objectives": [9, 10], "strafe_legs": {...}, "aim_snap": {"max_angle_deg": 22.5},
-# "steady_shot": {}, "aim_retarget": {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000},
-# "shot_gate": {"max_range": 5250}, "spray_aim": {"max_range": 850},
-# "spray_gate": {"max_teammates": 0, "min_enemies": 1},
-# "joint_sampling": {"when": {"head": 2, "value": 1}, "head": 0, "offsets": [51 numbers]}}.
-# Every key must be one the host knows and every value the declared type, so a bundle
-# asking for an option this release lacks is rejected at staging rather than played
-# without it. The rules here mirror neural_host.nim's exactly.
-DECODER_OPTIONS = {"fire_hold_teammates": (bool, dict), "sampling": dict, "forbid_objectives": list, "strafe_legs": dict,
-                   "aim_snap": dict, "steady_shot": dict, "aim_retarget": dict, "shot_gate": dict,
-                   "spray_aim": dict, "spray_gate": dict, "joint_sampling": dict}
-ACTION_SIZES = (51, 25, 2, 2, 2)  # both action contracts
+# A seat perceives only its SeatView and acts only through BASIC (docs/neural/seat-view.md): the
+# observation contracts are built from SeatView values, and the model's heads reach the engine only
+# through policy.bas. neural_contract.nim holds the same ids.
+OBSERVATION_CONTRACT_TEAMS_VIEW_1 = "paintbot-pw.teams.view.1"
+OBSERVATION_CONTRACT_FFA_VIEW_1 = "paintbot-pw.ffa.view.1"
+ACTION_CONTRACT_TEAMS_VIEW_1 = "paintbot-pw.teams.view.1.action.51-25-2-2-2"
+ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23"
+ACTION_CONTRACT_FFA_VIEW_1_POINTER = "paintbot-pw.ffa.view.1.action.pointer"
+
+
+def contract_hash(contract_id):
+    return hashlib.sha256(contract_id.encode()).hexdigest()
+
+
+OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH = contract_hash(OBSERVATION_CONTRACT_TEAMS_VIEW_1)
+OBSERVATION_CONTRACT_FFA_VIEW_1_HASH = contract_hash(OBSERVATION_CONTRACT_FFA_VIEW_1)
+ACTION_CONTRACT_TEAMS_VIEW_1_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1)
+ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET)
+ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH = contract_hash(ACTION_CONTRACT_FFA_VIEW_1_POINTER)
+TEAMS_VIEW_1_SIZE = 512
+ACTION_SIZES = (51, 25, 2, 2, 2)  # action contract teams.view.1
+ACTION_SIZES_OFFSET = (51, 25, 2, 2, 2, 23, 23)  # its aim-offset variant
+# Contracts retired for BASIC parity: their observations read state a BASIC seat cannot (cooldowns,
+# shield, aim, heart meters, the end tick, cover probes), or their actions were decoded natively.
+RETIRED_OBSERVATION_CONTRACTS = ("paintbot-pw.rules37.obs.v1.float448", "paintbot-pw.rules37.obs.v2.float506",
+                                 "paintbot-pw.rules43.obs.v3.float514", "paintbot-pw.rules40.obs.ffa.v1.float810",
+                                 "paintbot-pw.rules48.obs.ffa.v2")
+RETIRED_ACTION_CONTRACTS = ("paintbot-pw.rules37.action.v1.51-25-2-2-2", "paintbot-pw.rules37.action.v2.51-25-2-2-2",
+                            "paintbot-pw.rules48.action.ffa.v2.pointer")
+MAX_USER_INPUTS, USER_INPUT_LIMIT = 128, 1000000
+RETIRED_CONTRACT_HASHES = (
+    {contract_hash(c) for c in RETIRED_OBSERVATION_CONTRACTS + RETIRED_ACTION_CONTRACTS}
+    | {contract_hash("paintbot-pw.rules39.obs.v2u%d" % k) for k in range(1, MAX_USER_INPUTS + 1)}
+    | {contract_hash("paintbot-pw.rules43.obs.v3u%d" % k) for k in range(1, MAX_USER_INPUTS + 1)})
+RETIRED_MESSAGE = "was retired for BASIC parity (docs/neural/seat-view.md); retrain on teams.view.1 or ffa.view.1"
+# Schema-2 "decoder" options: selection only (the network's own distribution, reshaped). Every key must be
+# one the host knows, so a bundle asking for an option this release lacks is rejected at staging rather than
+# played without it. neural_host.nim holds the same rules.
+DECODER_OPTIONS = {"sampling": dict, "forbid_objectives": list, "joint_sampling": dict}
+# Native decoder rules retired for BASIC parity: a manifest naming one is refused (write it in policy.bas).
+RETIRED_DECODER_OPTIONS = ("fire_hold_teammates", "strafe_legs", "aim_snap", "steady_shot", "aim_retarget",
+                           "shot_gate", "spray_aim", "spray_gate")
 MAX_JOINT_OFFSET = 1000
 SAMPLING_HEADS = 5
 MIN_SAMPLING_TEMPERATURE, MAX_SAMPLING_TEMPERATURE = 0.01, 10.0
-OBJECTIVE_CANDIDATES = 51  # movement-head size in both action contracts
-MAX_STRAFE_RANGE, MAX_STRAFE_LEG_TICKS, MIN_STRAFE_SHOT_LEG_TICKS = 20000, 72, 6
-DEFAULT_AIM_SNAP_DEG, MAX_AIM_SNAP_MILLIDEG = 22.5, 90000
-STEADY_MOVEMENT = 0  # the movement-head index the steady shot stands the seat on
-# decoder.aim_retarget defaults are base.bas's target rule; decoder.shot_gate's is the gun range.
-# decoder.fire_hold_teammates: true = the hold at the gun's hit tolerance (55 units); the object form
-# {"radius": r} turns the hold on at radius r (optional, 55), an integer within 1 .. 2000.
-DEFAULT_FIRE_HOLD_RADIUS, MAX_FIRE_HOLD_RADIUS = 55, 2000
-AIM_RETARGET_DEFAULTS = {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000}
-MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT = 20000, 1000000000
-SHOT_GATE_DEFAULTS = {"max_range": 5250}
-# decoder.spray_aim / decoder.spray_gate (a ready spray can only): the spray reach, and a cone with at least
-# one enemy and no teammate.
-SPRAY_AIM_DEFAULTS = {"max_range": 850}
-SPRAY_GATE_DEFAULTS = {"max_teammates": 0, "min_enemies": 1}
-SPRAY_LIMITS = {"max_range": (1, 850), "max_teammates": (0, 7), "min_enemies": (0, 8)}
-MAX_SHOT_GATE_RANGE = 20000
-# Manifest "user_inputs": {"count": K, "init": [K ints]} (schema 2; PLAN-neural-basic-io part A): policy.bas feeds
-# the net K extra inputs with neuralInput(i, v), v clamped to +-1,000,000 and fed as float32(v) / 1000 one tick
-# later. The actor's observation contract is then v2u<K> (v2's 506 floats + K), whose hash is the SHA-256 of the id
-# below, and its input count is 506 + K. neural_host.nim holds the same rules.
-MAX_USER_INPUTS, USER_INPUT_LIMIT = 128, 1000000
-OBSERVATION_V2_SIZE = 506
-# Observation contract v3 (teams game): v2's 506 floats, then an 8-float scoreboard block (neural_contract.nim
-# encodeScoreboardBlock). v3u<K> = v3 + K user inputs, exactly as v2u<K> is to v2.
-OBSERVATION_V3_SIZE = 514
-OBSERVATION_CONTRACT_V3 = "paintbot-pw.rules43.obs.v3.float514"
-OBSERVATION_CONTRACT_V3_HASH = hashlib.sha256(OBSERVATION_CONTRACT_V3.encode()).hexdigest()
+OBJECTIVE_CANDIDATES = 51  # movement-head size of action contract teams.view.1
 ACTOR_MAGIC = b"PWNET001"
 
 
 def user_inputs_contract_id(count):
-    return "paintbot-pw.rules39.obs.v2u%d" % count
+    """Observation contract teams.view.1u<K>: teams.view.1's 512 floats, then K user inputs."""
+    return OBSERVATION_CONTRACT_TEAMS_VIEW_1 + "u%d" % count
 
 
-def v3_user_inputs_contract_id(count):
-    return "paintbot-pw.rules43.obs.v3u%d" % count
-
-
-USER_INPUTS_CONTRACT_HASHES = {hashlib.sha256(user_inputs_contract_id(k).encode()).hexdigest(): k
-                               for k in range(1, MAX_USER_INPUTS + 1)}
-V3_USER_INPUTS_CONTRACT_HASHES = {hashlib.sha256(v3_user_inputs_contract_id(k).encode()).hexdigest(): k
-                                  for k in range(1, MAX_USER_INPUTS + 1)}
+USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k)): k for k in range(1, MAX_USER_INPUTS + 1)}
 
 
 def validate_user_inputs(value):
@@ -108,6 +102,8 @@ def actor_header(model):
     neither (a PWNET002 model is fully validated here, validate_pwnet2)."""
     if model[:8] == PWNET2_MAGIC:
         info = validate_pwnet2(model)
+        if info.get("layout_dependent"):
+            raise ValueError("layout words need observation contract ffa.view.1")
         return info["inputs"], info["observation_contract"]
     if len(model) < 96 or model[:8] != ACTOR_MAGIC:
         raise ValueError("invalid neural actor magic")
@@ -129,145 +125,6 @@ def validate_forbid_objectives(value):
         raise ValueError("decoder.forbid_objectives repeats an index")
     if len(value) >= OBJECTIVE_CANDIDATES:
         raise ValueError("decoder.forbid_objectives must leave an objective allowed")
-
-
-def validate_strafe_legs(value):
-    """decoder.strafe_legs: {"range": r, "legs": [min, max], "shot_legs": [min, max], "reverse_permille": p},
-    every field optional (5250, [3, 6], [6, 9], 800)."""
-    if not isinstance(value, dict):
-        raise ValueError("decoder.strafe_legs must be an object")
-    options = {"range": 5250, "legs": [3, 6], "shot_legs": [6, 9], "reverse_permille": 800}
-    for key, field in value.items():
-        if key in ("range", "reverse_permille"):
-            if not _is_int(field):
-                raise ValueError("decoder.strafe_legs.%s must be an integer" % key)
-        elif key in ("legs", "shot_legs"):
-            if not isinstance(field, list) or len(field) != 2:
-                raise ValueError("decoder.strafe_legs.%s must be [min, max]" % key)
-            if not all(_is_int(item) for item in field):
-                raise ValueError("decoder.strafe_legs.%s must be an integer" % key)
-        else:
-            raise ValueError("unknown decoder.strafe_legs field: " + str(key))
-        options[key] = field
-    if not 1 <= options["range"] <= MAX_STRAFE_RANGE:
-        raise ValueError("decoder.strafe_legs.range must be within 1 .. %d" % MAX_STRAFE_RANGE)
-    low, high = options["legs"]
-    if not 1 <= low <= high <= MAX_STRAFE_LEG_TICKS:
-        raise ValueError("decoder.strafe_legs.legs must be [min, max] with 1 <= min <= max <= %d" % MAX_STRAFE_LEG_TICKS)
-    low, high = options["shot_legs"]
-    if not MIN_STRAFE_SHOT_LEG_TICKS <= low <= high <= MAX_STRAFE_LEG_TICKS:
-        raise ValueError("decoder.strafe_legs.shot_legs must be [min, max] with %d <= min <= max <= %d"
-                         % (MIN_STRAFE_SHOT_LEG_TICKS, MAX_STRAFE_LEG_TICKS))
-    if not 0 <= options["reverse_permille"] <= 1000:
-        raise ValueError("decoder.strafe_legs.reverse_permille must be within 0 .. 1000")
-
-
-def validate_aim_snap(value):
-    """decoder.aim_snap: {"max_angle_deg": a}, a optional (22.5), a multiple of 0.001 within 0.001 .. 90."""
-    if not isinstance(value, dict):
-        raise ValueError("decoder.aim_snap must be an object")
-    for key, field in value.items():
-        if key != "max_angle_deg":
-            raise ValueError("unknown decoder.aim_snap field: " + str(key))
-        if isinstance(field, bool) or not isinstance(field, (int, float)):
-            raise ValueError("decoder.aim_snap.max_angle_deg must be a number")
-        try:
-            scaled = float(field) * 1000
-        except OverflowError:
-            scaled = float("inf")
-        if scaled != scaled or not 0.5 <= scaled <= MAX_AIM_SNAP_MILLIDEG + 0.5 or abs(scaled - round(scaled)) > 1e-6:
-            raise ValueError("decoder.aim_snap.max_angle_deg must be a multiple of 0.001 within 0.001 .. 90")
-
-
-def validate_steady_shot(value):
-    """decoder.steady_shot: {} (no parameters)."""
-    if not isinstance(value, dict):
-        raise ValueError("decoder.steady_shot must be an object")
-    for key in value:
-        raise ValueError("unknown decoder.steady_shot field: " + str(key))
-
-
-def validate_fire_hold(value):
-    """decoder.fire_hold_teammates: a bool, or {"radius": r} with r optional (55), an integer within 1 .. 2000.
-    Returns (enabled, radius)."""
-    if isinstance(value, bool):
-        return value, DEFAULT_FIRE_HOLD_RADIUS
-    if not isinstance(value, dict):
-        raise ValueError("decoder.fire_hold_teammates must be a bool or an object")
-    radius = DEFAULT_FIRE_HOLD_RADIUS
-    for key, field in value.items():
-        if key != "radius":
-            raise ValueError("unknown decoder.fire_hold_teammates field: " + str(key))
-        if not _is_int(field):
-            raise ValueError("decoder.fire_hold_teammates.radius must be an integer")
-        if not 1 <= field <= MAX_FIRE_HOLD_RADIUS:
-            raise ValueError("decoder.fire_hold_teammates.radius must be within 1 .. %d" % MAX_FIRE_HOLD_RADIUS)
-        radius = field
-    return True, radius
-
-
-def validate_aim_retarget(value):
-    """decoder.aim_retarget: {"max_range": r, "hp_weight": h, "carry_weight": c}, every field optional
-    (5250, 160000, 2500000), integers with r within 1 .. 20000 and h, c within 0 .. 1e9."""
-    if not isinstance(value, dict):
-        raise ValueError("decoder.aim_retarget must be an object")
-    options = dict(AIM_RETARGET_DEFAULTS)
-    for key, field in value.items():
-        if key not in AIM_RETARGET_DEFAULTS:
-            raise ValueError("unknown decoder.aim_retarget field: " + str(key))
-        if not _is_int(field):
-            raise ValueError("decoder.aim_retarget.%s must be an integer" % key)
-        options[key] = field
-    if not 1 <= options["max_range"] <= MAX_RETARGET_RANGE:
-        raise ValueError("decoder.aim_retarget.max_range must be within 1 .. %d" % MAX_RETARGET_RANGE)
-    for key in ("hp_weight", "carry_weight"):
-        if not 0 <= options[key] <= MAX_RETARGET_WEIGHT:
-            raise ValueError("decoder.aim_retarget.%s must be within 0 .. %d" % (key, MAX_RETARGET_WEIGHT))
-    return options
-
-
-def validate_shot_gate(value):
-    """decoder.shot_gate: {"max_range": r}, r optional (5250), an integer within 1 .. 20000."""
-    if not isinstance(value, dict):
-        raise ValueError("decoder.shot_gate must be an object")
-    options = dict(SHOT_GATE_DEFAULTS)
-    for key, field in value.items():
-        if key not in SHOT_GATE_DEFAULTS:
-            raise ValueError("unknown decoder.shot_gate field: " + str(key))
-        if not _is_int(field):
-            raise ValueError("decoder.shot_gate.%s must be an integer" % key)
-        options[key] = field
-    if not 1 <= options["max_range"] <= MAX_SHOT_GATE_RANGE:
-        raise ValueError("decoder.shot_gate.max_range must be within 1 .. %d" % MAX_SHOT_GATE_RANGE)
-    return options
-
-
-def _validate_int_fields(name, value, defaults):
-    if not isinstance(value, dict):
-        raise ValueError("decoder.%s must be an object" % name)
-    options = dict(defaults)
-    for key, field in value.items():
-        if key not in defaults:
-            raise ValueError("unknown decoder.%s field: %s" % (name, key))
-        if not _is_int(field):
-            raise ValueError("decoder.%s.%s must be an integer" % (name, key))
-        options[key] = field
-    for key, field in options.items():
-        low, high = SPRAY_LIMITS[key]
-        if not low <= field <= high:
-            raise ValueError("decoder.%s.%s must be within %d .. %d" % (name, key, low, high))
-    return options
-
-
-def validate_spray_aim(value):
-    """decoder.spray_aim: {"max_range": r}, r optional (850), an integer within 1 .. 850."""
-    return _validate_int_fields("spray_aim", value, SPRAY_AIM_DEFAULTS)
-
-
-def validate_spray_gate(value):
-    """decoder.spray_gate: {"max_teammates": t, "min_enemies": e}, both optional (0, 1), integers,
-    t within 0 .. 7 and e within 0 .. 8."""
-    return _validate_int_fields("spray_gate", value, SPRAY_GATE_DEFAULTS)
 
 
 def validate_joint_sampling(value):
@@ -308,8 +165,9 @@ def validate_joint_sampling(value):
             raise ValueError("decoder.joint_sampling.offsets must be within [-1000, 1000]")
 
 
-def validate_sampling(value):
-    """decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}."""
+def validate_sampling(value, offset_heads=False):
+    """decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}; heads 5 and 6 only
+    under action contract teams.view.1 aim-offset (offset_heads)."""
     if not isinstance(value, dict):
         raise ValueError("decoder.sampling must be an object")
     if value.get("mode") != "categorical":
@@ -326,10 +184,13 @@ def validate_sampling(value):
             if not isinstance(field, list) or not field:
                 raise ValueError("decoder.sampling.heads must be a non-empty array")
             for item in field:
-                if isinstance(item, bool) or not isinstance(item, int) or not 0 <= item < SAMPLING_HEADS:
-                    raise ValueError("decoder.sampling.heads entries must be head indices 0 .. %d" % (SAMPLING_HEADS - 1))
+                if isinstance(item, bool) or not isinstance(item, int) or not 0 <= item < len(ACTION_SIZES_OFFSET):
+                    raise ValueError("decoder.sampling.heads entries must be head indices 0 .. %d"
+                                     % (len(ACTION_SIZES_OFFSET) - 1))
             if len(set(field)) != len(field):
                 raise ValueError("decoder.sampling.heads repeats a head")
+            if not offset_heads and any(item >= SAMPLING_HEADS for item in field):
+                raise ValueError("decoder.sampling.heads 5 and 6 need action contract teams.view.1 aim-offset")
         else:
             raise ValueError("unknown decoder.sampling field: " + str(key))
 
@@ -347,12 +208,6 @@ def neural_budget(seats):
     return MAX_NEURAL_OPERATIONS * seats // 16 if seats > 16 else MAX_NEURAL_OPERATIONS
 
 
-# Observation contract ffa.v2 (FFA-kin at any seat count; its width follows the match) and its
-# action contract, ffa.v2 pointer (heads sized by the match). neural_contract.nim holds both.
-OBSERVATION_CONTRACT_FFA_V2 = "paintbot-pw.rules48.obs.ffa.v2"
-OBSERVATION_CONTRACT_FFA_V2_HASH = hashlib.sha256(OBSERVATION_CONTRACT_FFA_V2.encode()).hexdigest()
-ACTION_CONTRACT_FFA_V2_POINTER = "paintbot-pw.rules48.action.ffa.v2.pointer"
-ACTION_CONTRACT_FFA_V2_POINTER_HASH = hashlib.sha256(ACTION_CONTRACT_FFA_V2_POINTER.encode()).hexdigest()
 # PWNET002 layout words (neural_actor.nim): a structural uint32 whose high 16 bits are 0xFFFE
 # names a quantity of the match layout, resolved by the engine when the seat loads.
 LAYOUT_WORD_PREFIX = 0xFFFE0000
@@ -868,6 +723,22 @@ def unpack_package(data, seats=16):
         digest = manifest.get(field, "")
         if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
             raise ValueError("invalid contract hash")
+    observation_contract = manifest["observation_contract"]
+    action_contract = manifest["action_contract"]
+    for field, digest in (("observation", observation_contract), ("action", action_contract)):
+        if digest in RETIRED_CONTRACT_HASHES:
+            raise ValueError("neural %s contract %s" % (field, RETIRED_MESSAGE))
+    user_inputs_named = USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
+    teams = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH or user_inputs_named > 0
+    if not teams and observation_contract != OBSERVATION_CONTRACT_FFA_VIEW_1_HASH:
+        raise ValueError("unknown neural observation contract")
+    if action_contract not in (ACTION_CONTRACT_TEAMS_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH,
+                               ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
+        raise ValueError("unknown neural action contract")
+    if teams != (action_contract != ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
+        raise ValueError("observation contract teams.view.1 goes with action contract teams.view.1 (or its aim-offset "
+                         "variant), ffa.view.1 with ffa.view.1 pointer")
+    offset = action_contract == ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH
     if "decoder" in manifest:
         if manifest.get("schema") != "paintbot-neural-basic/2":
             raise ValueError("decoder options need package schema 2")
@@ -875,81 +746,50 @@ def unpack_package(data, seats=16):
         if not isinstance(decoder, dict):
             raise ValueError("decoder options must be an object")
         for key, value in decoder.items():
+            if key in RETIRED_DECODER_OPTIONS:
+                raise ValueError("decoder." + key + " was retired for BASIC parity (docs/neural/seat-view.md); "
+                                 "write the rule in policy.bas")
             if key not in DECODER_OPTIONS:
                 raise ValueError("unknown decoder option: " + str(key))
-            allowed = DECODER_OPTIONS[key] if isinstance(DECODER_OPTIONS[key], tuple) else (DECODER_OPTIONS[key],)
-            if type(value) not in allowed:
-                raise ValueError("decoder." + key + " must be a " + " or a ".join(t.__name__ for t in allowed))
-            if key == "fire_hold_teammates":
-                validate_fire_hold(value)
-            elif key == "sampling":
-                validate_sampling(value)
+            if type(value) is not DECODER_OPTIONS[key]:
+                raise ValueError("decoder." + key + " must be a " + DECODER_OPTIONS[key].__name__)
+            if key == "sampling":
+                validate_sampling(value, offset)
             elif key == "forbid_objectives":
                 validate_forbid_objectives(value)
-            elif key == "strafe_legs":
-                validate_strafe_legs(value)
-            elif key == "aim_snap":
-                validate_aim_snap(value)
-            elif key == "steady_shot":
-                validate_steady_shot(value)
-            elif key == "aim_retarget":
-                validate_aim_retarget(value)
-            elif key == "shot_gate":
-                validate_shot_gate(value)
-            elif key == "spray_aim":
-                validate_spray_aim(value)
-            elif key == "spray_gate":
-                validate_spray_gate(value)
             elif key == "joint_sampling":
                 validate_joint_sampling(value)
-        if "steady_shot" in decoder and STEADY_MOVEMENT in decoder.get("forbid_objectives", []):
-            raise ValueError("decoder.steady_shot needs movement index 0, which decoder.forbid_objectives forbids")
-        if manifest.get("action_contract") == ACTION_CONTRACT_FFA_V2_POINTER_HASH:
-            for key in decoder:
-                if key != "sampling":
-                    # The other options read the fixed contracts' head indices (neural_host.nim).
-                    raise ValueError("decoder." + key + " is not available under action contract ffa.v2 pointer")
+            if not teams and key != "sampling":
+                # The other options read head indices of the fixed teams contract.
+                raise ValueError("decoder." + key + " is not available under action contract ffa.view.1 pointer")
     user_inputs = 0
     if "user_inputs" in manifest:
         if manifest.get("schema") != "paintbot-neural-basic/2":
             raise ValueError("user_inputs need package schema 2")
         user_inputs = validate_user_inputs(manifest["user_inputs"])
-    observation_contract = manifest["observation_contract"]
-    if (observation_contract == OBSERVATION_CONTRACT_FFA_V2_HASH) != \
-            (manifest["action_contract"] == ACTION_CONTRACT_FFA_V2_POINTER_HASH):
-        raise ValueError("observation contract ffa.v2 needs action contract ffa.v2 pointer, and the other way round")
-    family, base_size = "v2u", OBSERVATION_V2_SIZE
-    named = USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
-    if not named and observation_contract in V3_USER_INPUTS_CONTRACT_HASHES:
-        family, base_size = "v3u", OBSERVATION_V3_SIZE
-        named = V3_USER_INPUTS_CONTRACT_HASHES[observation_contract]
-    if user_inputs and not named:
-        raise ValueError("user_inputs need observation contract v2u<K> or v3u<K>")
-    if named and not user_inputs:
-        raise ValueError("observation contract %s%d needs manifest user_inputs" % (family, named))
-    if user_inputs and named != user_inputs:
-        raise ValueError("user_inputs.count does not match observation contract %s%d" % (family, named))
+    if user_inputs and not user_inputs_named:
+        raise ValueError("user_inputs need observation contract teams.view.1u<K>")
+    if user_inputs_named and not user_inputs:
+        raise ValueError("observation contract teams.view.1u%d needs manifest user_inputs" % user_inputs_named)
+    if user_inputs and user_inputs_named != user_inputs:
+        raise ValueError("user_inputs.count does not match observation contract teams.view.1u%d" % user_inputs_named)
     files["policy.bas"].decode("utf-8")
     if not files["model.bin"]:
         raise ValueError("empty neural model")
     if files["model.bin"][:8] == PWNET2_MAGIC:
-        info = validate_pwnet2(files["model.bin"], manifest["observation_contract"], manifest["action_contract"], seats)
+        info = validate_pwnet2(files["model.bin"], observation_contract, action_contract, seats)
         if info.get("conditionals") and "joint_sampling" in (manifest.get("decoder") or {}):
             raise ValueError("decoder.joint_sampling cannot be combined with the model's COND_HEAD layers")
-    if user_inputs:
+        if any(head >= SAMPLING_HEADS for pair in info.get("conditionals", []) for head in pair):
+            raise ValueError("COND_HEAD layers may name only heads 0 .. 4")
+    if teams:
+        # The fixed-width contract: the actor is checked at staging as the host checks it at load.
         inputs, observation = actor_header(files["model.bin"])
         if observation != observation_contract:
             raise ValueError("package and actor contract mismatch")
-        if inputs != base_size + user_inputs:
-            raise ValueError("neural actor input count must be %d for %d user inputs"
-                             % (base_size + user_inputs, user_inputs))
-    elif observation_contract == OBSERVATION_CONTRACT_V3_HASH:
-        # A new contract, so its actor is checked at staging as the host checks it at load.
-        inputs, observation = actor_header(files["model.bin"])
-        if observation != observation_contract:
-            raise ValueError("package and actor contract mismatch")
-        if inputs != OBSERVATION_V3_SIZE:
-            raise ValueError("neural actor input count must be %d for observation contract v3" % OBSERVATION_V3_SIZE)
+        if inputs != TEAMS_VIEW_1_SIZE + user_inputs:
+            raise ValueError("neural actor input count must be %d for observation contract teams.view.1%s"
+                             % (TEAMS_VIEW_1_SIZE + user_inputs, "u%d" % user_inputs if user_inputs else ""))
     return files["policy.bas"], files["model.bin"], manifest
 
 

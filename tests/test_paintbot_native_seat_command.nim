@@ -1,8 +1,7 @@
 ## The per-seat raw-command setter of the native training ABI (pw_set_seat_command):
 ## arguments; BASIC-equivalent construction (goal verbatim, aim clamped as lookAt clamps);
 ## next-step-only semantics, the echo through pw_seat_orders and pw_reset; the forbid check
-## and head decode skipped for the commanded seat; the fire hold and fire period applied
-## only when set; a scripted seat's order replaced; a world whose every seat is driven by
+## and head decode skipped for the commanded seat; the fire period applied only when set; a scripted seat's order replaced; a world whose every seat is driven by
 ## the commands the production bot loop issued equals that loop, hash for hash; and a
 ## library whose caller never calls it is untouched. Build with --mm:arc --threads:on
 ## -d:pwTraining.
@@ -14,6 +13,7 @@ when not defined(pwTraining): {.error: "the native ABI exists only under -d:pwTr
 
 const Root = currentSourcePath().parentDir.parentDir
 const Base = Root / "coworld/paintbot/players/base.bas"
+const DecoderSource = staticRead("../examples/paintbot/players/neural_decode.bas")
 type Buffer = ptr UncheckedArray[cfloat]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
@@ -91,9 +91,9 @@ suite "Native raw seat command":
       reference.step(commands)
       require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0   # forbidden heads ignored
       require pw_state_hash(h) == reference.stateHash()
-  test "the fire hold and the fire period apply to a command only when set on the seat":
+  test "the fire period applies to a command only when set on the seat":
     proc shootAtMates(w: World): array[LegacySeats, Command] =
-      ## Every seat stands and shoots past its first visible teammate, so the hold has work.
+      ## Every seat stands and shoots past its first visible teammate.
       for slot in 0..<Seats:
         let me = w.cogs[slot]
         var aim = point(me.pos.x.int + 2500, me.pos.z.int)
@@ -103,35 +103,26 @@ suite "Native raw seat command":
             aim = point(me.pos.x.int + 2*(o.x.int - me.pos.x.int), me.pos.z.int + 2*(o.z.int - me.pos.z.int))
             break
         result[slot] = Command(walk: true, goal: me.pos, shoot: true, aim: aim)
-    var finals: array[3, uint32]
-    for (i, hold, period) in [(0, false, 1'i32), (1, true, 1'i32), (2, false, 3'i32)]:
+    var finals: array[2, uint32]
+    for (i, period) in [(0, 1'i32), (1, 3'i32)]:
       var reference = newWorld(13, 900)
       let h = pw_create(13, 900)
       require h != nil
       for slot in countup(0, Seats-1, 2):
-        if hold: check pw_set_seat_fire_hold(h, slot.cint, 1) == 0
         check pw_set_seat_fire_period(h, slot.cint, period) == 0
       var actions: array[LegacySeats*ActionSizes.len, int32]
       var rewards, terminals: array[LegacySeats, float32]
-      var held = 0
       while reference.winner == -1 and reference.tick < 600:
         var commands = shootAtMates(reference)
         for slot in 0..<Seats:
           var n = nine(commands[slot])
           require pw_set_seat_command(h, slot.cint, ibuf(n)) == 0
-        for slot in countup(0, Seats-1, 2):
-          if hold and reference.holdFire(slot, commands[slot]): inc held
         reference.step(commands)
         require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
         if period == 1: require pw_state_hash(h) == reference.stateHash()
       finals[i] = pw_state_hash(h)
-      var reported = 0
-      for slot in 0..<Seats: reported += pw_seat_fire_held(h, slot.cint)
-      checkpoint "hold " & $hold & " period " & $period
-      check reported == held
-      if hold: check held > 0
       pw_destroy(h)
-    check finals[0] != finals[1] and finals[0] != finals[2]   # both knobs acted when set
+    check finals[0] != finals[1]   # the period acted when set
   test "a scripted seat's order is replaced for the commanded step, and echoed":
     resetOracle()
     let h = pw_create(17, 600)
@@ -152,15 +143,15 @@ suite "Native raw seat command":
     check pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
     check pw_seat_orders(h, 3, ibuf(orders)) == 0
     check orders[9] == 1 and orders[0..8] != @cmd   # the script's own order again
-  test "every seat driven by the production bot loop's commands equals that loop, hash for hash, both contracts":
-    for (seed, contract) in [(21'i32, 1'i32), (22'i32, 2'i32), (23'i32, 2'i32)]:
+  test "every seat driven by the production bot loop's commands equals that loop, hash for hash, both action contracts":
+    for (seed, contract) in [(21'i32, 11'i32), (22'i32, 13'i32), (23'i32, 13'i32)]:
       resetOracle()
       var w = newWorld(seed, 2400)
       let players = loadBots(@[BotGroup(path: Base, count: Seats)])
       let h = pw_create(seed, 2400)
       require h != nil
       check pw_set_action_contract(h, contract) == 0
-      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var actions: array[LegacySeats*ActionSizesOffset.len, int32]   # the commanded seats' heads are not read
       var rewards, terminals: array[LegacySeats, float32]
       var orders: array[10, int32]
       var steps = 0
@@ -181,7 +172,7 @@ suite "Native raw seat command":
       checkpoint "seed " & $seed & " steps " & $steps
       check steps > 500
       pw_destroy(h)
-  test "a caller that never sets a command is byte-identical to the decoded path":
+  test "a caller that never sets a command is byte-identical to the decoded path (the reference decoder script)":
     let a = pw_create(31, 600)
     let b = pw_create(31, 600)
     require a != nil and b != nil
@@ -189,6 +180,8 @@ suite "Native raw seat command":
       pw_destroy(a)
       pw_destroy(b)
     var reference = newWorld(31, 600)
+    var seats: seq[Bot]
+    for slot in 0..<Seats: seats.add loadDecoderBot(DecoderSource, slot, ObservationContractTeamsView1Hash, acTeamsView1)
     var actions: array[LegacySeats*ActionSizes.len, int32]
     var rewards, terminals: array[LegacySeats, float32]
     var orders: array[10, int32]
@@ -198,11 +191,10 @@ suite "Native raw seat command":
         actions[o] = int32(1 + (slot + reference.tick.int div 60) mod 10)
         actions[o+1] = int32(17 + (reference.tick.int div 9 + slot) mod 8)
         actions[o+2] = int32(reference.tick mod 3 == 0)
-      var commands: array[LegacySeats, Command]
       for slot in 0..<Seats:
-        let o = slot*ActionSizes.len
-        commands[slot] = reference.decodeActions(slot, actions.toOpenArray(o, o+ActionSizes.len-1))
-      reference.step(commands)
+        for head in 0..<ActionSizes.len: seats[slot].neural.fedChoices[head] = actions[slot*ActionSizes.len+head]
+        seats[slot].neural.choicesFed = true
+      reference.step(decideSeats(seats, reference))
       require pw_step(a, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       require pw_step(b, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       require pw_state_hash(a) == reference.stateHash() and pw_state_hash(b) == reference.stateHash()

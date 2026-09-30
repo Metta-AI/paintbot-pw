@@ -1,14 +1,17 @@
-## Neural BASIC I/O on the hosted seat (PLAN-neural-basic-io parts A and B): user inputs,
-## the head-level phase, the command buffer and the candidate readers. Synthetic actors
-## only (seeded random weights); no bundle or checkpoint.
+## Neural BASIC I/O on the hosted seat (PLAN-neural-basic-io parts A and B, on SeatView): user
+## inputs, the head-level phase (masks, temperatures, neuralSample, neuralChoice /
+## neuralSetChoice), neuralObs and neuralLogit. The heads reach the engine only through BASIC
+## verbs: every policy here selects with neuralSample and acts through the reference decode
+## (players/neural_decode.bas). Synthetic actors only (seeded random weights); no bundle or
+## checkpoint.
 import std/[unittest, os, strutils, random, math, json]
 import polyworld/cli
-import ../examples/paintbot/[bots, sim, neural_contract, neural_host]
+import ../examples/paintbot/[bots, sim, neural_contract, neural_host, contract_hash]
 
 proc u32(s: var string, value: uint32) =
   for i in 0..3: s.add char((value shr (8*i)) and 255)
 proc randomModel(seed: int, inputs: int, observationContract: string,
-    actionContract = ActionContractV2Hash): string =
+    actionContract = ActionContractTeamsView1Hash): string =
   ## A PWNET001 actor with seeded random weights, so logits move with the observation.
   const h = 64
   var r = initRand(seed)
@@ -28,11 +31,13 @@ const
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
 """
-  Act = Observe & "paintbot_act(neuralLogits())\n"
+  ## The reference reading of the heads, in BASIC (walkTo / lookAt / shootAt / chargeGrenade / sneak).
+  Decode = staticRead("../examples/paintbot/players/neural_decode.bas")
+  Act = Observe & "neuralSample()\n" & Decode
 
 var fixtureCount = 0
 proc manifestFor(observationContract: string, decoder = "", userInputs = "",
-    actionContract = ActionContractV2Hash, schema = Schema2): string =
+    actionContract = ActionContractTeamsView1Hash, schema = Schema2): string =
   result = "{\"schema\": \"" & schema & "\", \"observation_contract\": \"" & observationContract &
     "\", \"action_contract\": \"" & actionContract & "\", \"sha256\": {}"
   if decoder.len > 0: result.add ", \"decoder\": " & decoder
@@ -40,14 +45,15 @@ proc manifestFor(observationContract: string, decoder = "", userInputs = "",
   result.add "}"
 proc bundle(source: string, decoder = "", userInputs = 0, init = "", inputs = -1,
     observationContract = "", manifest = "x", model = true): seq[Bot] =
-  ## Every seat runs `source` over a seeded random actor (v2 observation, action contract
-  ## v2); `userInputs` > 0 makes it a v2u<K> actor with manifest user_inputs.
+  ## Every seat runs `source` over a seeded random actor (observation contract teams.view.1,
+  ## its action contract); `userInputs` > 0 makes it a teams.view.1u<K> actor with manifest
+  ## user_inputs.
   inc fixtureCount
   let path = getTempDir()/("paintbot-basic-io-" & $getCurrentProcessId() & "-" & $fixtureCount & ".bas")
   let contract = if observationContract.len > 0: observationContract
-                 elif userInputs > 0: UserInputsContractHashes[userInputs-1]
-                 else: ObservationContractV2Hash
-  let width = if inputs >= 0: inputs else: ObservationSizeV2 + userInputs
+                 elif userInputs > 0: userInputsContractHash(userInputs)
+                 else: ObservationContractTeamsView1Hash
+  let width = if inputs >= 0: inputs else: TeamsViewSize + userInputs
   writeFile(path, source)
   if model: writeFile(path & ".model.bin", randomModel(7, width, contract))
   var inputsJson = ""
@@ -77,114 +83,29 @@ proc play(players: seq[Bot], seed: int32, ticks: int): seq[uint32] =
     world.step(commands)
     result.add world.stateHash()
 
-const SprayGateBasic* = """
-' decoder.spray_gate (#101) in BASIC: drop a shoot order with a ready spray can unless the
-' cone it would produce holds at least gateEnemies apparent enemies and at most gateMates
-' apparent teammates. Runs between neuralSample and neuralDecode (before the strafe).
-sub isqrtN(n)
-  root = 0
-  if n > 0 then
-    root = n
-    guess = (root + 1) / 2
-    while guess < root
-      root = guess
-      guess = (root + n / root) / 2
-    wend
-  end if
-end sub
-sub sprayGate()
-  if neuralChoice(2) = 0 or hasSpray = 0 or neuralObs(23) <> 0 then
-    exit sub
-  end if
-  sx = neuralAimX(neuralChoice(1))
-  sz = neuralAimZ(neuralChoice(1))
-  if sx = -2147483647 - 1 then
-    sx = neuralAimX(0)
-    sz = neuralAimZ(0)
-  end if
-  if sx = 0 and sz = 0 then
-    gx = neuralGoalX(neuralChoice(0))
-    gz = neuralGoalZ(neuralChoice(0))
-    if gx = -2147483647 - 1 then
-      gx = selfX
-      gz = selfY
-    end if
-    if gx <> selfX or gz <> selfY then
-      sx = gx
-      sz = gz
-    end if
-  end if
-  dx = sx - selfX
-  dz = sz - selfY
-  isqrtN(dx * dx + dz * dz)
-  vx = 0
-  vz = 0
-  if root > 0 then
-    vx = dx * 850 / root
-    vz = dz * 850 / root
-  end if
-  isqrtN(vx * vx + vz * vz)
-  vl = root
-  if vl < 1 then
-    vl = 1
-  end if
-  enemies = 0
-  mates = 0
-  i = 0
-  while i < 16
-    if i <> selfId and visible(i) then
-      tx = playerX(i) - selfX
-      tz = playerY(i) - selfY
-      along = (tx * vx + tz * vz) / vl
-      across = tx * vz - tz * vx
-      if across < 0 then
-        across = -across
-      end if
-      across = across / vl
-      if along > 0 and along <= 905 and across <= along * 4 / 5 + 55 then
-        if playerTeam(i) = selfTeam then
-          mates = mates + 1
-        else
-          enemies = enemies + 1
-        end if
-      end if
-    end if
-    i = i + 1
-  wend
-  if enemies < gateEnemies or mates > gateMates then
-    neuralSetChoice(2, 0)
-  end if
-end sub
-"""
-
-const FullDecoder = """{"sampling": {"mode": "categorical"}, "forbid_objectives": [9, 10],
-  "strafe_legs": {}, "aim_snap": {}, "aim_retarget": {}, "shot_gate": {}, "spray_aim": {},
-  "spray_gate": {}, "fire_hold_teammates": {"radius": 150}}"""
-
 suite "neural BASIC I/O on the hosted seat":
-  test "neuralDecode + neuralIssue (with or without neuralSample) is paintbot_act, hash for hash":
-    for decoder in ["", """{"sampling": {"mode": "categorical", "temperature": 0.8}}""", FullDecoder,
-        """{"steady_shot": {}, "forbid_objectives": [3], "fire_hold_teammates": true}"""]:
+  test "neuralSample + the reference decode replays hash for hash under every kept decoder option":
+    for decoder in ["", """{"sampling": {"mode": "categorical", "temperature": 0.8}}""",
+        """{"sampling": {"mode": "categorical"}, "forbid_objectives": [9, 10]}""",
+        """{"forbid_objectives": [3], "joint_sampling": {"when": {"head": 3, "value": 0}, "head": 4, "offsets": [0, 1]}}"""]:
       checkpoint decoder
       let reference = bundle(Act, decoder)
       let expected = reference.play(2026, 500)
       check expected.len == 500
-      for variant in [Observe & "neuralDecode()\nneuralIssue()\n",
-                      Observe & "neuralSample()\nneuralDecode()\nneuralIssue()\n",
-                      Observe & "neuralSample()\npaintbot_act(neuralLogits())\n",
-                      Observe & "neuralDecode()\npaintbot_act(neuralLogits())\n"]:
-        let players = bundle(variant, decoder)
-        check players.play(2026, 500) == expected
-        check players[3].neural.telemetry(1, 500) == reference[3].neural.telemetry(1, 500)
+      let again = bundle(Act, decoder)
+      check again.play(2026, 500) == expected
+      check again[3].neural.telemetry(1, 500) == reference[3].neural.telemetry(1, 500)
+      check bundle(Act, decoder).play(2027, 500) != expected
 
   test "neuralMask forbids like decoder.forbid_objectives; neuralTemperature samples like decoder.sampling":
-    for sampling in ["", "\"sampling\": {\"mode\": \"categorical\"}, "]:
-      let native = bundle(Act, "{" & sampling & "\"forbid_objectives\": [9, 10], \"strafe_legs\": {}}").play(99, 400)
-      let basic = bundle("neuralMask(0, 1536)\n" & Act,
-        "{" & sampling & "\"strafe_legs\": {}}").play(99, 400)
+    for sampling in ["", "\"sampling\": {\"mode\": \"categorical\"}"]:
+      let native = bundle(Act, "{" & sampling & (if sampling.len > 0: ", " else: "") &
+        "\"forbid_objectives\": [9, 10]}").play(99, 400)
+      let decoder = if sampling.len > 0: "{" & sampling & "}" else: ""
+      let basic = bundle("neuralMask(0, 1536)\n" & Act, decoder).play(99, 400)
       check native == basic
       # neuralMaskFrom addresses the same choices through a window.
-      check bundle("neuralMaskFrom(0, 8, 6)\n" & Act, "{" & sampling & "\"strafe_legs\": {}}").play(99, 400) == native
+      check bundle("neuralMaskFrom(0, 8, 6)\n" & Act, decoder).play(99, 400) == native
     for (milli, t) in [(1000, "1.0"), (700, "0.7"), (2500, "2.5")]:
       let native = bundle(Act, "{\"sampling\": {\"mode\": \"categorical\", \"temperature\": " & t & "}}").play(5, 400)
       check bundle("neuralTemperature(-1, " & $milli & ")\n" & Act).play(5, 400) == native
@@ -200,77 +121,45 @@ suite "neural BASIC I/O on the hosted seat":
       """{"sampling": {"mode": "categorical"}}""")
     check once.play(5, 3).len == 3
 
-  test "the grenade mask in BASIC: four spellings, one match":
-    let decoder = """{"sampling": {"mode": "categorical"}, "strafe_legs": {}, "aim_retarget": {}}"""
+  test "the grenade mask in BASIC: three spellings, one match":
+    let decoder = """{"sampling": {"mode": "categorical"}}"""
     let expected = bundle(Act & "chargeGrenade(0)\n", decoder).play(11, 500)
     for variant in ["neuralMask(3, 2)\n" & Act,
-                    Observe & "neuralSample()\nneuralSetChoice(3, 0)\nneuralDecode()\nneuralIssue()\n",
-                    Observe & "neuralDecode()\ncmdSet(6, 0)\nneuralIssue()\n",
-                    Observe & "neuralDecode()\nneuralIssue()\nchargeGrenade(0)\n"]:
+                    Observe & "neuralSample()\nneuralSetChoice(3, 0)\n" & Decode]:
       check bundle(variant, decoder).play(11, 500) == expected
-
-  test "#101's spray gate in BASIC (between neuralSample and neuralDecode) is decoder.spray_gate, strafe on":
-    proc sprayPlay(players: seq[Bot], seed: int32, ticks: int): seq[uint32] =
-      # Every live seat holds a spray can, so the gate decides on most shoot orders.
-      var world = newWorld(seed)
-      for tick in 0..<ticks:
-        if world.winner != -1 or world.tick >= world.endTick: break
-        for slot in 0..<Seats:
-          if world.cogs[slot].hp > 0: world.equipment[slot].sprayCan = true
+    # The mask changes the selection itself: unmasked, the grenade head selects 1 on some
+    # decisions; masked, never.
+    proc grenadeSelections(players: seq[Bot]): int =
+      var world = newWorld(11)
+      for tick in 0..<100:
         let commands = players.decide(world)
         for slot in 0..<Seats:
-          if players[slot].failed:
-            checkpoint "seat " & $slot & ": " & players[slot].error
-            fail()
-            return
+          require not players[slot].failed
+          if world.cogs[slot].hp > 0 and players[slot].neural.selected[3] == 1: inc result
         world.step(commands)
-        result.add world.stateHash()
-    let common = "\"sampling\": {\"mode\": \"categorical\"}, \"strafe_legs\": {}, \"aim_retarget\": {}, " &
-      "\"shot_gate\": {}, \"fire_hold_teammates\": {\"radius\": 150}"
-    var gates = 0
-    for (mates, enemies) in [(0, 1), (1, 2), (0, 0)]:
-      for sprayAim in ["", ", \"spray_aim\": {}"]:
-        let gate = ", \"spray_gate\": {\"max_teammates\": " & $mates & ", \"min_enemies\": " & $enemies & "}"
-        let native = bundle(Act, "{" & common & sprayAim & gate & "}")
-        let expected = native.sprayPlay(77, 600)
-        for slot in 0..<Seats: gates += native[slot].neural.sprayGates
-        let basic = bundle(SprayGateBasic & "gateMates = " & $mates & "\ngateEnemies = " & $enemies & "\n" & Observe &
-          "neuralSample()\nsprayGate()\nneuralDecode()\nneuralIssue()\n", "{" & common & sprayAim & "}")
-        check basic.sprayPlay(77, 600) == expected
-    check gates > 100
+    check grenadeSelections(bundle(Act, decoder)) > 0
+    check grenadeSelections(bundle("neuralMask(3, 2)\n" & Act, decoder)) == 0
 
-  test "the command buffer: readers see the decoded command, cmdSet edits it, nothing is issued without neuralIssue":
+  test "the heads are numbers: nothing is issued without a BASIC verb; neuralSetChoice is what neuralChoice reads":
     # Assertions inside BASIC: a mismatch calls neuralSetChoice(9, 9), which disables the seat.
-    let check1 = Observe & """
+    let checks = Observe & """
 neuralSample()
 m = neuralChoice(0)
-k = neuralChoice(1)
-gx = neuralGoalX(m)
-ax = neuralAimX(k)
-az = neuralAimZ(k)
-if ax = -2147483647 - 1 then
-  ax = neuralAimX(0)
-  az = neuralAimZ(0)
-end if
-neuralDecode()
-if cmdAimX() <> ax or cmdAimZ() <> az then
+neuralSetChoice(0, 43)
+if neuralChoice(0) <> 43 then
   neuralSetChoice(9, 9)
 end if
-if gx <> -2147483647 - 1 and m > 0 and cmdGoalX() <> gx then
+neuralSetChoice(0, m)
+if neuralChoice(0) <> m then
   neuralSetChoice(9, 9)
 end if
-if cmdWalk() <> 1 or cmdShoot() <> neuralChoice(2) or cmdSneak() <> neuralChoice(4) or cmdDirect() <> 0 then
+neuralSetChoice(1, 24)
+neuralSetChoice(2, 1)
+if neuralChoice(1) <> 24 or neuralChoice(2) <> 1 then
   neuralSetChoice(9, 9)
 end if
-cmdSet(0, 0)
-cmdSet(4, -99999999)
-cmdSet(5, 99999999)
-if cmdWalk() <> 0 or cmdAimX() <> mapMinX() or cmdAimZ() <> mapMaxY() then
-  neuralSetChoice(9, 9)
-end if
-neuralIssue()
-"""
-    let players = bundle(check1, """{"sampling": {"mode": "categorical"}}""")
+""" & Decode
+    let players = bundle(checks, """{"sampling": {"mode": "categorical"}}""")
     var world = newWorld(4)
     for tick in 0..<120:
       let commands = players.decide(world)
@@ -278,15 +167,44 @@ neuralIssue()
         checkpoint players[slot].error
         check not players[slot].failed
         if world.cogs[slot].hp > 0:
-          check not commands[slot].walk
-          check commands[slot].aim.x == minX().int32 and commands[slot].aim.z == maxZ().int32
+          # The decode read the choices as set: compass aim 24 - 17 = 7 (1, -1), shooting.
+          check commands[slot].shoot
+          check players[slot].neural.choices[1] == 24 and players[slot].neural.choices[2] == 1
+          check players[slot].neural.choices[0] == players[slot].neural.selected[0]
       world.step(commands)
-    # Decoded but never issued: the seat issues nothing (the empty command).
-    let silent = bundle(Observe & "neuralDecode()\n")
+    # Selected but never decoded: the seat issues nothing (the empty command).
+    let silent = bundle(Observe & "neuralSample()\nm = neuralChoice(0)\nneuralSetChoice(0, 1)\n")
     let commands = silent.decide(newWorld(4))
     for slot in 0..<Seats:
       check not silent[slot].failed
+      check silent[slot].neural.sampled
       check commands[slot] == Command()
+
+  test "neuralLogit(i) reads the tick's logit i x 1000, after run_neural_net":
+    # The seat writes neuralLogit(i) into its user inputs, which Nim reads back.
+    const Indices = [0, 50, 51, 75, 76, 81]
+    var source = Observe
+    for k, i in Indices: source.add "neuralInput(" & $k & ", neuralLogit(" & $i & "))\n"
+    source.add "neuralSample()\n" & Decode
+    let players = bundle(source, userInputs = Indices.len)
+    var world = newWorld(12)
+    var checked = 0
+    for tick in 0..<30:
+      let commands = players.decide(world)
+      for slot in 0..<Seats:
+        require not players[slot].failed
+        if world.cogs[slot].hp <= 0: continue
+        let n = players[slot].neural
+        for k, i in Indices:
+          check n.userInputs[k] == int32(round(float64(n.logits[i]) * 1000))
+          inc checked
+      world.step(commands)
+    check checked > 1000
+    # A logit is some milli-value, not always 0: the random actor's logits move.
+    var nonzero = false
+    for x in players[0].neural.userInputs:
+      if x != 0: nonzero = true
+    check nonzero
 
   test "call-order and range errors disable the seat like every other neural misuse":
     for bad in [Observe & "neuralSample()\nneuralMask(0, 1)\n",
@@ -297,19 +215,17 @@ neuralIssue()
                 "neuralMask(2, 3)\n" & Act, "neuralMask(0, -1)\nneuralMaskFrom(0, 32, -1)\n" & Act,
                 "neuralSample()\n", Observe & "neuralChoice(0)\n", Observe & "neuralSample()\nneuralChoice(5)\n",
                 Observe & "neuralSample()\nneuralSetChoice(1, 25)\n", Observe & "neuralSample()\nneuralSetChoice(2, -1)\n",
-                Observe & "neuralDecode()\nneuralSetChoice(0, 0)\n", Observe & "neuralSample()\nneuralSample()\n",
-                Observe & "neuralDecode()\nneuralDecode()\n", Observe & "neuralIssue()\n",
-                Observe & "neuralDecode()\nneuralIssue()\nneuralIssue()\n", Act & "neuralIssue()\n",
-                Observe & "cmdWalk()\n", Observe & "cmdSet(0, 1)\n", Observe & "neuralDecode()\ncmdSet(9, 1)\n",
-                Observe & "neuralDecode()\nneuralIssue()\ncmdSet(0, 1)\n", "neuralInput(0, 1)\n" & Act,
-                "neuralObs(-1)\n", "neuralObs(506)\n", "neuralGoalX(51)\n", Observe & "neuralAimX(0)\n",
-                Observe & "neuralSample()\nneuralAimZ(25)\n"]:
+                Observe & "neuralSetChoice(0, 0)\n", Observe & "neuralSample()\nneuralSample()\n",
+                Act & "neuralSample()\n", "neuralInput(0, 1)\n" & Act,
+                "neuralObs(-1)\n", "neuralObs(512)\n",
+                "neuralLogit(0)\n", "paintbot_observe(neuralObservation())\nneuralLogit(0)\n",
+                Observe & "neuralLogit(-1)\n", Observe & "neuralLogit(82)\n"]:
       let players = bundle(bad)
       discard players.decide(newWorld(3))
       if not players[0].failed: checkpoint "did not fail: " & bad
       check players[0].failed
     # Seats without a neural model cannot use any of it.
-    for plain in ["neuralMask(0, 1)\n", "neuralObs(0)\n", "neuralGoalX(0)\n", "neuralTemperature(-1, 0)\n"]:
+    for plain in ["neuralMask(0, 1)\n", "neuralObs(0)\n", "neuralLogit(0)\n", "neuralTemperature(-1, 0)\n"]:
       let players = bundle(plain, manifest = "", model = false)
       discard players.decide(newWorld(3))
       check players[0].failed
@@ -317,21 +233,23 @@ neuralIssue()
   test "neuralObs reads the tick's observation x 1000, before or after paintbot_observe":
     let players = bundle("""
 a = neuralObs(0)
-b = neuralObs(505)
+b = neuralObs(511)
 paintbot_observe(neuralObservation())
-if neuralObs(0) <> a or neuralObs(505) <> b then
+if neuralObs(0) <> a or neuralObs(511) <> b then
   neuralSetChoice(9, 9)
 end if
-""" & Observe.splitLines()[1] & "\npaintbot_act(neuralLogits())\n")
+""" & Observe.splitLines()[1] & "\nneuralSample()\n" & Decode)
     var world = newWorld(8)
     for tick in 0..<30:
       let commands = players.decide(world)
       for slot in 0..<Seats: check not players[slot].failed
       world.step(commands)
-    var expected = newSeq[float32](ObservationSizeV2)
-    encodeObservation(world, 5, expected, ocV2)
     discard players.decide(world)
-    for i in [0, 1, 2, 8, 14, 21, 22, 23, 448, 505]:
+    require world.cogs[5].hp > 0
+    var expected = newSeq[float32](TeamsViewSize)
+    beginViews(world)
+    encodeObservation(seatView(5), ocTeamsView1, expected)
+    for i in [0, 1, 2, 8, 12, 14, 21, 22, 23, 125, 485, 511]:
       check round(float64(players[5].neural.observation[i]) * 1000) == round(float64(expected[i]) * 1000)
       check players[5].neural.observation[i] == expected[i]
 
@@ -346,18 +264,18 @@ neuralInput(2, -2000000)
     let players = bundle(source, userInputs = 3, init = "5, -7, 123")
     check not players[0].failed
     check players[0].neural.userInputs == @[5'i32, -7, 123]
-    check players[0].neural.observation.len == ObservationSizeV2 + 3
+    check players[0].neural.observation.len == TeamsViewSize + 3
     var world = newWorld(21)
     for tick in 0..<40:
       let commands = players.decide(world)
       for slot in 0..<Seats: check not players[slot].failed
       let obs = players[2].neural.observation
       if tick == 0:
-        check obs[506] == 0.005'f32 and obs[507] == -0.007'f32 and obs[508] == 0.123'f32
+        check obs[512] == 0.005'f32 and obs[513] == -0.007'f32 and obs[514] == 0.123'f32
       elif tick == 1:
-        check obs[506] == 0.005'f32 and obs[507] == 1000'f32 and obs[508] == -1000'f32
+        check obs[512] == 0.005'f32 and obs[513] == 1000'f32 and obs[514] == -1000'f32
       else:
-        check obs[506] == float32((tick-1)*10) / 1000'f32
+        check obs[512] == float32((tick-1)*10) / 1000'f32
       world.step(commands)
     # A dead seat does not run its script: its inputs stay where it left them.
     let before = players[2].neural.userInputs
@@ -367,11 +285,12 @@ neuralInput(2, -2000000)
     # The tick going back is a new match: init again.
     var fresh = newWorld(21)
     discard players.decide(fresh)
-    check players[2].neural.observation[506] == 0.005'f32
-    check players[2].neural.observation[508] == 0.123'f32
-    # The encoder matches encodeObservationInputs on the same world.
-    var expected = newSeq[float32](ObservationSizeV2 + 3)
-    encodeObservationInputs(fresh, 4, expected, fresh.observedBodies(4), [5'i32, -7, 123])
+    check players[2].neural.observation[512] == 0.005'f32
+    check players[2].neural.observation[514] == 0.123'f32
+    # The encoder (teams.view.1 then the inputs) on the same world.
+    var expected = newSeq[float32](TeamsViewSize + 3)
+    beginViews(fresh)
+    encodeObservation(seatView(4), ocTeamsView1, expected, [5'i32, -7, 123])
     check players[4].neural.observation == expected
 
   test "a user-input actor reads its inputs: a goal set in BASIC changes the net's input, not the world rules":
@@ -384,7 +303,7 @@ neuralInput(2, -2000000)
     check a != goalB.play(31, 300)
     # A goal read back from the observation equals the goal set (neuralObs of the tail).
     let readBack = bundle("""
-if worldTick > 1 and (neuralObs(506) <> 4321 or neuralObs(507) <> -99) then
+if worldTick > 1 and (neuralObs(512) <> 4321 or neuralObs(513) <> -99) then
   neuralSetChoice(9, 9)
 end if
 neuralInput(0, 4321)
@@ -397,7 +316,7 @@ neuralInput(1, -99)
       checkpoint "K = " & $k
       # The last input is written and read back through the observation tail.
       let players = bundle("""
-if worldTick > 1 and neuralObs(""" & $(ObservationSizeV2 + k - 1) & """) <> 777 then
+if worldTick > 1 and neuralObs(""" & $(TeamsViewSize + k - 1) & """) <> 777 then
   neuralSetChoice(9, 9)
 end if
 neuralInput(""" & $(k - 1) & """, 777)
@@ -406,12 +325,12 @@ neuralInput(0, worldTick)
       check not players[0].failed
       check players[0].neural.userInputs.len == k
       check players.play(31, 100).len == 100
-    let k128 = UserInputsContractHashes[127]
+    let k128 = userInputsContractHash(128)
     var zeros: seq[string]
     for i in 0..<129: zeros.add "0"
     check bundle(Act, userInputs = 128, manifest = manifestFor(k128, userInputs =
       "{\"count\": 129, \"init\": [" & zeros.join(", ") & "]}"))[0].failed
-    for bad in ["neuralInput(128, 1)\n", "neuralObs(" & $(ObservationSizeV2 + 128) & ")\n"]:
+    for bad in ["neuralInput(128, 1)\n", "neuralObs(" & $(TeamsViewSize + 128) & ")\n"]:
       checkpoint bad
       let outOfRange = bundle(bad & Act, userInputs = 128)
       discard outOfRange.decide(newWorld(3))
@@ -420,37 +339,44 @@ neuralInput(0, worldTick)
   test "user-input bundles are validated: contract, width and manifest must agree":
     check not bundle(Act, userInputs = 2)[0].failed
     check bundle(Act, userInputs = 2, init = "1, 2, 3")[0].failed                       # init length
-    check bundle(Act, userInputs = 2, inputs = ObservationSizeV2)[0].failed             # actor width
-    check bundle(Act, userInputs = 2, inputs = ObservationSizeV2 + 3)[0].failed
-    let k2 = UserInputsContractHashes[1]
+    check bundle(Act, userInputs = 2, inputs = TeamsViewSize)[0].failed             # actor width
+    check bundle(Act, userInputs = 2, inputs = TeamsViewSize + 3)[0].failed
+    let k2 = userInputsContractHash(2)
     check bundle(Act, userInputs = 2, manifest = manifestFor(k2))[0].failed             # no user_inputs
     check bundle(Act, userInputs = 2, manifest = "")[0].failed                          # no manifest at all
     check bundle(Act, userInputs = 2, manifest = manifestFor(k2, userInputs =
       "{\"count\": 2, \"init\": [0, 0]}", schema = "paintbot-neural-basic/1"))[0].failed # schema 1
     check bundle(Act, userInputs = 2, manifest = manifestFor(k2, userInputs =
       "{\"count\": 3, \"init\": [0, 0, 0]}"))[0].failed                                 # count vs contract
-    check bundle(Act, manifest = manifestFor(ObservationContractV2Hash, userInputs =
-      "{\"count\": 1, \"init\": [0]}"))[0].failed                                       # v2 actor with inputs
+    check bundle(Act, manifest = manifestFor(ObservationContractTeamsView1Hash, userInputs =
+      "{\"count\": 1, \"init\": [0]}"))[0].failed                                       # teams.view.1 actor with inputs
     for bad in ["[]", "{\"count\": 2}", "{\"init\": [0, 0]}", "{\"count\": 2, \"init\": [0, 1000001]}",
                 "{\"count\": 2, \"init\": [0, 0.5]}", "{\"count\": 2, \"init\": [0, 0], \"x\": 1}",
                 "{\"count\": 0, \"init\": []}"]:
       checkpoint bad
       check bundle(Act, userInputs = 2, manifest = manifestFor(k2, userInputs = bad))[0].failed
     check parseUserInputs(parseJson("{\"count\": 3, \"init\": [1000000, -1000000, 0]}")) == @[1000000'i32, -1000000, 0]
-    for k in 1..MaxUserInputs: check userInputsFromHash(UserInputsContractHashes[k-1]) == k
-    # The cap is 128; the v2u1 .. v2u64 hashes of the original 64-input table are unchanged
-    # (v2u1, v2u32, v2u64 pinned, and an FNV-1a-64 digest of the concatenated 64).
+    for k in 1..MaxUserInputs:
+      check userInputsFromHash(userInputsContractHash(k)) == k
+      check userInputsContractHash(k) == sha256Hex(userInputsContractId(k))
+    # The cap is 128; the teams.view.1u<K> hashes are the SHA-256 of their ids (pinned from
+    # an independent sha256 of "paintbot-pw.teams.view.1u<K>").
     check MaxUserInputs == 128
-    check UserInputsContractHashes[0] == "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04"
-    check UserInputsContractHashes[31] == "94373a1ce8a95bbcf99f8fcb1d2acc07e8fb19ab13c99591389ac2cff807e7c3"
-    check UserInputsContractHashes[63] == "18a5141bf7d78fdf93524757bf261f367cfebe3b489fb6f2988936375bb8f4aa"
-    check UserInputsContractHashes[127] == "a40a0922dbdfa188e739f591344da3d30b299a431939778d7cd4cc715fa96ba2"
-    var digest = 0xcbf29ce484222325'u64
-    for k in 0..<64:
-      for c in UserInputsContractHashes[k]: digest = (digest xor uint64(ord(c))) * 0x100000001b3'u64
-    check digest == 0xf784abdafb78ea91'u64
+    check userInputsContractId(7) == "paintbot-pw.teams.view.1u7"
+    check ObservationContractTeamsView1Hash == "8ee935f46326c0c513fac82c14634becf48199c364f4688553fa26aedbc1f08e"
+    check userInputsContractHash(1) == "ebcc4b0e1b3542c99c04b7ec7466a0244c26b495b0b174b9c10791fd3cab9a60"
+    check userInputsContractHash(32) == "1006d74e5bd17d8d7e1d45ac98dcf8d884b45548a698333a98166bf0047cb900"
+    check userInputsContractHash(64) == "10d64eb9a884839996372c62fb3373a8b11bc51b9b7281166d6311043eb0ffcf"
+    check userInputsContractHash(128) == "40f2dd5ee2a19d984849e2db01ac42be57ef0a4b05fa86c6fd3eb184e57f2bca"
     var zeros129: seq[string]
     for i in 0..<129: zeros129.add "0"
     expect ValueError: discard parseUserInputs(parseJson("{\"count\": 129, \"init\": [" & zeros129.join(", ") & "]}"))
-    check userInputsFromHash(ObservationContractV2Hash) == 0
-    check userInputsContractId(7) == "paintbot-pw.rules39.obs.v2u7"
+    expect ValueError: discard userInputsContractHash(0)
+    expect ValueError: discard userInputsContractHash(129)
+    check userInputsFromHash(ObservationContractTeamsView1Hash) == 0
+    # The retired v2u<K> / v3u<K> families are not user-input contracts any more: a bundle
+    # naming one is refused.
+    for id in ["paintbot-pw.rules39.obs.v2u2", "paintbot-pw.rules43.obs.v3u2"]:
+      checkpoint id
+      check userInputsFromHash(sha256Hex(id)) == 0
+      check bundle(Act, userInputs = 2, observationContract = sha256Hex(id))[0].failed

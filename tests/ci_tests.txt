@@ -77,10 +77,9 @@ nim r tests/test_paintbot_projection.nim
 nim r tests/test_actioncam.nim
 nim r tests/test_paintbot_camdirector.nim
 nim r -d:headless tests/test_paintbot_neural_contract.nim
-nim r -d:headless tests/test_paintbot_neural_obs_v2.nim
-nim r -d:headless tests/test_paintbot_neural_obs_v3.nim
-nim r -d:headless tests/test_paintbot_neural_obs_ffa.nim
-nim r -d:headless tests/test_paintbot_neural_obs_ffa_v2.nim
+nim r -d:headless tests/test_paintbot_neural_view_contracts.nim
+nim r tests/test_paintbot_seat_view_boundary.nim
+nim r -d:headless tests/test_paintbot_seat_view_parity.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim
 nim r tests/test_paintbot_geometry_cache.nim
@@ -88,34 +87,26 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_seat_stats.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_scripts.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_command.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_curriculum.nim
-nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_contract_v2.nim
-nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_respawn_memory.nim
-nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold.nim
-nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold_radius.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_sampling.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_river_strafe.nim
-nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_snap_steady.nim
-nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_retarget_gate.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_spray.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_weapon_stats.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_state.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.nim
-nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
-nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v3.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa_v2.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_aim_offset.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_parity.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_config.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map_memory.nim
 nim r -d:headless tests/test_paintbot_neural_host.nim
-nim r -d:headless tests/test_paintbot_neural_basic_io.nim "neuralDecode + neuralIssue*"
+nim r -d:headless tests/test_paintbot_neural_basic_io.nim "neuralSample + the reference decode*"
 nim r -d:headless tests/test_paintbot_neural_basic_io.nim "neuralMask forbids*" "the grenade mask in BASIC*"
-nim r -d:headless tests/test_paintbot_neural_basic_io.nim "#101's spray gate*" "the command buffer*" "call-order and range errors*" "neuralObs reads*" "user inputs: init*" "a user-input actor reads*" "user-input actors above*" "user-input bundles*"
+nim r -d:headless tests/test_paintbot_neural_basic_io.nim "the heads are numbers*" "neuralLogit(i) reads*" "call-order and range errors*" "neuralObs reads*" "user inputs: init*" "a user-input actor reads*" "user-input actors above*" "user-input bundles*"
 nim r -d:headless tests/test_paintbot_neural_net2.nim
 nim r -d:headless tests/test_paintbot_neural_layers.nim
-nim r -d:headless tests/test_paintbot_neural_pointer.nim
 nim r -d:headless tests/test_paintbot_neural_joint.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_cond_head.nim

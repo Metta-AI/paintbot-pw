@@ -2,47 +2,62 @@
 import hashlib
 import io
 import json
+import random
 import re
+import struct
 import sys
 import unittest
 import zipfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
-from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpack_package, validate_aim_retarget, validate_shot_gate, validate_fire_hold, MAX_MODEL_BYTES,
-                            validate_spray_aim, validate_spray_gate, SPRAY_AIM_DEFAULTS, SPRAY_GATE_DEFAULTS, SPRAY_LIMITS,
-                            AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
-                            MAX_SHOT_GATE_RANGE, validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS,
-                            USER_INPUT_LIMIT, OBSERVATION_V2_SIZE, validate_pwnet2, attention_ops,
-                            MAX_NEURAL_OPERATIONS, PWNET2_LIMITS, USER_INPUTS_CONTRACT_HASHES, segment_near_ops,
-                            OBSERVATION_V3_SIZE, OBSERVATION_CONTRACT_V3, OBSERVATION_CONTRACT_V3_HASH,
-                            v3_user_inputs_contract_id, V3_USER_INPUTS_CONTRACT_HASHES,
-                            OBSERVATION_CONTRACT_FFA_V2_HASH, ACTION_CONTRACT_FFA_V2_POINTER_HASH, neural_budget,
-                            attn_pool_ops, LAYOUT_WORD_PREFIX)
-import random
-import struct
+from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpack_package, MAX_MODEL_BYTES,
+                            validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS, USER_INPUT_LIMIT,
+                            validate_pwnet2, attention_ops, MAX_NEURAL_OPERATIONS, PWNET2_LIMITS,
+                            USER_INPUTS_CONTRACT_HASHES, segment_near_ops, neural_budget, attn_pool_ops,
+                            LAYOUT_WORD_PREFIX, TEAMS_VIEW_1_SIZE, ACTION_SIZES, ACTION_SIZES_OFFSET,
+                            OBSERVATION_CONTRACT_TEAMS_VIEW_1, OBSERVATION_CONTRACT_FFA_VIEW_1,
+                            ACTION_CONTRACT_TEAMS_VIEW_1, ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET,
+                            ACTION_CONTRACT_FFA_VIEW_1_POINTER, OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH,
+                            OBSERVATION_CONTRACT_FFA_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_HASH,
+                            ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH,
+                            RETIRED_OBSERVATION_CONTRACTS, RETIRED_ACTION_CONTRACTS, RETIRED_CONTRACT_HASHES,
+                            RETIRED_DECODER_OPTIONS)
+
+ROOT = Path(__file__).parents[2]
+TEAMS, FFA = OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH
+ACT, OFFSET, POINTER = (ACTION_CONTRACT_TEAMS_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH,
+                        ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH)
+SCHEMA2 = {"schema": "paintbot-neural-basic/2"}
+RETIRED = "retired for BASIC parity"
 
 
-def actor_bytes(inputs, observation_hash, hidden=64, outputs=82):
+def sha(text):
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def tv1u_hash(k):
+    """Observation contract teams.view.1u<K>."""
+    return sha(user_inputs_contract_id(k))
+
+
+def actor_bytes(inputs, observation_hash, hidden=64, heads=ACTION_SIZES, action_hash=ACT):
     """A synthetic PWNET001 header (zero weights) with the given input count and observation hash."""
-    heads = [51, 25, 2, 2, 2]
+    outputs = sum(heads)
     parameters = inputs * hidden + 3 * hidden * hidden + outputs * hidden
     header = b"PWNET001" + b"".join(v.to_bytes(4, "little") for v in (1, inputs, hidden, outputs, len(heads), parameters))
-    return (header + observation_hash.encode() + ("b" * 64).encode() +
+    return (header + observation_hash.encode() + action_hash.encode() +
             b"".join(h.to_bytes(4, "little") for h in heads) + bytes(4 * parameters))
 
 
-def v2u_hash(k):
-    return hashlib.sha256(user_inputs_contract_id(k).encode()).hexdigest()
+TEAMS_MODEL = actor_bytes(TEAMS_VIEW_1_SIZE, TEAMS)
+OFFSET_MODEL = actor_bytes(TEAMS_VIEW_1_SIZE, TEAMS, heads=ACTION_SIZES_OFFSET, action_hash=OFFSET)
 
 
-def v3u_hash(k):
-    return hashlib.sha256(v3_user_inputs_contract_id(k).encode()).hexdigest()
-
-
-def package(overrides=None, extra=None, model=b"neutral fixture"):
+def package(overrides=None, extra=None, model=TEAMS_MODEL):
+    """A bundle over observation contract teams.view.1 + action contract teams.view.1 (a 512-input actor);
+    the manifest's sha256 always follows `model` unless overridden."""
     source = b"idle = 1\n"
-    manifest = {"schema": "paintbot-neural-basic/1", "observation_contract": "a" * 64,
-                "action_contract": "b" * 64,
+    manifest = {"schema": "paintbot-neural-basic/1", "observation_contract": TEAMS, "action_contract": ACT,
                 "sha256": {"policy.bas": hashlib.sha256(source).hexdigest(),
                            "model.bin": hashlib.sha256(model).hexdigest()}}
     manifest.update(overrides or {})
@@ -56,11 +71,19 @@ def package(overrides=None, extra=None, model=b"neutral fixture"):
     return out.getvalue()
 
 
+def nim_strings(path, name):
+    """The string literals of the Nim array constant `name*` in examples/paintbot/<path>."""
+    source = (ROOT / "examples/paintbot" / path).read_text()
+    block = source[source.index(name + "* = ["):]
+    return re.findall(r'"([^"]*)"', block[:block.index("]")])
+
+
 class PackageTests(unittest.TestCase):
     def test_valid_package(self):
         source, model, manifest = unpack_package(package())
         self.assertEqual(source, b"idle = 1\n")
-        self.assertEqual(model, b"neutral fixture")
+        self.assertEqual(model, TEAMS_MODEL)
+        self.assertEqual(manifest["observation_contract"], TEAMS)
 
     def test_hash_mismatch(self):
         with self.assertRaisesRegex(ValueError, "hash mismatch"):
@@ -77,50 +100,17 @@ class PackageTests(unittest.TestCase):
                 unpack_package(package(extra=(name, b"bad")))
 
     def test_contract_required(self):
-        with self.assertRaisesRegex(ValueError, "contract"):
-            unpack_package(package({"action_contract": "invalid"}))
+        for field in ("observation_contract", "action_contract"):
+            for value in ("invalid", "A" * 64, "a" * 63, None, 7):
+                with self.assertRaisesRegex(ValueError, "invalid contract hash", msg=repr((field, value))):
+                    unpack_package(package({field: value}))
 
     def test_schema_2_accepted_and_others_rejected(self):
-        _, _, manifest = unpack_package(package({"schema": "paintbot-neural-basic/2"}))
+        _, _, manifest = unpack_package(package(SCHEMA2))
         self.assertEqual(manifest["schema"], "paintbot-neural-basic/2")
         for schema in ("paintbot-neural-basic/3", "paintbot-neural-basic", None):
             with self.assertRaisesRegex(ValueError, "schema"):
                 unpack_package(package({"schema": schema}))
-
-    def test_contract_hashes_are_sha256_of_their_ids(self):
-        # neural_contract.nim exports each contract id next to its hash; the hash is the
-        # SHA-256 of the id string and is what actors and manifests carry.
-        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
-        consts = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
-        pairs = [("ObservationContract", "ObservationContractHash"), ("ActionContract", "ActionContractHash"),
-                 ("ActionContractV2", "ActionContractV2Hash"), ("ObservationContractV2", "ObservationContractV2Hash"),
-                 ("ObservationContractFfaV1", "ObservationContractFfaV1Hash"),
-                 ("ObservationContractV3", "ObservationContractV3Hash")]
-        for name, hashed in pairs:
-            self.assertEqual(consts[hashed], hashlib.sha256(consts[name].encode()).hexdigest(), name)
-        self.assertEqual(consts["ActionContractV2"], "paintbot-pw.rules37.action.v2.51-25-2-2-2")
-        self.assertNotEqual(consts["ActionContractHash"], consts["ActionContractV2Hash"])
-        self.assertEqual(consts["ObservationContractV2"], "paintbot-pw.rules37.obs.v2.float506")
-        self.assertNotEqual(consts["ObservationContractHash"], consts["ObservationContractV2Hash"])
-
-    def test_decoder_options(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
-        _, _, manifest = unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": True}}))
-        self.assertEqual(manifest["decoder"], {"fire_hold_teammates": True})
-        _, _, manifest = unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": False}}))
-        self.assertEqual(manifest["decoder"], {"fire_hold_teammates": False})
-        _, _, manifest = unpack_package(package({**schema2, "decoder": {}}))
-        self.assertEqual(manifest["decoder"], {})
-        with self.assertRaisesRegex(ValueError, "schema 2"):
-            unpack_package(package({"decoder": {"fire_hold_teammates": True}}))
-        with self.assertRaisesRegex(ValueError, "unknown decoder option"):
-            unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": True, "other": 1}}))
-        for value in (1, 0, "true", None, [True]):
-            with self.assertRaisesRegex(ValueError, "must be a bool"):
-                unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": value}}))
-        for value in ([True], "fire_hold_teammates", None):
-            with self.assertRaisesRegex(ValueError, "must be an object"):
-                unpack_package(package({**schema2, "decoder": value}))
 
     def test_decompression_bound(self):
         out = io.BytesIO()
@@ -131,33 +121,64 @@ class PackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "oversized"):
             unpack_package(out.getvalue())
 
+    def test_decoder_object(self):
+        _, _, manifest = unpack_package(package({**SCHEMA2, "decoder": {}}))
+        self.assertEqual(manifest["decoder"], {})
+        with self.assertRaisesRegex(ValueError, "schema 2"):
+            unpack_package(package({"decoder": {}}))
+        with self.assertRaisesRegex(ValueError, "unknown decoder option: other"):
+            unpack_package(package({**SCHEMA2, "decoder": {"sampling": {"mode": "categorical"}, "other": 1}}))
+        for value in ([True], "sampling", None, 1):
+            with self.assertRaisesRegex(ValueError, "decoder options must be an object"):
+                unpack_package(package({**SCHEMA2, "decoder": value}))
+
+    def test_retired_decoder_options_are_refused_by_name(self):
+        # The native decoder rules were retired for BASIC parity: every key is refused whatever its value, alone
+        # or beside kept options, and the message names the key.
+        self.assertEqual(set(RETIRED_DECODER_OPTIONS), {"fire_hold_teammates", "strafe_legs", "aim_snap", "steady_shot",
+                                                        "aim_retarget", "shot_gate", "spray_aim", "spray_gate"})
+        for key in RETIRED_DECODER_OPTIONS:
+            for value in (True, False, {}, {"radius": 150}, [], 0):
+                for decoder in ({key: value}, {"sampling": {"mode": "categorical"}, key: value},
+                                {key: value, "forbid_objectives": [9, 10]}):
+                    with self.assertRaisesRegex(ValueError, r"^decoder\.%s was %s" % (key, RETIRED),
+                                                msg=repr(decoder)):
+                        unpack_package(package({**SCHEMA2, "decoder": decoder}))
+            # Under every action contract, the ffa.view.1 pointer one included.
+            with self.assertRaisesRegex(ValueError, r"decoder\.%s was %s" % (key, RETIRED)):
+                unpack_package(package({**SCHEMA2, "action_contract": OFFSET, "decoder": {key: {}}}, model=OFFSET_MODEL))
+            with self.assertRaisesRegex(ValueError, r"decoder\.%s was %s" % (key, RETIRED)):
+                unpack_package(package({**SCHEMA2, "observation_contract": FFA, "action_contract": POINTER,
+                                        "decoder": {key: {}}}, model=FFA_MODEL))
+
+    def test_retired_decoder_options_match_the_engine(self):
+        self.assertEqual(list(RETIRED_DECODER_OPTIONS), nim_strings("neural_host.nim", "RetiredDecoderOptions"))
 
     def test_sampling_option(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
         for sampling in ({"mode": "categorical"},
                          {"mode": "categorical", "temperature": 0.5, "heads": [0, 2]},
                          {"mode": "categorical", "temperature": 10},
                          {"mode": "categorical", "temperature": 0.01, "heads": [4, 3, 2, 1, 0]}):
-            _, _, manifest = unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": True, "sampling": sampling}}))
+            _, _, manifest = unpack_package(package({**SCHEMA2, "decoder": {"forbid_objectives": [9], "sampling": sampling}}))
             self.assertEqual(manifest["decoder"]["sampling"], sampling)
         with self.assertRaisesRegex(ValueError, "schema 2"):
             unpack_package(package({"decoder": {"sampling": {"mode": "categorical"}}}))
         for sampling, message in (({}, "mode"), ({"mode": "argmax"}, "mode"), ({"mode": "categorical", "temperature": 0}, "within"),
                                   ({"mode": "categorical", "temperature": 11}, "within"), ({"mode": "categorical", "temperature": "1"}, "number"),
                                   ({"mode": "categorical", "temperature": True}, "number"), ({"mode": "categorical", "heads": []}, "non-empty"),
-                                  ({"mode": "categorical", "heads": [5]}, "indices"), ({"mode": "categorical", "heads": [1, 1]}, "repeats"),
+                                  ({"mode": "categorical", "heads": [7]}, r"indices 0 \.\. 6"), ({"mode": "categorical", "heads": [-1]}, "indices"),
+                                  ({"mode": "categorical", "heads": [1, 1]}, "repeats"),
                                   ({"mode": "categorical", "heads": "all"}, "non-empty"), ({"mode": "categorical", "heads": [True]}, "indices"),
                                   ({"mode": "categorical", "seed": 1}, "unknown decoder.sampling field"), (True, "must be a dict"), ([], "must be a dict")):
             with self.assertRaisesRegex(ValueError, message, msg=repr(sampling)):
-                unpack_package(package({**schema2, "decoder": {"sampling": sampling}}))
+                unpack_package(package({**SCHEMA2, "decoder": {"sampling": sampling}}))
 
     def test_joint_sampling_option(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
         stand = [1000] + [0] * 50
         for joint in ({"when": {"head": 2, "value": 1}, "head": 0, "offsets": stand},
                       {"when": {"head": 0, "value": 50}, "head": 1, "offsets": [0.5] * 25},
                       {"head": 4, "offsets": [-1000, 1000], "when": {"value": 0, "head": 3}}):
-            _, _, manifest = unpack_package(package({**schema2, "decoder": {"joint_sampling": joint}}))
+            _, _, manifest = unpack_package(package({**SCHEMA2, "decoder": {"joint_sampling": joint}}))
             self.assertEqual(manifest["decoder"]["joint_sampling"], joint)
         with self.assertRaisesRegex(ValueError, "schema 2"):
             unpack_package(package({"decoder": {"joint_sampling": {"when": {"head": 2, "value": 1}, "head": 0, "offsets": stand}}}))
@@ -170,12 +191,11 @@ class PackageTests(unittest.TestCase):
                                ({**good, "head": True}, "head index"), ({**good, "when": [2, 1]}, "must be an object"),
                                ([], "must be a dict")):
             with self.assertRaisesRegex(ValueError, message, msg=repr(joint)):
-                unpack_package(package({**schema2, "decoder": {"joint_sampling": joint}}))
+                unpack_package(package({**SCHEMA2, "decoder": {"joint_sampling": joint}}))
 
     def test_forbid_objectives_option(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
         for forbid in ([9, 10], [0], [50, 1], list(range(50))):
-            _, _, manifest = unpack_package(package({**schema2, "decoder": {"forbid_objectives": forbid}}))
+            _, _, manifest = unpack_package(package({**SCHEMA2, "decoder": {"forbid_objectives": forbid}}))
             self.assertEqual(manifest["decoder"]["forbid_objectives"], forbid)
         with self.assertRaisesRegex(ValueError, "schema 2"):
             unpack_package(package({"decoder": {"forbid_objectives": [9, 10]}}))
@@ -183,195 +203,173 @@ class PackageTests(unittest.TestCase):
                                 (["9"], "indices"), ([9, 9], "repeats"), (list(range(51)), "leave an objective"),
                                 ("9,10", "must be a list"), ({"9": 1}, "must be a list")):
             with self.assertRaisesRegex(ValueError, message, msg=repr(forbid)):
-                unpack_package(package({**schema2, "decoder": {"forbid_objectives": forbid}}))
+                unpack_package(package({**SCHEMA2, "decoder": {"forbid_objectives": forbid}}))
 
-    def test_strafe_legs_option(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
-        for strafe in ({}, {"range": 5250, "legs": [3, 6], "shot_legs": [6, 9], "reverse_permille": 800},
-                       {"range": 1, "legs": [1, 1], "shot_legs": [6, 6], "reverse_permille": 0},
-                       {"range": 20000, "legs": [72, 72], "shot_legs": [72, 72], "reverse_permille": 1000}):
-            _, _, manifest = unpack_package(package({**schema2, "decoder": {"forbid_objectives": [9, 10], "strafe_legs": strafe}}))
-            self.assertEqual(manifest["decoder"]["strafe_legs"], strafe)
-        with self.assertRaisesRegex(ValueError, "schema 2"):
-            unpack_package(package({"decoder": {"strafe_legs": {}}}))
-        for strafe, message in (({"range": 0}, "range must be within"), ({"range": 20001}, "range must be within"),
-                                ({"range": 5250.0}, "integer"), ({"range": True}, "integer"), ({"legs": [0, 6]}, "legs must be"),
-                                ({"legs": [7, 6]}, "legs must be"), ({"legs": [3, 73]}, "legs must be"), ({"legs": [3]}, r"\[min, max\]"),
-                                ({"legs": "3-6"}, r"\[min, max\]"), ({"legs": [3, 6.0]}, "integer"), ({"shot_legs": [5, 9]}, "shot_legs must be"),
-                                ({"shot_legs": [9, 8]}, "shot_legs must be"), ({"reverse_permille": 1001}, "reverse_permille"),
-                                ({"reverse_permille": -1}, "reverse_permille"), ({"seed": 1}, "unknown decoder.strafe_legs field"),
-                                (True, "must be a dict"), ([], "must be a dict")):
-            with self.assertRaisesRegex(ValueError, message, msg=repr(strafe)):
-                unpack_package(package({**schema2, "decoder": {"strafe_legs": strafe}}))
-
-    def test_aim_snap_option(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
-        for snap in ({}, {"max_angle_deg": 22.5}, {"max_angle_deg": 30}, {"max_angle_deg": 0.001},
-                     {"max_angle_deg": 90}, {"max_angle_deg": 12.345}):
-            _, _, manifest = unpack_package(package({**schema2, "decoder": {"aim_snap": snap}}))
-            self.assertEqual(manifest["decoder"]["aim_snap"], snap)
-        with self.assertRaisesRegex(ValueError, "schema 2"):
-            unpack_package(package({"decoder": {"aim_snap": {}}}))
-        for snap, message in (({"max_angle_deg": 0}, "multiple of 0.001 within"), ({"max_angle_deg": -5}, "within"),
-                              ({"max_angle_deg": 90.001}, "within"), ({"max_angle_deg": 22.5001}, "multiple of 0.001"),
-                              ({"max_angle_deg": float("nan")}, "within"), ({"max_angle_deg": 10 ** 400}, "within"),
-                              ({"max_angle_deg": "22.5"}, "must be a number"), ({"max_angle_deg": True}, "must be a number"),
-                              ({"degrees": 22.5}, "unknown decoder.aim_snap field"), (True, "must be a dict"), ([], "must be a dict")):
-            with self.assertRaisesRegex(ValueError, message, msg=repr(snap)):
-                unpack_package(package({**schema2, "decoder": {"aim_snap": snap}}))
-
-    def test_steady_shot_option(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
-        for decoder in ({"steady_shot": {}}, {"steady_shot": {}, "forbid_objectives": [9, 10], "aim_snap": {},
-                                              "sampling": {"mode": "categorical"}, "strafe_legs": {}, "fire_hold_teammates": True}):
-            _, _, manifest = unpack_package(package({**schema2, "decoder": decoder}))
-            self.assertEqual(manifest["decoder"], decoder)
-        with self.assertRaisesRegex(ValueError, "schema 2"):
-            unpack_package(package({"decoder": {"steady_shot": {}}}))
-        for steady, message in (({"ticks": 6}, "unknown decoder.steady_shot field"), (True, "must be a dict"), ([], "must be a dict")):
-            with self.assertRaisesRegex(ValueError, message, msg=repr(steady)):
-                unpack_package(package({**schema2, "decoder": {"steady_shot": steady}}))
-        for forbid in ([0], [0, 9, 10], [10, 0]):
-            with self.assertRaisesRegex(ValueError, "steady_shot needs movement index 0"):
-                unpack_package(package({**schema2, "decoder": {"steady_shot": {}, "forbid_objectives": forbid}}))
-
-    def test_fire_hold_radius_option(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
-        # The boolean form is unchanged; the object form turns the hold on, radius 55 by default.
-        self.assertEqual(validate_fire_hold(True), (True, 55))
-        self.assertEqual(validate_fire_hold(False), (False, 55))
-        self.assertEqual(validate_fire_hold({}), (True, 55))
-        self.assertEqual(validate_fire_hold({"radius": 150}), (True, 150))
-        for hold in (True, False, {}, {"radius": 150}, {"radius": 1}, {"radius": 2000}, {"radius": 55}):
-            _, _, manifest = unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": hold}}))
-            self.assertEqual(manifest["decoder"]["fire_hold_teammates"], hold)
-        with self.assertRaisesRegex(ValueError, "schema 2"):
-            unpack_package(package({"decoder": {"fire_hold_teammates": {"radius": 150}}}))
-        for hold, message in (({"radius": 0}, "radius must be within 1 .. 2000"), ({"radius": -150}, "within"),
-                              ({"radius": 2001}, "within"), ({"radius": 10 ** 12}, "within"),
-                              ({"radius": 150.0}, "radius must be an integer"), ({"radius": "150"}, "must be an integer"),
-                              ({"radius": True}, "must be an integer"), ({"radius": None}, "must be an integer"),
-                              ({"range": 150}, "unknown decoder.fire_hold_teammates field"),
-                              (150, "must be a bool or a dict"), ([150], "must be a bool or a dict"), ("true", "must be a bool")):
-            with self.assertRaisesRegex(ValueError, message, msg=repr(hold)):
-                unpack_package(package({**schema2, "decoder": {"fire_hold_teammates": hold}}))
-
-    def test_fire_hold_radius_limits_match_the_engine(self):
-        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
-        self.assertRegex(source, r"(?m)^  MaxFireHoldRadius\* = 2000'i32$")
-        self.assertRegex(source, r"(?m)^static: doAssert FireHoldRadius == 55$")
-
-    def test_spray_options(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
-        # Defaults exact: the spray reach; at least one enemy and no teammate in the cone.
-        self.assertEqual(validate_spray_aim({}), {"max_range": 850})
-        self.assertEqual(validate_spray_gate({}), {"max_teammates": 0, "min_enemies": 1})
-        self.assertEqual(validate_spray_gate({"max_teammates": 2}), {"max_teammates": 2, "min_enemies": 1})
-        for name, value in (("spray_aim", {}), ("spray_aim", {"max_range": 1}), ("spray_aim", {"max_range": 850}),
-                            ("spray_gate", {}), ("spray_gate", {"max_teammates": 7, "min_enemies": 8}),
-                            ("spray_gate", {"max_teammates": 0, "min_enemies": 0})):
-            _, _, manifest = unpack_package(package({**schema2, "decoder": {name: value}}))
-            self.assertEqual(manifest["decoder"][name], value)
-        for name in ("spray_aim", "spray_gate"):
-            with self.assertRaisesRegex(ValueError, "schema 2"):
-                unpack_package(package({"decoder": {name: {}}}))
-        for name, value, message in (("spray_aim", {"max_range": 0}, "max_range must be within 1 .. 850"),
-                                     ("spray_aim", {"max_range": 851}, "within"), ("spray_aim", {"max_range": -1}, "within"),
-                                     ("spray_aim", {"max_range": 850.0}, "must be an integer"),
-                                     ("spray_aim", {"max_range": "850"}, "must be an integer"),
-                                     ("spray_aim", {"max_range": True}, "must be an integer"),
-                                     ("spray_aim", {"range": 850}, "unknown decoder.spray_aim field"),
-                                     ("spray_aim", True, "must be a dict"), ("spray_aim", [], "must be a dict"),
-                                     ("spray_gate", {"max_teammates": -1}, "max_teammates must be within 0 .. 7"),
-                                     ("spray_gate", {"max_teammates": 8}, "within"),
-                                     ("spray_gate", {"min_enemies": 9}, "min_enemies must be within 0 .. 8"),
-                                     ("spray_gate", {"min_enemies": -1}, "within"),
-                                     ("spray_gate", {"min_enemies": 1.0}, "must be an integer"),
-                                     ("spray_gate", {"max_teammates": None}, "must be an integer"),
-                                     ("spray_gate", {"teammates": 0}, "unknown decoder.spray_gate field"),
-                                     ("spray_gate", 1, "must be a dict")):
-            with self.assertRaisesRegex(ValueError, message, msg=repr((name, value))):
-                unpack_package(package({**schema2, "decoder": {name: value}}))
-
-    def test_spray_defaults_match_the_engine(self):
-        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
-        consts = {name: int(value.replace("_", "")) for name, value in
-                  re.findall(r"^  (\w+)\* = ([0-9_]+)'i32", source, re.M)}
-        self.assertEqual(SPRAY_AIM_DEFAULTS["max_range"], consts["DefaultSprayAimRange"])
-        self.assertEqual(SPRAY_GATE_DEFAULTS, {"max_teammates": consts["DefaultSprayMaxTeammates"],
-                                               "min_enemies": consts["DefaultSprayMinEnemies"]})
-        self.assertEqual(SPRAY_LIMITS["max_teammates"], (0, consts["MaxSprayTeammates"]))
-        self.assertEqual(SPRAY_LIMITS["min_enemies"], (0, consts["MaxSprayEnemies"]))
-        mech = (Path(__file__).parents[2] / "examples/paintbot/mechanics.nim").read_text()
-        self.assertRegex(mech, r"(?m)^  SprayReach\* = %d$" % SPRAY_LIMITS["max_range"][1])
-
-    def test_aim_retarget_option(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
-        # The defaults are exactly base.bas's rule and pw-diag3's counterfactual.
-        self.assertEqual(validate_aim_retarget({}), {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000})
-        self.assertEqual(validate_aim_retarget({"hp_weight": 0}), {"max_range": 5250, "hp_weight": 0, "carry_weight": 2500000})
-        for retarget in ({}, {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000}, {"max_range": 1},
-                         {"max_range": 20000}, {"hp_weight": 0, "carry_weight": 0},
-                         {"hp_weight": 1000000000, "carry_weight": 1000000000}):
-            _, _, manifest = unpack_package(package({**schema2, "decoder": {"aim_retarget": retarget}}))
-            self.assertEqual(manifest["decoder"]["aim_retarget"], retarget)
-        with self.assertRaisesRegex(ValueError, "schema 2"):
-            unpack_package(package({"decoder": {"aim_retarget": {}}}))
-        for retarget, message in (({"max_range": 0}, "max_range must be within 1 .. 20000"),
-                                  ({"max_range": -5250}, "max_range must be within"), ({"max_range": 20001}, "max_range must be within"),
-                                  ({"hp_weight": -1}, "hp_weight must be within 0 .. 1000000000"),
-                                  ({"hp_weight": 1000000001}, "hp_weight must be within"),
-                                  ({"carry_weight": -1}, "carry_weight must be within 0 .. 1000000000"),
-                                  ({"carry_weight": 2 ** 40}, "carry_weight must be within"),
-                                  ({"max_range": 5250.0}, "max_range must be an integer"), ({"max_range": "5250"}, "must be an integer"),
-                                  ({"max_range": True}, "must be an integer"), ({"hp_weight": 1.5}, "hp_weight must be an integer"),
-                                  ({"carry_weight": None}, "carry_weight must be an integer"),
-                                  ({"range": 5250}, "unknown decoder.aim_retarget field"), (True, "must be a dict"),
-                                  ([], "must be a dict"), (5250, "must be a dict")):
-            with self.assertRaisesRegex(ValueError, message, msg=repr(retarget)):
-                unpack_package(package({**schema2, "decoder": {"aim_retarget": retarget}}))
-
-    def test_shot_gate_option(self):
-        schema2 = {"schema": "paintbot-neural-basic/2"}
-        self.assertEqual(validate_shot_gate({}), {"max_range": 5250})
-        for gate in ({}, {"max_range": 5250}, {"max_range": 1}, {"max_range": 20000}):
-            _, _, manifest = unpack_package(package({**schema2, "decoder": {"shot_gate": gate}}))
-            self.assertEqual(manifest["decoder"]["shot_gate"], gate)
-        with self.assertRaisesRegex(ValueError, "schema 2"):
-            unpack_package(package({"decoder": {"shot_gate": {}}}))
-        for gate, message in (({"max_range": 0}, "max_range must be within 1 .. 20000"), ({"max_range": -1}, "within"),
-                              ({"max_range": 20001}, "within"), ({"max_range": 5250.5}, "must be an integer"),
-                              ({"max_range": "5250"}, "must be an integer"), ({"max_range": False}, "must be an integer"),
-                              ({"range": 5250}, "unknown decoder.shot_gate field"), (True, "must be a dict"),
-                              ([], "must be a dict"), (5250, "must be a dict")):
-            with self.assertRaisesRegex(ValueError, message, msg=repr(gate)):
-                unpack_package(package({**schema2, "decoder": {"shot_gate": gate}}))
-        # The full lever set pw-diag3 measured, together.
-        decoder = {"fire_hold_teammates": True, "sampling": {"mode": "categorical"}, "forbid_objectives": [9, 10],
-                   "aim_snap": {"max_angle_deg": 22.5}, "steady_shot": {}, "strafe_legs": {}, "aim_retarget": {},
-                   "shot_gate": {"max_range": 5250}}
-        _, _, manifest = unpack_package(package({**schema2, "decoder": decoder}))
+    def test_every_kept_option_together(self):
+        decoder = {"sampling": {"mode": "categorical", "temperature": 0.7}, "forbid_objectives": [9, 10],
+                   "joint_sampling": {"when": {"head": 2, "value": 1}, "head": 0, "offsets": [1000] + [0] * 50}}
+        _, _, manifest = unpack_package(package({**SCHEMA2, "decoder": decoder}))
         self.assertEqual(manifest["decoder"], decoder)
 
-    def test_retarget_and_gate_defaults_match_the_engine(self):
-        # neural_contract.nim holds the host's defaults and limits; the packager must agree.
-        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
-        consts = {name: int(value.replace("_", "")) for name, value in
-                  re.findall(r"^  (\w+)\* = ([0-9_]+)'i32", source, re.M)}
-        self.assertEqual(AIM_RETARGET_DEFAULTS, {"max_range": consts["DefaultRetargetRange"],
-                                                 "hp_weight": consts["DefaultRetargetHpWeight"],
-                                                 "carry_weight": consts["DefaultRetargetCarryWeight"]})
-        self.assertEqual((MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT), (consts["MaxRetargetRange"], consts["MaxRetargetWeight"]))
-        self.assertEqual(SHOT_GATE_DEFAULTS, {"max_range": consts["DefaultShotGateRange"]})
-        self.assertEqual(MAX_SHOT_GATE_RANGE, consts["MaxShotGateRange"])
+
+class ContractTests(unittest.TestCase):
+    """Only teams.view.1 (+ teams.view.1u<K>) with action teams.view.1 or its aim-offset variant, and ffa.view.1
+    with ffa.view.1 pointer, are staged; neural_contract.nim / neural_host.nim hold the same rules."""
+
+    def test_contract_hashes_match_the_engine(self):
+        # neural_contract.nim holds each id; the hash actors and manifests carry is the SHA-256 of the id.
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        ids = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        for name, ours, ours_hash in (
+                ("ObservationContractTeamsView1", OBSERVATION_CONTRACT_TEAMS_VIEW_1, TEAMS),
+                ("ObservationContractFfaView1", OBSERVATION_CONTRACT_FFA_VIEW_1, FFA),
+                ("ActionContractTeamsView1", ACTION_CONTRACT_TEAMS_VIEW_1, ACT),
+                ("ActionContractTeamsView1Offset", ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET, OFFSET),
+                ("ActionContractFfaView1Pointer", ACTION_CONTRACT_FFA_VIEW_1_POINTER, POINTER)):
+            self.assertEqual(ids[name], ours, name)
+            self.assertEqual(sha(ids[name]), ours_hash, name)
+            self.assertRegex(source, r"(?m)^  %sHash\* = sha256Hex\(%s\)$" % (name, name))
+        self.assertEqual(OBSERVATION_CONTRACT_TEAMS_VIEW_1, "paintbot-pw.teams.view.1")
+        self.assertEqual(OBSERVATION_CONTRACT_FFA_VIEW_1, "paintbot-pw.ffa.view.1")
+        self.assertEqual(len({TEAMS, FFA, ACT, OFFSET, POINTER}), 5)
+        # Widths and heads.
+        self.assertEqual(TEAMS_VIEW_1_SIZE, 512)
+        self.assertIn("doAssert TeamsViewSize == 512", source)
+        self.assertEqual(ACTION_SIZES, (51, 25, 2, 2, 2))
+        self.assertEqual(ACTION_SIZES_OFFSET, ACTION_SIZES + (23, 23))
+        self.assertRegex(source, r"(?m)^  ActionSizes\* = \[51, 25, 2, 2, 2\]$")
+        self.assertRegex(source, r"(?m)^  AimOffsetBins\* = 23$")
+        self.assertRegex(source, r"(?m)^  ActionSizesOffset\* = \[51, 25, 2, 2, 2, AimOffsetBins, AimOffsetBins\]$")
+
+    def test_retired_contracts_match_the_engine(self):
+        self.assertEqual(list(RETIRED_OBSERVATION_CONTRACTS), nim_strings("neural_contract.nim", "RetiredObservationContractIds"))
+        self.assertEqual(list(RETIRED_ACTION_CONTRACTS), nim_strings("neural_contract.nim", "RetiredActionContractIds"))
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        self.assertIn('retiredHashes.add sha256Hex("paintbot-pw.rules39.obs.v2u" & $k)', source)
+        self.assertIn('retiredHashes.add sha256Hex("paintbot-pw.rules43.obs.v3u" & $k)', source)
+        self.assertEqual(len(RETIRED_CONTRACT_HASHES), 5 + 3 + 2 * MAX_USER_INPUTS)
+        self.assertFalse(RETIRED_CONTRACT_HASHES & ({TEAMS, FFA, ACT, OFFSET, POINTER} | set(USER_INPUTS_CONTRACT_HASHES)))
+
+    def test_each_retired_observation_contract_is_refused(self):
+        # Refused by name before anything else is read (the model here is not even an actor).
+        retired = [sha(c) for c in RETIRED_OBSERVATION_CONTRACTS]
+        retired += [sha("paintbot-pw.rules39.obs.v2u%d" % k) for k in range(1, MAX_USER_INPUTS + 1)]
+        retired += [sha("paintbot-pw.rules43.obs.v3u%d" % k) for k in range(1, MAX_USER_INPUTS + 1)]
+        self.assertEqual(sha("paintbot-pw.rules37.obs.v2.float506"), retired[1])
+        self.assertEqual(sha("paintbot-pw.rules39.obs.v2u1"), "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04")
+        self.assertEqual(sha("paintbot-pw.rules43.obs.v3u1"), "8086b6f36b9c2cf07e9e6586e97221e484f809e08669075663c5dcf9cb63ac36")
+        for digest in retired:
+            for action in (ACT, POINTER):
+                with self.assertRaisesRegex(ValueError, "^neural observation contract was %s" % RETIRED, msg=digest):
+                    unpack_package(package({**SCHEMA2, "observation_contract": digest, "action_contract": action,
+                                            "user_inputs": {"count": 3, "init": [0, 0, 0]}}, model=b"x"))
+
+    def test_each_retired_action_contract_is_refused(self):
+        self.assertEqual([sha(c) for c in RETIRED_ACTION_CONTRACTS],
+                         [sha("paintbot-pw.rules37.action.v1.51-25-2-2-2"), sha("paintbot-pw.rules37.action.v2.51-25-2-2-2"),
+                          sha("paintbot-pw.rules48.action.ffa.v2.pointer")])
+        for contract in RETIRED_ACTION_CONTRACTS:
+            for observation in (TEAMS, FFA, tv1u_hash(3)):
+                with self.assertRaisesRegex(ValueError, "^neural action contract was %s" % RETIRED, msg=contract):
+                    unpack_package(package({"observation_contract": observation, "action_contract": sha(contract)}))
+        # A retired pair names the observation first, as the host does.
+        with self.assertRaisesRegex(ValueError, "^neural observation contract was %s" % RETIRED):
+            unpack_package(package({"observation_contract": sha(RETIRED_OBSERVATION_CONTRACTS[0]),
+                                    "action_contract": sha(RETIRED_ACTION_CONTRACTS[0])}))
+
+    def test_unknown_contracts_are_refused(self):
+        for digest in ("a" * 64, sha("paintbot-pw.teams.view.2"), sha(user_inputs_contract_id(0)),
+                       sha(user_inputs_contract_id(MAX_USER_INPUTS + 1)), sha("paintbot-pw.ffa.view.1u3"), ACT, POINTER):
+            with self.assertRaisesRegex(ValueError, "unknown neural observation contract", msg=digest):
+                unpack_package(package({"observation_contract": digest}))
+        for digest in ("b" * 64, TEAMS, FFA, sha("paintbot-pw.teams.view.1.action.51-25-2-2-2-23"),
+                       sha("paintbot-pw.ffa.view.1.action.51-25-2-2-2")):
+            with self.assertRaisesRegex(ValueError, "unknown neural action contract", msg=digest):
+                unpack_package(package({"action_contract": digest}))
+
+    def test_pairings_are_enforced(self):
+        pairing = "teams.view.1 goes with action contract teams.view.1"
+        ffa = {"observation_contract": FFA, "action_contract": POINTER}
+        # The accepted pairs.
+        unpack_package(package())
+        unpack_package(package({"action_contract": OFFSET}, model=OFFSET_MODEL))
+        unpack_package(package(ffa, model=FFA_MODEL))
+        k = 3
+        inputs = {**SCHEMA2, "observation_contract": tv1u_hash(k), "user_inputs": {"count": k, "init": [0] * k}}
+        unpack_package(package(inputs, model=actor_bytes(TEAMS_VIEW_1_SIZE + k, tv1u_hash(k))))
+        unpack_package(package({**inputs, "action_contract": OFFSET},
+                               model=actor_bytes(TEAMS_VIEW_1_SIZE + k, tv1u_hash(k), heads=ACTION_SIZES_OFFSET,
+                                                 action_hash=OFFSET)))
+        # The crossed ones.
+        for observation, action in ((TEAMS, POINTER), (tv1u_hash(k), POINTER), (FFA, ACT), (FFA, OFFSET)):
+            overrides = {"observation_contract": observation, "action_contract": action}
+            if observation == tv1u_hash(k):
+                overrides.update(SCHEMA2, user_inputs={"count": k, "init": [0] * k})
+            with self.assertRaisesRegex(ValueError, pairing, msg=(observation, action)):
+                unpack_package(package(overrides, model=FFA_MODEL))
+
+    def test_teams_view_1_checks_its_actor(self):
+        for schema in ("paintbot-neural-basic/1", "paintbot-neural-basic/2"):
+            for overrides, model in (({}, TEAMS_MODEL), ({"action_contract": OFFSET}, OFFSET_MODEL)):
+                _, staged, manifest = unpack_package(package({"schema": schema, **overrides}, model=model))
+                self.assertEqual(int.from_bytes(staged[12:16], "little"), TEAMS_VIEW_1_SIZE)
+        with self.assertRaisesRegex(ValueError, "input count must be 512 for observation contract teams.view.1$"):
+            unpack_package(package(model=actor_bytes(506, TEAMS)))
+        with self.assertRaisesRegex(ValueError, "input count must be 512"):
+            unpack_package(package(model=actor_bytes(513, TEAMS)))
+        with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
+            unpack_package(package(model=actor_bytes(TEAMS_VIEW_1_SIZE, FFA)))
+        with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
+            unpack_package(package(model=actor_bytes(TEAMS_VIEW_1_SIZE, sha(RETIRED_OBSERVATION_CONTRACTS[1]))))
+        with self.assertRaisesRegex(ValueError, "invalid neural actor magic"):
+            unpack_package(package(model=b"neutral fixture"))
+        with self.assertRaisesRegex(ValueError, "empty neural model"):
+            unpack_package(package(model=b""))
+
+    def test_sampling_heads_5_and_6_need_the_aim_offset_contract(self):
+        offset = {**SCHEMA2, "action_contract": OFFSET}
+        for heads in ([5], [6], [5, 6], [0, 1, 2, 3, 4, 5, 6], [6, 0]):
+            sampling = {"mode": "categorical", "heads": heads}
+            _, _, manifest = unpack_package(package({**offset, "decoder": {"sampling": sampling}}, model=OFFSET_MODEL))
+            self.assertEqual(manifest["decoder"]["sampling"]["heads"], heads)
+            with self.assertRaisesRegex(ValueError, "heads 5 and 6 need action contract teams.view.1 aim-offset"):
+                unpack_package(package({**SCHEMA2, "decoder": {"sampling": sampling}}))
+            with self.assertRaisesRegex(ValueError, "heads 5 and 6 need action contract teams.view.1 aim-offset"):
+                unpack_package(package({**SCHEMA2, "observation_contract": FFA, "action_contract": POINTER,
+                                        "decoder": {"sampling": sampling}}, model=FFA_MODEL))
+        with self.assertRaisesRegex(ValueError, r"indices 0 \.\. 6"):
+            unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [7]}}},
+                                   model=OFFSET_MODEL))
+        # The other selection options keep reading the five fixed heads under the aim-offset contract.
+        _, _, manifest = unpack_package(package({**offset, "decoder": {"forbid_objectives": [9]}}, model=OFFSET_MODEL))
+        self.assertEqual(manifest["decoder"]["forbid_objectives"], [9])
+        with self.assertRaisesRegex(ValueError, "head index 0 .. 4"):
+            unpack_package(package({**offset, "decoder": {"joint_sampling": {"when": {"head": 5, "value": 1}, "head": 0,
+                                                                             "offsets": [0] * 51}}}, model=OFFSET_MODEL))
+
+    def test_ffa_view_1_pointer_takes_sampling_only(self):
+        ffa = {**SCHEMA2, "observation_contract": FFA, "action_contract": POINTER}
+        _, _, manifest = unpack_package(package({**ffa, "decoder": {"sampling": {"mode": "categorical", "temperature": 0.5}}},
+                                                model=FFA_MODEL))
+        self.assertEqual(manifest["decoder"]["sampling"]["temperature"], 0.5)
+        for decoder in ({"forbid_objectives": [9]},
+                        {"joint_sampling": {"when": {"head": 2, "value": 1}, "head": 0, "offsets": [0] * 51}}):
+            with self.assertRaisesRegex(ValueError, "not available under action contract ffa.view.1 pointer"):
+                unpack_package(package({**ffa, "decoder": decoder}, model=FFA_MODEL))
+        with self.assertRaisesRegex(ValueError, "user_inputs need observation contract teams.view.1u<K>"):
+            unpack_package(package({**ffa, "user_inputs": {"count": 1, "init": [0]}}, model=FFA_MODEL))
 
 
 class UserInputTests(unittest.TestCase):
+    """Observation contract teams.view.1u<K>: teams.view.1's 512 floats, then K user inputs (512 + K)."""
+
     def inputs_package(self, k=3, init=None, observation=None, inputs=None, schema="paintbot-neural-basic/2",
-                       user_inputs="default"):
-        observation = observation or v2u_hash(k)
-        model = actor_bytes(OBSERVATION_V2_SIZE + k if inputs is None else inputs, observation)
-        overrides = {"schema": schema, "observation_contract": observation}
+                       user_inputs="default", action=ACT):
+        observation = observation or tv1u_hash(k)
+        heads = ACTION_SIZES_OFFSET if action == OFFSET else ACTION_SIZES
+        model = actor_bytes(TEAMS_VIEW_1_SIZE + k if inputs is None else inputs, observation, heads=heads,
+                            action_hash=action)
+        overrides = {"schema": schema, "observation_contract": observation, "action_contract": action}
         if user_inputs == "default":
             overrides["user_inputs"] = {"count": k, "init": init if init is not None else [0] * k}
         elif user_inputs is not None:
@@ -379,9 +377,12 @@ class UserInputTests(unittest.TestCase):
         return package(overrides, model=model)
 
     def test_valid_user_inputs(self):
-        for k in (1, 3, 32, 33, 34, 64, 65, 66, MAX_USER_INPUTS):
-            _, _, manifest = unpack_package(self.inputs_package(k, init=[USER_INPUT_LIMIT] + [-USER_INPUT_LIMIT] * (k - 1)))
-            self.assertEqual(manifest["user_inputs"]["count"], k)
+        for k in (1, 3, 32, 33, 64, 65, MAX_USER_INPUTS):
+            for action in (ACT, OFFSET):
+                _, model, manifest = unpack_package(self.inputs_package(
+                    k, init=[USER_INPUT_LIMIT] + [-USER_INPUT_LIMIT] * (k - 1), action=action))
+                self.assertEqual(manifest["user_inputs"]["count"], k)
+                self.assertEqual(int.from_bytes(model[12:16], "little"), 512 + k)
 
     def test_user_inputs_field_rules(self):
         for value, message in (([], "must be an object"), ({"init": []}, "count is required"),
@@ -399,72 +400,57 @@ class UserInputTests(unittest.TestCase):
     def test_user_inputs_need_schema_2_and_the_matching_contract(self):
         with self.assertRaisesRegex(ValueError, "need package schema 2"):
             unpack_package(self.inputs_package(schema="paintbot-neural-basic/1"))
-        with self.assertRaisesRegex(ValueError, "need observation contract v2u"):
-            unpack_package(self.inputs_package(observation="a" * 64))
-        with self.assertRaisesRegex(ValueError, "v2u3 needs manifest user_inputs"):
+        with self.assertRaisesRegex(ValueError, "user_inputs need observation contract teams.view.1u<K>"):
+            unpack_package(self.inputs_package(observation=TEAMS, inputs=TEAMS_VIEW_1_SIZE))
+        with self.assertRaisesRegex(ValueError, "teams.view.1u3 needs manifest user_inputs"):
             unpack_package(self.inputs_package(3, user_inputs=None))
-        with self.assertRaisesRegex(ValueError, "does not match observation contract v2u3"):
+        with self.assertRaisesRegex(ValueError, "does not match observation contract teams.view.1u3"):
             unpack_package(self.inputs_package(3, user_inputs={"count": 2, "init": [0, 0]}))
 
     def test_user_inputs_check_the_actor_input_count_and_contract(self):
-        with self.assertRaisesRegex(ValueError, "input count must be 509 for 3 user inputs"):
-            unpack_package(self.inputs_package(3, inputs=OBSERVATION_V2_SIZE))
-        observation = v2u_hash(3)
-        model = actor_bytes(OBSERVATION_V2_SIZE + 3, v2u_hash(2))
+        with self.assertRaisesRegex(ValueError, "input count must be 515 for observation contract teams.view.1u3"):
+            unpack_package(self.inputs_package(3, inputs=TEAMS_VIEW_1_SIZE))
+        with self.assertRaisesRegex(ValueError, "input count must be 515"):
+            unpack_package(self.inputs_package(3, inputs=506 + 3))
+        observation = tv1u_hash(3)
         with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
-            unpack_package(package({"schema": "paintbot-neural-basic/2", "observation_contract": observation,
-                                    "user_inputs": {"count": 3, "init": [0, 0, 0]}}, model=model))
+            unpack_package(package({**SCHEMA2, "observation_contract": observation,
+                                    "user_inputs": {"count": 3, "init": [0, 0, 0]}},
+                                   model=actor_bytes(TEAMS_VIEW_1_SIZE + 3, tv1u_hash(2))))
+        with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
+            unpack_package(package({**SCHEMA2, "observation_contract": observation,
+                                    "user_inputs": {"count": 3, "init": [0, 0, 0]}},
+                                   model=actor_bytes(TEAMS_VIEW_1_SIZE + 3, TEAMS)))
         with self.assertRaisesRegex(ValueError, "invalid neural actor magic"):
-            unpack_package(package({"schema": "paintbot-neural-basic/2", "observation_contract": observation,
-                                    "user_inputs": {"count": 3, "init": [0, 0, 0]}}))
+            unpack_package(package({**SCHEMA2, "observation_contract": observation,
+                                    "user_inputs": {"count": 3, "init": [0, 0, 0]}}, model=b"neutral fixture"))
 
     def test_user_inputs_contract_ids_match_the_engine(self):
-        # neural_contract.nim lists the v2u<K> hashes; each is the SHA-256 of its id.
-        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
-        block = source[source.index("UserInputsContractHashes*"):]
-        block = block[block.index("= ["):]
-        hashes = re.findall(r'"([0-9a-f]{64})"', block[:block.index("]")])
-        self.assertEqual(hashes, [v2u_hash(k) for k in range(1, MAX_USER_INPUTS + 1)])
-        self.assertIn('"paintbot-pw.rules39.obs.v2u" & $k', source)
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        self.assertIn('proc userInputsContractId*(k: int): string = ObservationContractTeamsView1 & "u" & $k', source)
+        self.assertEqual(user_inputs_contract_id(7), "paintbot-pw.teams.view.1u7")
         consts = {name: int(value.replace("_", "")) for name, value in
                   re.findall(r"^  (\w+)\* = ([0-9_]+)(?:'i32)?$", source, re.M)}
         self.assertEqual((MAX_USER_INPUTS, USER_INPUT_LIMIT), (consts["MaxUserInputs"], consts["UserInputLimit"]))
-
-    def test_user_input_cap_is_128_and_the_original_64_contracts_are_unchanged(self):
-        # Raising the cap from 32 to 64 appended v2u33 .. v2u64, and from 64 to 128 v2u65 .. v2u128; v2u1 .. v2u64
-        # keep their hashes (pinned here), so every existing K <= 64 bundle stages exactly as before.
         self.assertEqual(MAX_USER_INPUTS, 128)
-        self.assertEqual(v2u_hash(1), "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04")
-        self.assertEqual(hashlib.sha256("".join(v2u_hash(k) for k in range(1, 33)).encode()).hexdigest(),
-                         "3e49fd8df675ca9c5b21ccb81e3ef3ca78767fab6de847672a3775bec03f9fda")
-        self.assertEqual(hashlib.sha256("".join(v2u_hash(k) for k in range(1, 65)).encode()).hexdigest(),
-                         "17887904f4f2ffec0f4fc47ad1bfa305aead80440d83f43d73b57f8ebaec643b")
-        self.assertEqual(v2u_hash(64), "18a5141bf7d78fdf93524757bf261f367cfebe3b489fb6f2988936375bb8f4aa")
-        self.assertEqual(v2u_hash(128), "a40a0922dbdfa188e739f591344da3d30b299a431939778d7cd4cc715fa96ba2")
-        self.assertEqual(sorted(USER_INPUTS_CONTRACT_HASHES.values()), list(range(1, 129)))
-        self.assertEqual(USER_INPUTS_CONTRACT_HASHES[v2u_hash(34)], 34)
-        self.assertEqual(USER_INPUTS_CONTRACT_HASHES[v2u_hash(66)], 66)
-        self.assertNotIn(hashlib.sha256(user_inputs_contract_id(129).encode()).hexdigest(), USER_INPUTS_CONTRACT_HASHES)
-        with self.assertRaisesRegex(ValueError, "within 1 .. 128"):
+        self.assertEqual(USER_INPUTS_CONTRACT_HASHES, {tv1u_hash(k): k for k in range(1, 129)})
+        self.assertNotIn(tv1u_hash(129), USER_INPUTS_CONTRACT_HASHES)
+        # teams.view.1u129 is no contract (refused before the manifest's count is read); a count of 129 is refused
+        # under any contract.
+        with self.assertRaisesRegex(ValueError, "unknown neural observation contract"):
             unpack_package(self.inputs_package(129))
-        with self.assertRaisesRegex(ValueError, "need observation contract v2u"):
-            unpack_package(self.inputs_package(128, observation=hashlib.sha256(user_inputs_contract_id(129).encode()).hexdigest()))
-        # v3u<K> follows the same cap; v3u1 .. v3u64 are unchanged.
-        self.assertEqual(hashlib.sha256("".join(v3u_hash(k) for k in range(1, 65)).encode()).hexdigest(),
-                         "8597b082fdd9c1d2222407b74f6ad49e8e1f2112be2f216385d3de0692e4d44d")
-        self.assertEqual(v3u_hash(128), "cbb429e7fa93d9bc478f30da689742751baf4c2a4fee50210f2a104de1410e88")
-        self.assertNotIn(hashlib.sha256(v3_user_inputs_contract_id(129).encode()).hexdigest(),
-                         V3_USER_INPUTS_CONTRACT_HASHES)
+        with self.assertRaisesRegex(ValueError, "within 1 .. 128"):
+            unpack_package(self.inputs_package(128, user_inputs={"count": 129, "init": [0] * 129}))
+        with self.assertRaisesRegex(ValueError, "unknown neural observation contract"):
+            unpack_package(self.inputs_package(128, observation=tv1u_hash(129)))
 
     def test_packages_without_user_inputs_are_unaffected(self):
-        # (v3, which checks its actor at staging, is in ObservationV3Tests.)
-        # An ordinary contract hash with the model never parsed, exactly as before.
-        _, model, _ = unpack_package(package({"schema": "paintbot-neural-basic/2"}))
-        self.assertEqual(model, b"neutral fixture")
-OBS, ACT = "a" * 64, "b" * 64
+        _, model, manifest = unpack_package(package(SCHEMA2))
+        self.assertEqual(model, TEAMS_MODEL)
+        self.assertNotIn("user_inputs", manifest)
 
 
-def pwnet2(inputs, heads, layers, obs=OBS, act=ACT):
+def pwnet2(inputs, heads, layers, obs=TEAMS, act=ACT):
     """layers = [(type, [params], [extra u32], n_floats)] with deterministic small weights."""
     out = b"PWNET002" + struct.pack("<4I", 2, inputs, sum(heads), len(heads)) + struct.pack("<%dI" % len(heads), *heads)
     out += obs.encode() + act.encode() + struct.pack("<I", len(layers))
@@ -476,6 +462,8 @@ def pwnet2(inputs, heads, layers, obs=OBS, act=ACT):
     return out
 
 
+# A minimal ffa.view.1 pointer actor (staging leaves its layout to the engine).
+FFA_MODEL = pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=FFA, act=POINTER)
 EPS = struct.unpack("<I", struct.pack("<f", 1e-5))[0]
 
 
@@ -508,22 +496,31 @@ class Pwnet2Tests(unittest.TestCase):
         self.assertEqual(info["operations"], 2 * (i * h + 3 * h * h + o * h) + 32 * h)
 
     def test_staging_accepts_and_rejects(self):
-        model = self.example()
-        overrides = {"sha256": {"policy.bas": hashlib.sha256(b"idle = 1\n").hexdigest(),
-                                "model.bin": hashlib.sha256(model).hexdigest()}}
-        self.assertEqual(unpack_package(package(overrides, model=model))[1], model)
-        other = {"observation_contract": "c" * 64, **overrides}
+        # The example's shape over teams.view.1's 512 inputs (the concatenated slice covers the last 280).
+        model = pwnet2(TEAMS_VIEW_1_SIZE, [51, 25, 2, 2, 2], [
+            attn([(24, 8, 10, 8, 0), (104, 8, 16, 8, 0)], 64, 4, 2, 64, 0, 24),
+            (6, [232, 280], [], 0),
+            (3, [432, 128, 0, 1], [], 2 * 128 * 432 + 2 * 128),
+            (1, [128, 82, 1, 0], [], 128 * 82 + 82)])
+        self.assertEqual(unpack_package(package(model=model))[1], model)
+        offset = pwnet2(TEAMS_VIEW_1_SIZE, list(ACTION_SIZES_OFFSET), [(1, [512, 128], [], 512 * 128)], act=OFFSET)
+        self.assertEqual(unpack_package(package({"action_contract": OFFSET}, model=offset))[1], offset)
+        # The manifest's contracts must be the actor's.
         with self.assertRaisesRegex(ValueError, "contract mismatch"):
-            unpack_package(package(other, model=model))
-        big = pwnet2(506, [51, 25, 2, 2, 2], [
+            unpack_package(package({"observation_contract": FFA, "action_contract": POINTER}, model=model))
+        with self.assertRaisesRegex(ValueError, "contract mismatch"):
+            unpack_package(package({"action_contract": OFFSET}, model=model))
+        with self.assertRaisesRegex(ValueError, "contract mismatch"):
+            unpack_package(package(model=offset))
+        with self.assertRaisesRegex(ValueError, "input count must be 512"):
+            unpack_package(package(model=self.example()))
+        big = pwnet2(TEAMS_VIEW_1_SIZE, [51, 25, 2, 2, 2], [
             attn([(24, 8, 10, 8, 0), (104, 8, 16, 8, 0), (232, 5, 32, 5, 0)], 128, 4, 2, 256, 0, 24),
             (1, [280, 82], [], 280 * 82)])
-        big_overrides = {"sha256": {"policy.bas": hashlib.sha256(b"idle = 1\n").hexdigest(),
-                                    "model.bin": hashlib.sha256(big).hexdigest()}}
         with self.assertRaisesRegex(ValueError, "exceeds native operation budget"):
-            unpack_package(package(big_overrides, model=big))
-        # Non-PWNET002 models are left to the host loader, exactly as before.
-        self.assertEqual(unpack_package(package())[1], b"neutral fixture")
+            unpack_package(package(model=big))
+        # A PWNET001 actor is checked by its header only (the host's loader reads the rest).
+        self.assertEqual(unpack_package(package())[1], TEAMS_MODEL)
 
     def test_structural_rejections(self):
         heads = [2, 2, 2]
@@ -578,7 +575,7 @@ class Pwnet2Tests(unittest.TestCase):
             (9, [4, 52], [], 65)]
 
     def entity_factored(self, inputs=538):
-        # neural_actor.md's entity-factored example over v2u32: 1,327,278 operations (test_paintbot_neural_net2).
+        # neural_actor.md's entity-factored example (538 inputs): 1,327,278 operations (test_paintbot_neural_net2).
         return pwnet2(inputs, [51, 25, 2, 2, 2], self.entity_factored_layers(inputs))
 
     def test_token_layers_cost_and_structure(self):
@@ -694,12 +691,29 @@ class Pwnet2Tests(unittest.TestCase):
                 validate_pwnet2(pwnet2(64, heads, layers))
 
     def test_cond_head_and_joint_sampling_are_exclusive(self):
-        model = pwnet2(64, [51, 25, 2, 2, 2], [(1, [64, 82, 1, 0], [], 64 * 82 + 82), (13, [2, 0], [], 102)])
+        model = pwnet2(512, [51, 25, 2, 2, 2], [(1, [512, 82, 1, 0], [], 512 * 82 + 82), (13, [2, 0], [], 102)])
         joint = {"when": {"head": 2, "value": 1}, "head": 0, "offsets": [0.0] * 51}
-        overrides = {"schema": "paintbot-neural-basic/2", "observation_contract": OBS, "action_contract": ACT}
-        unpack_package(package(overrides, model=model))
+        unpack_package(package(SCHEMA2, model=model))
         with self.assertRaisesRegex(ValueError, "cannot be combined with the model's COND_HEAD"):
-            unpack_package(package(dict(overrides, decoder={"joint_sampling": joint}), model=model))
+            unpack_package(package(dict(SCHEMA2, decoder={"joint_sampling": joint}), model=model))
+
+    def test_cond_head_names_only_heads_0_to_4(self):
+        # Under the aim-offset contract the actor has seven heads; COND_HEAD may still name only the five fixed ones.
+        heads = list(ACTION_SIZES_OFFSET)
+        body = [(1, [512, 128, 1, 0], [], 512 * 128 + 128)]
+
+        def bundle(cond):
+            model = pwnet2(512, heads, body + [(13, list(cond), [], heads[cond[1]] * heads[cond[0]])], act=OFFSET)
+            return model, package({"action_contract": OFFSET}, model=model)
+        model, staged = bundle((2, 0))
+        self.assertEqual(unpack_package(staged)[1], model)
+        model, staged = bundle((4, 1))
+        self.assertEqual(unpack_package(staged)[1], model)
+        for cond in ((5, 0), (0, 5), (2, 6), (6, 5)):
+            model, staged = bundle(cond)
+            self.assertEqual(validate_pwnet2(model)["conditionals"], [cond])  # structurally valid ...
+            with self.assertRaisesRegex(ValueError, r"COND_HEAD layers may name only heads 0 \.\. 4", msg=cond):
+                unpack_package(staged)  # ... but not staged
 
     @staticmethod
     def near(tokens=4, base=0, stride=8, xi=1, zi=2, vi=0, ei=6, ci=3, scale_x=2.0, scale_z=4.0, radius=1.0, dst=32,
@@ -763,35 +777,31 @@ class Pwnet2Tests(unittest.TestCase):
             validate_pwnet2(good + bytes(4))
 
     def test_pwnet002_with_user_inputs(self):
-        # A PWNET002 actor with obs contract v2u<K> (506 + K inputs): the header is read through validate_pwnet2 and
-        # the op count includes the K extra inputs.
+        # A PWNET002 actor with obs contract teams.view.1u<K> (512 + K inputs): the header is read through
+        # validate_pwnet2 and the op count includes the K extra inputs.
         k = 3
         heads = [51, 25, 2, 2, 2]
 
         def bundle(model, count=k, observation=None):
-            observation = observation or v2u_hash(k)
-            return package({"schema": "paintbot-neural-basic/2", "observation_contract": observation, "action_contract": ACT,
-                            "user_inputs": {"count": count, "init": [0] * count},
-                            "sha256": {"policy.bas": hashlib.sha256(b"idle = 1\n").hexdigest(),
-                                       "model.bin": hashlib.sha256(model).hexdigest()}}, model=model)
+            observation = observation or tv1u_hash(k)
+            return package({**SCHEMA2, "observation_contract": observation,
+                            "user_inputs": {"count": count, "init": [0] * count}}, model=model)
 
-        model = pwnet2(OBSERVATION_V2_SIZE + k, heads, [(6, [0, 24], [], 0), (1, [OBSERVATION_V2_SIZE + k + 24, 82], [],
-                                                         (OBSERVATION_V2_SIZE + k + 24) * 82)], obs=v2u_hash(k))
+        width = TEAMS_VIEW_1_SIZE + k
+        model = pwnet2(width, heads, [(6, [0, 24], [], 0), (1, [width + 24, 82], [], (width + 24) * 82)], obs=tv1u_hash(k))
         self.assertEqual(unpack_package(bundle(model))[1], model)
-        self.assertEqual(validate_pwnet2(model)["operations"], 24 + 2 * (OBSERVATION_V2_SIZE + k + 24) * 82)
-        short = pwnet2(OBSERVATION_V2_SIZE, heads, [(1, [OBSERVATION_V2_SIZE, 82], [], OBSERVATION_V2_SIZE * 82)],
-                       obs=v2u_hash(k))
-        with self.assertRaisesRegex(ValueError, "input count must be 509 for 3 user inputs"):
+        self.assertEqual(validate_pwnet2(model)["operations"], 24 + 2 * (width + 24) * 82)
+        short = pwnet2(TEAMS_VIEW_1_SIZE, heads, [(1, [TEAMS_VIEW_1_SIZE, 82], [], TEAMS_VIEW_1_SIZE * 82)], obs=tv1u_hash(k))
+        with self.assertRaisesRegex(ValueError, "input count must be 515 for observation contract teams.view.1u3"):
             unpack_package(bundle(short))
-        other = pwnet2(OBSERVATION_V2_SIZE + k, heads, [(1, [OBSERVATION_V2_SIZE + k, 82], [], (OBSERVATION_V2_SIZE + k) * 82)],
-                       obs=v2u_hash(2))
+        other = pwnet2(width, heads, [(1, [width, 82], [], width * 82)], obs=tv1u_hash(2))
         with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
             unpack_package(bundle(other))
-        with self.assertRaisesRegex(ValueError, "does not match observation contract v2u3"):
+        with self.assertRaisesRegex(ValueError, "does not match observation contract teams.view.1u3"):
             unpack_package(bundle(model, count=2))
 
     def test_constants_match_the_engine(self):
-        source = (Path(__file__).parents[2] / "examples/paintbot/neural_actor.nim").read_text()
+        source = (ROOT / "examples/paintbot/neural_actor.nim").read_text()
         consts = {m.group(1): int(m.group(2).replace("_", ""))
                   for m in re.finditer(r"^\s+(Max\w+|TranscendentalOps|MinGruUnitOps)\* = ([0-9_]+)", source, re.M)}
         self.assertEqual(PWNET2_LIMITS, dict(parameters=consts["MaxNet2Parameters"], layers=consts["MaxNet2Layers"],
@@ -806,87 +816,10 @@ class Pwnet2Tests(unittest.TestCase):
         self.assertEqual((consts["TranscendentalOps"], consts["MinGruUnitOps"]), (8, 32))
         # SEGMENT_NEAR's published count: one formula in the loader, staging and neural_actor.md.
         self.assertIn("int64(inputs) + int64(tokens)*int64(tokens)*12 + int64(tokens)*8", source)
-        self.assertIn("| SEGMENT_NEAR | `I + 12*T*T + 8*T` |",
-                      (Path(__file__).parents[2] / "examples/paintbot/neural_actor.md").read_text())
+        self.assertIn("| SEGMENT_NEAR | `I + 12*T*T + 8*T` |", (ROOT / "examples/paintbot/neural_actor.md").read_text())
         self.assertEqual(segment_near_ops(538, 16), 538 + 12 * 16 * 16 + 8 * 16)
-        host = (Path(__file__).parents[2] / "examples/paintbot/neural_host.nim").read_text()
+        host = (ROOT / "examples/paintbot/neural_host.nim").read_text()
         self.assertIn("MaxNeuralOperations* = %s'i64" % format(MAX_NEURAL_OPERATIONS, "_"), host)
-
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-class ObservationV3Tests(unittest.TestCase):
-    """Observation contract v3 (v2 + an 8-float scoreboard) and v3u<K>; neural_host.nim holds the same rules."""
-
-    def v3_package(self, observation=None, inputs=OBSERVATION_V3_SIZE, actor_observation=None, user_inputs=None,
-                   schema="paintbot-neural-basic/2"):
-        observation = observation or OBSERVATION_CONTRACT_V3_HASH
-        overrides = {"schema": schema, "observation_contract": observation}
-        if user_inputs is not None:
-            overrides["user_inputs"] = user_inputs
-        return package(overrides, model=actor_bytes(inputs, actor_observation or observation))
-
-    def test_contract_id_hash_and_width_match_the_engine(self):
-        source = (Path(__file__).parents[2] / "examples/paintbot/neural_contract.nim").read_text()
-        consts = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
-        self.assertEqual(consts["ObservationContractV3"], OBSERVATION_CONTRACT_V3)
-        self.assertEqual(consts["ObservationContractV3Hash"], OBSERVATION_CONTRACT_V3_HASH)
-        self.assertEqual(OBSERVATION_CONTRACT_V3, "paintbot-pw.rules43.obs.v3.float514")
-        self.assertEqual(OBSERVATION_CONTRACT_V3_HASH, "06f16d62adedda6995d393696c0d2ed257aa9380b86341e73d1d6a3c7ea374f1")
-        self.assertEqual(OBSERVATION_V3_SIZE, OBSERVATION_V2_SIZE + 8)
-        sizes = {name: int(value) for name, value in re.findall(r"^  (\w+)\* = (\d+)$", source, re.M)}
-        self.assertEqual(sizes["ScoreboardBlockSize"], 8)
-        # The v3u<K> table: each hash is the SHA-256 of its id, and none is a v2u<K> hash.
-        block = source[source.index("V3UserInputsContractHashes*"):]
-        block = block[block.index("= ["):]
-        hashes = re.findall(r'"([0-9a-f]{64})"', block[:block.index("]")])
-        self.assertEqual(hashes, [v3u_hash(k) for k in range(1, MAX_USER_INPUTS + 1)])
-        self.assertIn('"paintbot-pw.rules43.obs.v3u" & $k', source)
-        self.assertEqual(sorted(V3_USER_INPUTS_CONTRACT_HASHES.values()), list(range(1, 129)))
-        self.assertFalse(set(V3_USER_INPUTS_CONTRACT_HASHES) & set(USER_INPUTS_CONTRACT_HASHES))
-        self.assertEqual(v3u_hash(1), "8086b6f36b9c2cf07e9e6586e97221e484f809e08669075663c5dcf9cb63ac36")
-
-    def test_v3_accepted_with_a_514_input_actor(self):
-        for schema in ("paintbot-neural-basic/1", "paintbot-neural-basic/2"):
-            _, model, manifest = unpack_package(self.v3_package(schema=schema))
-            self.assertEqual(manifest["observation_contract"], OBSERVATION_CONTRACT_V3_HASH)
-            self.assertEqual(int.from_bytes(model[12:16], "little"), 514)
-
-    def test_v3_rejects_a_wrong_actor(self):
-        with self.assertRaisesRegex(ValueError, "input count must be 514 for observation contract v3"):
-            unpack_package(self.v3_package(inputs=OBSERVATION_V2_SIZE))
-        with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
-            unpack_package(self.v3_package(actor_observation=hashlib.sha256(b"paintbot-pw.rules37.obs.v2.float506").hexdigest()))
-        with self.assertRaisesRegex(ValueError, "invalid neural actor magic"):
-            unpack_package(package({"observation_contract": OBSERVATION_CONTRACT_V3_HASH}))
-        with self.assertRaisesRegex(ValueError, "user_inputs need observation contract v2u<K> or v3u<K>"):
-            unpack_package(self.v3_package(user_inputs={"count": 1, "init": [0]}))
-
-    def test_v3u_accepted_for_every_k(self):
-        for k in (1, 3, 32, 63, 64, 65, 66, MAX_USER_INPUTS):
-            _, _, manifest = unpack_package(self.v3_package(observation=v3u_hash(k), inputs=OBSERVATION_V3_SIZE + k,
-                                                            user_inputs={"count": k, "init": [7] * k}))
-            self.assertEqual(manifest["user_inputs"]["count"], k)
-
-    def test_v3u_rules_mirror_v2u(self):
-        with self.assertRaisesRegex(ValueError, "observation contract v3u3 needs manifest user_inputs"):
-            unpack_package(self.v3_package(observation=v3u_hash(3), inputs=517))
-        with self.assertRaisesRegex(ValueError, "does not match observation contract v3u3"):
-            unpack_package(self.v3_package(observation=v3u_hash(3), inputs=517, user_inputs={"count": 2, "init": [0, 0]}))
-        with self.assertRaisesRegex(ValueError, "input count must be 517 for 3 user inputs"):
-            unpack_package(self.v3_package(observation=v3u_hash(3), inputs=OBSERVATION_V2_SIZE + 3,
-                                           user_inputs={"count": 3, "init": [0, 0, 0]}))
-        with self.assertRaisesRegex(ValueError, "package and actor contract mismatch"):
-            unpack_package(self.v3_package(observation=v3u_hash(3), inputs=517, actor_observation=v2u_hash(3),
-                                           user_inputs={"count": 3, "init": [0, 0, 0]}))
-        with self.assertRaisesRegex(ValueError, "need package schema 2"):
-            unpack_package(self.v3_package(observation=v3u_hash(3), inputs=517, schema="paintbot-neural-basic/1",
-                                           user_inputs={"count": 3, "init": [0, 0, 0]}))
-        # v2u<K> keeps v2's width: a v2u3 manifest over a 517-input actor is refused as before.
-        with self.assertRaisesRegex(ValueError, "input count must be 509 for 3 user inputs"):
-            unpack_package(self.v3_package(observation=v2u_hash(3), inputs=517, user_inputs={"count": 3, "init": [0, 0, 0]}))
 
 
 def layout_word(section, field, addend=0):
@@ -894,45 +827,51 @@ def layout_word(section, field, addend=0):
     return LAYOUT_WORD_PREFIX | (section << 12) | (field << 8) | addend
 
 
-class FfaV2PackageTests(unittest.TestCase):
-    """Observation contract ffa.v2 + action contract ffa.v2 pointer bundles, layout words, ATTN_POOL, PAD, token
-    caps of 256 and the seat-scaled budget: staging mirrors neural_host.nim / neural_actor.nim."""
-    FFA, POINTER = OBSERVATION_CONTRACT_FFA_V2_HASH, ACTION_CONTRACT_FFA_V2_POINTER_HASH
+class FfaView1PackageTests(unittest.TestCase):
+    """Observation contract ffa.view.1 + action contract ffa.view.1 pointer bundles, layout words, ATTN_POOL, PAD,
+    token caps of 256 and the seat-scaled budget: staging mirrors neural_host.nim / neural_actor.nim."""
 
-    def bundle(self, model, decoder=None, obs=None, act=None, seats=16):
-        overrides = {"schema": "paintbot-neural-basic/2", "observation_contract": obs or self.FFA,
-                     "action_contract": act or self.POINTER}
+    def bundle(self, model, decoder=None, obs=FFA, act=POINTER, seats=16):
+        overrides = {**SCHEMA2, "observation_contract": obs, "action_contract": act}
         if decoder is not None:
             overrides["decoder"] = decoder
         return unpack_package(package(overrides, model=model), seats)
 
     def test_contract_ids(self):
-        self.assertEqual(self.FFA, hashlib.sha256(b"paintbot-pw.rules48.obs.ffa.v2").hexdigest())
-        self.assertEqual(self.POINTER, hashlib.sha256(b"paintbot-pw.rules48.action.ffa.v2.pointer").hexdigest())
+        self.assertEqual(FFA, sha("paintbot-pw.ffa.view.1"))
+        self.assertEqual(POINTER, sha("paintbot-pw.ffa.view.1.action.pointer"))
 
     def test_pairing_and_pointer_decoder_options(self):
-        model = pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=self.FFA, act=self.POINTER)
-        self.bundle(model)
-        self.bundle(model, {"sampling": {"mode": "categorical", "temperature": 0.5}})
-        with self.assertRaisesRegex(ValueError, "not available under action contract ffa.v2 pointer"):
-            self.bundle(model, {"aim_snap": {}})
-        with self.assertRaisesRegex(ValueError, "needs action contract ffa.v2 pointer"):
-            self.bundle(pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=self.FFA, act=ACT),
-                        act=ACT)
-        with self.assertRaisesRegex(ValueError, "needs action contract ffa.v2 pointer"):
-            self.bundle(pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=OBS, act=self.POINTER),
-                        obs=OBS)
+        self.assertEqual(self.bundle(FFA_MODEL)[1], FFA_MODEL)
+        self.bundle(FFA_MODEL, {"sampling": {"mode": "categorical", "temperature": 0.5}})
+        with self.assertRaisesRegex(ValueError, "not available under action contract ffa.view.1 pointer"):
+            self.bundle(FFA_MODEL, {"forbid_objectives": [9]})
+        with self.assertRaisesRegex(ValueError, "aim_snap was %s" % RETIRED):
+            self.bundle(FFA_MODEL, {"aim_snap": {}})
+        pairing = "ffa.view.1 with ffa.view.1 pointer"
+        with self.assertRaisesRegex(ValueError, pairing):
+            self.bundle(pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=FFA, act=ACT), act=ACT)
+        with self.assertRaisesRegex(ValueError, pairing):
+            self.bundle(pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=TEAMS, act=POINTER), obs=TEAMS)
+        with self.assertRaisesRegex(ValueError, "contract mismatch"):
+            self.bundle(pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=TEAMS, act=ACT))
 
     def test_layout_words_are_left_to_the_engine(self):
         words = pwnet2(layout_word(14, 0), [2, 2, 2], [(7, [layout_word(0, 0), 1, 0, 0, 1],
                                                         [layout_word(0, 1), layout_word(0, 2), 44, 8], 8 * 44 + 8),
-                                                       (1, [16, 6], [], 16 * 6)], obs=self.FFA, act=self.POINTER)
+                                                       (1, [16, 6], [], 16 * 6)], obs=FFA, act=POINTER)
         info = validate_pwnet2(words)
         self.assertTrue(info["layout_dependent"])
-        self.assertEqual(info["observation_contract"], self.FFA)
+        self.assertEqual(info["observation_contract"], FFA)
         self.bundle(words)
         with self.assertRaisesRegex(ValueError, "contract mismatch"):
-            validate_pwnet2(words, OBS, ACT)
+            validate_pwnet2(words, TEAMS, ACT)
+        # Layout words need ffa.view.1: the same actor over teams.view.1 is refused.
+        teams_words = pwnet2(layout_word(14, 0), [2, 2, 2], [(7, [layout_word(0, 0), 1, 0, 0, 1],
+                                                              [layout_word(0, 1), layout_word(0, 2), 44, 8], 8 * 44 + 8),
+                                                             (1, [16, 6], [], 16 * 6)])
+        with self.assertRaisesRegex(ValueError, "layout words need observation contract ffa.view.1"):
+            unpack_package(package(model=teams_words))
 
     def test_attn_pool_pad_and_exposed_attention_cost_as_the_engine(self):
         # neural_actor.nim's test model (test_paintbot_neural_layers): 17,686 operations.
@@ -941,28 +880,33 @@ class FfaV2PackageTests(unittest.TestCase):
             (8, [0, 6], [], 6 * 8 + 6 + 6 * 16),
             (11, [0, 2, 4, 3], [], 8 * 28 + 8 + 8 * 8 + 8 + 6 * 8 + 6),
             (1, [34, 12], [], 34 * 12),
-            (9, [0, 4], [], 8 + 1)])
+            (9, [0, 4], [], 8 + 1)], obs=FFA, act=POINTER)
         info = validate_pwnet2(model)
         self.assertEqual(info["operations"], 17686)
         self.assertEqual(attn_pool_ops(8, 8, 28, 2, 4, 3), 2836)
-        padded = pwnet2(8, [2, 2, 2, 2], [(1, [8, 4], [], 32), (12, [2, 4], [], 0)])
+        padded = pwnet2(8, [2, 2, 2, 2], [(1, [8, 4], [], 32), (12, [2, 4], [], 0)], obs=FFA, act=POINTER)
         self.assertEqual(validate_pwnet2(padded)["operations"], 2 * 8 * 4 + 8)
         with self.assertRaisesRegex(ValueError, "PAD position beyond width"):
-            validate_pwnet2(pwnet2(8, [2, 2, 2, 2], [(1, [8, 4], [], 32), (12, [5, 4], [], 0)]))
+            validate_pwnet2(pwnet2(8, [2, 2, 2, 2], [(1, [8, 4], [], 32), (12, [5, 4], [], 0)], obs=FFA, act=POINTER))
         with self.assertRaisesRegex(ValueError, "ATTN_POOL source"):
-            validate_pwnet2(pwnet2(8, [2, 2, 2], [(1, [8, 4], [], 32), (11, [0, 1, 2, 2], [], 0)]))
+            validate_pwnet2(pwnet2(8, [2, 2, 2], [(1, [8, 4], [], 32), (11, [0, 1, 2, 2], [], 0)], obs=FFA, act=POINTER))
 
     def test_token_cap_is_256(self):
-        ok = pwnet2(512, [2, 2, 2], [(7, [256, 1, 0, 0, 1], [0, 2, 2, 4], 4 * 2 + 4), (1, [8, 6], [], 48)])
+        ok = pwnet2(512, [2, 2, 2], [(7, [256, 1, 0, 0, 1], [0, 2, 2, 4], 4 * 2 + 4), (1, [8, 6], [], 48)],
+                    obs=FFA, act=POINTER)
         validate_pwnet2(ok)
         with self.assertRaisesRegex(ValueError, "TOKEN_MLP tokens must be 1..256"):
-            validate_pwnet2(pwnet2(1024, [2, 2, 2], [(7, [257, 1, 0, 0, 1], [0, 2, 2, 4], 4 * 2 + 4), (1, [8, 6], [], 48)]))
+            validate_pwnet2(pwnet2(1024, [2, 2, 2], [(7, [257, 1, 0, 0, 1], [0, 2, 2, 4], 4 * 2 + 4), (1, [8, 6], [], 48)],
+                                   obs=FFA, act=POINTER))
 
     def test_budget_scales_with_seats(self):
         self.assertEqual((neural_budget(16), neural_budget(8), neural_budget(50)), (4000000, 4000000, 12500000))
         # 2 * 2000 * 1024 = 4,096,000 operations: over the 16-seat budget, within 50 seats'.
-        big = pwnet2(2000, [512, 512], [(1, [2000, 1024], [], 2000 * 1024)], obs=self.FFA, act=self.POINTER)
+        big = pwnet2(2000, [512, 512], [(1, [2000, 1024], [], 2000 * 1024)], obs=FFA, act=POINTER)
         with self.assertRaisesRegex(ValueError, "operation budget"):
             self.bundle(big)
         self.bundle(big, seats=50)
 
+
+if __name__ == "__main__":
+    unittest.main()

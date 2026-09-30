@@ -4,9 +4,12 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* v1 buffers: 16 seats, 448 floats/seat (observation contract v1; a handle from
- * pw_create_observation(..., 2) writes 506, (..., 101) writes 810, (..., 102) a per-match
- * width at any seat count: see pw_set_seats below), 5 int32 actions/seat.
+/* Buffers: 16 seats, 512 floats/seat (observation contract teams.view.1; a handle from
+ * pw_create_observation(..., 202) writes a per-match width at any seat count: see
+ * pw_set_seats below), 5 int32 actions/seat. Every observation column is a value the seat's
+ * BASIC builtins can read (docs/neural/seat-view.md), and pw_step's actions reach the engine
+ * only through the reference decoder script (players/neural_decode.bas). The contracts
+ * before teams.view.1 / ffa.view.1 were retired for BASIC parity.
  * Output reset masks are independent of match terminals. Handles are exclusive
  * to one call at a time. Caller provides correctly sized non-null buffers. */
 int pw_env_version(void);
@@ -64,10 +67,9 @@ int pw_seat_orders(void *handle, int seat, int32_t *ten);
  * direct} (flags 0/1) on the NEXT pw_step only, built as BASIC's orders build a command:
  * the goal verbatim (walkTo; the world clamps where it walks and stores the point), the aim
  * clamped to the map (lookAt/shootAt; (0,0) = no aim order). For that step the seat's
- * action heads are neither decoded nor checked against its forbid mask (no decoder option
- * runs for it and its contract-v2 aim memory is not recorded); a scripted seat's script
- * still runs but its order is replaced. The fire hold and fire period apply only if already
- * set on the seat (off by default). pw_seat_orders echoes the executed command (an
+ * action heads are neither decoded nor checked against its forbid mask; a scripted seat's
+ * script still runs but its order is replaced. A harness tool, not a seat. The fire period
+ * applies only if already set on the seat (off by default). pw_seat_orders echoes the executed command (an
  * unscripted seat reports zeros again after a step without one). A second call before the
  * step replaces the first; pw_reset drops it. A library whose caller never calls it is
  * byte-identical to one without it. Returns 0, -1 bad args. */
@@ -87,67 +89,35 @@ int pw_set_seat_command(void *handle, int seat, const int32_t *nine);
  * glory as before). 1000 is exact. Returns 0, -1 bad args. */
 int pw_set_seat_fire_period(void *handle, int seat, int32_t period);
 int pw_set_seat_damage_scale(void *handle, int seat, int32_t permille);
-/* Action contract selection (additive to v1). pw_set_action_contract chooses how the
- * caller's actions (and the Nim bot's, and an override-mapped scripted seat's) are
- * decoded: 1 = contract v1 "paintbot-pw.rules37.action.v1.51-25-2-2-2" (an identity aim
- * is the body's current position; the default, byte-identical to a library without this
- * call), 2 = contract v2 "paintbot-pw.rules37.action.v2.51-25-2-2-2" (an identity aim is
- * the body's lead-compensated aim point: body + 6*u - 5*v with u the body's last-tick
- * displacement as the seat itself could observe it (zero on a first tick, gap, respawn
- * or teleport) and v the move the seat's own movement/sneak heads order this tick; see
- * neural_contract.nim). Same head sizes; movement, directional aim, fire, grenade and
- * sneak decode identically. Kept across pw_reset; the per-seat one-tick aim memory v2
- * reads is cleared here and by every reset, and, as the hosted seat clears it
- * (neural_host.beginTick), on every decided tick the seat is dead or alive after a tick it
- * was dead (so a respawned seat's first leads are the hosted seat's).
- * Returns 0, -1 for a bad handle or version.
- * pw_action_contract returns the selected version.
- * pw_action_contract_hash writes the 64-hex SHA-256 an actor and manifest must carry to
- * be decoded under that version (NUL-terminated, capacity >= 65). */
+/* Action contracts. teams.view.1 (version 11, "paintbot-pw.teams.view.1.action.51-25-2-2-2"),
+ * its aim-offset variant (13, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23": the five
+ * heads, then two 23-bin heads x, z; the reference decode adds ((ix - 11) * 28, (iz - 11) * 28),
+ * mirrored for team 1, to an identity aim) and ffa.view.1 pointer (12,
+ * "paintbot-pw.ffa.view.1.action.pointer"). pw_set_action_contract selects the contract
+ * pw_step reads the caller's heads under: 11 (default) or 13 on a 201 handle, 12 only on a 202
+ * handle; kept across pw_reset; 0, or -1 bad args. Under 13 a seat's action row is seven
+ * int32 and pw_action_layout returns -1: use pw_action_layout_ext (int32[10] = {heads, seven
+ * head-size slots, logits per seat, 0}). pw_action_contract returns the handle's;
+ * pw_action_contract_hash writes the 64-hex SHA-256 an actor and manifest carry
+ * (NUL-terminated, capacity >= 65; -1 for another version). What each head index means is
+ * the seat's policy.bas's to decide; pw_step decodes a caller-driven seat's heads with the
+ * reference decoder script (players/neural_decode.bas, neural_decode_ffa.bas) through the
+ * seat's SeatView, as a hosted policy.bas does. */
 int pw_set_action_contract(void *handle, int32_t version);
+int pw_action_layout_ext(void *handle, int32_t *ten);
 int pw_action_contract(void *handle);
 int pw_action_contract_hash(int32_t version, char *sixty_five_bytes, int32_t capacity);
-/* Demonstration-mapping diagnostic: the point every movement head index (51 x {x, z})
- * and aim head index (25 x {x, z}) resolves to for the seat on the current pre-step
- * world under the selected contract, exactly as the coming pw_step would decode it
- * (a v2 identity aim depends on the movement and sneak head indices given, through the
- * seat's planned move). Index 0 is the seat's position / current aim. Candidates that do not exist now
- * (missing heart, unavailable or unseen pickup, identity nobody visible carries) and
- * every entry of a dead seat are INT32_MIN in both coordinates. Reads only. */
-int pw_action_candidates(void *handle, int seat, int32_t movement, int32_t sneak,
-                         int32_t *goals_51x2, int32_t *aims_25x2);
 /* Mapping-ceiling diagnostics (pw-bc). pw_script_decide runs the scripted seats'
  * decision for the current tick now (once; later calls before the next pw_step are
  * no-ops) so pw_seat_orders reports the orders the coming pw_step will execute; with
  * every override mask 0 the world is byte-identical whether or not it is called.
  * Returns 1 decided, 0 nothing to do, -1 bad handle. pw_set_seat_override makes a
- * scripted seat execute the caller's decoded action for the masked heads instead of its
+ * scripted seat execute the caller's action (decoded by the reference decoder script) for the masked heads instead of its
  * script's order (bits: 1 walk/goal/direct, 2 aim, 4 shoot, 8 grenade, 16 sneak; 0 =
  * exact script play); the script still runs and reports its orders. Kept across
  * pw_reset. Returns 0, -1 bad args. */
 int pw_script_decide(void *handle);
 int pw_set_seat_override(void *handle, int seat, int32_t mask);
-/* Decoder fire hold (additive; the hosted bundle option decoder.fire_hold_teammates so
- * training and deployment agree). With enabled = 1 the seat's final shoot order on every
- * pw_step, whoever issued it (the caller's decoded action, the Nim bot, a script, an
- * override mix), is dropped when a teammate the seat can see (fog-gated, apparent team,
- * the gun's line-of-sight test) stands within the gun's hit tolerance (Radius = 55) of
- * the segment from the seat to the aim the order leaves and no farther along it than
- * the aim point; the aim, movement and every other head stand, so the network keeps
- * choosing fire and the decoder gates it. Action candidates and contract hashes are
- * untouched. 0 (the default) is byte-identical to a library without this call. Kept
- * across pw_reset. Returns 0, -1 bad args. pw_seat_fire_held: the orders held for the
- * seat since the last create/reset (telemetry; 0 with the hold off; -1 bad args). */
-int pw_set_seat_fire_hold(void *handle, int seat, int32_t enabled);
-int pw_seat_fire_held(void *handle, int seat);
-/* Fire-hold radius (additive; decoder.fire_hold_teammates {"radius": r}).
- * pw_set_seat_fire_hold_radius(handle, seat, r) with r in 1..2000: the seat's hold
- * (pw_set_seat_fire_hold) tests teammates within r of the line of fire instead of 55; 0
- * restores 55 (the default; byte-identical). It does not turn the hold on. Kept across
- * pw_reset. Returns 0, -1 bad args. pw_seat_fire_hold_radius: the effective radius (55
- * unless set), -1 bad args. */
-int pw_set_seat_fire_hold_radius(void *handle, int seat, int32_t radius);
-int pw_seat_fire_hold_radius(void *handle, int seat);
 /* Decoder sampling (additive; the hosted bundle option decoder.sampling so probes and
  * deployment draw alike). pw_set_seat_sampling: temperature_permille 10..10000 (0.01..10.0)
  * turns categorical sampling on for the heads in head_mask (bit h = head h; 0 = every
@@ -169,112 +139,14 @@ int pw_seat_sample_draws(void *handle, int seat);
  * pw_set_seat_forbid_objectives: the `count` movement-head indices (distinct, 0..50, fewer
  * than 51) are never selected for the seat by pw_sample_actions (argmax or draw, as if
  * their logits were -inf), and pw_step returns -3 without stepping when the caller hands
- * one of them for a live seat whose actions it decodes; count 0 clears (indices may be NULL).
+ * one of them for a live caller-driven seat; count 0 clears (indices may be NULL).
  * Kept across pw_reset; -1 bad args. pw_seat_forbidden_objectives: mask int32[51] (may be
  * NULL) gets 1 per forbidden index, 0 otherwise (the trainer's logit mask); returns the
  * count, -1 bad args. No seat forbidding anything = byte-identical to before. */
 int pw_set_seat_forbid_objectives(void *handle, int seat, const int32_t *indices, int32_t count);
 int pw_seat_forbidden_objectives(void *handle, int seat, int32_t *mask);
-/* Decoder strafe legs (additive; the hosted bundle option decoder.strafe_legs, base.bas's
- * contact footwork). pw_set_seat_strafe with range > 0: on every pw_step while the seat sees
- * an apparent enemy within range and is not in a trench, the caller's movement index for it
- * is replaced by a compass leg (43..50) perpendicular to the nearest such enemy, turned 3/4
- * lateral plus the direction to the heart/pickup the caller's index names, held leg_min..
- * leg_max ticks, or shot_min..shot_max when a shoot order the gun can take starts it (a
- * ready shot with fewer than shot_min ticks left starts a new leg), reversing across the
- * line with probability reverse_permille/1000 per new leg; draws from the seat's own stream
- * seeded from the match seed and the slot exactly as the hosted seat seeds it. Defaults of
- * the bundle option: 5250, 3, 6, 6, 9, 800. range 0 = off (the default; byte-identical).
- * Kept across pw_reset (legs and stream reset); -1 bad args (1 <= leg_min <= leg_max <= 72,
- * 6 <= shot_min <= shot_max <= 72, range <= 20000, 0 <= permille <= 1000).
- * pw_seat_strafe_stats: int32[3] = {legs started, decisions replaced (since create/reset),
- * movement index executed on the last pw_step or -1 if the caller's stood}; -1 bad args. */
-int pw_set_seat_strafe(void *handle, int seat, int32_t range, int32_t leg_min, int32_t leg_max,
-                       int32_t shot_min, int32_t shot_max, int32_t reverse_permille);
-int pw_seat_strafe_stats(void *handle, int seat, int32_t *stats);
-/* Decoder aim snap (additive; the hosted bundle option decoder.aim_snap). pw_set_seat_aim_snap
- * with max_angle_millideg in 1..90000 (22500 = the bundle default 22.5 degrees): on every
- * pw_step a live caller-decoded seat's shoot order with a compass aim (17..24) takes the aim
- * index (1..16) of the apparent enemy identity it can see (fog-gated, apparent team) within
- * that angle of the compass heading, nearest in angle, then nearer body, then lower identity;
- * the identity candidate (contract v2: the lead aim point) is then what it aims at. Integer
- * geometry against threshold round(cos(angle) * 32768). 0 = off (the default; byte-identical).
- * Kept across pw_reset; -1 bad args. pw_seat_aim_snap_stats: int32[3] = {decisions snapped
- * (since create/reset), aim index executed on the last pw_step or -1 if the caller's stood,
- * the cosine threshold or 0 when off}; -1 bad args.
- * Decoder steady shot (additive; decoder.steady_shot). pw_set_seat_steady_shot(handle, seat,
- * 1): a live caller-decoded seat carrying the gun stands still (movement index 0) on the step
- * a shoot order the gun takes is decided (pre-step windup 0 and cooldown <= 1) and on every
- * step its windup runs (pre-step windup > 0), i.e. from the order until the ray leaves (six
- * decisions per shot; v2's own-drift term is then zero and true). 0 = off (the default;
- * byte-identical). Kept across pw_reset; -1 bad args or when the seat's forbid mask lists
- * index 0 (and pw_set_seat_forbid_objectives refuses index 0 while it is on).
- * pw_seat_steady_stats: int32[3] = {order ticks held, decisions held (since create/reset),
- * movement index executed on the last pw_step (0) or -1}; -1 bad args.
- * Order inside pw_step for one seat: aim snap, strafe, steady shot, decode, fire hold (a
- * steady-held step reports the strafe's executed index as -1). */
-int pw_set_seat_aim_snap(void *handle, int seat, int32_t max_angle_millideg);
-int pw_seat_aim_snap_stats(void *handle, int seat, int32_t *stats);
-int pw_set_seat_steady_shot(void *handle, int seat, int32_t enabled);
-int pw_seat_steady_stats(void *handle, int seat, int32_t *stats);
-/* Decoder aim retarget (additive; the hosted bundle option decoder.aim_retarget).
- * pw_set_seat_aim_retarget(handle, seat, 1, max_range, hp_weight, carry_weight) with
- * max_range in 1..20000 and both weights in 0..1000000000 (5250, 160000, 2500000 = base.bas's
- * rule and the bundle defaults): on every pw_step a live caller-decoded seat's shoot order
- * with an identity or compass aim (1..24) takes the aim index (1..16) of the visible apparent
- * enemy identity (the observation's identity block: fog-gated, apparent team) minimising
- * d^2 - (3 - hp) * hp_weight - carrying * carry_weight among those with d <= max_range, d
- * measured from the seat to the identity's aim candidate exactly as pw_action_candidates
- * reports it for the step's movement and sneak heads (contract v2: the lead point); ties go
- * to the lower identity; none qualifies = the order stands. enabled 0 = off (the default;
- * byte-identical; the other arguments are then ignored). Kept across pw_reset; -1 bad args.
- * pw_seat_aim_retarget_stats: int32[3] = {decisions whose aim it replaced (since
- * create/reset), aim index executed on the last pw_step or -1 if the caller's stood,
- * max_range or 0 when off}; -1 bad args.
- * Decoder shot gate (additive; decoder.shot_gate). pw_set_seat_shot_gate(handle, seat,
- * max_range) with max_range in 1..20000 (5250 = the bundle default): on every pw_step a live
- * caller-decoded seat's shoot order, as it stands after the aim retarget and the aim snap,
- * becomes no shot when its aim is still a compass index (17..24; no snap configured, or no
- * enemy in the snap's cone), when the snap aimed it at an enemy whose body lies beyond
- * max_range, or when it is an identity aim whose aim candidate lies beyond max_range. A keep
- * aim (0), and an identity aim within range or that no visible body carries, pass (pw-diag3's
- * --shot-gate). A dropped decision keeps its pre-snap aim head, so the strafe, the steady
- * shot and the fire hold see a decision without a shot. 0 = off (the default;
- * byte-identical). Kept across pw_reset; -1 bad args. pw_seat_shot_gate_stats: int32[3] =
- * {shoot orders dropped (since create/reset), shoot head executed on the last pw_step (0) or
- * -1 if the caller's stood, max_range or 0 when off}; -1 bad args.
- * Order inside pw_step for one seat: aim retarget, aim snap, shot gate, strafe, steady shot,
- * decode, fire hold. */
-int pw_set_seat_aim_retarget(void *handle, int seat, int32_t enabled, int32_t max_range,
-                             int32_t hp_weight, int32_t carry_weight);
-int pw_seat_aim_retarget_stats(void *handle, int seat, int32_t *stats);
-int pw_set_seat_shot_gate(void *handle, int seat, int32_t max_range);
-int pw_seat_shot_gate_stats(void *handle, int seat, int32_t *stats);
-/* Decoder spray options (additive; decoder.spray_aim / decoder.spray_gate). Both act only on
- * a live caller-decoded seat's shoot order while it holds a READY spray can (sprayCooldown 0,
- * so the order starts a burst this step), and judge the cone that order would produce on the
- * pre-step world: the aim the decode gives the heads, the seat's position, mechanics.nim
- * sprayTouches' geometry, over the bodies the seat can see under their apparent teams.
- * pw_set_seat_spray_aim(handle, seat, max_range) with max_range in 1..850 (850 = default):
- * the aim head becomes the visible apparent enemy identity (within max_range + Radius, clear
- * line) whose cone holds the most apparent enemies (ties: nearer body, lower hp, lower
- * identity); when no candidate's cone holds an enemy the order stands. 0 = off (default).
- * pw_seat_spray_aim_stats: int32[3] = {orders re-aimed, aim index executed on the last step
- * or -1, max_range or 0}. pw_set_seat_spray_gate(handle, seat, max_teammates, min_enemies)
- * with max_teammates 0..7 and min_enemies 0..8 (0, 1 = defaults): the order is dropped unless
- * its cone holds >= min_enemies apparent enemies and <= max_teammates apparent teammates;
- * max_teammates -1 = off (default; min_enemies ignored). pw_seat_spray_gate_stats: int32[4] =
- * {orders dropped, shoot head executed on the last step (0) or -1, max_teammates or -1,
- * min_enemies or -1}. Both are kept across pw_reset; off on every seat is byte-identical;
- * -1 bad args. Order inside pw_step: aim retarget, aim snap, spray aim, shot gate (whose drop
- * also undoes the spray aim), spray gate, strafe, steady shot, decode, fire hold.
- * pw_seat_spray_stats (training library only): int32[4] = {enemy damage, teammate damage,
- * enemy kills, teammate kills} dealt by the seat's spray since the last create/reset (health
- * removed, armor first; attribution = the damage's owner during the spray burst). */
-int pw_set_seat_spray_aim(void *handle, int seat, int32_t max_range);
-int pw_seat_spray_aim_stats(void *handle, int seat, int32_t *stats);
-int pw_set_seat_spray_gate(void *handle, int seat, int32_t max_teammates, int32_t min_enemies);
-int pw_seat_spray_gate_stats(void *handle, int seat, int32_t *stats);
+/* pw_seat_spray_stats (training library only): int32[4] = {enemy damage, teammate damage,
+ * enemy kills, teammate kills} dealt by the seat's spray since the last create/reset. */
 int pw_seat_spray_stats(void *handle, int seat, int32_t *stats);
 /* pw_seat_weapon_stats (training library only): int32[9] per seat, cumulative since the last
  * create/reset, attributed to the damage's owner, enemy victims only: {gun kills, grenade kills,
@@ -286,6 +158,18 @@ int pw_seat_spray_stats(void *handle, int seat, int32_t *stats);
  * slowdown), high = terrainHeight >= 216, trench = inside a trench; classes may overlap. Pure
  * telemetry, never part of the world or its hash; -1 bad args. */
 int pw_seat_weapon_stats(void *handle, int seat, int32_t *stats);
+/* pw_seat_privileged_labels (TRAINING-ONLY supervision labels; training_labels.nim): float[21]
+ * for the seat on the current pre-step world = {gun cooldown, gun windup, spray cooldown,
+ * shield, respawn (ticks), aim x, aim z, own heart meter, enemy heart meter (scoreTicks; 0 in
+ * FFA-kin), lead valid, lead x, lead z}: the lead is the retired contract-v2 formula for the
+ * nearest visible enemy body (body + 6 * its last-step displacement - 5 * the seat's planned
+ * step towards its current goal), then 9 traversable probes (the retired v1 cover probes: the
+ * seat's position and the 8 compass points 200 units out, mirrored for team 1; 1 = inside the
+ * map, not blocked and traversable from the seat). None of this is perceivable by a seat (docs/neural/
+ * seat-view.md): use it only as auxiliary-loss targets, never as a policy input. The hosted
+ * engine has no such call. 0, or -1 bad args. */
+#define PW_PRIVILEGED_LABELS 21
+int pw_seat_privileged_labels(void *handle, int seat, float *twenty_one);
 
 /* pw_seat_state (training library only): float[16 * 8], per seat in seat order {x, z (world
  * units), hp, armor, lives, respawn (ticks until the seat respawns, 0 while alive), carrying (1 =
@@ -306,26 +190,15 @@ int pw_world_json(void *handle, char *output, int32_t capacity);
  * (sim.elevation: terrain plus world features), for controllers that raster line of sight from
  * pw_world_json. Pure read; -1000000 for a nil handle. */
 int pw_elevation(void *handle, int32_t x, int32_t z);
-/* Observation contract selection (additive). pw_create_observation is pw_create with the
- * observation contract chosen, kept across pw_reset: 1 = v1
- * "paintbot-pw.rules37.obs.v1.float448" (identical to pw_create), 2 = v2
- * "paintbot-pw.rules37.obs.v2.float506" = v1's 448 floats unchanged in columns 0..447,
- * then a 58-float public terrain block (self wet, self height; per heart 0..9 wet and
- * height delta; per apparent identity 0..15 wet and height delta, zero when v1's slot is
- * empty; visible apparent enemies wet/dry and teammates wet/dry, each /8; heights are
- * elevation/800; see neural_actor.md), 101 = ffa.v1 "paintbot-pw.rules40.obs.ffa.v1.float810"
- * (FFA-kin; no map flip; offsets: self 0..7, identity row j at 8+42j, heart row i at
- * 680+6i, great heart row g at 740+6g, terrain block 752..809; neural_contract.nim
- * encodeFfaObservation documents every column), 3 = v3
- * "paintbot-pw.rules43.obs.v3.float514" = v2's 506 floats unchanged, then an 8-float
- * scoreboard block from the seat's team's side {own lives left / 32, enemy lives left / 32,
- * own glory / 1000, enemy glory / 1000, behind-in-lives award / 10, its period in seconds
- * / 60, quiet-supplies award / 100, max(0, end_tick - tick) / max(1, end_tick)}
- * (neural_contract.encodeScoreboardBlock; the teams game only: pw_set_game_mode refuses
- * FFA-kin on a v3 handle). NULL for any other version or a bad max_ticks.
- * pw_observe / pw_observe_seats rows are then that many floats apart. The contract never
- * touches the world or its hash. pw_observation_size() stays 448;
- * pw_observation_size_for(version) = 448 / 506 / 514 / 810 (-1 unknown); pw_handle_observation_size
+/* Observation contract selection. pw_create_observation is pw_create with the observation
+ * contract chosen, kept across pw_reset: 201 = teams.view.1 "paintbot-pw.teams.view.1"
+ * (identical to pw_create; 512 floats; the teams game only: pw_set_game_mode refuses FFA-kin
+ * on the handle), 202 = ffa.view.1 "paintbot-pw.ffa.view.1" (FFA-kin at any seat count; see
+ * below). neural_contract.nim encodeTeamsView / encodeFfaView document every column; each
+ * is computed from the seat's SeatView. NULL for any other version (1, 2, 3, 101 and 102
+ * were retired for BASIC parity) or a bad max_ticks. pw_observe / pw_observe_seats rows are
+ * then that many floats apart. pw_observation_size() = 512; pw_observation_size_for(201) =
+ * 512 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
  * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
  * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
  * 0, or -1 bad args). */
@@ -334,40 +207,33 @@ int pw_observation_size_for(int32_t obs_version);
 int pw_handle_observation_size(void *handle);
 int pw_observation_contract(void *handle);
 int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, int32_t capacity);
-/* Neural BASIC I/O (PLAN-neural-basic-io), training side; every call additive, and a
- * handle that never uses them is byte-identical to one without them.
- * pw_create_observation_inputs: observation contract v2u<K>
- * "paintbot-pw.rules39.obs.v2u<K>" (K = user_inputs, 1..128; 0 = pw_create_observation(.., 2)):
- * every pw_observe row is v2's 506 floats followed by K floats, a policy seat's user inputs
- * as its policy.bas left them (float32(v) / 1000: what its next decision's observation
- * reads), zeros for every other seat. pw_handle_user_inputs = the handle's K;
- * pw_handle_observation_size = 506 + K; pw_user_inputs_contract_hash writes the v2u<K>
- * SHA-256 (0, or -1 bad args).
- * pw_create_observation_inputs_v(seed, max_ticks, obs_version, user_inputs): the same with
- * the base contract chosen, obs_version 2 = v2u<K> (identical to
- * pw_create_observation_inputs) or 3 = v3u<K> "paintbot-pw.rules43.obs.v3u<K>" (v3's 514
- * floats, then the K user-input floats; pw_handle_observation_size = 514 + K); K = 0 is
- * pw_create_observation(.., obs_version). pw_user_inputs_contract_hash_v(obs_version,
- * user_inputs, ...) writes the v2u<K> or v3u<K> SHA-256 (0, or -1 bad args).
+/* Neural BASIC I/O, training side.
+ * pw_create_observation_inputs: observation contract teams.view.1u<K>
+ * "paintbot-pw.teams.view.1u<K>" (K = user_inputs, 1..128; 0 = pw_create): every pw_observe
+ * row is teams.view.1's 512 floats followed by K floats, a policy seat's user inputs as its
+ * policy.bas left them (float32(v) / 1000: what its next decision's observation reads),
+ * zeros for every other seat. pw_handle_user_inputs = the handle's K;
+ * pw_handle_observation_size = 512 + K; pw_user_inputs_contract_hash writes the
+ * teams.view.1u<K> SHA-256 (0, or -1 bad args). The _v forms take obs_version 201 only.
  * pw_set_seat_policy_script: the seat runs a bundle's policy.bas under its manifest.json
- * exactly as the hosted neural seat does (decoder options, sampling, user inputs, action
- * contract; the seat's own sampling and strafe streams from the match seed and slot), with
- * no actor: run_neural_net yields the seat's row of the logits passed to pw_step_logits.
- * The manifest's observation_contract must be the handle's. Rebuilt on pw_reset; length 0
- * removes it; pw_set_seat_script on the seat replaces it. Per-seat decoder setters do not
+ * exactly as the hosted neural seat does (selection options, user inputs, action contract;
+ * the seat's own sampling stream from the match seed and slot), with no actor:
+ * run_neural_net yields the seat's row of the logits passed to pw_step_logits. The
+ * manifest's observation_contract must be the handle's. Rebuilt on pw_reset; length 0
+ * removes it; pw_set_seat_script on the seat replaces it. Per-seat selection setters do not
  * apply to it. 0 running, 1 compile failed, 2 manifest rejected (text in
  * pw_seat_script_status), -1 bad args. While any policy seat is installed pw_step and
  * pw_script_decide return -4.
- * pw_step_logits: pw_step with logits = float[16 * 82] in seat order (only policy seats'
- * rows are read). The trainer runs the actor on the seat's pw_observe row every tick the
- * seat is alive, its recurrent state cleared as the host clears it (dead, alive after a
- * death, new match).
+ * pw_step_logits: pw_step with logits = float[n * logits per seat] in seat order (only
+ * policy seats' rows are read). The trainer runs the actor on the seat's pw_observe row every
+ * tick the seat is alive, its recurrent state cleared as the host clears it (dead, alive
+ * after a death, new match).
  * pw_seat_policy_choices: int32[22] of the last step = {decided, selected[5], final[5],
  * temperature_milli[5], mask0 bits 0..31, mask0 bits 32..50, mask1, mask2, mask3, mask4}:
- * decided = the script selected this step; selected = the heads drawn under the applied
- * masks and temperatures (the trainer's log-probability target); final = the heads decoded
- * (-1 if never decoded); temperature 0 = argmax; mask bit i = choice i excluded. -1 bad args
- * or not a policy seat. */
+ * decided = the script selected this step (neuralSample); selected = the heads drawn under
+ * the applied masks and temperatures (the trainer's log-probability target); final = the
+ * choices after the script's neuralSetChoice calls; temperature 0 = argmax; mask bit i =
+ * choice i excluded. -1 bad args or not a policy seat. */
 void *pw_create_observation_inputs(int32_t seed, int32_t max_ticks, int32_t user_inputs);
 int pw_handle_user_inputs(void *handle);
 int pw_user_inputs_contract_hash(int32_t user_inputs, char *sixty_five_bytes, int32_t capacity);
@@ -379,6 +245,19 @@ int pw_set_seat_policy_script(void *handle, int seat, const char *bas, int32_t b
 int pw_step_logits(void *handle, const int32_t *actions, const float *logits, float *rewards,
     float *terminals);
 int pw_seat_policy_choices(void *handle, int seat, int32_t *twenty_two);
+/* pw_seat_policy_offset_choices: a policy seat's aim-offset heads (action contract 13) on the
+ * last pw_step_logits, int32[6] = {selected5, selected6, final5, final6, temperature_milli5,
+ * temperature_milli6}; zeros when the seat did not select. -1 bad args, not a policy seat, or
+ * no aim-offset heads.
+ * pw_set_seat_conditionals: a policy seat's COND_HEAD layers held by the trainer: count pairs
+ * (condition head, re-selected head) in heads[2 * count], their weights (size(head) x
+ * size(condition head), row-major) concatenated in that order; replaces the seat's previous
+ * ones from its next selection, kept across pw_reset (count 0 clears). A zero weight column
+ * takes no draw. 0; -1 bad args or not a policy seat; -2 against COND_HEAD's rules (or with
+ * decoder.joint_sampling). */
+int pw_seat_policy_offset_choices(void *handle, int seat, int32_t *six);
+int pw_set_seat_conditionals(void *handle, int seat, int32_t count, const int32_t *heads,
+                             const float *weights, int32_t weight_count);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
 /* Terrain table of the handle's rules and map (shared by every handle and thread of the process
@@ -421,7 +300,7 @@ int pw_net_infer(void *net, const float *observation, float *state, float *logit
  * match's rewards sum to R_i / 4320. The teams reward is unchanged.
  * Fog of war (rules 48, pw_set_rules(h, 48) or later): the agent-facing observations
  * (pw_observe*, and what policy seats read) never show a cog the observing seat cannot see:
- * ffa.v1 zeroes that seat's identity row, and scripted and policy seats' BASIC kin / gene /
+ * ffa.view.1 carries only the agents the seat sees, and every seat's BASIC kin / gene /
  * seatScore / seatAlive read -1 for it. The reads below are PRIVILEGED trainer/eval reads of
  * the whole match (reward and logging), unmasked at every rules: never feed them to a policy.
  * Reads (current world): pw_kin float[256] r(i,j) at [16i+j] (zeros in teams);
@@ -453,8 +332,8 @@ int pw_net_infer(void *net, const float *observation, float *state, float *logit
  * genes uint32[16], ibd int8[256] (0..32, symmetric, 32 on the diagonal; r = ibd/32),
  * family NULL clears, wins over the layout (the override's layout is a label only). The engine
  * reads the ibd matrix (the FFA territory boost, sim.territoryBoost) but never the genes. Both apply at the NEXT pw_reset and stay until
- * cleared. pw_set_obs_mask: bit 0 zeroes every r-to-me column of ffa.v1 (the genes-only
- * ablation; the own row reads 0 too, as does the own row's territory-boost column), read
+ * cleared. pw_set_obs_mask: bit 0 zeroes every kin column of ffa.view.1 (the genes-only
+ * ablation; the territory-boost header column too), read
  * by the next pw_observe, kept across resets;
  * other bits rejected. pw_set_pair_stats_enabled(h, 0/1): pair counters off/on (default
  * on; off skips their per-tick work, from the next pw_step, kept across resets); the
@@ -509,53 +388,41 @@ int pw_rules_latest(void);
 int pw_set_rules(void *handle, int32_t version);
 int pw_rules(void *handle);
 int pw_set_config_json(void *handle, const char *json, int32_t length, char *error, int32_t capacity);
-/* Observation contract ffa.v2 and N-seat handles (additive; a handle that never calls these
- * is byte-identical to one from a library without them).
- * pw_create_observation(seed, max_ticks, 102): observation contract ffa.v2
- * "paintbot-pw.rules48.obs.ffa.v2" (SHA-256 d0a10cee...), FFA-kin at any seat count: a 24-float
- * header (the seat's own state and match constants only), then the cog section (seats - 1
- * rows of 44 floats: ONLY the cogs the seat can see, nearest first, ties by seat id; every row
- * after them is all zero), the control heart section (one 12-float row per heart, nearest
- * first) and the great heart section (2 rows of 12). Column 0 of every row is its valid flag.
- * neural_contract.encodeFfaV2Observation documents every column. The row width follows the
- * match (seats and control hearts), so it is fixed per match, not per contract:
- * pw_observation_size_for(102) = -1; read pw_handle_observation_size after each reset.
- * pw_set_seats(h, n): the seat count from the NEXT pw_reset on, 2..256; n != 16 needs a 102
- * handle without user inputs (-1 otherwise). Kept across resets; a reset that changes the
- * count re-creates every per-seat setting at its default (knobs, decoder options, scripts and
- * policy seats removed). pw_seats(h): the current world's count (-1 NULL). Every per-seat
- * buffer follows it: pw_observe rows (seat s at s * pw_handle_observation_size; pw_observe_seats
- * can select seats 0..31 only), pw_step actions n*5 / rewards n / terminals n, pw_kin n*n at
- * [n*i+j], pw_genes n, pw_scores n, pw_reward_split 2n, pw_kin_seat_stats 3n, pw_pair_stats
- * n*n*13 at [(n*i+j)*13+stat], pw_seat_stats 8n, pw_seat_state 8n. The eval overrides
- * pw_set_spawn_grouping and pw_set_kin_override are 16-seat tables and apply to 16-seat
- * worlds only. With more than 16 seats pw_step returns -5 (nothing stepped) while any seat
- * would decode the caller's heads: action contracts v1 and v2 address 16 identities, so every
- * seat must be scripted (pw_set_seat_script) or given a raw command (pw_set_seat_command);
- * pw_bot_actions and pw_action_candidates return -1 there.
+/* Observation contract ffa.view.1 and N-seat handles.
+ * pw_create_observation(seed, max_ticks, 202): observation contract ffa.view.1
+ * "paintbot-pw.ffa.view.1", FFA-kin at any seat count: a 24-float header (the seat's own
+ * state and match constants), then the cog section (min(seats - 1, 64) rows of 44 floats:
+ * exactly the seat's nearAgents(20000) list, nearest first, ties by identity; every row after
+ * it all zero), the control heart section (one 12-float row per heart, nearest first) and the
+ * great heart section (2 rows of 12). Column 0 of every row is its valid flag. The row width
+ * follows the match, so read pw_handle_observation_size after each reset.
+ * pw_set_seats(h, n): the seat count from the NEXT pw_reset on, 2..256; n != 16 needs a 202
+ * handle (-1 otherwise). Kept across resets; a reset that changes the count re-creates every
+ * per-seat setting at its default (knobs, scripts and policy seats removed). pw_seats(h): the
+ * current world's count (-1 NULL). Every per-seat buffer follows it: pw_observe rows,
+ * pw_step actions n*5 / rewards n / terminals n, pw_kin n*n at [n*i+j], pw_genes n,
+ * pw_scores n, pw_reward_split 2n, pw_kin_seat_stats 3n, pw_pair_stats n*n*13,
+ * pw_seat_stats 8n, pw_seat_state 8n. The eval overrides pw_set_spawn_grouping and
+ * pw_set_kin_override apply to 16-seat worlds only; pw_bot_actions returns -1 in FFA-kin.
  * pw_observation_layout(h, int32[16]): [row floats, header floats, cog offset, cog rows, cog
  * width, heart offset, heart rows, heart width, great offset, great rows, great width, valid
- * column, seats, control hearts, 0, 0] for the current world (other contracts: [row floats,
- * row floats, 0 x 9, -1, seats, control hearts, 0, 0]). pw_observation_rows(h, seat, int32
- * *out, capacity): the seat's row -> entity map for the observation pw_observe writes before
- * the next pw_step, laid out like the sections: seats - 1 cog-row seat ids (-1 past the seen
- * cogs), then the heart rows' control heart indices, then the 2 great heart indices; returns
- * that count and writes only when capacity holds it (capacity 0 sizes the buffer); -1 bad
- * args or not a 102 handle. All return 0 unless stated, -1 bad args.
- * Action contract ffa.v2 pointer (additive): pw_set_action_contract(h, 3) on a 102 handle
- * (-1 on any other; pw_action_contract_hash(3, ...) writes 068fc981...). The five heads are
- * sized by the current world: pw_action_layout(h, int32[8]) = [5, 11 + control hearts, 8 +
- * seats, 2, 2, 2, logits per seat, 0] (v1 / v2: [5, 51, 25, 2, 2, 2, 82, 0]). pw_step decodes
- * each seat's heads through the rows of the observation pw_observe wrote for that world
- * (objective 9 + k = control heart row k, 9 + H + g = great heart row g; aim 9 + k = cog row
- * k, lead-compensated; neural_actor.md), at any seat count (no -5); the per-seat decoder
- * options (strafe, aim snap, ...) and forbid masks do not apply under it, the fire hold and
- * fire period do. pw_step_logits' logits are n rows of pw_action_layout's width.
- * pw_sample_actions and pw_action_candidates return -1 under it.
+ * column, seats, control hearts, 0, 0] for the current world (teams.view.1: [row floats, row
+ * floats, 0 x 9, -1, seats, control hearts, 0, 0]). pw_observation_rows(h, seat, int32 *out,
+ * capacity): the seat's row -> entity map for the observation pw_observe writes before the
+ * next pw_step: the cog rows' identities (-1 past the agents seen), then the heart rows'
+ * control heart indices, then the 2 great heart indices; returns that count and writes only
+ * when capacity holds it; -1 bad args or not a 202 handle.
+ * Action contract ffa.view.1 pointer: the five heads are sized by the current world:
+ * pw_action_layout(h, int32[8]) = [5, 11 + control hearts, 9 + cog rows, 2, 2, 2, logits per
+ * seat, 0] (teams.view.1: [5, 51, 25, 2, 2, 2, 82, 0]). pw_step's caller heads are decoded
+ * by players/neural_decode_ffa.bas (objective 9 + k = control heart row k, 9 + H + g = great
+ * heart row g; aim 9 + k = cog row k). Forbid masks do not apply under it;
+ * pw_step_logits' logits are n rows of pw_action_layout's width; pw_sample_actions returns
+ * -1 under it.
  * pw_net_load_layout(h, data, length, error, capacity): pw_net_load with the model's PWNET002
- * layout words resolved against the 102 handle's current layout and action heads, and the
+ * layout words resolved against the 202 handle's current layout and action heads, and the
  * budget of its seat count (4,000,000 x seats / 16 above 16 seats); NULL with the reason in
- * `error` otherwise (a handle that is not 102 included). */
+ * `error` otherwise (a handle that is not 202 included). */
 #define PW_OBSERVATION_LAYOUT_WORDS 16
 int pw_set_seats(void *handle, int32_t seats);
 int pw_seats(void *handle);

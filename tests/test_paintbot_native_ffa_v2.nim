@@ -1,13 +1,18 @@
-## Native training ABI for observation contract ffa.v2 (version 102) and N-seat handles:
+## Native training ABI for observation contract ffa.view.1 (version 202) and N-seat handles:
 ## pw_set_seats, the per-match row width and section layout, the row -> entity map, and
 ## observe / step / scripts / raw commands / kin / scores / reward split / results at 16 and
 ## at 50 seats (the Heartland and Heartland Big configs).
 import std/[unittest, os, importutils, random]
-import ../examples/paintbot/[sim, kinship, neural_contract, native_env]
+import ../examples/paintbot/[sim, kinship, neural_contract, native_env, seat_view, bots, neural_host]
 import paintbot_pwnet2_fixture
 privateAccess(NativeEnv)
 
 const Root = currentSourcePath().parentDir.parentDir
+const DecoderFfa = staticRead("../examples/paintbot/players/neural_decode_ffa.bas")
+const PolicyFfa = "paintbot_observe(neuralObservation())\nrun_neural_net(neuralModel(), neuralObservation(), " &
+  "neuralLogits(), neuralState())\nneuralSample()\n" & DecoderFfa
+const PointerManifest = """{"schema": "paintbot-neural-basic/1", "observation_contract": """" &
+  ObservationContractFfaView1Hash & """", "action_contract": """" & ActionContractFfaView1PointerHash & """"}"""
 const HeartlandConfig = """{"seed": 2026, "max_ticks": 8640, "mode": "ffa_kin", "kin_layout": "cousins"}"""
 const HeartlandBigConfig = """{"seed": 2026, "max_ticks": 8640, "mode": "ffa_kin", "map": "big-twin-mesas", "kin_layout": "tribes"}"""
 
@@ -19,7 +24,7 @@ proc cp(text: string): ptr UncheckedArray[char] = cast[ptr UncheckedArray[char]]
 proc envOf(h: pointer): ptr NativeEnv = cast[ptr NativeEnv](h)
 
 proc heartland(seats: int, config: string, ticks = 240'i32): pointer =
-  result = pw_create_observation(7, 0, 102)
+  result = pw_create_observation(7, 0, ocFfaView1.int32)
   doAssert result != nil
   doAssert pw_set_rules(result, LiveRules) == 0
   doAssert pw_set_config_json(result, cp(config), config.len.int32, nil, 0) == 0
@@ -31,39 +36,51 @@ proc scriptAll(h: pointer) =
   for seat in 0..<pw_seats(h):
     doAssert pw_set_seat_script(h, seat.cint, cp(source), source.len.int32) == 0
 
-suite "Native ffa.v2 and N-seat handles":
+proc layoutOf(h: pointer): FfaViewLayout = ffaViewLayout(pw_seats(h).int, envOf(h).world.controlHearts.len)
+
+suite "Native ffa.view.1 and N-seat handles":
   teardown:
     configureSeats(LegacySeats)
 
-  test "version 102: per-match width, layout, hash; 16 seats unless pw_set_seats":
+  test "version 202: per-match width, layout, hash; 16 seats unless pw_set_seats":
     var text: array[65, char]
-    check pw_observation_contract_hash(102, cast[ptr UncheckedArray[char]](addr text[0]), 65) == 0
-    check $cast[cstring](addr text[0]) == ObservationContractFfaV2Hash
-    check pw_observation_size_for(102) == -1
+    check pw_observation_contract_hash(202, cast[ptr UncheckedArray[char]](addr text[0]), 65) == 0
+    check $cast[cstring](addr text[0]) == ObservationContractFfaView1Hash
+    check pw_observation_size_for(202) == -1
     let h = heartland(16, HeartlandConfig)
-    check pw_observation_contract(h) == 102 and pw_seats(h) == 16
-    let l = ffaV2Layout(envOf(h).world)
+    check pw_observation_contract(h) == 202 and pw_seats(h) == 16
+    let l = h.layoutOf
+    check l.cogRows == 15 # min(seats - 1, 64)
     check pw_handle_observation_size(h) == l.size
     var layout = newSeq[int32](ObservationLayoutWords)
     check pw_observation_layout(h, ip(layout)) == 0
     check layout == @[l.size.int32, 24, 24, 15, 44, l.heartOffset.int32, l.heartRows.int32, 12,
       l.greatOffset.int32, 2, 12, 0, 16, l.heartRows.int32, 0, 0]
     pw_destroy(h)
-    # Other contracts: no sections, 16 seats only.
-    let v1 = pw_create_observation(7, 24, 1)
+    # teams.view.1: no sections, 16 seats only.
+    let v1 = pw_create_observation(7, 24, ocTeamsView1.int32)
     check pw_observation_layout(v1, ip(layout)) == 0
-    check layout[0] == 448 and layout[1] == 448 and layout[2] == 0 and layout[11] == -1 and layout[12] == 16
+    check layout[0] == 512 and layout[1] == 512 and layout[2] == 0 and layout[11] == -1 and layout[12] == 16
     check pw_set_seats(v1, 50) == -1 and pw_set_seats(v1, 16) == 0
     var rows = newSeq[int32](64)
     check pw_observation_rows(v1, 0, ip(rows), 64) == -1
     pw_destroy(v1)
-    let f1 = pw_create_observation(7, 24, 101)
-    check pw_set_seats(f1, 50) == -1
-    pw_destroy(f1)
-    let bad = pw_create_observation(7, 24, 102)
+    check pw_create_observation(7, 24, 101) == nil and pw_create_observation(7, 24, 102) == nil # retired
+    let bad = pw_create_observation(7, 24, ocFfaView1.int32)
     check pw_set_seats(bad, 1) == -1 and pw_set_seats(bad, 257) == -1 and pw_set_seats(nil, 16) == -1
     check pw_set_seats(bad, 256) == 0 and pw_set_seats(bad, 2) == 0
     pw_destroy(bad)
+
+  test "cog rows are min(seats - 1, 64): 64 at 100 seats":
+    let h = heartland(100, HeartlandBigConfig, 24)
+    check h.layoutOf.cogRows == 64
+    var layout = newSeq[int32](ObservationLayoutWords)
+    check pw_observation_layout(h, ip(layout)) == 0
+    check layout[3] == 64 and layout[12] == 100 and layout[0] == h.layoutOf.size.int32
+    var heads = newSeq[int32](8)
+    check pw_action_layout(h, ip(heads)) == 0
+    check heads[2] == 9 + 64
+    pw_destroy(h)
 
   for (seats, config) in [(16, HeartlandConfig), (50, HeartlandBigConfig)]:
     test "observe at " & $seats & " seats equals the reference encoder; rows map the sections":
@@ -73,23 +90,42 @@ suite "Native ffa.v2 and N-seat handles":
       if seats == 50:
         check env.world.controlHearts.len == 100 and env.kinship.layout == klTribes
       let n = pw_handle_observation_size(h).int
-      let l = ffaV2Layout(env.world)
-      check n == l.size
+      let l = h.layoutOf
+      check n == l.size and l.cogRows == min(seats - 1, 64)
       var obs = newSeq[float32](seats*n)
       var resets = newSeq[float32](seats)
-      check pw_observe(h, fp(obs), fp(resets)) == 0
-      var expected = newSeq[float32](n)
       var rows = newSeq[int32](l.cogRows + l.heartRows + 2)
       check pw_observation_rows(h, 0, nil, 0) == rows.len
-      for slot in 0..<seats:
-        check resets[slot] == 1
-        encodeFfaV2Observation(env.world, slot, expected, env.world.ffaV2Rows(slot), env.kinship)
-        check obs[slot*n ..< (slot+1)*n] == expected
-        check pw_observation_rows(h, slot.cint, ip(rows), rows.len.int32) == rows.len
-        for k in 0..<l.cogRows:
-          if rows[k] < 0: check obs[slot*n + l.cogOffset + k*FfaV2CogWidth] == 0
-          else: check obs[slot*n + l.cogOffset + k*FfaV2CogWidth + 43] == float32(rows[k])/255
-        for k in 0..<l.heartRows: check rows[l.cogRows+k] in 0'i32..<l.heartRows.int32
+      var seen = 0
+      var actions = newSeq[int32](seats*ActionSizes.len)
+      var rewards = newSeq[float32](seats)
+      var terminals = newSeq[float32](seats)
+      h.scriptAll()
+      for tick in 0..<2:
+        check pw_observe(h, fp(obs), fp(resets)) == 0
+        for slot in 0..<seats:
+          check resets[slot] == float32(tick == 0)
+          check pw_observation_rows(h, slot.cint, ip(rows), rows.len.int32) == rows.len
+          beginViews(env.world)
+          let view = seatView(slot)
+          var expected = newSeq[float32](n)
+          encodeFfaView(view, expected, ffaViewRows(view))
+          check obs[slot*n ..< (slot+1)*n] == expected
+          # The cog rows are nearAgents(20000)'s identities in its order, then -1.
+          let near = view.agentsNear(NearMaxRadius)
+          check near.len <= l.cogRows
+          for k in 0..<l.cogRows:
+            let o = slot*n + l.cogOffset + k*FfaCogWidth
+            if k < near.len:
+              check rows[k] == near[k].identity and obs[o] == 1
+              check obs[o + 43] == float32(rows[k])/255
+              inc seen
+            else:
+              check rows[k] == -1 and obs[o] == 0
+          for k in 0..<l.heartRows: check rows[l.cogRows+k] in 0'i32..<l.heartRows.int32
+          for k in 0..<2: check rows[l.cogRows+l.heartRows+k] in 0'i32..1'i32
+        check pw_step(h, ip(actions), fp(rewards), fp(terminals)) == 0
+      check seen > 0
       pw_destroy(h)
 
     test "a scripted " & $seats & "-seat match plays to the end; kin, scores, split and results cover every seat":
@@ -136,16 +172,14 @@ suite "Native ffa.v2 and N-seat handles":
       check pw_seat_stats(h, ip(stats)) == 0
       pw_destroy(h)
 
-  test "over 16 seats every seat needs a script or a raw command (-5), and raw commands step":
+  test "raw commands step a 50-seat world; seat 50 is out of range":
     let h = heartland(50, HeartlandBigConfig)
     var actions = newSeq[int32](50*ActionSizes.len)
     var rewards = newSeq[float32](50)
     var terminals = newSeq[float32](50)
-    check pw_step(h, ip(actions), fp(rewards), fp(terminals)) == -5
     let source = readFile(Root / "coworld/heartland/players/ffa.bas")
     for seat in 0..<49:
       check pw_set_seat_script(h, seat.cint, cp(source), source.len.int32) == 0
-    check pw_step(h, ip(actions), fp(rewards), fp(terminals)) == -5
     let before = envOf(h).world.cogs[49].pos
     let goal = Point(x: before.x + 500, z: before.z)
     var nine = @[1'i32, goal.x, goal.z, 0, 0, 0, 0, 0, 0]
@@ -156,7 +190,7 @@ suite "Native ffa.v2 and N-seat handles":
     check pw_seat_orders(h, 49, ip(orders)) == 0
     check orders[0] == 1 and orders[1] == goal.x
     check pw_set_seat_script(h, 50, cp(source), source.len.int32) == -1
-    check pw_action_candidates(h, 0, 0, 0, ip(actions), ip(actions)) == -1
+    check pw_set_seat_command(h, 50, ip(nine)) == -1
     pw_destroy(h)
 
   test "a reset that changes the seat count re-creates the per-seat settings; one that keeps it keeps them":
@@ -190,27 +224,31 @@ suite "Native ffa.v2 and N-seat handles":
     check pw_observe(small, fp(b), fp(rb)) == 0
     check pw_observe(big, fp(a), fp(ra)) == 0
     check Seats == 50
-    let v1 = pw_create_observation(7, 24, 1)
-    var c = newSeq[float32](16*448)
+    let v1 = pw_create_observation(7, 24, ocTeamsView1.int32)
+    var c = newSeq[float32](16*512)
     check pw_observe(v1, fp(c), fp(rb)) == 0
     check Seats == 16
     pw_destroy(v1)
     pw_destroy(small)
     pw_destroy(big)
 
-  test "action contract ffa.v2 pointer: 50 seats step on the caller's heads, decoded through the rows":
+  test "action contract ffa.view.1 pointer: 50 seats step on the caller's heads, decoded by neural_decode_ffa.bas":
     let h = heartland(50, HeartlandBigConfig, 240)
-    check pw_set_action_contract(h, 3) == 0 and pw_action_contract(h) == 3
+    check pw_action_contract(h) == acFfaView1Pointer.cint
     var layout = newSeq[int32](8)
     check pw_action_layout(h, ip(layout)) == 0
-    let l = ffaV2Layout(envOf(h).world)
-    check layout == @[5'i32, int32(11 + l.heartRows), int32(8 + 50), 2, 2, 2,
-      int32(11 + l.heartRows + 8 + 50 + 6), 0]
+    let l = h.layoutOf
+    check layout == @[5'i32, int32(11 + l.heartRows), int32(9 + 49), 2, 2, 2,
+      int32(11 + l.heartRows + 9 + 49 + 6), 0]
+    check pointerHeads(l) == @[11 + l.heartRows, 9 + 49, 2, 2, 2]
     var text: array[65, char]
-    check pw_action_contract_hash(3, cast[ptr UncheckedArray[char]](addr text[0]), 65) == 0
-    check $cast[cstring](addr text[0]) == ActionContractFfaV2PointerHash
-    let v1 = pw_create_observation(7, 24, 1)
-    check pw_set_action_contract(v1, 3) == -1
+    check pw_action_contract_hash(12, cast[ptr UncheckedArray[char]](addr text[0]), 65) == 0
+    check $cast[cstring](addr text[0]) == ActionContractFfaView1PointerHash
+    check pw_action_contract_hash(3, cast[ptr UncheckedArray[char]](addr text[0]), 65) == -1 # ffa.v2 retired
+    check pw_set_action_contract(h, acTeamsView1.int32) == -1 and pw_set_action_contract(h, acFfaView1Pointer.int32) == 0
+    let v1 = pw_create_observation(7, 24, ocTeamsView1.int32)
+    check pw_action_contract(v1) == acTeamsView1.cint
+    check pw_set_action_contract(v1, acFfaView1Pointer.int32) == -1
     pw_destroy(v1)
     var obs = newSeq[float32](50*pw_handle_observation_size(h))
     var resets = newSeq[float32](50)
@@ -218,12 +256,16 @@ suite "Native ffa.v2 and N-seat handles":
     var rewards = newSeq[float32](50)
     var terminals = newSeq[float32](50)
     var r = initRand(5)
-    var memories = newSeq[PointerMemory](50)
-    for m in memories.mitems: m.resetPointerMemory(50)
+    # The reference: the same choices as one-hot logits to hosted-style policy seats running
+    # neuralSample + the reference decode, stepping a copy of the world.
+    check pw_observe(h, fp(obs), fp(resets)) == 0 # installs the handle's rules, seats and kinship
+    var reference = envOf(h).world
+    var policies = newSeq[Bot](50)
+    for slot in 0..<50: policies[slot] = loadPolicyBot(PolicyFfa, PointerManifest, slot, ObservationContractFfaView1Hash)
+    let width = layout[6].int
+    var aimed, sampled = 0
     for tick in 0..<24:
       check pw_observe(h, fp(obs), fp(resets)) == 0
-      var reference = envOf(h).world
-      var commands = newSeq[Command](50)
       for slot in 0..<50:
         let o = slot*ActionSizes.len
         actions[o] = int32(r.rand(layout[1]-1))
@@ -231,13 +273,22 @@ suite "Native ffa.v2 and N-seat handles":
         actions[o+2] = int32(r.rand(1))
         actions[o+3] = 0
         actions[o+4] = int32(r.rand(1))
-        let rows = reference.ffaV2Rows(slot)
-        if reference.cogs[slot].hp <= 0: memories[slot].resetPointerMemory(50)
-        commands[slot] = decodePointerActions(reference, slot, actions.toOpenArray(o, o+4), rows, memories[slot])
-        memories[slot].recordPointerMemory(reference, rows)
+        if actions[o+1] >= PointerAimFirstRow: inc aimed
+        let bot = policies[slot]
+        for i in 0..<width: bot.neural.fedLogits[i] = 0
+        var offset = 0
+        for head in 0..<5:
+          bot.neural.fedLogits[offset + actions[o+head].int] = 1
+          offset += layout[1+head].int
+        bot.neural.logitsFed = true
+      let commands = decide(policies, reference)
       check pw_step(h, ip(actions), fp(rewards), fp(terminals)) == 0
       reference.step(commands)
       check pw_state_hash(h) == reference.stateHash()
+      for slot in 0..<50:
+        if policies[slot].neural.sampled: inc sampled
+        if policies[slot].neural.sampled: check @(policies[slot].neural.choices) == actions[slot*5 ..< slot*5+5]
+    check aimed > 0 and sampled > 0
     actions[0] = int32(layout[1])
     check pw_step(h, ip(actions), fp(rewards), fp(terminals)) == -1
     pw_destroy(h)
@@ -248,9 +299,10 @@ suite "Native ffa.v2 and N-seat handles":
     for (seats, config) in [(16, HeartlandConfig), (50, HeartlandBigConfig)]:
       let h = heartland(seats, config, 120)
       var message = newString(256)
-      check pw_net_load_layout(h, unsafeAddr model[0], model.len.int64,
-        cast[ptr UncheckedArray[char]](addr message[0]), 256) == nil   # contract 1: no pointer target
-      check pw_set_action_contract(h, 3) == 0
+      let teams = pw_create_observation(7, 24, ocTeamsView1.int32)
+      check pw_net_load_layout(teams, unsafeAddr model[0], model.len.int64,
+        cast[ptr UncheckedArray[char]](addr message[0]), 256) == nil   # not an ffa.view.1 handle
+      pw_destroy(teams)
       let net = pw_net_load_layout(h, unsafeAddr model[0], model.len.int64,
         cast[ptr UncheckedArray[char]](addr message[0]), 256)
       require net != nil
@@ -259,10 +311,8 @@ suite "Native ffa.v2 and N-seat handles":
       check pw_action_layout(h, ip(layout)) == 0
       let width = layout[6].int
       # Seat 0 is a policy seat on the bundle's manifest; every other seat runs ffa.bas.
-      let manifest = """{"schema": "paintbot-neural-basic/1", "observation_contract": """" &
-        ObservationContractFfaV2Hash & """", "action_contract": """" & ActionContractFfaV2PointerHash & """"}"""
-      let script = "paintbot_observe(neuralObservation())\nrun_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())\npaintbot_act(neuralLogits())\n"
-      check pw_set_seat_policy_script(h, 0, cp(script), script.len.int32, cp(manifest), manifest.len.int32) == 0
+      check pw_set_seat_policy_script(h, 0, cp(PolicyFfa), PolicyFfa.len.int32, cp(PointerManifest),
+        PointerManifest.len.int32) == 0
       let source = readFile(Root / "coworld/heartland/players/ffa.bas")
       for seat in 1..<seats: check pw_set_seat_script(h, seat.cint, cp(source), source.len.int32) == 0
       var obs = newSeq[float32](seats*n)
@@ -271,8 +321,8 @@ suite "Native ffa.v2 and N-seat handles":
       var logits = newSeq[float32](seats*width)
       var rewards = newSeq[float32](seats)
       var terminals = newSeq[float32](seats)
-      var state = newSeq[float32](0)
       var steps = 0
+      var decided = 0
       while true:
         check pw_observe(h, fp(obs), fp(resets)) == 0
         check pw_net_infer(net, cast[ptr UncheckedArray[float32]](addr obs[0]), nil,
@@ -282,9 +332,19 @@ suite "Native ffa.v2 and N-seat handles":
         check code == 0
         if code != 0: break
         inc steps
-      check steps == 120
+        var choices = newSeq[int32](22)
+        check pw_seat_policy_choices(h, 0, ip(choices)) == 0
+        if choices[0] == 1:
+          inc decided
+          # The selection is the argmax of the seat's logits, head by head.
+          var offset = 0
+          for head in 0..<5:
+            var best = 0
+            for i in 0..<layout[1+head].int:
+              if logits[offset+i] > logits[offset+best]: best = i
+            check choices[1+head] == best.int32 and choices[6+head] == best.int32
+            offset += layout[1+head].int
+      check steps == 120 and decided > 0
       check pw_seat_script_status(h, 0, nil, 0) == 1
-      var choices = newSeq[int32](22)
-      check pw_seat_policy_choices(h, 0, ip(choices)) == 0
       pw_net_destroy(net)
       pw_destroy(h)

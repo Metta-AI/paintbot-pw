@@ -6,12 +6,13 @@
 ## default-handle run and prints its digests: that is how the goldens were recorded, from the
 ## library before this feature (its native_env has no pw_set_map).
 import std/[unittest, os, random, strutils]
-import ../examples/paintbot/[sim, neural_contract, native_env]
+import ../examples/paintbot/[sim, neural_contract, native_env, bots]
 
 when not defined(pwTraining): {.error: "native maps exist only under -d:pwTraining".}
 
 const Root = currentSourcePath().parentDir.parentDir
 const Base = Root / "coworld/paintbot/players/base.bas"
+const DecoderSource = staticRead("../examples/paintbot/players/neural_decode.bas")
 type
   Buffer = ptr UncheckedArray[cfloat]
   Actions = array[LegacySeats*ActionSizes.len, int32]
@@ -102,18 +103,21 @@ else:
   proc referenceThread(job: ptr ReferenceJob) {.thread.} =
     ## The engine's own path (the hosted game, arch_roll): a thread bound to the library's
     ## rules and the map by configureRules and configureMap, a world from newWorld, commands
-    ## decoded from the same actions.
+    ## decoded from the same actions by the reference decoder script (players/neural_decode.bas)
+    ## through each seat's SeatView, as pw_step decodes them.
     {.cast(gcsafe).}:
       configureRules(NativeRules)
       configureMap(if job.map < 0: "" else: MapNames[job.map])
       var world = newWorld(job.seed, job.ticks.int32)
+      var seats: seq[Bot]
+      for slot in 0..<Seats: seats.add loadDecoderBot(DecoderSource, slot, ObservationContractTeamsView1Hash, acTeamsView1)
       var actions: Actions
-      var commands: array[LegacySeats, Command]
       for tick in 0..<job.ticks:
         actions.fillActions(job.seed.int, tick)
         for slot in 0..<Seats:
-          let offset = slot*ActionSizes.len
-          commands[slot] = decodeActions(world, slot, actions.toOpenArray(offset, offset+ActionSizes.len-1))
+          for head in 0..<ActionSizes.len: seats[slot].neural.fedChoices[head] = actions[slot*ActionSizes.len+head]
+          seats[slot].neural.choicesFed = true
+        let commands = decideSeats(seats, world)
         world.step(commands)
         job.hashes.add world.stateHash()
 
@@ -234,11 +238,12 @@ else:
       let seed = 71'i32
       let ticks = 200
       let map = mapIndex("highlands")
-      # Contract v2 carries the terrain block, which reads the thread's map.
-      let control = pw_create_observation(seed, ticks.int32, 2)
-      let handle = pw_create_observation(seed, ticks.int32, 2)
+      # teams.view.1 carries terrain heights and water (self, hearts, bodies, probes), which read
+      # the thread's map.
+      let control = pw_create(seed, ticks.int32)
+      let handle = pw_create(seed, ticks.int32)
       require control != nil and handle != nil
-      let n = ObservationSizeV2
+      let n = TeamsViewSize
       var observed, expected = newSeq[float32](Seats*n)
       var resets: array[LegacySeats, float32]
       var actions: Actions
@@ -277,13 +282,11 @@ end if
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
 neuralSample()
-neuralDecode()
-neuralIssue()
 """
-      let contract = UserInputsContractHashes[K-1]
-      let manifest = Manifest % [contract, ActionContractV2Hash]
+      let contract = userInputsContractHash(K)
+      let manifest = Manifest % [contract, ActionContractTeamsView1Hash]
       let baseSource = readFile(Base)
-      let policy = Policy
+      let policy = Policy & DecoderSource
       var r = initRand(5)
       for map in [mapIndex("twin-mesas"), mapIndex("deep-forest"), mapIndex("serpent-river")]:
         checkpoint "map " & MapNames[map]

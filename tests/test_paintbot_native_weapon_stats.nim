@@ -19,11 +19,17 @@ template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[i
 
 const Root = currentSourcePath().parentDir.parentDir
 const Base = Root / "coworld/paintbot/players/base.bas"
+const DecoderSource = staticRead("../examples/paintbot/players/neural_decode.bas")
 
 type Derived* = array[LegacySeats, array[9, int]]  # the pw_seat_weapon_stats layout
 
+proc wet(p: Point): bool =
+  ## In the river's water: rules >= 30, the river's blend and below its water height (the
+  ## wading slowdown's test, SeatView.waterAt's).
+  visionRulesVersion >= 30 and riverBlend(p.x.int, p.z.int) > 0 and terrainHeight(p.x.int, p.z.int) < RiverWaterHeight
+
 proc classes(w: World, p: Point): (bool, bool, bool) =
-  (inWater(p), terrainHeight(p.x.int, p.z.int) >= HighGroundHeight, w.trenchAt(p) >= 0)
+  (wet(p), terrainHeight(p.x.int, p.z.int) >= HighGroundHeight, w.trenchAt(p) >= 0)
 
 proc derivedStep*(w: var World, commands: openArray[Command], acc: var Derived) =
   ## Step `w`, adding each enemy damage event of the step to `acc`, derived without the
@@ -143,19 +149,20 @@ suite "Native per-weapon kills and hit locations":
       var derived: Derived
       var actions: array[LegacySeats*ActionSizes.len, int32]
       var rewards, terminals: array[LegacySeats, float32]
-      var commands: array[LegacySeats, Command]
+      var seats: seq[Bot]
+      for slot in 0..<Seats: seats.add loadDecoderBot(DecoderSource, slot, ObservationContractTeamsView1Hash, acTeamsView1)
       while w.tick < ticks and w.winner == -1:
+        beginViews(w)
         for slot in 0..<Seats:
+          let v = seatView(slot)
           let o = slot*ActionSizes.len
           let t = w.tick.int
           actions[o] = int32(1 + (slot div 2 + seed + t div 97) mod 10)
           if not w.equipment[slot].sprayCan:
             var best = high(int64)
             for i, p in w.pickups:
-              if i >= 32 or p.kind notin {sprayPickup, grenadePickup}: continue
-              let (found, g) = w.goalCandidate(slot, 11 + i)
-              if not found: continue
-              let d = distance2(w.cogs[slot].pos, g)
+              if i >= 32 or p.kind notin {sprayPickup, grenadePickup} or v.pickupVisible(i) == 0: continue
+              let d = distance2(w.cogs[slot].pos, Point(x: v.pickupX(i), z: v.pickupY(i)))
               if d < best:
                 best = d
                 actions[o] = int32(11 + i)
@@ -163,7 +170,9 @@ suite "Native per-weapon kills and hit locations":
           actions[o+2] = int32(w.tick mod 3 != 0)
           actions[o+3] = int32((t + slot*7) mod 40 < 12)
           actions[o+4] = 0
-          commands[slot] = decodeActions(w, slot, actions.toOpenArray(o, o+4))
+          for head in 0..<ActionSizes.len: seats[slot].neural.fedChoices[head] = actions[o+head]
+          seats[slot].neural.choicesFed = true
+        let commands = decideSeats(seats, w)
         w.derivedStep(commands, derived)
         require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
         require pw_state_hash(h) == w.stateHash()
