@@ -4,7 +4,7 @@
 import std/[strutils, options]
 from std/json import parseJson
 import jsony
-import sim, kinship, neural_contract, bots, neural_actor, match_config
+import sim, kinship, neural_contract, bots, neural_actor, match_config, training_labels
 from neural_host import MaxNeuralOperations, neuralOperationBudget, setConditionals
 import polyworld/rngs
 import polyworld/basic
@@ -69,6 +69,9 @@ type
     # through the seat's SeatView, as a hosted neural seat's policy.bas decodes its heads.
     # Built on first use and dropped by every create/reset.
     decoders: seq[Bot]
+    # Privileged supervision labels (pw_seat_privileged_labels, training_labels.nim): the
+    # pre-step positions of the last step, for the lead label's velocity. Never observed.
+    labelMemory: LabelMemory
     # Mapping-ceiling diagnostics (pw-bc): a scripted seat with a non-zero override mask
     # still runs its script every step (its orders are reported by pw_seat_orders) but
     # executes the caller's decoded action for the masked heads: 1 walk/goal/direct,
@@ -536,6 +539,8 @@ proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): p
     env.initCurriculum()
     env.resetDecoders()
     env.resetSampling()
+    env.labelMemory.resetLabelMemory()
+    env.labelMemory.resetLabelMemory()
     result = env
   except CatchableError:
     `=destroy`(env[])
@@ -899,6 +904,7 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       if not env.pairStatsOff:
         kinEnv = env
         damageObserver = observeKinDamage
+    env.labelMemory.recordLabelMemory(env.world)
     combatTelemetry = addr env.stats
     damageScale = addr env.damagePermille
     try: env.world.step(commands)
@@ -1585,6 +1591,19 @@ proc pw_seat_spray_stats*(handle: pointer, seat: cint, output: ptr UncheckedArra
   output[1] = s.sprayDamageTeam
   output[2] = s.sprayKillsEnemy
   output[3] = s.sprayKillsTeam
+  0
+
+proc pw_seat_privileged_labels*(handle: pointer, seat: cint, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
+  ## TRAINING-ONLY supervision labels for one seat on the current pre-step world,
+  ## PrivilegedLabelCount = 12 floats (training_labels.privilegedLabels documents each): gun
+  ## cooldown, windup, spray cooldown, shield, respawn, aim x, aim z, own and enemy heart
+  ## meter, lead valid, lead x, lead z. State no seat can perceive: for auxiliary losses only,
+  ## never an input to a policy (the hosted engine has no such call). 0, or -1 bad args.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  let labels = privilegedLabels(env.world, seat.int, env.labelMemory)
+  for i, x in labels: output[i] = x
   0
 
 proc pw_seat_weapon_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
