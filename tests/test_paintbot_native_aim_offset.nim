@@ -91,7 +91,7 @@ suite "Action contract teams.view.1 aim-offset":
                              z: clamp(before.z + (iz-11)*28*flip, minZ().int32, maxZ().int32))
         check w[].cogs[slot].aim == expected
         checkedSides.incl team(slot).int8
-    check checkedSides.card >= 1
+    check checkedSides == {0'i8, 1'i8}
 
   test "a policy seat selects the offset heads from its logits; argmax and temperature":
     let h = pw_create(3, 600)
@@ -126,3 +126,37 @@ suite "Action contract teams.view.1 aim-offset":
       if choices[0] >= 0: seen.incl choices[0].int8
       check choices[4] == 1000 and choices[5] == 0 and choices[1] == 0
     check seen.card > 5  # uniform logits at temperature 1: many bins drawn
+
+import std/random
+import ./paintbot_pwnet2_fixture
+from ../examples/paintbot/neural_host import loadNeuralSeat
+
+suite "Hosted aim-offset seats":
+  test "a hosted aim-offset actor loads, samples heads 5 and 6 and plays; a five-head width is refused":
+    var r = initRand(13)
+    let model = encode2(TeamsViewSize, ActionSizesOffset, [r.dense(TeamsViewSize, LogitSizeOffset, bias = true)],
+      ObservationContractTeamsView1Hash, ActionContractTeamsView1OffsetHash)
+    let dir = getTempDir() / ("paintbot-aim-offset-" & $getCurrentProcessId())
+    createDir(dir)
+    defer: removeDir(dir)
+    let path = dir / "policy.bas"
+    writeFile(path, "paintbot_observe(neuralObservation())\n" &
+      "run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())\n" &
+      "neuralTemperature(-1, 1000)\nneuralSample()\n" & readFile(Root / "examples/paintbot/players/neural_decode.bas"))
+    writeFile(path & ".model.bin", model)
+    var players = loadBots(@[BotGroup(path: path, count: Seats)])
+    var w = newWorld(4)
+    var seen: set[int8]
+    for tick in 0..<120:
+      let commands = players.decide(w)
+      for slot in 0..<Seats:
+        if players[slot].neural.sampled:
+          check players[slot].neural.offsetChoices[0] in 0'i32..22'i32
+          seen.incl players[slot].neural.offsetChoices[0].int8
+      w.step(commands)
+    for slot in 0..<Seats: check not players[slot].failed
+    check seen.card > 5
+    # The same dense layer with five-head sizes under the aim-offset hash is refused.
+    writeFile(path & ".model.bin", encode2(TeamsViewSize, ActionSizes, [r.dense(TeamsViewSize, LogitSize, bias = true)],
+      ObservationContractTeamsView1Hash, ActionContractTeamsView1OffsetHash))
+    expect ValueError: discard loadNeuralSeat(path, 0)
