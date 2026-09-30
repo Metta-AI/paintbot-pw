@@ -19,7 +19,7 @@ proc load(model: string, message: var string): pointer =
   result = pw_net_load(addr data[0], data.len.int64, cbuf(error), 256)
   message = $cast[cstring](addr error[0])
 
-proc attentionNet(r: var Rand, inputs = ObservationSize): string =
+proc attentionNet(r: var Rand, inputs = TeamsViewSize): string =
   encode2(inputs, ActionSizes, [
     r.attention([[104'u32, 8, 16, 8, 0], [24'u32, 8, 10, 8, 0]], 32, 4, 1, 48, 0, 24),
     concat(232, 160),
@@ -41,31 +41,31 @@ suite "pw_net ABI":
     let actor = loadActor(model)
     var info: array[8, int64]
     check pw_net_info(net, i64buf(info)) == 0
-    check info == [2'i64, ObservationSize, LogitSize, 144, 5, 8, actor.parameterCount, actor.operationCount]
+    check info == [2'i64, TeamsViewSize, LogitSize, 144, 5, 8, actor.parameterCount, actor.operationCount]
     var heads: array[32, int32]
     check pw_net_head_sizes(net, ibuf(heads), 32) == 5
     check heads[0..4] == [51'i32, 25, 2, 2, 2]
     var contracts: array[140, char]
     check pw_net_contracts(net, cbuf(contracts), 140) == 0
-    check $cast[cstring](addr contracts[0]) == ObservationContractHash & " " & ActionContractHash
+    check $cast[cstring](addr contracts[0]) == ObservationContractTeamsView1Hash & " " & ActionContractTeamsView1Hash
     var hostState = newSeq[float32](144)
     var hostLogits = newSeq[float32](LogitSize)
     var state = newSeq[float32](144)
     var logits = newSeq[float32](LogitSize)
     for step in 0..<100:
-      var obs = r.observation(ObservationSize)
+      var obs = r.observation(TeamsViewSize)
       actor.infer(obs, hostState, hostLogits)
       check pw_net_infer(net, fbuf(obs), fbuf(state), fbuf(logits)) == 0
       check bits(state) == bits(hostState) and bits(logits) == bits(hostLogits)
     # A failed inference leaves the caller's state and logits untouched.
-    var obs = r.observation(ObservationSize)
+    var obs = r.observation(TeamsViewSize)
     obs[3] = NaN.float32
     let before = (bits(state), bits(logits))
     check pw_net_infer(net, fbuf(obs), fbuf(state), fbuf(logits)) == -2
     check (bits(state), bits(logits)) == before
     pw_net_destroy(net)
     # PWNET001 runs through the same entry points.
-    let (v1, _, _, _) = r.pwnet001(ObservationSize, 64)
+    let (v1, _, _, _) = r.pwnet001(TeamsViewSize, 64)
     let old = load(v1, message)
     require old != nil
     check pw_net_info(old, i64buf(info)) == 0
@@ -73,15 +73,15 @@ suite "pw_net ABI":
     pw_net_destroy(old)
     # Rejections carry the hosted loader's reason; over-budget models are refused as hosted.
     check load(model[0..^2], message) == nil and "truncated" in message
-    let big = encode2(ObservationSize, ActionSizes, [
+    let big = encode2(TeamsViewSize, ActionSizes, [
       r.attention([[104'u32, 8, 16, 8, 0], [24'u32, 8, 10, 8, 0], [232'u32, 5, 32, 5, 0]], 128, 4, 2, 256, 0, 24),
       r.dense(280, LogitSize)])
     check load(big, message) == nil
     check message == "neural actor exceeds native operation budget: " & $loadActor(big).operationCount & " > 4000000"
     check load("PWNET00", message) == nil and message == "invalid neural actor length"
     # Token layers through the same entry points, bit for bit.
-    let tokens = encode2(ObservationSize, ActionSizes,
-      r.entityFactored(inputs = ObservationSize, segments = [[104'u32, 8, 8], [0'u32, 0, 24]]))
+    let tokens = encode2(TeamsViewSize, ActionSizes,
+      r.entityFactored(inputs = TeamsViewSize, segments = [[104'u32, 8, 8], [0'u32, 0, 24]]))
     let tnet = load(tokens, message)
     require tnet != nil
     let tactor = loadActor(tokens)
@@ -90,14 +90,14 @@ suite "pw_net ABI":
     var ts, hs = newSeq[float32](128)
     var tl, hl = newSeq[float32](LogitSize)
     for step in 0..<100:
-      let o = r.observation(ObservationSize)
+      let o = r.observation(TeamsViewSize)
       tactor.infer(o, hs, hl)
       var oc = o
       check pw_net_infer(tnet, fbuf(oc), fbuf(ts), fbuf(tl)) == 0
       check bits(ts) == bits(hs) and bits(tl) == bits(hl)
     pw_net_destroy(tnet)
     # SEGMENT_NEAR (the input view) in front of them: the same, bit for bit, on identity-block geometry.
-    let near = encode2(ObservationSize, ActionSizes, r.entityFactored(inputs = ObservationSize,
+    let near = encode2(TeamsViewSize, ActionSizes, r.entityFactored(inputs = TeamsViewSize,
       segments = [[104'u32, 8, 8], [392'u32, 1, 1], [0'u32, 0, 24]]).shifted(identityNear(392, radius = 2000)))
     let nnet = load(near, message)
     require nnet != nil
@@ -107,18 +107,20 @@ suite "pw_net ABI":
     for i in 0..<128:
       ts[i] = 0; hs[i] = 0
     for step in 0..<100:
-      var o = r.observation(ObservationSize)
+      var o = r.observation(TeamsViewSize)
       r.nearScene(o)
       nactor.infer(o, hs, hl)
       check pw_net_infer(nnet, fbuf(o), fbuf(ts), fbuf(tl)) == 0
       check bits(ts) == bits(hs) and bits(tl) == bits(hl)
     pw_net_destroy(nnet)
 
+# The hosted seat selects (argmax: no manifest) and decodes with the reference decoder script,
+# the same script pw_step runs for a caller-driven seat's heads.
 const NeuralSource = """
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
-paintbot_act(neuralLogits())
-"""
+neuralSample()
+""" & staticRead("../examples/paintbot/players/neural_decode.bas")
 
 suite "Hosted PWNET002 seats and the native ABI":
   configureRules(NativeRules)
@@ -138,7 +140,7 @@ suite "Hosted PWNET002 seats and the native ABI":
       var world = newWorld(seed, 1500)
       let handle = pw_create(seed, 1500)
       require handle != nil
-      var obs = newSeq[float32](Seats*ObservationSize)
+      var obs = newSeq[float32](Seats*TeamsViewSize)
       var resets: array[LegacySeats, float32]
       var states = newSeq[float32](Seats*S)
       var logits = newSeq[float32](LogitSize)
@@ -151,7 +153,7 @@ suite "Hosted PWNET002 seats and the native ABI":
           if resets[slot] != 0:
             inc stateResets
             for i in 0..<S: states[slot*S+i] = 0
-          require pw_net_infer(net, cast[Buffer](addr obs[slot*ObservationSize]),
+          require pw_net_infer(net, cast[Buffer](addr obs[slot*TeamsViewSize]),
             cast[Buffer](addr states[slot*S]), fbuf(logits)) == 0
           let picked = argmaxActions(logits)
           for head in 0..<ActionSizes.len: actions[slot*ActionSizes.len+head] = picked[head].int32
@@ -183,10 +185,10 @@ suite "Hosted PWNET002 seats and the native ABI":
 
   test "the same with token layers (TOKEN_MLP, TOKEN_MIX, POINTER): hash for hash":
     playsHashForHash(proc (r: var Rand): string =
-      encode2(ObservationSize, ActionSizes,
-        r.entityFactored(inputs = ObservationSize, segments = [[104'u32, 8, 8], [0'u32, 0, 24]])), 128)
+      encode2(TeamsViewSize, ActionSizes,
+        r.entityFactored(inputs = TeamsViewSize, segments = [[104'u32, 8, 8], [0'u32, 0, 24]])), 128)
 
   test "the same with SEGMENT_NEAR (the input view) in front: hash for hash":
     playsHashForHash(proc (r: var Rand): string =
-      encode2(ObservationSize, ActionSizes, r.entityFactored(inputs = ObservationSize,
+      encode2(TeamsViewSize, ActionSizes, r.entityFactored(inputs = TeamsViewSize,
         segments = [[104'u32, 8, 8], [392'u32, 1, 1], [0'u32, 0, 24]]).shifted(identityNear(392))), 128)

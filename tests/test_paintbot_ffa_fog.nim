@@ -1,11 +1,11 @@
 ## FFA-kin fog of war (rules 48): no agent-facing surface shows a cog the seat cannot see. BASIC's
-## kin, gene, seatScore and seatAlive read -1 for it (as playerX does); the ffa.v1 observation
-## zeroes its row, for hosted and policy seats alike; shouts still carry within hearing range
+## kin, gene, seatScore and seatAlive read -1 for it (as playerX does); the ffa.view.1 observation
+## gives it no row and reads its kin as unknown, for hosted and policy seats alike; shouts still carry within hearing range
 ## and reveal nothing else. Rules 47 and the teams game are unchanged; a rules-47 FFA recording
 ## made before rules 48 replays hash for hash.
 import std/[unittest, os, importutils]
 import polyworld/[cli, tapes]
-import ../examples/paintbot/[sim, game, bots, kinship, neural_contract, native_env]
+import ../examples/paintbot/[sim, game, bots, kinship, neural_contract, native_env, seat_view]
 privateAccess(NativeEnv)
 
 const Root = currentSourcePath().parentDir.parentDir
@@ -126,60 +126,84 @@ suite "FFA-kin fog of war (rules 48)":
     # Hearing seat 2 does not make it known.
     check c.goal.z == -1'i32
 
-  test "ffa.v1: an unseen cog's row is all zero at rules 48; rules 47 shows its public columns":
-    let k = kinshipFor(klCousins, 11)
-    var o = newSeq[float32](ObservationSizeFfaV1)
-    proc row(j: int): int = FfaIdentityOffset + j*FfaIdentityRowSize
-    let fogged = fogWorld(48, k)
-    encodeObservation(fogged, 0, o, ocFfaV1)
-    for hidden in [2, 3, 5]:
-      for c in 0..<FfaIdentityRowSize: check o[row(hidden)+c] == 0
-    # The seen cog and the seat's own row are unchanged.
-    check o[row(1)+2] == 1 and o[row(1)+3] == 1 and o[row(1)+37] == float32(k.r(0, 1))
-    check o[row(1)+38] == float32(70)/10000
-    check o[row(0)+3] == 1 and o[row(0)+37] == 1
-    # Hearts keep their owner's r.
-    check o[FfaHeartOffset + 4*FfaHeartRowSize + 2] == float32(k.r(0, 2))
-    let open = fogWorld(47, k)
-    var p = newSeq[float32](ObservationSizeFfaV1)
-    encodeObservation(open, 0, p, ocFfaV1)
-    check p[row(2)+2] == 0 and p[row(2)+3] == 1 and p[row(2)+37] == float32(k.r(0, 2))
-    check p[row(2)+38] == float32(90)/10000
-    # Only the unseen rows differ between the rules.
-    for i in 0..<ObservationSizeFfaV1:
-      let unseenRow = i >= row(2) and i < row(LegacySeats)  # seats 2..15: none in view
-      if not unseenRow: check o[i] == p[i]
+  proc heartRow(rows: FfaViewRows, heart: int): int =
+    for k, i in rows.hearts:
+      if i == heart: return k
+    doAssert false, "no row for heart " & $heart
 
-  test "native: pw_observe and a policy seat's observation hold no genes or r of an unseen cog":
-    let h = pw_create_observation(3, 0, 101)
+  test "ffa.view.1: an unseen cog has no row and its heart reads no kin at rules 48; rules 47 shows its r":
+    let k = kinshipFor(klCousins, 11)
+    proc encode(w: World): (seq[float32], FfaViewRows, FfaViewLayout) =
+      beginViews(w)
+      let v = seatView(0)
+      let rows = ffaViewRows(v)
+      let l = ffaViewLayout(v)
+      var o = newSeq[float32](l.size)
+      encodeFfaView(v, o, rows)
+      (o, rows, l)
+    let fogged = fogWorld(48, k)
+    let (o, rows, l) = encode(fogged)
+    # Only seat 1 is in view: one cog row, every later row all zero.
+    check rows.agents.len == 1 and rows.agents[0].identity == 1
+    let c = l.cogOffset
+    check o[c] == 1 and o[c+37] == float32(k.rPercent(0, 1))/100 and o[c+38] == float32(70)/10000
+    check o[c+43] == float32(1)/255
+    for i in c+FfaCogWidth ..< l.heartOffset: check o[i] == 0
+    check o[14] == float32(1)/FfaSeatScale # cog rows filled
+    # Heart 4 is seat 2's: its owner column reads kin(2), unknown (0) under the fog.
+    let owner = l.heartOffset + rows.heartRow(4)*FfaHeartWidth + 5
+    check o[owner] == 0
+    let open = fogWorld(47, k)
+    let (p, openRows, _) = encode(open)
+    # Rules 47: seat 2 is still out of sight (no row), but its kinship is public.
+    check openRows.agents.len == 1 and openRows.hearts == rows.hearts
+    check p[owner] == float32(k.rPercent(0, 2))/100 and p[owner] != 0
+    # Only that column differs between the rules.
+    for i in 0..<l.size:
+      if i != owner: check o[i] == p[i]
+
+  test "native: pw_observe and a policy seat's observation hold no row or r of an unseen cog":
+    let h = pw_create_observation(3, 0, ocFfaView1.int32)
     require h != nil
     check pw_set_rules(h, 48) == 0 and pw_set_game_mode(h, 1) == 0 and pw_set_kin_layout(h, 3) == 0
     check pw_reset(h, 2026, 240) == 0
     let env = cast[ptr NativeEnv](h)
     env.world.arrange()
-    for s in 0..<LegacySeats: env.bodiesReady[s] = false
-    # A policy seat on seat 0 reads its own observation's row for seat 2 through neuralObs.
-    let manifest = """{"schema": "paintbot-neural-basic/1", "observation_contract": """" &
-      ObservationContractFfaV1Hash & """", "action_contract": """" & ActionContractHash & """"}"""
-    let r2 = FfaIdentityOffset + 2*FfaIdentityRowSize
-    let script = "walkTo(neuralObs(" & $(r2+3) & ") + 5000, neuralObs(" & $(r2+37) & ") * 7 + neuralObs(" &
-      $(r2+5) & ") + 5000)\n"
-    check pw_set_seat_policy_script(h, 0, cast[ptr UncheckedArray[char]](unsafeAddr script[0]), script.len.int32,
-      cast[ptr UncheckedArray[char]](unsafeAddr manifest[0]), manifest.len.int32) == 0
-    var obs = newSeq[float32](16*ObservationSizeFfaV1)
+    let n = pw_handle_observation_size(h).int
+    var obs = newSeq[float32](16*n)
     var resets = newSeq[float32](16)
     check pw_observe(h, cast[ptr UncheckedArray[cfloat]](addr obs[0]), cast[ptr UncheckedArray[cfloat]](addr resets[0])) == 0
-    for c in 0..<FfaIdentityRowSize: check obs[r2+c] == 0
+    beginViews(env.world)
+    let rows = ffaViewRows(seatView(0))
+    let l = ffaViewLayout(16, env.world.controlHearts.len)
+    let owner = l.heartOffset + rows.heartRow(4)*FfaHeartWidth + 5
+    check rows.agents.len == 1 and rows.agents[0].identity == 1
+    check obs[owner] == 0 and obs[14] == float32(1)/FfaSeatScale
+    for i in l.cogOffset+FfaCogWidth ..< l.heartOffset: check obs[i] == 0
+    var ids = newSeq[int32](l.cogRows + l.heartRows + 2)
+    check pw_observation_rows(h, 0, cast[ptr UncheckedArray[int32]](addr ids[0]), ids.len.int32) == ids.len
+    check ids[0] == 1 and ids[1] == -1
+    # A policy seat on seat 0 reads the same through neuralRow and neuralObs.
+    let manifest = """{"schema": "paintbot-neural-basic/1", "observation_contract": """" &
+      ObservationContractFfaView1Hash & """", "action_contract": """" & ActionContractFfaView1PointerHash & """"}"""
+    let script = "walkTo(neuralRow(0, 0) * 100 + neuralRow(0, 1) + 5000, neuralObs(" & $owner &
+      ") + neuralObs(14) * 10 + 5000)\n"
+    check pw_set_seat_policy_script(h, 0, cast[ptr UncheckedArray[char]](unsafeAddr script[0]), script.len.int32,
+      cast[ptr UncheckedArray[char]](unsafeAddr manifest[0]), manifest.len.int32) == 0
+    var layout = newSeq[int32](8)
+    check pw_action_layout(h, cast[ptr UncheckedArray[int32]](addr layout[0])) == 0
     var actions = newSeq[int32](16*ActionSizes.len)
-    var logits = newSeq[float32](16*LogitSize)
+    var logits = newSeq[float32](16*layout[6])
     var rewards = newSeq[float32](16)
     var terminals = newSeq[float32](16)
     check pw_step_logits(h, cast[ptr UncheckedArray[int32]](addr actions[0]),
       cast[ptr UncheckedArray[cfloat]](addr logits[0]), cast[ptr UncheckedArray[cfloat]](addr rewards[0]),
       cast[ptr UncheckedArray[cfloat]](addr terminals[0])) == 0
+    check pw_seat_script_status(h, 0, nil, 0) == 1
     var orders = newSeq[int32](10)
     check pw_seat_orders(h, 0, cast[ptr UncheckedArray[int32]](addr orders[0])) == 0
-    check orders[0] == 1 and orders[1] == 5000 and orders[2] == 5000
+    # Row 0 is seat 1, row 1 is empty (-1); the heart owner reads 0; one cog row filled (16).
+    check orders[0] == 1 and orders[1] == 100 - 1 + 5000 and orders[2] == 0 + 16*10 + 5000
     # The privileged trainer reads stay whole.
     var kin = newSeq[float32](256)
     check pw_kin(h, cast[ptr UncheckedArray[cfloat]](addr kin[0])) == 0

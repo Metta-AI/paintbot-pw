@@ -83,3 +83,12 @@ suite "SeatView boundary":
     let (output, code) = execCmdEx("nim check --hints:off " & quoteShell(probe))
     check code != 0
     check "training_labels is training-only" in output
+
+  test "the sample neural policy ends with the reference decode, verbatim":
+    let policy = readFile(Paintbot / "players/neural_policy.bas")
+    let decode = readFile(Paintbot / "players/neural_decode.bas")
+    check policy.endsWith(decode)
+    check "neuralSample()" in policy
+    for retired in ["paintbot_act", "neuralDecode", "neuralIssue", "cmdSet", "neuralAimX", "neuralGoalX"]:
+      check retired notin policy
+      check retired notin decode

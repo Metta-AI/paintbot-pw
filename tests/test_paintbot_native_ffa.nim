@@ -1,58 +1,96 @@
-## Native training ABI for FFA-kin: observation contract ffa.v1 selection (version 101).
-import std/unittest
-import ../examples/paintbot/[sim, kinship, neural_contract, native_env, topography]
+## Native training ABI for FFA-kin: observation contract ffa.view.1 (version 202), the kin
+## reward, pair counters, eval overrides and seat scripts.
+import std/[unittest, importutils]
+import ../examples/paintbot/[sim, kinship, neural_contract, native_env, topography, seat_view]
+privateAccess(NativeEnv)
 
 proc fp(buffer: var openArray[float32]): ptr UncheckedArray[cfloat] =
   cast[ptr UncheckedArray[cfloat]](addr buffer[0])
-
-suite "Native ffa.v1 observation selection":
-  test "version 101 creates 810-float rows equal to the reference encoder; 4 is unknown (3 is v3)":
-    check pw_observation_size_for(101) == 810
-    check pw_observation_size_for(4) == -1 and pw_create_observation(1, 24, 4) == nil
-    var text: array[65, char]
-    let buffer = cast[ptr UncheckedArray[char]](addr text[0])
-    check pw_observation_contract_hash(101, buffer, 65) == 0
-    check $cast[cstring](addr text[0]) == ObservationContractFfaV1Hash
-    let h = pw_create_observation(9, 48, 101)
-    require h != nil
-    check pw_observation_contract(h) == 101 and pw_handle_observation_size(h) == 810
-    check pw_reset(h, 10, 48) == 0
-    check pw_observation_contract(h) == 101
-    var obs = newSeq[float32](Seats*ObservationSizeFfaV1)
-    var resets: array[LegacySeats, float32]
-    check pw_observe(h, fp(obs), fp(resets)) == 0
-    configureRules(NativeRules)
-    let reference = newWorld(10, 48)
-    var expected = newSeq[float32](ObservationSizeFfaV1)
-    for slot in 0..<Seats:
-      encodeObservation(reference, slot, expected, ocFfaV1)
-      check obs[slot*ObservationSizeFfaV1 ..< (slot+1)*ObservationSizeFfaV1] == expected
-    pw_destroy(h)
-
-# ---------------------------------------------------------------------------------------
-# Task C2: game mode, kin reads, dense kin reward, pair counters and eval overrides.
-import std/[importutils, math]
-privateAccess(NativeEnv)
-
 proc ip(buffer: var openArray[int32]): ptr UncheckedArray[int32] =
   cast[ptr UncheckedArray[int32]](addr buffer[0])
 proc envOf(h: pointer): ptr NativeEnv = cast[ptr NativeEnv](h)
-proc near(p: Point, dx = 0, dz = 0): Point = point(p.x.int+dx, p.z.int+dz)
 
 proc ffaHandle(seed: int32, ticks = 0'i32, layout = -1'i32): pointer =
-  result = pw_create(seed, 24)
+  ## An FFA-kin world on an observation contract ffa.view.1 handle (FFA-kin needs 202).
+  result = pw_create_observation(seed, 24, ocFfaView1.int32)
   doAssert result != nil
   doAssert pw_set_game_mode(result, 1) == 0
   doAssert pw_set_kin_layout(result, layout) == 0
   doAssert pw_reset(result, seed, ticks) == 0
 
+proc expectedRow(h: pointer, slot: int, mask = 0'u32): seq[float32] =
+  ## encodeFfaView of the seat's SeatView on the handle's current world (the handle's threadvars
+  ## are installed by the pw_observe that precedes every call).
+  let env = envOf(h)
+  beginViews(env.world)
+  let view = seatView(slot)
+  result = newSeq[float32](ffaViewLayout(view).size)
+  encodeFfaView(view, result, ffaViewRows(view), mask)
+
+suite "Native ffa.view.1 observation selection":
+  test "version 202 rows equal encodeFfaView of each seat's view; retired versions are unknown":
+    check pw_observation_size_for(202) == -1 # the width follows the match
+    check pw_observation_size_for(201) == TeamsViewSize
+    for retired in [1'i32, 2, 3, 4, 101, 102]:
+      check pw_observation_size_for(retired) == -1 and pw_create_observation(1, 24, retired) == nil
+    var text: array[65, char]
+    let buffer = cast[ptr UncheckedArray[char]](addr text[0])
+    check pw_observation_contract_hash(202, buffer, 65) == 0
+    check $cast[cstring](addr text[0]) == ObservationContractFfaView1Hash
+    check pw_observation_contract_hash(101, buffer, 65) == -1
+    let h = ffaHandle(10, 48)
+    check pw_observation_contract(h) == 202
+    let n = pw_handle_observation_size(h).int
+    check n == ffaViewLayout(Seats, envOf(h).world.controlHearts.len).size
+    var obs = newSeq[float32](Seats*n)
+    var resets: array[LegacySeats, float32]
+    var actions = newSeq[int32](Seats*ActionSizes.len)
+    var rewards, terminals: array[LegacySeats, float32]
+    var filled = 0
+    for tick in 0..<3:
+      check pw_observe(h, fp(obs), fp(resets)) == 0
+      for slot in 0..<Seats:
+        let expected = h.expectedRow(slot)
+        check obs[slot*n ..< (slot+1)*n] == expected
+        if expected[FfaHeaderSize + FfaValidColumn] == 1: inc filled
+      check pw_step(h, ip(actions), fp(rewards), fp(terminals)) == 0
+    check filled > 0 # some seat sees another: the cog rows are exercised
+    pw_destroy(h)
+
+# ---------------------------------------------------------------------------------------
+# Task C2: game mode, kin reads, dense kin reward, pair counters and eval overrides.
+proc near(p: Point, dx = 0, dz = 0): Point = point(p.x.int+dx, p.z.int+dz)
+
 proc heartActions(h: pointer, tick: int): array[LegacySeats*ActionSizes.len, int32] =
-  ## Walk to a heart per seat (changing every 20 s) and fire at a compass heading.
+  ## Walk to a heart per seat (changing every 20 s) and fire at a compass heading. teams.view.1:
+  ## heart 1..10, compass aim 17..24. ffa.view.1 pointer: the rows are nearest first, so a
+  ## seat walking to its k-th nearest heart (k > 0) keeps changing target; the seats alternate
+  ## between the nearest control heart (row 0) and the nearest great heart instead; compass
+  ## aim 1..8.
+  let pointer = pw_action_contract(h) == acFfaView1Pointer.cint
+  let hearts = envOf(h).world.controlHearts.len
   for slot in 0..<Seats:
     let o = slot*ActionSizes.len
-    result[o] = int32(1 + (slot + tick div 480) mod 10)
-    result[o+1] = int32(17 + (slot + tick div 96) mod 8)
+    if pointer:
+      result[o] = int32(PointerObjectiveFirstRow + (if (slot + tick div 480) mod 2 == 0: 0 else: hearts))
+      result[o+1] = int32(1 + (slot + tick div 96) mod 8)
+    else:
+      result[o] = int32(1 + (slot + tick div 480) mod 10)
+      result[o+1] = int32(17 + (slot + tick div 96) mod 8)
     result[o+2] = int32((tick + slot) mod 3 == 0)
+
+proc commandAll(h: pointer, tick: int) =
+  ## heartActions as raw commands (pw_set_seat_command) for every seat: walk to heart
+  ## (slot + tick div 480) mod 10, aim 5000 units along a compass heading, fire every third tick.
+  ## Needs no decoder, so it drives a teams world on any handle.
+  let w = envOf(h).world
+  for slot in 0..<Seats:
+    let heart = w.controlHearts[(slot + tick div 480) mod 10].pos
+    let (dx, dz) = Directions[(slot + tick div 96) mod 8]
+    let p = w.cogs[slot].pos
+    var nine = [1'i32, heart.x, heart.z, int32((tick + slot) mod 3 == 0),
+      int32(p.x.int + 5000*dx), int32(p.z.int + 5000*dz), 0, 0, 0]
+    doAssert pw_set_seat_command(h, slot.cint, ip(nine)) == 0
 
 proc stats(h: pointer): seq[int32] =
   result = newSeq[int32](Seats*Seats*PairStatCount)
@@ -73,7 +111,6 @@ proc isolate(h: pointer, placed: openArray[(int, Point)], hp = FfaMaxHp.int32) =
     env.world.cogs[slot].goal = p
     env.world.cogs[slot].aim = Point()
     env.world.equipment[slot].lives = 1
-  for s in 0..<Seats: env.bodiesReady[s] = false
 
 proc command(h: pointer, slot: int, shoot: bool, aim: Point) =
   var nine = [0'i32, 0, 0, shoot.int32, aim.x, aim.z, 0, 0, 0]
@@ -117,7 +154,10 @@ proc open(h: pointer, dz = 0): Point =
 
 suite "Native FFA-kin ABI":
   test "the mode and kin layout apply at the next reset and are kept across resets":
-    let h = pw_create(3, 240)
+    let teams = pw_create(3, 240)
+    check pw_set_game_mode(teams, 1) == -1 and pw_set_game_mode(teams, 0) == 0 # teams.view.1 is the teams game's
+    pw_destroy(teams)
+    let h = pw_create_observation(3, 240, ocFfaView1.int32)
     check pw_game_mode(h) == 0 and pw_set_game_mode(h, 1) == 0 and pw_game_mode(h) == 0
     check pw_set_game_mode(h, 2) == -1 and pw_set_kin_layout(h, 7) == -1 and pw_set_kin_layout(h, -2) == -1
     check pw_set_kin_layout(h, 6) == 0 # tribes (families of 5)
@@ -184,10 +224,11 @@ suite "Native FFA-kin ABI":
       for i in 0..<Seats:
         check abs(seat[3*i+1].float64 + seat[3*i+2].float64 - total[i]) < 1e-5
       if layout == 5:
-        # Clones: every score pays everyone, so the dead keep earning.
+        # Clones: every score pays everyone, so the dead keep earning (a seat that died on the
+        # match's last tick had no step left to be paid in).
         var dead = 0
         for i in 0..<Seats:
-          if seat[3*i] >= 0:
+          if seat[3*i] >= 0 and seat[3*i] < float32(envOf(h).world.tick - 1):
             inc dead
             check afterDeath[i] > 0
         check dead > 0
@@ -290,7 +331,7 @@ suite "Native FFA-kin ABI":
 
   test "pair stats can be switched off; reward, split and hashes are unchanged":
     let on = ffaHandle(27, 600, 1)
-    let off = pw_create(27, 24)
+    let off = pw_create_observation(27, 24, ocFfaView1.int32)
     doAssert pw_set_game_mode(off, 1) == 0 and pw_set_kin_layout(off, 1) == 0
     check pw_set_pair_stats_enabled(off, 2) == -1 and pw_set_pair_stats_enabled(off, 0) == 0
     doAssert pw_reset(off, 27, 600) == 0
@@ -363,7 +404,7 @@ suite "Native FFA-kin ABI":
 
   test "overrides apply at reset; in the teams game nothing changes, hash for hash":
     let plain = pw_create(31, 480)
-    let knobs = pw_create(31, 480)
+    let knobs = pw_create_observation(31, 480, ocFfaView1.int32) # FFA-kin later needs ffa.view.1
     var family: array[LegacySeats, int8]
     var genes: array[LegacySeats, uint32]
     var ibd: array[LegacySeats*LegacySeats, int8]
@@ -389,11 +430,13 @@ suite "Native FFA-kin ABI":
     check pw_reset(plain, 32, 480) == 0 and pw_reset(knobs, 32, 480) == 0
     check pw_game_mode(knobs) == 0
     var r1, r2, t1, t2: array[LegacySeats, float32]
+    var idle: array[LegacySeats*ActionSizes.len, int32]
     for tick in 0..<480:
-      var a1 = heartActions(plain, tick)
-      var a2 = a1
-      check pw_step(plain, ip(a1), fp(r1), fp(t1)) == 0
-      check pw_step(knobs, ip(a2), fp(r2), fp(t2)) == 0
+      # Raw commands: the same orders on both handles, whatever their action contracts.
+      plain.commandAll(tick)
+      knobs.commandAll(tick)
+      check pw_step(plain, ip(idle), fp(r1), fp(t1)) == 0
+      check pw_step(knobs, ip(idle), fp(r2), fp(t2)) == 0
       check pw_state_hash(plain) == pw_state_hash(knobs)
       check r1 == r2 and t1 == t2
     for v in knobs.stats(): check v == 0
@@ -415,7 +458,7 @@ suite "Native FFA-kin ABI":
 
   test "kin invariance through the ABI: one spawn grouping and r, two genomes, identical hashes":
     proc run(genesSalt: uint32, r: int8): seq[uint32] =
-      let h = pw_create(41, 24)
+      let h = pw_create_observation(41, 24, ocFfaView1.int32)
       var family: array[LegacySeats, int8]
       var genes: array[LegacySeats, uint32]
       var ibd: array[LegacySeats*LegacySeats, int8]
@@ -444,7 +487,7 @@ suite "Native FFA-kin ABI":
     # the boost on kin ground, so the hashes diverge.
     check run(2654435761'u32, 8) != a
     # Negative control: without the grouping override the families (i div 4) place spawns.
-    let h = pw_create(41, 24)
+    let h = pw_create_observation(41, 24, ocFfaView1.int32)
     doAssert pw_set_game_mode(h, 1) == 0 and pw_set_kin_layout(h, 0) == 0
     doAssert pw_reset(h, 41, 600) == 0
     var rewards, terminals: array[LegacySeats, float32]
@@ -453,23 +496,37 @@ suite "Native FFA-kin ABI":
     check pw_state_hash(h) != a[0]
     pw_destroy(h)
 
-  test "the kin mask zeroes r-to-me in pw_observe rows":
-    let h = pw_create_observation(51, 24, 101)
+  test "the kin mask zeroes every kin column of ffa.view.1 rows":
+    let h = pw_create_observation(51, 24, ocFfaView1.int32)
     doAssert pw_set_game_mode(h, 1) == 0 and pw_set_kin_layout(h, 5) == 0 and pw_reset(h, 51, 0) == 0
-    var obs = newSeq[float32](Seats*ObservationSizeFfaV1)
+    let n = pw_handle_observation_size(h).int
+    let l = ffaViewLayout(Seats, envOf(h).world.controlHearts.len)
+    var obs = newSeq[float32](Seats*n)
     var resets: array[LegacySeats, float32]
+    # Every heart owned by seat 1, so heart column 5 reads kin for every other seat.
+    for heart in envOf(h).world.controlHearts.mitems: heart.owner = 1
     check pw_observe(h, fp(obs), fp(resets)) == 0
-    check obs[FfaIdentityOffset + FfaIdentityRowSize + 37] == 1 # clones
+    var seenKin = 0
+    for slot in 0..<Seats:
+      for k in 0..<l.cogRows:
+        let o = slot*n + l.cogOffset + k*FfaCogWidth
+        if obs[o] == 1:
+          check obs[o+37] == 1 # clones
+          inc seenKin
+      if slot != 1:
+        check obs[slot*n + l.heartOffset + 5] == 1 # the owner is a clone
+    check seenKin > 0
     check pw_set_obs_mask(h, 1) == 0
     check pw_observe(h, fp(obs), fp(resets)) == 0
     for slot in 0..<Seats:
-      for j in 0..<Seats:
-        check obs[slot*ObservationSizeFfaV1 + FfaIdentityOffset + j*FfaIdentityRowSize + 37] == 0
-    # The rows otherwise equal the reference encoder on the handle's world and kinship.
-    var expected = newSeq[float32](ObservationSizeFfaV1)
-    encodeFfaObservation(envOf(h).world, 3, expected, envOf(h).world.observedBodies(3),
-      envOf(h).kinship, FfaObsMaskKin)
-    check obs[3*ObservationSizeFfaV1 ..< 4*ObservationSizeFfaV1] == expected
+      check obs[slot*n + 11] == 0 # the territory boost
+      for k in 0..<l.cogRows: check obs[slot*n + l.cogOffset + k*FfaCogWidth + 37] == 0
+      for k in 0..<l.heartRows:
+        let owner = obs[slot*n + l.heartOffset + k*FfaHeartWidth + 5]
+        check owner == (if slot == 1: 1'f32 else: 0'f32) # own hearts still read 1
+      # The rows otherwise equal encodeFfaView under the mask.
+      check obs[slot*n ..< (slot+1)*n] == h.expectedRow(slot, FfaObsMaskKin)
+    check obs[0 ..< n] != h.expectedRow(0) # negative control: the mask changed the row
     pw_destroy(h)
 
   test "an FFA handle and a teams handle interleaved on one thread do not disturb each other":
@@ -532,10 +589,13 @@ suite "Native FFA-kin seat scripts, results and bots":
     pw_destroy(h)
 
   test "an FFA script set before the switching reset compiles at that reset; teams refuses it":
-    let h = pw_create(72, 240)
+    # An ffa.view.1 handle playing the teams game (FFA-kin needs 202 later). Its caller heads
+    # have no teams decoder, so the other seats run a trivial script.
+    let h = pw_create_observation(72, 240, ocFfaView1.int32)
     check h.setScript(0, FfaBas) == 1 # the teams game has no kin(), gene(), ...
     let (code, message) = h.status(0)
     check code == 2 and message.len > 0
+    for seat in 1..<Seats: check h.setScript(seat, "walkTo(selfX, selfY)\n") == 0
     var actions: array[LegacySeats*ActionSizes.len, int32]
     var rewards, terminals: array[LegacySeats, float32]
     check pw_step(h, ip(actions), fp(rewards), fp(terminals)) == 0 # the disabled seat idles

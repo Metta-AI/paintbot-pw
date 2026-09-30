@@ -136,7 +136,7 @@ suite "Native ABI decoder sampling":
     for seat in 0..<Seats: check pw_set_seat_sampling(sampling, seat.cint, 1000, 0) == 0
     var actions: array[LegacySeats*ActionSizes.len, int32]
     var rewards, terminals: array[LegacySeats, cfloat]
-    var observations: array[LegacySeats*ObservationSize, cfloat]
+    var observations: array[LegacySeats*TeamsViewSize, cfloat]
     var resets: array[LegacySeats, cfloat]
     for tick in 0..<300:
       # The same caller actions for both handles; the sampling handle also draws, which
