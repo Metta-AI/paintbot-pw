@@ -541,22 +541,68 @@ proc lineClearRay(w: World, a, b: Point): bool =
   let startHeight = if elevated: w.elevation(a) else: 0
   let endHeight = if elevated: w.elevation(b) else: 0
   let steps = max(abs(b.x-a.x), abs(b.z-a.z)) div 25 + 1
-  for i in 1..steps:
-    let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
-    if boundsBlocked(p, 0, bounds): return false
-    when IndexedGeometry:
-      if coverBlockedIndexed(g, w, p, 0): return false
-    else:
-      if filtered:
-        for k in 0..<rayCount:
-          if w.cover[rayCover[k]].coverBlocks(p, 0): return false
-      else:
-        for c in w.cover:
-          if c.coverBlocks(p, 0): return false
+  when defined(pwTraining):
+    # The same samples and predicates, cheaper: a sample whose terrain block's bounds (its
+    # lowest coast margin, its highest ground) cannot block it skips the cell; otherwise one
+    # cell fetch serves both the coast and the eye-line tests. Only trenches overlapping the
+    # ray's bounds are scanned (all of them when there are too many to list).
+    let island = islandTerrain
+    const RayTrenchLimit = 16
+    var rayTrenches: array[RayTrenchLimit, int32]
+    var trenchCount = 0
     if elevated:
-      let eye = startHeight+120+(endHeight-startHeight)*i.int div steps.int
-      if w.elevation(p) > eye: return false
-  true
+      for index, t in w.trenches:
+        if t.x <= max(a.x,b.x) and t.x+t.w > min(a.x,b.x) and t.z <= max(a.z,b.z) and t.z+t.h > min(a.z,b.z):
+          if trenchCount < RayTrenchLimit: rayTrenches[trenchCount] = index.int32
+          inc trenchCount
+    let listed = trenchCount <= RayTrenchLimit
+    for i in 1..steps:
+      let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
+      if p.x < bounds[0] or p.z < bounds[1] or p.x > bounds[2] or p.z > bounds[3]: return false
+      let eye = if elevated: startHeight+120+(endHeight-startHeight)*i.int div steps.int else: 0
+      let blk = terrainBlockAt(p.x.int, p.z.int)
+      if blk == nil:
+        # Not tabled (a generated map, or outside the span): the direct lookups, as before.
+        if island and islandMargin(p.x.int, p.z.int) < 40: return false
+        if elevated and w.elevation(p) > eye: return false
+      elif (island and blk.minMargin.int < 40) or (elevated and blk.maxHeight.int > eye):
+        let cell = blk.cellIn(p.x.int, p.z.int)
+        if island and cell.margin.int < 40: return false
+        if elevated:
+          # A trench only lowers the ground, so a cell at or below the eye line stays clear.
+          var height = cell.height.int
+          if height > eye:
+            if listed:
+              for k in 0..<trenchCount:
+                let t = w.trenches[rayTrenches[k]]
+                if p.x >= t.x and p.x < t.x+t.w and p.z >= t.z and p.z < t.z+t.h:
+                  height -= 60
+                  break
+            else:
+              for t in w.trenches:
+                if p.x >= t.x and p.x < t.x+t.w and p.z >= t.z and p.z < t.z+t.h:
+                  height -= 60
+                  break
+            if height > eye: return false
+      if coverBlockedIndexed(g, w, p, 0): return false
+    return true
+  else:
+    for i in 1..steps:
+      let p = Point(x: a.x+(b.x-a.x)*i div steps, z: a.z+(b.z-a.z)*i div steps)
+      if boundsBlocked(p, 0, bounds): return false
+      when IndexedGeometry:
+        if coverBlockedIndexed(g, w, p, 0): return false
+      else:
+        if filtered:
+          for k in 0..<rayCount:
+            if w.cover[rayCover[k]].coverBlocks(p, 0): return false
+        else:
+          for c in w.cover:
+            if c.coverBlocks(p, 0): return false
+      if elevated:
+        let eye = startHeight+120+(endHeight-startHeight)*i.int div steps.int
+        if w.elevation(p) > eye: return false
+    true
 proc lineClear*(w: World, a, b: Point): bool =
   when IndexedGeometry:
     # Remembered per thread for the geometry the cover index was built from; the

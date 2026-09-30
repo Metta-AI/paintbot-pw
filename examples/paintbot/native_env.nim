@@ -2246,6 +2246,37 @@ proc pw_elevation*(handle: pointer, x, z: int32): cint {.exportc, cdecl, dynlib.
   ready(handle)
   elevation(cast[ptr NativeEnv](handle).world, Point(x: x, z: z)).cint
 
+proc pw_terrain_prewarm*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
+  ## Computes now the terrain table blocks covering the handle's current world bounds, so its
+  ## rays, walks and observations never pay for a block's first touch (a cold table otherwise
+  ## halves throughput for the first few thousand ticks of a process). The table is shared by
+  ## every handle and thread of the process whose rules and map agree, so one call per rules
+  ## and map suffices. Returns the blocks covered; 0 for a generated map (read from its grid,
+  ## never tabled); -1 for a nil handle. Changes no world state.
+  if handle == nil: return -1
+  ready(handle)
+  cint(prewarmTerrain(minX(), minZ(), maxX(), maxZ()))
+
+proc pw_terrain_cache_save*(handle: pointer, path: cstring): cint {.exportc, cdecl, dynlib.} =
+  ## Writes the terrain table of the handle's rules and map (every computed block; call
+  ## pw_terrain_prewarm first for a complete one) to path, replaced atomically. Returns the
+  ## blocks written; 0 for a generated map; -1 for a nil argument or an I/O failure.
+  if handle == nil or path == nil: return -1
+  ready(handle)
+  try: cint(saveTerrain($path))
+  except CatchableError: -1
+
+proc pw_terrain_cache_load*(handle: pointer, path: cstring): cint {.exportc, cdecl, dynlib.} =
+  ## Maps a file pw_terrain_cache_save wrote, read-only and shared through the page cache, into
+  ## the table of the handle's rules and map. Returns the blocks installed (those not already
+  ## computed); 0 for a generated map; -1 for a nil argument or a file this build cannot use
+  ## (missing, another game build's terrain, other rules or map, or cells that disagree with
+  ## the direct terrain functions), in which case nothing is installed.
+  if handle == nil or path == nil: return -1
+  ready(handle)
+  try: cint(loadTerrain($path))
+  except CatchableError: -1
+
 proc pw_terrain_cache_blocks*(): cint {.exportc, cdecl, dynlib.} =
   ## Diagnostic: resident 64x64 terrain blocks (16 KiB each) across all tables.
   cint(terrainCacheResidentBlocks())

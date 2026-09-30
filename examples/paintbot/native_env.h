@@ -381,6 +381,16 @@ int pw_step_logits(void *handle, const int32_t *actions, const float *logits, fl
 int pw_seat_policy_choices(void *handle, int seat, int32_t *twenty_two);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
+/* Terrain table of the handle's rules and map (shared by every handle and thread of the process
+ * that agree): pw_terrain_prewarm computes the blocks covering the world bounds now (~30 s for
+ * the island) and returns how many; pw_terrain_cache_save writes the computed blocks to path
+ * (replaced atomically); pw_terrain_cache_load maps such a file read-only (shared across
+ * processes through the page cache) and returns the blocks installed, or -1 when the file is
+ * missing or was written for another game build, rules or map. All return 0 on a generated map
+ * (never tabled) and -1 for a nil argument; none changes world state. */
+int pw_terrain_prewarm(void *handle);
+int pw_terrain_cache_save(void *handle, const char *path);
+int pw_terrain_cache_load(void *handle, const char *path);
 /* Neural actors (additive): the hosted seat's own loader and inference (neural_actor.nim)
  * for a model.bin in PWNET001 or PWNET002 format, so a trainer or evaluator runs a bundle's
  * network bit for bit as the hosted seat does. pw_net_load validates like the host and
