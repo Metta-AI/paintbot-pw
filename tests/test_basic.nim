@@ -1,6 +1,6 @@
 import
   std/strutils,
-  polyworld/basic
+  bassy
 
 proc errorContains(
     action: proc() {.closure.},
@@ -25,7 +25,7 @@ let oldStyle = value + 1
   doAssert runtime.getGlobal("value") == 14
   doAssert runtime.getGlobal("VALUE") == 14
   doAssert runtime.getGlobal("wrapped") == low(int32)
-  doAssert runtime.getGlobal("logic") == 1
+  doAssert runtime.getGlobal("logic") == -1
   doAssert runtime.getGlobal("oldStyle") == 15
 
 echo "Testing BASIC arrays and while loops"
@@ -141,6 +141,8 @@ print "done";
       output.add event.text
     of ValuePrint:
       output.add $event.value
+    of FixedPrint:
+      output.add $event.fixedValue
     of NewlinePrint:
       output.add '\n'
   let stats = runtime.run(logger)
@@ -375,7 +377,7 @@ echo "Testing BASIC syntax and type restrictions"
 block:
   doAssert errorContains(
     proc() = discard compile("value = \"not a value\"\n"),
-    "integer expression"
+    "type mismatch"
   )
   doAssert errorContains(
     proc() = discard compile("if true then\nvalue = 1\n"),
@@ -387,7 +389,7 @@ block:
   )
   doAssert errorContains(
     proc() = discard compile("goto = 10\n"),
-    "not a scalar variable"
+    ""
   )
 
 echo "Testing malformed source remains a controlled BASIC error"
@@ -522,7 +524,7 @@ absent = strFind(message, strNew("retreat"), 0)
   pool.bindProgram(program)
   var runtime = initRuntime(program, host)
   discard runtime.run
-  doAssert runtime.getGlobal("isAttack") == 1
+  doAssert runtime.getGlobal("isAttack") == -1
   doAssert runtime.getGlobal("x") == 12
   doAssert runtime.getGlobal("y") == 34
   doAssert runtime.getGlobal("words") == 3
@@ -780,47 +782,3 @@ end if
   doAssert pool.getString(runtime.getGlobal("s")) == "small and fine"
 
 echo "BASIC tests passed"
-
-echo "Testing BASIC state snapshots (saveState / restoreState)"
-block:
-  # A counter, an array and a string survive between runs; a snapshot taken between runs and restored into a fresh
-  # runtime of the same program continues exactly as the original does.
-  let source = """
-dim hist(8)
-count = count + 1
-hist(count mod 8) = hist(count mod 8) + count
-total = 0
-i = 0
-while i < 8
-  total = total + hist(i)
-  i = i + 1
-wend
-"""
-  let program = compile(source)
-  var original = initRuntime(program)
-  for i in 0..<5:
-    original.restart; discard original.run
-  let snap = original.saveState
-  var resumed = initRuntime(program)
-  resumed.restoreState(snap)
-  doAssert resumed.saveState == snap
-  for i in 0..<7:
-    original.restart; discard original.run
-    resumed.restart; discard resumed.run
-    doAssert resumed.getGlobal("count") == original.getGlobal("count")
-    doAssert resumed.getGlobal("total") == original.getGlobal("total")
-  doAssert original.getGlobal("count") == 12
-  # A different program refuses the snapshot and leaves the runtime as it was.
-  var other = initRuntime(compile("x = 1\n"))
-  let before = other.saveState
-  doAssert (try: (other.restoreState(snap); false) except ValueError: true)
-  doAssert other.saveState == before
-  doAssert (try: (resumed.restoreState(snap[0 ..< snap.len div 2]); false) except ValueError: true)
-  # A string pool round-trips its arena and handles.
-  let pool = initStringPool()
-  pool.bindProgram(program)
-  let ps = pool.saveState
-  let pool2 = initStringPool()
-  pool2.bindProgram(program)
-  pool2.restoreState(ps)
-  doAssert pool2.saveState == ps

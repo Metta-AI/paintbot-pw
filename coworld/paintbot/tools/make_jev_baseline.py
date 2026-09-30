@@ -37,6 +37,7 @@ lines in the init block; the generated file states the measurements):
 from __future__ import annotations
 
 import sys
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -44,12 +45,50 @@ BASE = ROOT / "coworld/paintbot/players/base.bas"
 OUTPUTS = [ROOT / "coworld/paintbot/players/jev.bas", ROOT / "examples/paintbot/players/jev.bas"]
 
 
+def record_syntax(source: str) -> str:
+    """Use the baseline's record fields and explicit integer division."""
+    columns = {
+        "pickupMemoryX": "supplies({}).x",
+        "pickupMemoryY": "supplies({}).y",
+        "pickupMemoryKind": "supplies({}).kind",
+        "pickupMemoryTick": "supplies({}).tick",
+        "oldX": "motion({}).x", "oldY": "motion({}).y",
+        "lastSeen": "motion({}).seen",
+        "visible": "agents({}).visible", "playerX": "agents({}).x",
+        "playerY": "agents({}).y", "playerHp": "agents({}).hp",
+        "playerTeam": "agents({}).team",
+        "playerCarrying": "agents({}).carrying",
+    }
+    scalars = {
+        "selfId": "id", "selfTeam": "team", "selfX": "x",
+        "selfY": "y", "selfHp": "hp", "worldTick": "tick",
+        "carrying": "carrying", "hasGrenade": "hasGrenade",
+        "hasSpray": "hasSpray", "armorHp": "armorHp",
+        "grenadeCharge": "grenadeCharge", "trenchId": "trenchId",
+        "livesLeft": "livesLeft",
+    }
+    pieces = re.split(r'("[^"\n]*"|\'[^\n]*)', source)
+    for i in range(0, len(pieces), 2):
+        code = pieces[i].replace("/", "\\")
+        for name, field in columns.items():
+            code = re.sub(r"\b" + name + r"\(([^()]*)\)",
+                          lambda match: field.format(match[1]), code)
+        for name, field in scalars.items():
+            code = re.sub(r"(?<![.\w])" + name + r"\b", "me." + field, code)
+        code = re.sub(r"\bnot\s+([A-Za-z_]\w*(?:\([^()]*\))?(?:\.\w+)*)",
+                      r"(\1 = 0)", code)
+        pieces[i] = code
+    return "".join(pieces)
+
+
 def splice(s: str, anchor: str, new: str, *, before: bool = True) -> str:
+    anchor, new = record_syntax(anchor), record_syntax(new)
     assert s.count(anchor) == 1, (anchor[:70], s.count(anchor))
     return s.replace(anchor, new + anchor if before else anchor + new, 1)
 
 
 def swap(s: str, old: str, new: str) -> str:
+    old, new = record_syntax(old), record_syntax(new)
     assert s.count(old) == 1, (old[:70], s.count(old))
     return s.replace(old, new, 1)
 
@@ -2066,7 +2105,7 @@ def build(base: str) -> str:
     s = base
     s = swap(s, "' Paintbot PW baseline. Every cog runs this file on its own: no shared memory, fog-gated\n",
              HEADER + "' Baseline notes follow. Every cog runs this file on its own: no shared memory, fog-gated\n")
-    s = splice(s, "dim lastSeen(16)\n", DIMS, before=False)
+    s = splice(s, "dim drF(6)\n", DIMS, before=False)
     s = splice(s, "if started = 0 then\n  started = 1\n", SUBS)
     s = splice(s, "' Where we want to be. Later rules override earlier ones; one walkTo is issued at the end.\n", CLUMP)
     s = splice(s, "' Where we want to be. Later rules override earlier ones; one walkTo is issued at the end.\n", FOCUS)

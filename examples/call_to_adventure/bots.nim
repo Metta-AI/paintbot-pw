@@ -4,8 +4,9 @@
 ## One VM per hero. Commands go through `applyHeroAction`, so a script
 ## cannot write world fields directly.
 
+import bassy
 import
-  polyworld/[basic, cli, controllers, pathing, profiles],
+  polyworld/[cli, controllers, pathing, profiles],
   content,
   sim,
   replays

@@ -1,8 +1,9 @@
 ## Gods of the Arena hero scripting: the BASIC surface one hero has
 ## on the simulation.
 
+import bassy
 import
-  polyworld/[basic, cli, controllers, profiles, tapes],
+  polyworld/[cli, controllers, profiles, tapes],
   content,
   sim,
   replays

@@ -4,7 +4,7 @@
 ## here writes a command (docs/neural/seat-view.md).
 import std/[os, json, strutils, math]
 import polyworld/rngs
-import polyworld/basic
+import bassy
 import seat_view, neural_actor, neural_contract
 
 const MaxNeuralOperations* = 4_000_000'i64

@@ -8,9 +8,10 @@
 ## BASIC decisions arrive through `onHeroTurn`. This module owns the
 ## VM type on `Game` but never runs a program.
 
+from bassy import Runtime, PrintProc, Limits
 import
   std/[strformat],
-  polyworld/[basic, bodies, fixed, hashes, noises, pathing, profiles, rngs,
+  polyworld/[bodies, fixed, hashes, noises, pathing, profiles, rngs,
     tapes, visions],
   content,
   maps,

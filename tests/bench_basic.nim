@@ -1,6 +1,6 @@
 import
   benchy,
-  polyworld/basic
+  bassy
 
 const
   ArithmeticIterations = 1_000_000

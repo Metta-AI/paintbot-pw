@@ -3,8 +3,9 @@
 ## pods, this suite) every ask is refused, and the file must then play exactly like `base.bas`:
 ## the same state hash tick for tick, no seat disabled, and a per-decision cost that stays well
 ## inside the BASIC budget even though it drafts oracle requests.
+import bassy
 import std/[unittest, os, strutils, tables, json]
-import polyworld/[cli, basic]
+import polyworld/[cli]
 import ../examples/paintbot/[sim, bots, oracle]
 
 const Ticks = 720   # thirty seconds: the layer's first asks, shouts and heart flips all fall inside
@@ -89,6 +90,7 @@ suite "Jev-advised BASIC baseline":
         case e.kind
         of TextPrint: lines[s].add e.text
         of ValuePrint: lines[s].add $e.value
+        of FixedPrint: lines[s].add $e.fixedValue
         of NewlinePrint:
           if lines[s].startsWith("ans ") and firstAnswer[s] < 0:
             firstAnswer[s] = parseInt(lines[s].split(' ')[1].split('=')[1])
