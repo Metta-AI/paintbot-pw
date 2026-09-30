@@ -1112,7 +1112,7 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
   ## replace the handle's mode, kin layout, map, vision, vision range and glory awards from its NEXT pw_reset
   ## on (the current world keeps its own), as pw_set_game_mode, pw_set_kin_layout and pw_set_map
   ## do; the rules stay pw_set_rules'. 0; -1 bad args; -2 a config the host would refuse (or an
-  ## FFA-kin config on an observation contract v3 handle), with its reason in `error`
+  ## FFA-kin config on an observation contract teams.view.1 handle), with its reason in `error`
   ## (NUL-terminated, truncated to capacity; "" on success; may be NULL).
   if handle == nil or length < 0 or (length > 0 and json == nil): return -1
   var text = newString(length.int)

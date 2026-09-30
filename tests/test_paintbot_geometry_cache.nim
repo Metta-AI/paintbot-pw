@@ -5,7 +5,7 @@
 ## `nim r tests/test_paintbot_geometry_cache.nim` and
 ## `nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim`.
 import std/[unittest, random, os, math]
-import ../examples/paintbot/[sim, neural_contract]
+import ../examples/paintbot/[sim, seat_view, neural_contract]
 
 when not IndexedGeometry: {.error: "this test exercises the geometry caches; drop -d:pwFullScanGeometry".}
 
@@ -226,19 +226,23 @@ suite "Geometry caches":
     configureRules(37)
     for i in 0..<600:
       check w.waypoint(w.cogs[i mod Seats].pos, goals[i mod goals.len]) == first[i]
-  test "host body cache matches per-call resolution":
+  test "the SeatView vision cache matches per-call resolution":
     configureRules(37)
     let w = newWorld(77, 240)
     for slot in 0..<Seats:
-      let bodies = w.observedBodies(slot)
-      var actions = [int32(1), int32(1+slot), 1'i32, 0'i32, 0'i32]
-      check w.decodeActions(slot, actions) == w.decodeActions(slot, actions, bodies)
-      var direct: array[ObservationSize, float32]
-      var shared: array[ObservationSize, float32]
-      w.encodeObservation(slot, direct)
-      w.encodeObservation(slot, shared, bodies)
-      check direct == shared
+      beginViews(w)
+      let view = seatView(slot)
+      var warm, cached: array[TeamsViewSize, float32]
+      encodeTeamsView(view, warm)    # fills the tick's vision cache
+      encodeTeamsView(view, cached)  # reads it back
+      check warm == cached
+      for identity in 0..<Seats:
+        var seen = identity == slot
+        for body in 0..<Seats:
+          if body != slot and w.observedSeat(slot, body) == identity and w.visible(slot, body): seen = true
+        check view.visible(identity) == int32(seen)
       var a, b: array[ActionSizes.len, int32]
-      w.trainingBotActions(slot, 2, a)
-      w.trainingBotActions(slot, 2, b, bodies)
+      view.trainingBotActions(2, a)
+      beginViews(w)
+      seatView(slot).trainingBotActions(2, b)
       check a == b
