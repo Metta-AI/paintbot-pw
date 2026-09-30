@@ -41,7 +41,6 @@ type
     celebrating: bool
     celebrationSeconds: float32
     actionCamera: bool
-    inset: bool ## the action camera's runner-up view fills the corner inset
     instantReplay: bool
     camera: array[3, float32]
     screen: seq[array[2, float32]]
@@ -84,7 +83,6 @@ var
   director = newDirector(160)
   directorLens = -2
   instant: InstantReplay
-  insetView: InsetShot
   missCheckTick = -1
   orbitPhase = 0'f32
   orbitAmount = 0'f32 ## 0..1: the action camera's slow sway fades in and out
@@ -926,8 +924,6 @@ proc runGraphics*() =
         director.cam.chooseShot(dt.float32, max(1, playbackRate.int32))
       director.cam.follow(target, distance, dt.float32, max(1, playbackRate.int32))
       camX = target.x; camY = target.y; camZ = target.z
-      insetView = if firstPerson or instant.active: (false, vec3(0, 0, 0), 0'f32)
-        else: director.insetShot(dt.float32)
       # Replays at up to 2x: rewind to a highlight both views missed once the action is calm.
       if replayMode and (transport.playing or instant.active):
         let calm = director.cam.interestScore(director.cam.lockId) < CalmScore
@@ -935,7 +931,6 @@ proc runGraphics*() =
           allowed = transport.playing and playbackRate <= 2)
         if back >= 0: transport.seekTo(back, play = true)
     else:
-      insetView = (false, vec3(0, 0, 0), 0'f32)
       # The action camera was turned off or the match ended: return from a replay.
       let back = instant.finish(world.tick)
       if back >= 0 and not cameraFinished: transport.seekTo(back, play = transport.playing)
@@ -950,20 +945,15 @@ proc runGraphics*() =
         window.size.x, window.size.y)
     profMark(1)
     let vp = projection*view
-    let insetVp = if insetView.show:
-        (let (_, v, p) = spectatorCamera(insetView.target, insetView.distance, viewYaw, tilt, 16, 10); p*v)
-      else: mat4()
-    # Highlights neither view showed become instant-replay candidates.
+    # Highlights the camera did not show become instant-replay candidates.
     if world.tick < missCheckTick: missCheckTick = world.tick
     if replayMode and autoCamera and world.tick != missCheckTick and
         world.tick-missCheckTick <= MissScanTicks:
       for event in index.eventsBetween(missCheckTick, world.tick):
         if (event.slot >= 0 and not seen(event.slot)) or not world.isHighlight(event): continue
         let at = position(point(event.x, event.z), 1)
-        proc inView(m: Mat4): bool =
-          let q = projected(m, at)
-          q[0] in 0.03'f32..0.97'f32 and q[1] in 0.03'f32..0.97'f32
-        if not inView(vp) and not (insetView.show and inView(insetVp)):
+        let q = projected(vp, at)
+        if q[0] notin 0.03'f32..0.97'f32 or q[1] notin 0.03'f32..0.97'f32:
           instant.noteMissed(event.tick.int32, at)
     missCheckTick = world.tick
     proc onScreen(p: Vec3, margin = 1.15'f32, view = vp): bool =
@@ -1379,8 +1369,7 @@ proc runGraphics*() =
     profMark(7)
     shapes.draw(vp)
     profMark(8)
-    # A second 3D view in the corner: the selected bot's eyes, or the action camera's
-    # runner-up shot elsewhere on the map.
+    # A second 3D view in the corner: the selected bot's eyes.
     proc drawInset(v, proj: Mat4, eyeAt: Vec3, exclude: int) =
       let wi = (window.size.x.float32*insetSize).int; let he = wi*5 div 8
       var ratio = 1'f32
@@ -1410,10 +1399,6 @@ proc runGraphics*() =
       let forward = vec3(d.x.float32/100, 0, d.z.float32/100)
       drawInset(lookAt(p, p+forward, vec3(0, 1, 0)),
         perspective(78'f32, 1.6'f32, 0.15'f32, 180'f32), p, selected)
-    elif insetView.show:
-      let (insetEye, v, p) = spectatorCamera(insetView.target, insetView.distance, viewYaw,
-        tilt, 16, 10)
-      drawInset(v, p, insetEye, -1)
     profMark(9)
     window.swapBuffers()
     profMark(10)
@@ -1479,7 +1464,7 @@ proc runGraphics*() =
             for j in 0..<Seats: row[j] = activeKinship.rPercent(i, j)
             rPct.add row
         let payload = ViewerState(mode: mode, family: family, genes: genes, rPct: rPct, kinHue: kinHue, terrain: terrain, objects: objects, heartHeld: heartHeld, heartValues: heartValues, combat: (if world.tick < index.combat.len: index.combat[world.tick] else: newSeq[CombatStats](Seats)), rulesVersion: replayRulesVersion, glory: gloryRules(), maxHp: maxHp(), world: hudWorld, staticOmitted: staticOmitted, bounds: [minX(),minZ(),maxX(),maxZ()], recorded: recording.frames.len, total: transport.timelineEnd.int, live: not replayMode, playerSlot: options.playerSlot.int,
-            paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, inset: insetView.show, instantReplay: instant.active, camera: [camX,camZ,distance], screen: screens, visible: visibility,
+            paused: paused, celebrating: victory.active, celebrationSeconds: victory.elapsed, actionCamera: autoCamera, instantReplay: instant.active, camera: [camX,camZ,distance], screen: screens, visible: visibility,
             footprint: footprint, map: mapName(), land: landMask()).toJson()
         let data = payload.cstring
         let tick = world.tick

@@ -60,23 +60,7 @@ suite "camera director":
     check totals.frames > 0
     check totals.coverage >= 0.5
 
-suite "inset and instant replay":
-  test "the inset frames strong action outside the main shot and holds it":
-    let d = newDirector(200)
-    var cam = d.cam
-    cam.beginFrame(0)
-    cam.noteInterest(1, vec3(0, 0, 0), 150, 4, 0, 1000)
-    cam.chooseShot(0)
-    check d.insetShot(0).show == false
-    cam.noteInterest(2, vec3(120, 0, 0), 130, 4, 0, 1000)
-    let shot = d.insetShot(1/60)
-    check shot.show
-    check abs(shot.target.x-120) < 1
-    # The runner-up cools below the keep bar: the inset holds a moment, then hides.
-    cam.noteInterest(2, vec3(120, 0, 0), 20, 4, 0, 1000, replace = true)
-    check d.insetShot(1).show
-    check not d.insetShot(3).show
-
+suite "instant replay":
   test "an instant replay waits for calm, rewinds, and returns":
     var r: InstantReplay
     r.noteMissed(100, vec3(5, 0, 5))

@@ -23,13 +23,6 @@ const
   LeadMaxMeters = 6'f32
   CoverageSeconds = 40'f32
     ## A cog unseen this long reaches the full coverage bonus.
-  InsetScore = 110'f32
-    ## An interest this strong outside the main shot earns the inset.
-  InsetKeepScore = 60'f32
-  InsetHoldSeconds = 3'f32
-  InsetGapSeconds = 3'f32
-    ## After the inset hides it stays down this long unless something urgent appears.
-  InsetUrgentScore = 150'f32
   ReplayLeadTicks = 2*TickRate
     ## An instant replay starts this long before the missed highlight.
   ReplayTailTicks = TickRate*3 div 2
@@ -79,14 +72,6 @@ type
     velocity: array[MaxSeats, Vec3]
       ## Smoothed metres per tick.
     lastInShot: array[MaxSeats, int32]
-    insetId: int32
-    insetTarget: Vec3
-    insetDistance: float32
-    insetHold: float32
-      ## Wall-clock seconds the inset keeps its subject before it may hide or change.
-    insetGap: float32
-      ## Wall-clock seconds before a hidden inset may show a new subject.
-  InsetShot* = tuple[show: bool, target: Vec3, distance: float32]
   InstantReplay* = object
     ## Rewinds to a highlight the main camera missed, then returns.
     active*: bool
@@ -347,39 +332,6 @@ proc noteInterests*(d: Director, w: World, index: ReplayIndex,
       cam.noteInterest(int32(10000+n), w.worldPoint(point(event.x, event.z), 1),
         weight*timing*w.impact(event)*stakes, 9, tick, 1, replace = true)
   d.tick = tick
-
-proc insetShot*(d: Director, dt: float32): InsetShot =
-  ## A second view on the strongest action outside the main shot, held for a
-  ## few seconds so it does not flicker.
-  let cam = d.cam
-  d.insetHold = max(0, d.insetHold-max(dt, 0))
-  d.insetGap = max(0, d.insetGap-max(dt, 0))
-  if not cam.locked: return
-  proc outside(p: Vec3): bool =
-    length(vec2(p.x-cam.lockTarget.x, p.z-cam.lockTarget.z)) > cam.lockDistance*0.7
-  var bestId = 0'i32
-  var best = -1'f32
-  for interest in cam.liveInterests:
-    if not outside(interest.position): continue
-    if interest.id == d.insetId and interest.score >= InsetKeepScore:
-      d.insetTarget = interest.position
-      d.insetDistance = 26+interest.radius*2
-      bestId = interest.id
-      break
-    let bar = if d.insetId == 0 and d.insetGap > 0: InsetUrgentScore else: InsetScore
-    if interest.score >= bar and interest.score > best:
-      best = interest.score
-      bestId = interest.id
-      d.insetTarget = interest.position
-      d.insetDistance = 26+interest.radius*2
-  if bestId != 0:
-    if bestId != d.insetId: d.insetHold = InsetHoldSeconds
-    d.insetId = bestId
-  elif d.insetHold <= 0 or not outside(d.insetTarget):
-    if d.insetId != 0: d.insetGap = InsetGapSeconds
-    d.insetId = 0
-  if d.insetId != 0 or d.insetHold > 0 and outside(d.insetTarget):
-    result = (true, d.insetTarget, d.insetDistance)
 
 proc isHighlight*(w: World, event: Moment): bool =
   ## Whether an event deserves an instant replay if the camera missed it: a cog out
