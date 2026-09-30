@@ -146,3 +146,23 @@ assert.match(result.text, /Match ended · top cog Bot 5 \(R 50\.0\) · top loner
   assert.equal(kin.familyChips(crowd).length, 10);
 }
 console.log('Paintbot FFA-kin HUD sorting, family sums, dead flags, great hearts and R maths passed');
+
+// Players: seats grouped by player name without the " (n)" copy suffix; mean R and raw s per cog.
+const names = Array.from({length: 16}, (_, i) => i < 2 ? `alpha (David B) (${i + 1})` : i === 4 ? 'solo' : `beta (${i})`);
+assert.equal(kin.playerOf(names, 1), 'alpha (David B)');
+assert.equal(kin.playerOf(['Alpha (David B)'], 0), 'Alpha (David B)', 'an owner suffix is not a copy suffix');
+assert.equal(kin.playerOf([], 3), 'Bot 4');
+const players = kin.playerChips(state, names);
+assert.deepEqual(players.map(p => p.player), ['solo', 'alpha (David B)', 'beta']);
+assert.equal(players[0].meanR, 50);
+const alpha = players[1];
+assert.deepEqual(alpha.members, [0, 1]);
+assert.equal(alpha.alive, 1);
+assert.equal(alpha.meanR, (kin.kinScore(state, 0) + kin.kinScore(state, 1)) / 2);
+assert.equal(alpha.meanS, (10 + 30) / 2);
+assert.equal(players[2].members.length, 13);
+assert.equal(kin.playerKey(alpha), 'p:alpha (David B)');
+// Player keys share the focus set with family keys; the mask is the union.
+assert.equal(kin.focusMask(state, new Set(['p:alpha (David B)']), names), 0b11);
+assert.equal(kin.focusMask(state, new Set(['p:solo', 'f1']), names), 0b11100);
+assert.equal(kin.focusMask(state, new Set(['p:alpha (David B)'])), 0, 'no names: player keys match nothing real');

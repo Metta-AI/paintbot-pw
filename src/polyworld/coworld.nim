@@ -13,6 +13,7 @@ type
   CoworldError* = object of CatchableError
   CoworldPlayer* = object
     name*: string
+    owner*: string ## optional: the player's owner ("David B"); "" for platform-owned seats
   CoworldConfig* = object
     tokens*: seq[string]
     players*: seq[CoworldPlayer]

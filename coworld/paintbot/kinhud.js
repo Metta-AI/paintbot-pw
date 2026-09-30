@@ -83,14 +83,35 @@
     if (next.has(key)) next.delete(key); else next.add(key);
     return next;
   }
-  // Seats belonging to the selected families as a bit mask (bit i = seat i): a number for up to
-  // 31 seats, a BigInt for crowd matches. maskBit reads either.
-  function focusMask(state, focus) {
+  // A seat's player: its name ("Alpha (David B)": player and owner) without the " (n)" copy
+  // suffix the host appends to repeated seats.
+  const playerOf = (names, seat) => (names?.[seat] || `Bot ${seat + 1}`).replace(/ \(\d+\)$/, '');
+  // One chip per player with the mean score of the cogs it controls: R (the match score) and raw s.
+  function playerChips(state, names) {
+    const chips = new Map();
+    for (let seat = 0; seat < seatCount(state); seat++) {
+      const player = playerOf(names, seat);
+      if (!chips.has(player)) chips.set(player, { player, members: [], alive: 0, R: 0, s: 0 });
+      const chip = chips.get(player);
+      chip.members.push(seat);
+      chip.R += kinScore(state, seat);
+      chip.s += points(state.world.seatScore?.[seat] ?? 0);
+      if (state.world.cogs?.[seat]?.hp > 0) chip.alive++;
+    }
+    return [...chips.values()]
+      .map(({ R, s, ...c }) => ({ ...c, meanR: R / c.members.length, meanS: s / c.members.length }))
+      .sort((a, b) => b.meanR - a.meanR || b.meanS - a.meanS || a.members[0] - b.members[0]);
+  }
+  // A player chip's selection key; it shares the focus set with family keys.
+  const playerKey = (chip) => `p:${chip.player}`;
+  // Seats belonging to the selected families or players as a bit mask (bit i = seat i): a number
+  // for up to 31 seats, a BigInt for crowd matches. maskBit reads either.
+  function focusMask(state, focus, names) {
     const seats = seatCount(state);
     let mask = seats > 31 ? 0n : 0;
     for (let seat = 0; seat < seats; seat++) {
       const family = state.family?.[seat] ?? -1;
-      if (!focus.has(family >= 0 ? `f${family}` : `l${seat}`)) continue;
+      if (!focus.has(family >= 0 ? `f${family}` : `l${seat}`) && !focus.has(`p:${playerOf(names, seat)}`)) continue;
       if (typeof mask === 'bigint') mask |= 1n << BigInt(seat); else mask |= 1 << seat;
     }
     return mask;
@@ -141,7 +162,7 @@
     return { top, family, text: `Match ended · top cog ${nameOf(top.seat)} (R ${top.R.toFixed(1)}) · top ${familyName} (${family.score.toFixed(1)})` };
   }
   const api = { kinColor, isFfa, kinLabel, kinScore, cogRows, familyChips, greatStatus, greatText, matchResult,
-    chipKey, chipText, COMPACT_CHIPS, toggleFocus, focusMask, cogEmphasis };
+    chipKey, chipText, COMPACT_CHIPS, toggleFocus, focusMask, cogEmphasis, playerOf, playerChips, playerKey };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.PaintbotKinHud = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);
