@@ -65,6 +65,9 @@ proc execute*(client: Client, directory: string, run: JsonNode,
         if controls.fault != nil:
           controls.fault("submission-intent")
         if stopping:
+          attempt["status"] = %"not_sent"
+          record["state"] = %"planned"
+          saveRecord(directory, record, controls)
           break
         let detail = client.request("POST", "/v2/experience-requests",
           attempt["body"])

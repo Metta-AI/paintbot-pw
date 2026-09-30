@@ -167,7 +167,7 @@ proc render*(summary: JsonNode, dataRoot: string, siteRoot = ""): string =
       "<div class=kicker>" & (if kind == "mixed": "Five policies per team"
         else: "One policy per team") & "</div><h2>" &
       capitalizeAscii(kind) & " teams · 8 v 8</h2><p>" &
-      (if kind == "mixed": "All ten policies, shuffled across teams and positions. Three extra cog slots per team use balanced duplicates."
+      (if kind == "mixed": "Ten policies per game, shuffled across teams and positions. Three extra cog slots per team use balanced duplicates."
         else: "Eight cogs per policy. One averaged result per policy per game.") &
       "</p></div><div class=ladders>"
     for panel in summary["panels"]:

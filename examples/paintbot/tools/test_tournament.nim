@@ -235,6 +235,20 @@ saveJson(baselineDirectory / "run.json", run)
 doAssert execute(fakeClient(baselineDirectory), baselineDirectory, run,
   DataRoot, Controls(concurrency: 2)) == 0
 let baseline = readJson(baselineDirectory / "summary.json")
+block:
+  let directory = fresh("pause-before-send")
+  let pause = proc(point: string) =
+    ## Simulates Ctrl+C after the intent save but before the HTTP request.
+    if point == "submission-intent":
+      stopping = true
+  doAssert execute(fakeClient(directory), directory, run, DataRoot,
+    Controls(concurrency: 2, fault: pause)) == 130
+  doAssert readJson(directory / "remote.json").len == 0
+  doAssert loadRecords(directory, run)[0]["state"].getStr == "planned"
+  stopping = false
+  doAssert execute(fakeClient(directory), directory, run, DataRoot,
+    Controls(concurrency: 2)) == 0
+  assertEquivalent(baseline, readJson(directory / "summary.json"))
 for point in ["remote-acceptance", "result-received",
     "result-saved",
     "replace:000001.json", "replace:report.html"]:
