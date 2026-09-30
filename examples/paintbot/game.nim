@@ -1,7 +1,8 @@
-import std/[os, strutils, json]
-import jsony
-import polyworld/[cli, tapes]
-import sim, bots, controls, kinship, match_config
+import
+  std/[os, strutils, json, monotimes, times],
+  jsony,
+  polyworld/[cli, tapes],
+  ./[sim, bots, controls, kinship, match_config]
 export match_config
 when defined(coworld): import polyworld/coworld
 
@@ -604,10 +605,15 @@ proc advance*() =
 proc matchOutcome*(w: World): string =
   ## results.outcome: FFA-kin matches simply end (winner -3); the scores carry the result.
   if ffa(): "ended" elif w.winner < 0: "time_limit" else: $w.winner
-proc runHeadless*() =
-  setup()
+proc runHeadless*(initialized = false) =
+  ## Runs a complete headless match or verifies every recorded replay hash.
+  if not initialized: setup()
+  when defined(fastXpWorker):
+    let started = getMonoTime()
   let limit = if replayMode: recording.frames.len else: options.maximumTicks.int
   while (world.tick < limit or (not replayMode and replayRulesVersion in 20..22 and limit >= 7200)) and world.winner == -1: advance()
+  when defined(fastXpWorker):
+    let gameplayMs = (getMonoTime() - started).inMilliseconds
   if replayMode and world.tick != limit: raise newException(ReplayError, "Replay has frames after victory")
   if not replayMode and options.recordPath.len > 0: saveRecording(options.recordPath, recording)
   echo "ticks=", world.tick, " captures=", world.captures, " hash=",
@@ -622,5 +628,8 @@ proc runHeadless*() =
     # Hosted seat logs are the only per-seat channel a player can read back, so each neural
     # seat's inference cost goes there before the platform's "completed" line.
     if not replayMode: players.logNeuralTelemetry(world.tick, playerLog)
+    when defined(fastXpWorker):
+      writeFile(localPath(getEnv("COGAME_RESULTS_URI")).parentDir / "timings.json",
+        $(%*{"gameplay_ms": gameplayMs, "ticks": world.tick}))
     finishCoworld(NumericCoworldResults[float](scores: world.scores(), ticks: world.tick,
         seed: world.seed, outcome: world.matchOutcome()))

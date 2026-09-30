@@ -1,0 +1,5 @@
+switch("define", "coworld")
+switch("define", "headless")
+switch("define", "fastXpWorker")
+switch("define", "paintbotExpanded")
+switch("passL", "-larchive")
