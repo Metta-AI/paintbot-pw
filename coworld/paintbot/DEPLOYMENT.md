@@ -802,3 +802,20 @@ The action camera no longer shows its runner-up shot in the corner inset. That c
 BOT EYES view. Instant replay now fires on highlights the main view missed. The hosted viewer bundle
 (`sha256:e762ac8b72a523ed561a4150892c42b346af29ac08be23e139c33327e744442b`) played league replay
 `76c4867d-f744-4a68-a9e7-96cdab8d2831` with Replay hash verified and no inset.
+
+## Opt-in vision range and faster training terrain: 0.3.88
+
+Automatic deploy run 36746324518 shipped `1aa76e5` (#181, on top of #183) as 0.3.88 =
+`cow_41934688-77ef-4492-af4d-a07611316acd`, now canonical, with all ten certification checks and five hosted smoke
+episodes passing. The commit is tagged `coworld-v0.3.88`; Heartland shipped the same commit as `heartland-v0.1.19`
+(`cow_ab6f6fef-6ddb-4849-928d-818d0abf1a07`, canonical). Hosted smoke replay
+`58492b98-34cb-4d37-aaff-90f28de205d2` resimulates natively: rules 48, 240 ticks, every frame hash matching.
+
+- #181: the optional game config key `"vision_range"` (integer metres, 1..200) caps per-cog sight lines. Cogs,
+  pickups and hearts beyond it are not visible; weapons are unchanged. Absent means unlimited, as before, and no
+  league variant sets it, so live matches play exactly as on 0.3.87. Ranged recordings carry the range in a new
+  version (base + 2000); unranged recordings keep their bytes. With 20 m the training library runs ~3x faster.
+- #183: training library only (`-d:pwTraining`). Terrain blocks record their bounds so visibility rays skip most
+  cell reads (2.06x warm training throughput, identical trajectories), and `pw_terrain_prewarm` /
+  `pw_terrain_cache_save` / `pw_terrain_cache_load` let training processes share one precomputed table. Hosted
+  and viewer builds are unchanged.
