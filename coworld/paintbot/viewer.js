@@ -1772,12 +1772,6 @@
       data.actionCamera = true;
     }
     pressed("actioncam", !!data.actionCamera);
-    // The action camera's runner-up shot borrows the first-person inset frame.
-    document.body.classList.toggle("pip", !!data.inset && !pov);
-    // The feed sits below the inset whenever the action camera may use it, so it
-    // does not jump each time the inset appears.
-    document.body.classList.toggle("autocam", !!data.actionCamera && !pov);
-    $("fpvcap").textContent = pov ? "BOT EYES · LIVE POV" : "ACTION ELSEWHERE";
     $("instant-replay").hidden = !data.instantReplay;
     if (data.camera) [camera.x, camera.z, camera.d] = data.camera;
     const w = data.world,
