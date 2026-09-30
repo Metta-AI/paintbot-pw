@@ -276,3 +276,8 @@ proc pointerModel*(r: var Rand): string =
   encodeWords(layoutWord(LayoutGlobal, 0), layoutWord(LayoutGlobal, 1),
     [layoutWord(LayoutGlobal, 2, 0), layoutWord(LayoutGlobal, 2, 1), 2'u32, 2, 2], specs,
     ObservationContractFfaV2Hash, ActionContractFfaV2PointerHash)
+
+proc condHead*(whenHead, head: int, weights: seq[float32]): Spec =
+  ## COND_HEAD: head `head` re-selected with column a of weights [size(head), size(whenHead)] added,
+  ## a = the choice selected for `whenHead`.
+  Spec(code: 13, params: [whenHead.uint32, head.uint32, 0, 0, 0, 0, 0, 0], tensors: weights)

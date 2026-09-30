@@ -643,6 +643,39 @@ class Pwnet2Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "eps must be finite and positive"):
             validate_pwnet2(pwnet2(64, heads, [mlp, word_eps] + tail))
 
+    def test_cond_head_cost_and_structure(self):
+        # COND_HEAD (13): params (condition head, re-selected head), weights size(head) x size(condition head),
+        # passes the vector through; costs the copy of the width and the column add. After every other layer.
+        heads = [51, 25, 2, 2, 2]
+        body = [(1, [64, 82, 1, 0], [], 64 * 82 + 82)]
+        base = validate_pwnet2(pwnet2(64, heads, body))
+        info = validate_pwnet2(pwnet2(64, heads, body + [(13, [2, 0], [], 51 * 2)]))
+        self.assertEqual(info["operations"], base["operations"] + 82 + 51)
+        self.assertEqual(info["parameters"], base["parameters"] + 102)
+        self.assertEqual(info["conditionals"], [(2, 0)])
+        chain = body + [(13, [2, 0], [], 102), (13, [0, 1], [], 25 * 51)]
+        self.assertEqual(validate_pwnet2(pwnet2(64, heads, chain))["conditionals"], [(2, 0), (0, 1)])
+        cases = [
+            (body + [(13, [2, 2], [], 4)], "must differ"),
+            (body + [(13, [5, 0], [], 102)], "COND_HEAD heads must be"),
+            (body + [(13, [2, 0, 1], [], 102)], "unused parameter 2"),
+            (body + [(13, [2, 0], [], 102), (13, [3, 0], [], 102)], "already re-selected"),
+            (body + [(13, [2, 0], [], 102), (13, [0, 2], [], 102)], "earlier COND_HEAD's condition"),
+            ([(13, [2, 0], [], 102)] + [(1, [64, 82, 1, 0], [], 64 * 82 + 82)], "must come after every other layer"),
+            (body + [(13, [2, 0], [], 100)], "truncated|trailing|unknown layer type"),
+        ]
+        for layers, fragment in cases:
+            with self.assertRaisesRegex(ValueError, fragment):
+                validate_pwnet2(pwnet2(64, heads, layers))
+
+    def test_cond_head_and_joint_sampling_are_exclusive(self):
+        model = pwnet2(64, [51, 25, 2, 2, 2], [(1, [64, 82, 1, 0], [], 64 * 82 + 82), (13, [2, 0], [], 102)])
+        joint = {"when": {"head": 2, "value": 1}, "head": 0, "offsets": [0.0] * 51}
+        overrides = {"schema": "paintbot-neural-basic/2", "observation_contract": OBS, "action_contract": ACT}
+        unpack_package(package(overrides, model=model))
+        with self.assertRaisesRegex(ValueError, "cannot be combined with the model's COND_HEAD"):
+            unpack_package(package(dict(overrides, decoder={"joint_sampling": joint}), model=model))
+
     @staticmethod
     def near(tokens=4, base=0, stride=8, xi=1, zi=2, vi=0, ei=6, ci=3, scale_x=2.0, scale_z=4.0, radius=1.0, dst=32,
              dst_stride=2):

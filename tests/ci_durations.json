@@ -70,6 +70,7 @@
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim": 5.3,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim": 17.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim": 16.0,
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_cond_head.nim": 20.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map.nim": 20.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_config.nim": 40.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map_memory.nim": 40.0,

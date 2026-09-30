@@ -7,7 +7,7 @@ type
     ## PWNET002 layer type codes (the u32 `type` of a layer record).
     lkDense = 1, lkRmsNorm = 2, lkMinGru = 3, lkResidual = 4, lkEntityAttn = 5, lkConcatInput = 6,
     lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9, lkSegmentNear = 10, lkAttnPool = 11,
-    lkPad = 12
+    lkPad = 12, lkCondHead = 13
   AttnGroup = object
     offset, stride, count, width, valid: int  # valid = -1: every token of the group is valid
     weight: int                               # E_g [d, width] then e_g [d], offsets into weights
@@ -54,12 +54,19 @@ type
     stateSize, parameters: int
     operations: int64
   Net2* = ref Net2Object
+  Conditional* = object
+    ## COND_HEAD: a learned conditional action head. After the tick's selection, head `head`
+    ## is selected again from its logits plus column a of `weights` [size(head), size(whenHead)]
+    ## (row-major), a = the choice already selected for `whenHead` (neural_actor.md, COND_HEAD).
+    whenHead*, head*: int
+    weights*: seq[float32]
   Actor* = ref object
     inputSize*, hiddenSize*, outputSize*: int
     headSizes*: seq[int]
     observationContract*, actionContract*: string
     encoder, recurrent, decoder: seq[float32]
     net: Net2  # PWNET002 layer stack (nil for PWNET001); see the PWNET002 section below.
+    conditionals*: seq[Conditional]  # COND_HEAD layers, in layer order (none for PWNET001)
   LayoutSection* = object
     offset*, rows*, width*: int  # where the section's rows lie in the observation
     target*: int                 # the logit offset of row 0's pointer target (-1: none)
@@ -294,6 +301,31 @@ proc resolveWord*(ctx: ActorLayout, v: uint32, where: string): uint32 =
   if value < 0 or int64(value) >= int64(LayoutWordBase): net2Error(where & "layout word out of range")
   uint32(value)
 
+proc conditionalOffsets*(c: Conditional, whenValue: int, sizes: openArray[int]): seq[float32] =
+  ## Column `whenValue` of the COND_HEAD's weights: the offsets added to head `c.head`'s logits.
+  let n = sizes[c.whenHead]
+  for j in 0..<sizes[c.head]: result.add c.weights[j*n + whenValue]
+
+proc checkConditionals*(conditionals: openArray[Conditional], sizes: openArray[int]) =
+  ## COND_HEAD's structural rules (neural_actor.md): heads in range and distinct, the weight
+  ## count size(head) x size(whenHead), each head re-selected by at most one COND_HEAD, and no
+  ## head re-selected after a COND_HEAD read it as its condition. Raises ValueError.
+  var targets, conditions: seq[int]
+  for k, c in conditionals:
+    let where = "COND_HEAD " & $k & ": "
+    if c.whenHead notin 0..<sizes.len or c.head notin 0..<sizes.len:
+      raise newException(ValueError, where & "head index outside the action heads")
+    if c.whenHead == c.head: raise newException(ValueError, where & "head must differ from the condition head")
+    if c.weights.len != sizes[c.head]*sizes[c.whenHead]:
+      raise newException(ValueError, where & "weights must be size(head) x size(condition head)")
+    if c.head in targets: raise newException(ValueError, where & "head " & $c.head & " is already re-selected")
+    if c.head in conditions:
+      raise newException(ValueError, where & "head " & $c.head & " is an earlier COND_HEAD's condition")
+    for x in c.weights:
+      if classify(x) in {fcNan, fcInf, fcNegInf}: raise newException(ValueError, where & "nonfinite weight")
+    targets.add c.head
+    conditions.add c.whenHead
+
 proc readWeights(net: Net2, data: string, p: var int, n: int) =
   if n < 0 or net.weights.len + n > MaxNet2Parameters: net2Error("parameter count")
   if p + 4*n > data.len: raise newException(ValueError, "truncated neural actor")
@@ -377,6 +409,8 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       elif q[7] != 0: net2Error(where & "unused parameter 7 must be 0")
     var layer = NetLayer(inWidth: width, bias: -1)
     var tokenSpace = 0  # TOKEN_MLP / TOKEN_MIX: token buffer floats reserved before the output
+    if code != lkCondHead.uint32 and result.conditionals.len > 0:
+      net2Error(where & "COND_HEAD layers must come after every other layer")
     case code
     of lkDense.uint32:
       layer.kind = lkDense
@@ -635,6 +669,24 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       work = max(work, 2*hk + layer.tokens*layer.heads + hv)
       layer.operations = attnPoolOps(layer.tokens, src.tokenWidth, width, layer.heads, layer.keyWidth,
         layer.valueWidth)
+    of lkCondHead.uint32:
+      layer.kind = lkCondHead
+      let whenHead = int(q[0])
+      let head = int(q[1])
+      unused(2)
+      if whenHead notin 0..<heads or head notin 0..<heads:
+        net2Error(where & "COND_HEAD heads must be 0.." & $(heads-1))
+      if whenHead == head: net2Error(where & "COND_HEAD head must differ from the condition head")
+      let n = result.headSizes[head]*result.headSizes[whenHead]
+      layer.weight = net.weights.len
+      net.readWeights(data, p, n)
+      var c = Conditional(whenHead: whenHead, head: head, weights: net.weights[layer.weight ..< layer.weight + n])
+      result.conditionals.add c
+      try: checkConditionals(result.conditionals, result.headSizes)
+      except ValueError as e: net2Error(where & e.msg)
+      layer.outWidth = width
+      # The copy of x here, and at selection the add of one column to the head's logits.
+      layer.operations = int64(width) + int64(result.headSizes[head])
     else:
       net2Error(where & "unknown layer type " & $code)
     if tokenSpace > 0:
@@ -1157,6 +1209,9 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
       segmentNear(layer[], input, y)
     of lkAttnPool:
       attnPool(layer[], net.layers[layer.source], x, w, scratch, scratch.at(net.work), y)
+    of lkCondHead:
+      # A declaration for the selection (Actor.conditionals); the vector passes through.
+      for i in 0..<layer.outWidth: y[i] = x[i]
     of lkPad:
       # y = x[0 ..< at], `length` zeros, x[at ..< width]: room for match-sized pointer heads.
       let at = layer.source

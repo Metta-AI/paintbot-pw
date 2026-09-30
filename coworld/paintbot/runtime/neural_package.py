@@ -521,6 +521,7 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
         bad("layer count must be 1..%d" % lim["layers"])
     width, state, operations, widths = inputs, 0, 0, []
     token_layers = {}  # layer index -> ("mlp" | "mix" | "attn", tokens, floats per token)
+    conditionals = []  # COND_HEAD (condition head, re-selected head), in layer order
     exposed = set()    # ENTITY_ATTN layers whose token rows a later layer reads (their copy is costed once)
 
     def expose(source):
@@ -532,6 +533,8 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
 
     for k in range(count):
         code = u32()
+        if code != 13 and conditionals:
+            bad("layer %d: COND_HEAD layers must come after every other layer" % k)
         # FP32 parameters (RMSNORM eps, ENTITY_ATTN eps, the token layers' norm eps) are read as bits, never as
         # layout words.
         q = [u32() if (code, j) in ((2, 1), (5, 7), (7, 7), (8, 7)) else word() for j in range(8)]
@@ -759,6 +762,21 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
             if out > lim["width"]:
                 bad(where + "ATTN_POOL output exceeds %d" % lim["width"])
             operations += attn_pool_ops(tokens, z, width, heads_, key_width, value_width)
+        elif code == 13:  # COND_HEAD
+            when_head, head = q[0], q[1]
+            unused(2)
+            if when_head >= heads or head >= heads:
+                bad(where + "COND_HEAD heads must be 0..%d" % (heads - 1))
+            if when_head == head:
+                bad(where + "COND_HEAD head must differ from the condition head")
+            weights(sizes[head] * sizes[when_head])
+            if head in [c[1] for c in conditionals]:
+                bad(where + "COND_HEAD %d: head %d is already re-selected" % (len(conditionals), head))
+            if head in [c[0] for c in conditionals]:
+                bad(where + "COND_HEAD %d: head %d is an earlier COND_HEAD's condition" % (len(conditionals), head))
+            conditionals.append((when_head, head))
+            out = width
+            operations += width + sizes[head]
         elif code == 12:  # PAD
             at, length = q[0], q[1]
             unused(2)
@@ -783,7 +801,7 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
         raise ValueError("neural actor exceeds native operation budget: %d > %d" % (operations, budget))
     return dict(format=2, inputs=inputs, outputs=outputs, heads=sizes, layers=count, state=state,
                 parameters=parameters, operations=operations, observation_contract=contracts[0].decode(),
-                action_contract=contracts[1].decode())
+                action_contract=contracts[1].decode(), conditionals=conditionals)
 
 
 def unpack_package(data, seats=16):
@@ -884,7 +902,9 @@ def unpack_package(data, seats=16):
     if not files["model.bin"]:
         raise ValueError("empty neural model")
     if files["model.bin"][:8] == PWNET2_MAGIC:
-        validate_pwnet2(files["model.bin"], manifest["observation_contract"], manifest["action_contract"], seats)
+        info = validate_pwnet2(files["model.bin"], manifest["observation_contract"], manifest["action_contract"], seats)
+        if info.get("conditionals") and "joint_sampling" in (manifest.get("decoder") or {}):
+            raise ValueError("decoder.joint_sampling cannot be combined with the model's COND_HEAD layers")
     if user_inputs:
         inputs, observation = actor_header(files["model.bin"])
         if observation != observation_contract:

@@ -188,7 +188,10 @@ candidates and the contract hashes are the same with or without them.
   taken. For example `{"when": {"head": 2, "value": 1}, "head": 0, "offsets": [1000, 0,
   ...]}` stands the seat still on every shoot draw, the network's own choice of when to
   shoot, instead of a rule that overrides it. The telemetry line gains
-  ` joint_sampling=h<h>=<v>->h<g> held=<n>` (decisions the condition held on).
+  ` joint_sampling=h<h>=<v>->h<g> held=<n>` (decisions the condition held on). A learned
+  version of the same coupling lives in the model instead: PWNET002's COND_HEAD layer
+  (`neural_actor.md`), whose column of weights is chosen by the condition head's selection;
+  a bundle cannot use both.
 - Order of every option within one decision: forbid and sampling (or argmax) select the
   heads; joint sampling may re-select its head; the aim retarget, the aim snap, then the spray aim rewrite the aim head; the shot
   gate may drop the shot (undoing the snap and spray aim), then the spray gate may; the
