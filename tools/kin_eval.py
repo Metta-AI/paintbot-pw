@@ -18,7 +18,7 @@ Suites (--suite, comma-separated, or "all"):
   scrambled   families spawn apart, strangers together (pw_set_spawn_grouping); hamilton again,
               plus the same metrics split by spawn group, so the curves can be seen to track r.
   rsweep      a fixed 4x4 grouping with within-family ibd 0, 8, 16, 32 (pw_set_kin_override).
-  genes_only  hamilton with pw_set_obs_mask bit 0 (r-to-me zeroed); neural policies only.
+  genes_only  hamilton with pw_set_obs_mask bit 0 (the kin columns zeroed); neural policies only.
   health      kin share of return per layout, the collusion alarm (heart passes between r >= .5
               pairs vs r = 0 pairs, flagged above 3x), episode length and death times.
   selfish     the policy vs --policy2 (a control trained on own score only); "no control" without it.
@@ -65,8 +65,7 @@ BLIND_BAS = PLAYERS / "ffa_blind.bas"
 SEATS = 16
 FFA_TICKS = 8640
 TICKS_PER_MINUTE = 1440
-OBS_FFA = 101
-LOGITS = 82
+OBS_FFA = 202  # observation contract ffa.view.1 (action contract ffa.view.1 pointer)
 PAIR_STATS = 13
 (VISIBLE, IN_RANGE, DAMAGE, KILLS, DEFEND, DEFEND_OPP, YIELD_OPP, CONTEST, NEAR, CO_CAPTURE,
  COSTLY_DEFEND, DEATH_AFTER_DEFEND, HEART_PASS) = range(PAIR_STATS)
@@ -144,6 +143,7 @@ SIGNATURES = {
     "pw_set_kin_override": ([P, PI8, PU, PI8], ctypes.c_int),
     "pw_set_obs_mask": ([P, U32], ctypes.c_int),
     "pw_observation_contract_hash": ([I32, ctypes.c_char_p, I32], ctypes.c_int),
+    "pw_handle_observation_size": ([P], ctypes.c_int), "pw_action_layout": ([P, PI], ctypes.c_int),
     "pw_net_load": ([ctypes.c_char_p, ctypes.c_int64, ctypes.c_char_p, I32], P),
     "pw_net_info": ([P, ctypes.POINTER(ctypes.c_int64)], ctypes.c_int),
     "pw_net_infer": ([P, PF, PF, PF], ctypes.c_int),
@@ -364,6 +364,12 @@ def run_episode(job):
             raise RuntimeError("kinship changed between the probe reset and the episode reset")
 
         actions = (ctypes.c_int32 * (SEATS * 5))()
+        # ffa.view.1's widths follow the match (its control hearts): rows and logits per seat.
+        obs_width = lib.pw_handle_observation_size(h)
+        layout = (ctypes.c_int32 * 8)()
+        if obs_width <= 0 or lib.pw_action_layout(h, layout) != 0:
+            raise RuntimeError("pw_handle_observation_size / pw_action_layout failed")
+        logit_width = layout[6]
         rewards = (ctypes.c_float * SEATS)()
         terminals = (ctypes.c_float * SEATS)()
         results = (ctypes.c_float * 8)()
@@ -371,18 +377,17 @@ def run_episode(job):
         played = 0
         if neural_seats:
             nets = {}
-            obs_size = None
             for s, spec in neural_seats:
                 net, inputs, outputs, state_size = _net(spec)
-                if outputs != LOGITS:
-                    raise RuntimeError(f"{spec['name']}: model has {outputs} outputs, expected {LOGITS}")
-                if obs_size is not None and inputs != obs_size:
-                    raise RuntimeError("neural seats disagree on the observation size")
-                obs_size = inputs
+                if outputs != logit_width:
+                    raise RuntimeError(f"{spec['name']}: model has {outputs} outputs, this match needs {logit_width}")
+                if inputs != obs_width:
+                    raise RuntimeError(f"{spec['name']}: model has {inputs} inputs, this match observes {obs_width}")
                 nets[s] = (net, (ctypes.c_float * max(1, state_size))())
+            obs_size = obs_width
             obs = (ctypes.c_float * (SEATS * obs_size))()
             resets = (ctypes.c_float * SEATS)()
-            logits = (ctypes.c_float * (SEATS * LOGITS))()
+            logits = (ctypes.c_float * (SEATS * logit_width))()
             fsize = ctypes.sizeof(ctypes.c_float)
             obs_addr, logit_addr = ctypes.addressof(obs), ctypes.addressof(logits)
             for t in range(ticks):
@@ -394,7 +399,7 @@ def run_episode(job):
                     if seat_stats[3 * s] >= 0:
                         continue  # out of the match: the host runs no actor for a dead seat
                     rc = lib.pw_net_infer(net, ctypes.cast(obs_addr + s * obs_size * fsize, PF), state,
-                                          ctypes.cast(logit_addr + s * LOGITS * fsize, PF))
+                                          ctypes.cast(logit_addr + s * logit_width * fsize, PF))
                     if rc != 0:
                         raise RuntimeError(f"pw_net_infer failed ({rc}) at tick {t}")
                 if lib.pw_step_logits(h, actions, logits, rewards, terminals) != 0:
@@ -952,8 +957,8 @@ def analyse_gap(eps, args):
 
 def analyse(suite, eps, args, policies):
     if suite == "genes_only" and policies["main"]["kind"] != "neural":
-        return {"skipped": "genes_only needs a neural policy (pw_set_obs_mask zeroes an ffa.v1 "
-                           "observation column; BASIC seats do not read observations)"}
+        return {"skipped": "genes_only needs a neural policy (pw_set_obs_mask zeroes the kin columns of "
+                           "an ffa.view.1 observation; BASIC seats do not read observations)"}
     if suite == "selfish" and "second" not in policies:
         return analyse_selfish(eps, args, policies)
     if not eps:
@@ -1185,7 +1190,7 @@ def render(suite, res, meta):
                        xlabels=dict(enumerate(res["mixed"]))) + "</div>")
         return "".join(out)
     if suite in ("hamilton", "heldout", "genes_only"):
-        pre = "<p>r-to-me zeroed in the observation (pw_set_obs_mask bit 0).</p>" if suite == "genes_only" else ""
+        pre = "<p>kin columns zeroed in the observation (pw_set_obs_mask bit 0).</p>" if suite == "genes_only" else ""
         return pre + render_hamilton(res)
     if suite == "scrambled":
         keys = [f"r={b}/{g}" for b in R_BUCKETS for g in ("same group", "apart")]

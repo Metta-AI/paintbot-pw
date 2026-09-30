@@ -9,6 +9,7 @@ counters recomputed from a recorded replay equal the counters of the same match 
 """
 
 import array
+import hashlib
 import json
 import random
 import re
@@ -27,8 +28,8 @@ import kin_replay_stats  # noqa: E402
 import make_ffa_blind  # noqa: E402
 
 PLAYERS = ROOT / "coworld/paintbot/players"
-ACTION_CONTRACT_V2 = "51f602ef167919ca825595f9d81777cb807afbb0938a20102457d0594e2b4317"
-ACTION_SIZES = (51, 25, 2, 2, 2)
+ACTION_CONTRACT_FFA_POINTER = hashlib.sha256(b"paintbot-pw.ffa.view.1.action.pointer").hexdigest()
+DECODE_FFA = ROOT / "examples/paintbot/players/neural_decode_ffa.bas"
 TICKS = "400"
 
 
@@ -37,15 +38,27 @@ def nim(*args):
                     "--hints:off", *args], cwd=ROOT, check=True, capture_output=True, text=True)
 
 
-def synthetic_bundle(path: Path, obs_hash: str) -> None:
-    """A PWNET001 actor (hidden 64, seeded random weights) for ffa.v1 with the standard policy.bas."""
+def heartland_widths(lib):
+    """ffa.view.1's observation width and ffa.view.1 pointer's head sizes for a 16-seat Heartland match."""
+    h = lib.pw_create_observation(1, 100, kin_eval.OBS_FFA)
+    assert h and lib.pw_set_game_mode(h, 1) == 0 and lib.pw_reset(h, 1, 100) == 0
+    layout = (kin_eval.ctypes.c_int32 * 8)()
+    assert lib.pw_action_layout(h, layout) == 0
+    inputs, heads = lib.pw_handle_observation_size(h), tuple(layout[1:1 + layout[0]])
+    lib.pw_destroy(h)
+    return inputs, heads
+
+
+def synthetic_bundle(path: Path, obs_hash: str, inputs: int, heads: tuple) -> None:
+    """A PWNET001 actor (hidden 64, seeded random weights) for ffa.view.1 / ffa.view.1 pointer whose
+    policy.bas observes, infers, samples, then runs the reference decode (neural_decode_ffa.bas)."""
     rng = random.Random(7)
-    inputs, hidden, outputs = 810, 64, sum(ACTION_SIZES)
+    hidden, outputs = 64, sum(heads)
     n = inputs * hidden + 3 * hidden * hidden + outputs * hidden
     model = bytearray(b"PWNET001")
-    model += struct.pack("<6I", 1, inputs, hidden, outputs, len(ACTION_SIZES), n)
-    model += obs_hash.encode() + ACTION_CONTRACT_V2.encode()
-    model += struct.pack(f"<{len(ACTION_SIZES)}I", *ACTION_SIZES)
+    model += struct.pack("<6I", 1, inputs, hidden, outputs, len(heads), n)
+    model += obs_hash.encode() + ACTION_CONTRACT_FFA_POINTER.encode()
+    model += struct.pack(f"<{len(heads)}I", *heads)
     weights = []
     for i in range(n):
         scale = 0.08 if i < inputs * hidden else (0.15 if i < inputs * hidden + 3 * hidden * hidden else 0.6)
@@ -53,9 +66,9 @@ def synthetic_bundle(path: Path, obs_hash: str) -> None:
     model += struct.pack(f"<{n}f", *weights)
     policy = (b"paintbot_observe(neuralObservation())\n"
               b"run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())\n"
-              b"paintbot_act(neuralLogits())\n")
+              b"neuralSample()\n" + DECODE_FFA.read_bytes())
     manifest = {"schema": "paintbot-neural-basic/1", "observation_contract": obs_hash,
-                "action_contract": ACTION_CONTRACT_V2, "sha256": {}}
+                "action_contract": ACTION_CONTRACT_FFA_POINTER, "sha256": {}}
     with zipfile.ZipFile(path, "w") as z:
         z.writestr("manifest.json", json.dumps(manifest))
         z.writestr("policy.bas", policy)
@@ -152,9 +165,10 @@ class KinEvalTest(unittest.TestCase):
 
     def test_neural_genes_only(self):
         buf = kin_eval.ctypes.create_string_buffer(65)
-        kin_eval.load_lib(self.lib).pw_observation_contract_hash(kin_eval.OBS_FFA, buf, 65)
+        lib = kin_eval.load_lib(self.lib)
+        lib.pw_observation_contract_hash(kin_eval.OBS_FFA, buf, 65)
         bundle = self.dir / "synthetic.zip"
-        synthetic_bundle(bundle, buf.value.decode())
+        synthetic_bundle(bundle, buf.value.decode(), *heartland_widths(lib))
         results, _ = self.run_eval("--suite", "genes_only,hamilton", "--policy", str(bundle), "--layouts", "fours")
         for suite in ("genes_only", "hamilton"):
             self.assertEqual(results[suite]["episodes"], 2, suite)
