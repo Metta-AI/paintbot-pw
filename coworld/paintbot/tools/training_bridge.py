@@ -9,7 +9,8 @@ from pathlib import Path
 
 
 SEATS = 16
-OBSERVATION_SIZE = 506
+OBSERVATION_SIZE = 512  # observation contract teams.view.1 (native version 201)
+OBSERVATION_VERSION = 201
 ACTION_SIZES = (51, 25, 2, 2, 2)
 ACTION_NAMES = ("move", "aim", "fire", "grenade", "sneak")
 OPPONENT = Path(__file__).resolve().parents[3] / "examples/paintbot/players/base.bas"
@@ -30,8 +31,6 @@ class Bridge:
         self.library.pw_create_observation.argtypes = [ctypes.c_int32, ctypes.c_int32, ctypes.c_int32]
         self.library.pw_create_observation.restype = ctypes.c_void_p
         self.library.pw_destroy.argtypes = [ctypes.c_void_p]
-        self.library.pw_set_action_contract.argtypes = [ctypes.c_void_p, ctypes.c_int32]
-        self.library.pw_set_action_contract.restype = ctypes.c_int
         self.library.pw_observe_seats.argtypes = [
             ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float)
         ]
@@ -71,8 +70,8 @@ class Bridge:
             "kind": "decision", "game": "paintbot-pw", "decision_id": self.decision_id,
             "seat": 0, "engine_seat": 0, "turn": int(results[0]),
             "semantic_view": {
-                "observation_contract": "paintbot-pw.rules37.obs.v2.float506",
-                "action_contract": "paintbot-pw.rules37.action.v2.51-25-2-2-2",
+                "observation_contract": "paintbot-pw.teams.view.1",
+                "action_contract": "paintbot-pw.teams.view.1.action.51-25-2-2-2",
                 "values": self.values, "state_reset": self.reset_mask,
             },
             "inbox": [], "messages": [], "speech_messages": [],
@@ -93,11 +92,11 @@ class Bridge:
                 raise ValueError("Paintbot requires 16 seats")
             self.close()
             seed = int.from_bytes(hashlib.sha256(command["seed"].encode()).digest()[:4], "big") & 0x7FFFFFFF
-            self.handle = self.library.pw_create_observation(seed, self.ticks, 2)
+            # The action contract is the observation contract's pair; pw_step decodes the heads
+            # with the reference BASIC decoder (examples/paintbot/players/neural_decode.bas).
+            self.handle = self.library.pw_create_observation(seed, self.ticks, OBSERVATION_VERSION)
             if self.handle is None:
                 raise RuntimeError("Paintbot native create failed")
-            if self.library.pw_set_action_contract(self.handle, 2) != 0:
-                raise RuntimeError("Paintbot action contract v2 is unavailable")
             opponent = OPPONENT.read_bytes()
             for seat in range(1, SEATS):
                 if self.library.pw_set_seat_script(self.handle, seat, opponent, len(opponent)) != 0:

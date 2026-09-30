@@ -42,7 +42,7 @@ class TrainingBridgeTest(unittest.TestCase):
             responses = [json.loads(line) for line in result.stdout.splitlines()]
             self.assertEqual(len(responses), len(commands))
             self.assertEqual(responses[0]["kind"], "decision")
-            self.assertEqual(len(responses[0]["semantic_view"]["values"]), 506)
+            self.assertEqual(len(responses[0]["semantic_view"]["values"]), 512)
             self.assertEqual([len(head["choices"]) for head in responses[1]["action_heads"]], [51, 25, 2, 2, 2])
             self.assertEqual(responses[2]["kind"], "rejected")
             self.assertEqual(responses[3]["observation"]["decision_id"], 2)
