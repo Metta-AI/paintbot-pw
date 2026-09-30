@@ -1233,20 +1233,20 @@ goalX = me.x
 goalY = me.y
 holding = 0
 if me.carrying then
-  if ownHeartStolen and thief >= 0 then
+  if me.ownHeartStolen and thief >= 0 then
     goalX = agents(thief).x
     goalY = agents(thief).y
   else
-    goalX = homeX
-    goalY = homeY
+    goalX = me.homeX
+    goalY = me.homeY
   end if
 else
   if thief >= 0 then
     goalX = agents(thief).x
     goalY = agents(thief).y
   else
-    goalX = heartX
-    goalY = heartY
+    goalX = me.heartX
+    goalY = me.heartY
   end if
 end if
 
@@ -1266,9 +1266,9 @@ if heartCount() > 0 then
   candCost2 = 2147483647
   pass = 0
   while pass < 2
-    refY = homeY - 1500
+    refY = me.homeY - 1500
     if pass = 1 then
-      refY = homeY + 1500
+      refY = me.homeY + 1500
     end if
     if me.team = 1 then
       ' Mirror play: blue's first squad works from below home, the half turn of red's.
@@ -1279,7 +1279,7 @@ if heartCount() > 0 then
     j = 0
     while j < heartCount() and j < 16
       if controlOwner(j) <> me.team and j <> otherTarget then
-        dx = (controlX(j) - homeX) \ 8
+        dx = (controlX(j) - me.homeX) \ 8
         dy = (controlY(j) - refY) \ 8
         cost = dx * dx + dy * dy
         if controlOwner(j) = -1 then

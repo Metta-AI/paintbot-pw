@@ -263,10 +263,9 @@ proc runSeat(b: Bot, slot: int, w: World) =
   let values = view.dataValues
   b.runtime.restart()
   b.runtime.invalidateArrays()
-  b.observations.refresh(values)
+  b.observations.refresh(b.runtime, values)
   b.strings.reset()
   try:
-    for j,name in DataNames:b.runtime.setData(name,values[j])
     let stats = b.runtime.run(b.output)
     peakNativeWork[slot] = max(peakNativeWork[slot], b.neural.nativeWork)
     peakInstructions[slot] = max(peakInstructions[slot], stats.instructions)

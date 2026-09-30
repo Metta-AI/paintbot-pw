@@ -66,6 +66,10 @@ def record_syntax(source: str) -> str:
         "hasSpray": "hasSpray", "armorHp": "armorHp",
         "grenadeCharge": "grenadeCharge", "trenchId": "trenchId",
         "livesLeft": "livesLeft",
+        "homeX": "homeX", "homeY": "homeY",
+        "heartX": "heartX", "heartY": "heartY",
+        "ownHeartX": "ownHeartX", "ownHeartY": "ownHeartY",
+        "ownHeartStolen": "ownHeartStolen",
     }
     pieces = re.split(r'("[^"\n]*"|\'[^\n]*)', source)
     for i in range(0, len(pieces), 2):

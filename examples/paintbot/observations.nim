@@ -12,10 +12,14 @@ const
   AgentFields = ["visible", "x", "y", "hp", "team", "carrying"]
 
 type
+  DataBinding = object
+    field: int
+    id: int32
   SelfBinding = object
     field: int
     view: GlobalView
   Observations* = object
+    data: seq[DataBinding]
     selves: seq[SelfBinding]
 
 proc recordSource*(): string =
@@ -55,6 +59,16 @@ proc bindObservations*(
     slot: int
 ): Observations =
   ## Binds referenced scalar fields and lazy roster columns before JIT setup.
+  for i, name in DataNames:
+    let id = program.hostDataIndex(name)
+    for instruction in program.bytecode:
+      case instruction.op
+      of LoadHostDataOp, AddGlobalHostDataOp:
+        if instruction.b == id:
+          result.data.add DataBinding(field: i, id: id)
+          break
+      else:
+        discard
   for i, field in SelfFields:
     let name = "me." & field
     if program.referencesGlobal(name):
@@ -63,7 +77,13 @@ proc bindObservations*(
     let name = "agents." & field
     runtime.setArrayLoader(name, fieldLoader(runtime, slot, i))
 
-proc refresh*(observations: Observations, values: openArray[int32]) =
-  ## Copies this tick's scalar observations through prebound record accessors.
+proc refresh*(
+    observations: Observations,
+    runtime: var Runtime,
+    values: openArray[int32]
+) =
+  ## Refreshes referenced scalar observations through their bound accessors.
+  for binding in observations.data:
+    runtime.setData(binding.id, toValue(values[binding.field]))
   for binding in observations.selves:
     binding.view.value = toValue(values[binding.field])

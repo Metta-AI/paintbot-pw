@@ -12,6 +12,7 @@ const
   HostCallIterations = 500_000
   BenchRuns {.intdefine.} = 10
   CompileRuns {.intdefine.} = 100
+  UseJit {.booldefine.} = true
 
   ArithmeticSource = """
 i = 0
@@ -181,7 +182,18 @@ var
   (stringFindProgram, stringFindRuntime, stringFindPool) =
     buildStringBench(StringFindSource, limits)
 
-echo "BASIC register VM benchmark"
+when UseJit:
+  for runtime in [
+    arithmeticRuntime, arrayRuntime, branchRuntime, callRuntime,
+    hostDataRuntime, hostCallRuntime, stringBuildRuntime,
+    stringParseRuntime, stringFindRuntime
+  ]:
+    var compiled = runtime
+    let offsets = compiled.compileNative()
+    if jitSupported():
+      doAssert offsets > 0, "Benchmark must use native compilation."
+
+echo "Bassy benchmark, JIT=", UseJit and jitSupported()
 echo "  arithmetic iterations=", ArithmeticIterations
 echo "  array iterations=", ArrayIterations, " elements=", ArraySize
 echo "  branch iterations=", BranchIterations
