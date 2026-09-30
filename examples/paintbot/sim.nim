@@ -255,6 +255,10 @@ when defined(pwTraining):
       gunKills*, grenadeKills*, weaponSprayKills*: int32
       hitsFromWater*, hitsFromHigh*, hitsFromTrench*: int32
       hitsToWater*, hitsToHigh*, hitsToTrench*: int32
+      # Per-weapon enemy damage (pw_seat_weapon_damage): health this seat removed from enemies
+      # and enemies removed from it, by the weapon of the damage event (the kills' split).
+      gunDamageDealt*, grenadeDamageDealt*, sprayDamageDealt*: int32
+      gunDamageTaken*, grenadeDamageTaken*, sprayDamageTaken*: int32
     CombatTelemetry* = array[LegacySeats, SeatStats] # the training library plays LegacySeats
   const HighGroundHeight* = 216 # pw_seat_weapon_stats' "high": terrainHeight >= this
   type DamageWeapon* = enum

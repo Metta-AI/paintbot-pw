@@ -393,6 +393,18 @@ proc damage*(w: var World, victim, attacker, amount: int) =
           t[attacker].damageDealtEnemy += removed
           inc t[attacker].hitsEnemy
           if killed: inc t[attacker].kills
+          # Per-weapon enemy damage dealt and taken (pw_seat_weapon_damage).
+          case damageWeapon
+          of dwGun:
+            t[attacker].gunDamageDealt += removed
+            t[victim].gunDamageTaken += removed
+          of dwGrenade:
+            t[attacker].grenadeDamageDealt += removed
+            t[victim].grenadeDamageTaken += removed
+          of dwSpray:
+            t[attacker].sprayDamageDealt += removed
+            t[victim].sprayDamageTaken += removed
+          of dwNone: discard
           # Weapon kills and hit locations (pw_seat_weapon_stats), enemy victims only.
           if killed:
             case damageWeapon

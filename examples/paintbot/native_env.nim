@@ -1888,6 +1888,21 @@ proc pw_seat_weapon_stats*(handle: pointer, seat: cint, output: ptr UncheckedArr
     output[i] = v
   0
 
+proc pw_seat_weapon_damage*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Per-weapon enemy damage for one seat (training library only), six int32, cumulative since
+  ## the last create/reset: [dealt by gun, dealt by grenade, dealt by spray, taken from gun,
+  ## taken from grenade, taken from spray]. Enemy damage only (the attacker on the other team),
+  ## as pw_seat_stats' damage_dealt_enemy: health removed (armor absorbs first), attributed by
+  ## the weapon of the damage event, pw_seat_weapon_stats' kill split. The three dealt values sum
+  ## to damage_dealt_enemy. Pure telemetry. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<LegacySeats or output == nil: return -1
+  ready(handle)
+  let s = cast[ptr NativeEnv](handle).stats[seat]
+  for i, v in [s.gunDamageDealt, s.grenadeDamageDealt, s.sprayDamageDealt, s.gunDamageTaken,
+      s.grenadeDamageTaken, s.sprayDamageTaken]:
+    output[i] = v
+  0
+
 const SeatStateFloats* = 8 ## pw_seat_state floats per seat
 
 proc pw_seat_state*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
