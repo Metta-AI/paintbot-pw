@@ -418,6 +418,15 @@ def attn_pool_ops(tokens, z, width, heads, key_width, value_width):
             + heads * (tokens + TRANSCENDENTAL_OPS))
 
 
+TOKEN_PAIR_FEATURES = 10
+
+
+def token_pair_ops(tokens, d, p, width):
+    """TOKEN_PAIR's published cost (neural_actor.tokenPairOps)."""
+    return (width + tokens * (4 * d * p + 2 + d) + tokens * tokens * (18 + 2 * TOKEN_PAIR_FEATURES * p + 6 * p)
+            + tokens * (TRANSCENDENTAL_OPS + p) + token_pool_ops(tokens, d + 2 * p))
+
+
 def segment_near_ops(inputs, tokens):
     """SEGMENT_NEAR's published cost: the copy of the input, 12 per token pair, 8 per token."""
     return inputs + tokens * tokens * 12 + tokens * 8
@@ -697,8 +706,8 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
                 if q[j] != 0:
                     bad(where + "unused parameter %d must be 0" % j)
             norm = token_norm()
-            if source >= k or token_layers.get(source, ("",))[0] not in ("mlp", "attn"):
-                bad(where + "TOKEN_MIX source must name an earlier TOKEN_MLP or ENTITY_ATTN layer")
+            if source >= k or token_layers.get(source, ("",))[0] not in ("mlp", "attn", "pair"):
+                bad(where + "TOKEN_MIX source must name an earlier TOKEN_MLP, ENTITY_ATTN or TOKEN_PAIR layer")
             if not 1 <= z <= lim["token_model"]:
                 bad(where + "TOKEN_MIX width must be 1..%d" % lim["token_model"])
             expose(source)
@@ -712,8 +721,8 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
         elif code == 9:  # POINTER
             source, offset = q[0], q[1]
             unused(2)
-            if source >= k or token_layers.get(source, ("",))[0] not in ("mix", "mlp", "attn"):
-                bad(where + "POINTER source must name an earlier TOKEN_MIX, TOKEN_MLP or ENTITY_ATTN layer")
+            if source >= k or token_layers.get(source, ("",))[0] not in ("mix", "mlp", "attn", "pair"):
+                bad(where + "POINTER source must name an earlier TOKEN_MIX, TOKEN_MLP, ENTITY_ATTN or TOKEN_PAIR layer")
             expose(source)
             _, tokens, z = token_layers[source]
             if offset > width or tokens > width - offset:
@@ -746,8 +755,8 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
         elif code == 11:  # ATTN_POOL
             source, heads_, key_width, value_width = q[:4]
             unused(4)
-            if source >= k or token_layers.get(source, ("",))[0] not in ("mlp", "mix", "attn"):
-                bad(where + "ATTN_POOL source must name an earlier TOKEN_MLP, TOKEN_MIX or ENTITY_ATTN layer")
+            if source >= k or token_layers.get(source, ("",))[0] not in ("mlp", "mix", "attn", "pair"):
+                bad(where + "ATTN_POOL source must name an earlier TOKEN_MLP, TOKEN_MIX, ENTITY_ATTN or TOKEN_PAIR layer")
             if not 1 <= heads_ <= lim["pool_heads"]:
                 bad(where + "ATTN_POOL heads must be 1..%d" % lim["pool_heads"])
             if not 1 <= key_width <= lim["token_model"] or not 1 <= value_width <= lim["token_model"]:
@@ -762,6 +771,28 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
             if out > lim["width"]:
                 bad(where + "ATTN_POOL output exceeds %d" % lim["width"])
             operations += attn_pool_ops(tokens, z, width, heads_, key_width, value_width)
+        elif code == 14:  # TOKEN_PAIR
+            source, pw, geo_base, geo_stride, gx, gz = q[:6]
+            flag(6)  # self_pairs
+            unused(7)
+            if source >= k or token_layers.get(source, ("",))[0] not in ("mlp", "mix", "attn"):
+                bad(where + "TOKEN_PAIR source must name an earlier TOKEN_MLP, TOKEN_MIX or ENTITY_ATTN layer")
+            if not 1 <= pw <= lim["token_model"]:
+                bad(where + "TOKEN_PAIR width must be 1..%d" % lim["token_model"])
+            expose(source)
+            _, tokens, d = token_layers[source]
+            if not 1 <= geo_stride <= inputs or gx >= geo_stride or gz >= geo_stride:
+                bad(where + "TOKEN_PAIR geometry stride / columns")
+            if geo_base > inputs or (tokens - 1) * geo_stride + geo_stride > inputs - geo_base:
+                bad(where + "TOKEN_PAIR geometry outside the input")
+            if d + 2 * pw > 1024:
+                bad(where + "TOKEN_PAIR rows exceed 1024")
+            weights(2 * pw * d + pw * TOKEN_PAIR_FEATURES + pw)
+            out = width + 2 * (d + 2 * pw)
+            if out > lim["width"]:
+                bad(where + "TOKEN_PAIR output exceeds %d" % lim["width"])
+            token_layers[k] = ("pair", tokens, d + 2 * pw)
+            operations += token_pair_ops(tokens, d, pw, width)
         elif code == 13:  # COND_HEAD
             when_head, head = q[0], q[1]
             unused(2)

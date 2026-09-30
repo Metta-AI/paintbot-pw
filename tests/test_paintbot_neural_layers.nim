@@ -292,3 +292,111 @@ suite "PWNET002 token-layer LayerNorm (params 6 = norm, 7 = eps)":
       check rejects(plain.with(k, proc (s: var Spec) = s.params[7] = cast[uint32](1e-5'f32)), "unused parameter 7")
     check rejects(plain.with(3, proc (s: var Spec) = s.params[2] = 1), "unused parameter 2")
     check rejects(plain.with(0, proc (s: var Spec) = s.params[5] = 1), "unused parameter 5")
+
+suite "PWNET002 TOKEN_PAIR (layer 14): a learned pairwise token layer":
+  # 6 tokens of 8 floats (flag +0, x +1, z +2) in 0..47, the seat's own 8 floats at 48..55.
+  proc pairSpecs(r: var Rand, selfPairs = false): seq[Spec] =
+    @[r.tokenMlp(6, [[0'u32, 8, 8], [48'u32, 0, 8]], 0, 0, [9]),     # 18, rows e (9)
+      concat(48, 8),                                                  # 26
+      r.tokenPair(0, 9, 4, 0, 8, 1, 2, selfPairs),                    # 26 + 2*(9 + 8) = 60, rows (17)
+      r.tokenMix(2, 17, 60, 5),                                       # 70
+      r.dense(70, 9, bias = true),                                    # 9
+      r.pointerHead(3, 2, 5)]                                         # logits 2..7
+
+  proc pairObservation(r: var Rand): seq[float32] =
+    result = r.observation(56)
+    for n in 0..<6: result[8*n] = float32(n != 1 and n != 4)
+
+  test "the engine equals a float32 reimplementation, term for term":
+    for selfPairs in [false, true]:
+      var r = initRand(98)
+      let specs = r.pairSpecs(selfPairs)
+      let actor = loadActor(encode2(56, [4, 5], specs))
+      let mlp = specs[0].tensors
+      let pr = specs[2].tensors
+      for trial in 0..<10:
+        let obs = r.pairObservation()
+        var rows: seq[seq[float32]]
+        var valid: seq[bool]
+        for n in 0..<6:
+          valid.add obs[8*n] > 0.5
+          rows.add(if valid[^1]: dense32(obs[8*n ..< 8*n+8] & obs[48 ..< 56], mlp[0 ..< 144], mlp[144 ..< 153], 9,
+            relu = true) else: newSeq[float32](9))
+        let x0 = pools32(rows, valid, 9) & obs[48 ..< 56]
+        # TOKEN_PAIR: A [4, 9], B [4, 9], C [4, 10], b [4].
+        var pairRows: seq[seq[float32]]
+        for n in 0..<6:
+          if not valid[n]:
+            pairRows.add newSeq[float32](17)
+            continue
+          let an = dense32(rows[n], pr[0 ..< 36], newSeq[float32](4), 4)
+          var mean = newSeq[float32](4)
+          var best = newSeq[float32](4)
+          var count = 0
+          for m in 0..<6:
+            if not valid[m] or (m == n and not selfPairs): continue
+            let bm = dense32(rows[m], pr[36 ..< 72], newSeq[float32](4), 4)
+            let (xn, zn, xm, zm) = (obs[8*n+1], obs[8*n+2], obs[8*m+1], obs[8*m+2])
+            # One product or sum per statement (no FMA contraction), as the layer computes them.
+            let (xx, zz, xz, zx, nx, nz, mx, mz) = (xn*xm, zn*zm, xn*zm, zn*xm, xn*xn, zn*zn, xm*xm, zm*zm)
+            let g = @[xn, zn, xm, zm, xm - xn, zm - zn, xx + zz, xz - zx, nx + nz, mx + mz]
+            let cg = dense32(g, pr[72 ..< 112], pr[112 ..< 116], 4)
+            for o in 0..<4:
+              var s = cg[o]
+              s = s + an[o]
+              s = s + bm[o]
+              let h = if s > 0'f32: s else: 0'f32
+              mean[o] = mean[o] + h
+              if count == 0 or h > best[o]: best[o] = h
+            inc count
+          if count > 0:
+            let inverse = 1'f32 / float32(count)
+            for o in 0..<4: mean[o] = mean[o]*inverse
+          pairRows.add rows[n] & mean & best
+        let x1 = x0 & pools32(pairRows, valid, 17)
+        let mix = specs[3].tensors
+        let u = dense32(x1, mix[85+5 ..< 85+5+300], newSeq[float32](5), 5)
+        var zs: seq[seq[float32]]
+        for n in 0..<6:
+          if not valid[n]:
+            zs.add newSeq[float32](5)
+            continue
+          var z = dense32(pairRows[n], mix[0 ..< 85], mix[85 ..< 90], 5)
+          for o in 0..<5:
+            z[o] = z[o] + u[o]
+            if not (z[o] > 0'f32): z[o] = 0'f32
+          zs.add z
+        let mixed = x1 & pools32(zs, valid, 5)
+        var logits = dense32(mixed, specs[4].tensors[0 ..< 630], specs[4].tensors[630 ..< 639], 9)
+        let v = specs[5].tensors
+        for n in 0..<6:
+          if not valid[n]: continue
+          var dot = 0'f32
+          for i in 0..<5: dot += zs[n][i]*v[i]
+          logits[2+n] = logits[2+n] + (dot + v[5])
+        check actor.run(obs) == logits
+
+  test "cost, masked tokens, the loader's checks":
+    var r = initRand(99)
+    let specs = r.pairSpecs()
+    let actor = loadActor(encode2(56, [4, 5], specs))
+    check tokenPairOps(6, 9, 4, 26) == 26 + 6*(4*9*4 + 2 + 9) + 36*(18 + 80 + 24) + 6*(8 + 4) + (6 + 2*6*17 + 17 + 8)
+    check actor.operationCount == tokenMlpOps(6, [16, 9]) + 8 + tokenPairOps(6, 9, 4, 26) +
+      tokenMixOps(6, 17, 60, 5) + (2*70*9 + 9) + pointerOps(6, 5, 9)
+    var obs = r.pairObservation()
+    let first = actor.run(obs)
+    for c in 1..7: obs[8+c] = 3.5   # token 1 is masked: its floats (and geometry) change nothing
+    check actor.run(obs) == first
+    obs[8*2+1] = obs[8*2+1] + 0.25   # a valid token's x moves its pairs
+    check actor.run(obs) != first
+    proc with(k: int, change: proc (s: var Spec)): string =
+      var v = specs
+      change(v[k])
+      encode2(56, [4, 5], v)
+    check rejects(with(2, proc (s: var Spec) = s.params[0] = 1), "TOKEN_PAIR source")
+    check rejects(with(2, proc (s: var Spec) = s.params[1] = 0), "TOKEN_PAIR width")
+    check rejects(with(2, proc (s: var Spec) = s.params[4] = 8), "geometry stride")
+    check rejects(with(2, proc (s: var Spec) = s.params[2] = 16), "geometry outside the input")
+    check rejects(with(2, proc (s: var Spec) = s.params[6] = 2), "parameter 6 must be 0 or 1")
+    check rejects(with(2, proc (s: var Spec) = s.params[7] = 1), "unused parameter 7")
+    check rejects(with(2, proc (s: var Spec) = s.tensors.setLen(s.tensors.len - 1)), "")

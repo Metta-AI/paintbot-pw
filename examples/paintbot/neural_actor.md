@@ -124,6 +124,7 @@ when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 | 11 | ATTN_POOL | `source, heads, key, value` | `Wq[h*key, width]`, `bq[h*key]`, `Wk[h*key, z]`, `bk[h*key]`, `Wv[h*value, z]`, `bv[h*value]` |
 | 12 | PAD | `at, len` | none |
 | 13 | COND_HEAD | `when_head, head` | `W[size(head), size(when_head)]` |
+| 14 | TOKEN_PAIR | `source, p, geo_base, geo_stride, x, z, self_pairs` | `A[p, d]`, `B[p, d]`, `C[p, 10]`, `b[p]` |
 
 Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1024;
 `act` 0 = none, 1 = relu; `eps` finite and > 0; TOKEN_MLP tokens 1..256, segments 1..8, layers
@@ -288,6 +289,21 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
   from +0 in index order, then the bias).
 - **PAD**: `y = [x[0 ..< at], 0 x len, x[at ..< W]]` (width `W + len`): opens a run of zeros
   where later POINTERs write match-sized heads.
+- **TOKEN_PAIR** (a learned pairwise token layer): `source` names an earlier TOKEN_MLP, TOKEN_MIX
+  or ENTITY_ATTN (its rows `e_n`, width `d`, T tokens, valid flags). Token n's position is
+  `(x_n, z_n) = (input[geo_base + n*geo_stride + x], input[geo_base + n*geo_stride + z])` (the
+  observation, or SEGMENT_NEAR's view; `x, z < geo_stride`, the whole block inside the input).
+  For each valid token n: `a_n = A e_n`, `b_n = B e_n` (DENSE, no bias). For each valid partner
+  m (m != n unless `self_pairs`), in token order, the pair features `g` (10, each product or sum
+  its own FP32 operation): `x_n, z_n, x_m, z_m, x_m - x_n, z_m - z_n, x_n*x_m + z_n*z_m,
+  x_n*z_m - z_n*x_m, x_n*x_n + z_n*z_n, x_m*x_m + z_m*z_m`, and
+  `h_nm[o] = relu((((sum_i g_i*C[o,i]) + b[o]) + a_n[o]) + b_m[o])`. Row n (width `d + 2p`, at
+  most 1024) is `[e_n, mean_m h_nm, max_m h_nm]`: the mean is `sum * (1/count)`, the max takes the
+  first partner first, and both are 0 with no partner. An invalid token's row is 0. Output
+  (width `W + 2(d + 2p)`): `[x, masked mean of the rows, masked max of the rows]` (the token-layer
+  pools). The rows and valid flags feed a later TOKEN_MIX, POINTER or ATTN_POOL. A learned
+  successor to SEGMENT_NEAR's fixed geometry: the pair features let one relu layer form the
+  products of both tokens' positions that a segment test needs.
 - **COND_HEAD** (a learned conditional action head): `y = x`; the layer's weights act at
   selection, not in the vector. `when_head` and `head` are distinct action-head indices, and
   `W` is `size(head) x size(when_head)` (row-major, part of the model's weights). After the
@@ -340,6 +356,7 @@ unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 | ATTN_POOL | `W + (2*W*h*k + h*k) + T*((2*z*h*k + h*k) + h*(2*k + 1) + h*(8 + 3) + (2*z*h*v + h*v) + 2*h*v) + h*(T + 8)` |
 | PAD | `W + len` |
 | COND_HEAD | `W + size(head)` (the copy, and the column add at selection) |
+| TOKEN_PAIR | `W + T*(4*d*p + 2 + d) + T*T*(18 + 26*p) + T*(8 + p) + pool(d + 2p)` |
 
 with, for ENTITY_ATTN (T tokens, h heads, F = ff, P = pass_len):
 
