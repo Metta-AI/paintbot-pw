@@ -117,8 +117,8 @@ when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 | 4 | RESIDUAL | `start` | none |
 | 5 | ENTITY_ATTN | `groups, d, heads, blocks, ff, pass_offset, pass_len, eps` | group descriptors, then tensors (below) |
 | 6 | CONCAT_INPUT | `offset, len` | none |
-| 7 | TOKEN_MLP | `tokens, segments, valid_segment, valid_index, layers` | segment descriptors, widths, then tensors (below) |
-| 8 | TOKEN_MIX | `source, z` | `Ue[z, d]`, `b[z]`, `Uy[z, width]` (d = the source's token width) |
+| 7 | TOKEN_MLP | `tokens, segments, valid_segment, valid_index, layers, 0, norm, eps` | segment descriptors, widths, then tensors (below) |
+| 8 | TOKEN_MIX | `source, z, 0, 0, 0, 0, norm, eps` | `Ue[z, d]`, `b[z]`, `Uy[z, width]` (d = the source's token width), then `g[z]`, `s[z]` with norm |
 | 9 | POINTER | `source, offset` | `v[z]`, `c` (z = the source's token width) |
 | 10 | SEGMENT_NEAR | `tokens, base, stride, x, z, valid, exclude, candidate` | `scale_x, scale_z, radius` (FP32 bits), `dst, dst_stride`; no weights |
 | 11 | ATTN_POOL | `source, heads, key, value` | `Wq[h*key, width]`, `bq[h*key]`, `Wk[h*key, z]`, `bk[h*key]`, `Wv[h*value, z]`, `bv[h*value]` |
@@ -153,7 +153,7 @@ its low 16 bits are section `s` (bits 12..15), field `f` (bits 8..11) and an add
 
 Words are allowed in the header (I, O, head sizes) and in every structural integer of a
 layer record (params, ENTITY_ATTN group descriptors, TOKEN_MLP segments and widths,
-SEGMENT_NEAR `dst` and `dst_stride`); never in an FP32 field (RMSNORM and ENTITY_ATTN `eps`,
+SEGMENT_NEAR `dst` and `dst_stride`); never in an FP32 field (RMSNORM, ENTITY_ATTN and token-layer norm `eps`,
 SEGMENT_NEAR's scales and radius). A word the host cannot resolve (no match layout, an
 unknown section or field, a pointer target the action contract lacks) rejects the model. The
 weight counts must not depend on a word for one file to fit several layouts: build them from
@@ -218,20 +218,28 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
     `input[offset + n*stride ..< offset + n*stride + length]`; `stride` 0 gives every token
     the same slice (e.g. the seat's own features). Every slice must lie inside the input.
     Then `layers` uint32 widths `d_1 .. d_L`, then for each layer `W_l[d_l, d_(l-1)]`,
-    `b_l[d_l]` (`d_0` = the summed segment lengths).
+    `b_l[d_l]` (`d_0` = the summed segment lengths), and with norm `g_l[d_l]`, `s_l[d_l]` after `b_l`.
   - Token n is valid when `input[offset_s + n*stride_s + valid_index] > 0.5` for
     `s = valid_segment`, or always when `valid_segment` is `0xFFFFFFFF` (then `valid_index`
     is 0). A valid token's row is `e_n = relu(W_L ... relu(W_1 x_n + b_1) ... + b_L)` (each a
-    DENSE with bias and relu); an invalid token's row is 0 and is not computed.
+    DENSE with bias and relu); an invalid token's row is 0 and is not computed. With norm, every
+    layer is `relu(layernorm(W_l x + b_l, g_l, s_l))` (the token-layer norm, below).
   - Output (width `2*d_L`): the masked mean (`sum * (1/count)`) and the masked max (first
     valid token first) of the valid rows, exactly ENTITY_ATTN's pools; 0 with no valid token.
     The rows `e` and the valid flags stay available to later TOKEN_MIX layers for the tick.
 - **TOKEN_MIX** (per-token layer after the recurrence): `source` names an earlier TOKEN_MLP (or
   ENTITY_ATTN, whose rows `h_n` are then the `e_n`).
   With the current vector x (width W): `u = Uy x` (no bias), then for each valid token
-  `z_n[o] = relu((sum_i e_n[i]*Ue[o,i] + b[o]) + u[o])`; an invalid token's `z_n` is 0.
+  `z_n[o] = relu((sum_i e_n[i]*Ue[o,i] + b[o]) + u[o])`; an invalid token's `z_n` is 0. With
+  norm, `z_n = relu(layernorm(v_n, g, s))` where `v_n[o] = (sum_i e_n[i]*Ue[o,i] + b[o]) + u[o]`.
   Output (width `W + 2z`): `[x, masked mean of z, masked max of z]` (the same pools). The rows
   `z` stay available to later POINTER layers.
+- **Token-layer norm** (TOKEN_MLP and TOKEN_MIX params 6 and 7): `norm` 0 is the layer above,
+  unchanged, and `eps` must then be 0; `norm` 1 puts a LayerNorm with a learned gain and shift
+  on each valid token's pre-activation row, before the relu, with `eps` (FP32 bits, finite and
+  > 0). For a row `v` of width n: `mu = (sum_i v[i]) / n`, `var = (sum_i c_i*c_i) / n` with
+  `c_i = v[i] - mu`, `r = 1 / sqrt(var + eps)`, `v[i] = ((c_i * r) * g[i]) + s[i]`, each product
+  and sum its own FP32 operation in that order. (Param 5 of TOKEN_MLP stays 0.)
 - **ENTITY_ATTN's token rows** (the final `h_n` and the valid flags) are available to a later
   TOKEN_MIX, POINTER or ATTN_POOL that names the ENTITY_ATTN layer as its `source`; the layer
   then also copies them to a token buffer (`T*d + T` more operations, counted once).
@@ -307,6 +315,7 @@ unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 | CONCAT_INPUT | `len` |
 | TOKEN_MLP | `T*d_0 + T*sum_l(2*d_(l-1)*d_l + 2*d_l) + pool(d_L)` |
 | TOKEN_MIX | `2*W*z + W + T*(2*d*z + 3*z) + pool(z)` |
+| token-layer norm | `+ T*(8*n + 32)` per normalised width n (TOKEN_MLP: each `d_l`; TOKEN_MIX: `z`) |
 | POINTER | `W + T*(2*z + 2)` |
 | SEGMENT_NEAR | `I + 12*T*T + 8*T` |
 | ENTITY_ATTN | `embed + blocks*block + pool` (+ `T*d + T` when a later layer reads its token rows) |

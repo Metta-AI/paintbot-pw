@@ -75,11 +75,17 @@ proc attention*(r: var Rand, groups: openArray[array[5, uint32]], d, heads, bloc
     result.tensors.add r.weights(d*ff, 1.0/sqrt(ff.float))
     result.tensors.add r.weights(d, 0.1)
 
+proc normWeights(r: var Rand, n: int): seq[float32] =
+  ## A LayerNorm's gain [n] (about 1) then shift [n] (about 0).
+  for i in 0..<n: result.add 1'f32 + r.gauss(0.1)
+  result.add r.weights(n, 0.1)
+
 proc tokenMlp*(r: var Rand, tokens: int, segments: openArray[array[3, uint32]], validSegment, validIndex: uint32,
-    widths: openArray[int]): Spec =
-  ## TOKEN_MLP: segments are (offset, stride, length); widths are the shared MLP's layer outputs.
+    widths: openArray[int], norm = false, eps = 1e-5'f32): Spec =
+  ## TOKEN_MLP: segments are (offset, stride, length); widths are the shared MLP's layer outputs. `norm`: a
+  ## LayerNorm before every relu (params 6 = 1, 7 = eps; gain and shift after each layer's bias).
   result = Spec(code: 7, params: [tokens.uint32, segments.len.uint32, validSegment, validIndex, widths.len.uint32,
-    0, 0, 0])
+    0, norm.uint32, (if norm: cast[uint32](eps) else: 0'u32)])
   var n = 0
   for s in segments:
     for x in s: result.extra.add x
@@ -88,13 +94,16 @@ proc tokenMlp*(r: var Rand, tokens: int, segments: openArray[array[3, uint32]], 
   for o in widths:
     result.tensors.add r.weights(o*n, 1.0/sqrt(n.float))
     result.tensors.add r.weights(o, 0.1)
+    if norm: result.tensors.add r.normWeights(o)
     n = o
-proc tokenMix*(r: var Rand, source, tokenIn, width, z: int): Spec =
-  ## TOKEN_MIX: Ue [z, tokenIn], b [z], Uy [z, width].
-  result = Spec(code: 8, params: [source.uint32, z.uint32, 0, 0, 0, 0, 0, 0])
+proc tokenMix*(r: var Rand, source, tokenIn, width, z: int, norm = false, eps = 1e-5'f32): Spec =
+  ## TOKEN_MIX: Ue [z, tokenIn], b [z], Uy [z, width]; with `norm` (params 6 = 1, 7 = eps) then gain [z], shift [z].
+  result = Spec(code: 8, params: [source.uint32, z.uint32, 0, 0, 0, 0, norm.uint32,
+    (if norm: cast[uint32](eps) else: 0'u32)])
   result.tensors = r.weights(z*tokenIn, 1.0/sqrt(tokenIn.float))
   result.tensors.add r.weights(z, 0.1)
   result.tensors.add r.weights(z*width, 1.0/sqrt(width.float))
+  if norm: result.tensors.add r.normWeights(z)
 proc pointerHead*(r: var Rand, source, offset, z: int): Spec =
   ## POINTER: v [z], c [1].
   result = Spec(code: 9, params: [source.uint32, offset.uint32, 0, 0, 0, 0, 0, 0])

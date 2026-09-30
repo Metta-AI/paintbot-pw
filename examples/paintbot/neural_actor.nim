@@ -43,6 +43,7 @@ type
     near: SegmentNearSpec  # SEGMENT_NEAR (tokens = its token count)
     exposeTokens: bool     # ENTITY_ATTN: a later layer reads its token rows (tokenBuffer / validBuffer)
     keyWidth, valueWidth: int  # ATTN_POOL: per-head key and value widths
+    norm: bool             # TOKEN_MLP / TOKEN_MIX: LayerNorm (gain, shift) on each pre-activation row, eps = `eps`
     operations: int64
   Net2Object = object
     layers: seq[NetLayer]
@@ -140,7 +141,8 @@ proc interpolate(a, b, weight: float32): float32 =
 
 # ---------------------------------------------------------------------------------------
 # PWNET002: the architecture is data. A layer stack from a fixed menu (DENSE, RMSNORM,
-# MINGRU, RESIDUAL, ENTITY_ATTN, CONCAT_INPUT, TOKEN_MLP, TOKEN_MIX, POINTER, SEGMENT_NEAR), FP32
+# MINGRU, RESIDUAL, ENTITY_ATTN, CONCAT_INPUT, TOKEN_MLP, TOKEN_MIX (both with an optional pre-relu
+# LayerNorm), POINTER, SEGMENT_NEAR, ATTN_POOL, PAD), FP32
 # (SEGMENT_NEAR's geometry: float64), fixed summation order, loaded and validated once, run
 # with bounded per-model scratch sized at load (no inference allocation). The format,
 # equations and the published operation-count formula are in neural_actor.md ("PWNET002").
@@ -201,6 +203,17 @@ proc attentionOps*(groups: openArray[tuple[count, width: int]], d, heads, blocks
   embed + int64(blocks)*perBlock + T + 2*T*D + D + TranscendentalOps + int64(passLength)
 
 proc tokenPoolOps(t, d: int): int64 = int64(t + 2*t*d + d + TranscendentalOps)
+
+proc layerNormOps*(d: int): int64 =
+  ## One LayerNorm row of width d: the sum, the centred squares (a subtract and a multiply-accumulate), the
+  ## centre, scale, gain and shift of every element (8 per element), and the two divisions by d, the sqrt and
+  ## the reciprocal.
+  int64(8*d + 4*TranscendentalOps)
+
+proc tokenNormOps*(tokens: int, widths: openArray[int]): int64 =
+  ## What a token layer's `norm` flag adds: one LayerNorm row per token (valid or not) for each normalised width
+  ## (TOKEN_MLP: every layer's output width; TOKEN_MIX: z).
+  for d in widths: result += int64(tokens)*layerNormOps(d)
 
 proc tokenMlpOps*(tokens: int, widths: openArray[int]): int64 =
   ## TOKEN_MLP's published cost: the gather, a biased relu DENSE per token per layer, the pools.
@@ -342,8 +355,9 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
     var q: array[8, uint32]
     for j in 0..7:
       let raw = readU32(data, p)
-      # FP32 parameters (RMSNORM eps, ENTITY_ATTN eps) are never layout words.
-      let floatParam = (code == lkRmsNorm.uint32 and j == 1) or (code == lkEntityAttn.uint32 and j == 7)
+      # FP32 parameters (RMSNORM eps, ENTITY_ATTN eps, the token layers' norm eps) are never layout words.
+      let floatParam = (code == lkRmsNorm.uint32 and j == 1) or (code == lkEntityAttn.uint32 and j == 7) or
+        (code in [lkTokenMlp.uint32, lkTokenMix.uint32] and j == 7)
       if floatParam and isLayoutWord(raw): net2Error(where & "parameter " & $j & " cannot be a layout word")
       q[j] = if floatParam: raw else: ctx.resolveWord(raw, where)
     template unused(first: int) =
@@ -356,6 +370,11 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       let e = cast[float32](q[j])
       if not finite(e) or not (e > 0'f32): net2Error(where & "eps must be finite and positive")
       e
+    template tokenNorm() =
+      ## The token layers' params 6 (norm, 0 or 1) and 7 (its eps as FP32 bits; 0 without norm).
+      layer.norm = flag(6)
+      if layer.norm: layer.eps = epsilon(7)
+      elif q[7] != 0: net2Error(where & "unused parameter 7 must be 0")
     var layer = NetLayer(inWidth: width, bias: -1)
     var tokenSpace = 0  # TOKEN_MLP / TOKEN_MIX: token buffer floats reserved before the output
     case code
@@ -472,7 +491,8 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       let t = int(q[0])
       let segments = int(q[1])
       let layers = int(q[4])
-      unused(5)
+      if q[5] != 0: net2Error(where & "unused parameter 5 must be 0")
+      tokenNorm()
       if t notin 1..MaxAttnTokens: net2Error(where & "TOKEN_MLP tokens must be 1.." & $MaxAttnTokens)
       if segments notin 1..MaxTokenSegments: net2Error(where & "TOKEN_MLP segments must be 1.." & $MaxTokenSegments)
       if layers notin 1..MaxTokenMlpLayers: net2Error(where & "TOKEN_MLP layers must be 1.." & $MaxTokenMlpLayers)
@@ -502,6 +522,7 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       layer.weight = net.weights.len
       for l in 1..layers:
         net.readWeights(data, p, layer.mlpWidths[l]*layer.mlpWidths[l-1] + layer.mlpWidths[l])
+        if layer.norm: net.readWeights(data, p, 2*layer.mlpWidths[l])  # gain, shift
       let d = layer.mlpWidths[^1]
       layer.tokenWidth = d
       tokenSpace = t*d + t
@@ -510,11 +531,14 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       for o in layer.mlpWidths: widest = max(widest, o)
       work = max(work, tokenIn + 2*widest)
       layer.operations = tokenMlpOps(t, layer.mlpWidths)
+      if layer.norm: layer.operations += tokenNormOps(t, layer.mlpWidths[1..^1])
     of lkTokenMix.uint32:
       layer.kind = lkTokenMix
       layer.source = int(q[0])
       let z = int(q[1])
-      unused(2)
+      for j in 2..5:
+        if q[j] != 0: net2Error(where & "unused parameter " & $j & " must be 0")
+      tokenNorm()
       if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMlp, lkEntityAttn}:
         net2Error(where & "TOKEN_MIX source must name an earlier TOKEN_MLP or ENTITY_ATTN layer")
       if z notin 1..MaxTokenModel: net2Error(where & "TOKEN_MIX width must be 1.." & $MaxTokenModel)
@@ -524,11 +548,13 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       layer.tokenWidth = z
       layer.weight = net.weights.len
       net.readWeights(data, p, z*src.tokenWidth + z + z*width)
+      if layer.norm: net.readWeights(data, p, 2*z)  # gain, shift
       tokenSpace = layer.tokens*z
       layer.outWidth = width + 2*z
       if layer.outWidth > MaxNet2Width: net2Error(where & "TOKEN_MIX output exceeds " & $MaxNet2Width)
       work = max(work, z)
       layer.operations = tokenMixOps(layer.tokens, src.tokenWidth, width, z)
+      if layer.norm: layer.operations += tokenNormOps(layer.tokens, [z])
     of lkPointer.uint32:
       layer.kind = lkPointer
       layer.source = int(q[0])
@@ -719,6 +745,26 @@ proc rmsNorm(x: F32s, n: int, gain: F32s, eps: float32, y: F32s) =
   let r = 1'f32 / sqrt(squares / float32(n) + eps)
   for i in 0..<n: y[i] = x[i]*r*gain[i]
 
+proc layerNorm(v: F32s, n: int, gain, shift: F32s, eps: float32) =
+  ## In place: mu = sum/n, var = (sum of (v-mu)^2)/n, r = 1/sqrt(var + eps), v = ((v-mu)*r)*gain + shift.
+  var total = 0'f32
+  for i in 0..<n: total += v[i]
+  let mean = total / float32(n)
+  var squares = 0'f32
+  for i in 0..<n:
+    let c = v[i] - mean
+    squares += c*c
+  let r = 1'f32 / sqrt(squares / float32(n) + eps)
+  for i in 0..<n:
+    let c = v[i] - mean
+    let scaled = c*r
+    let gained = scaled*gain[i]
+    v[i] = gained + shift[i]
+
+proc reluInPlace(v: F32s, n: int) =
+  for i in 0..<n:
+    if not (v[i] > 0'f32): v[i] = 0'f32
+
 proc minGru(layer: NetLayer, x, w, bias, state, combined, next, y: F32s) =
   ## PWNET001's cell (same expressions, same order), optionally with a gate bias and
   ## without the highway gate.
@@ -899,8 +945,14 @@ proc tokenMlp(layer: NetLayer, input, w, scratch, work, y: F32s) =
       let n0 = layer.mlpWidths[l-1]
       let n1 = layer.mlpWidths[l]
       let target = if l == layer.mlpWidths.len-1: row elif l mod 2 == 1: a else: b
-      dense(x, n0, w.at(off), w.at(off + n1*n0), n1, true, target)
-      off += n1*n0 + n1
+      if layer.norm:
+        dense(x, n0, w.at(off), w.at(off + n1*n0), n1, false, target)
+        layerNorm(target, n1, w.at(off + n1*n0 + n1), w.at(off + n1*n0 + 2*n1), layer.eps)
+        reluInPlace(target, n1)
+        off += n1*n0 + 3*n1
+      else:
+        dense(x, n0, w.at(off), w.at(off + n1*n0), n1, true, target)
+        off += n1*n0 + n1
       x = target
   checkFinite(buffer, t*d)
   tokenPools(buffer, valid, t, d, y)
@@ -929,7 +981,12 @@ proc tokenMix(layer: NetLayer, source: NetLayer, x, w, scratch, work, y: F32s) =
       for i in 0..<d: sum += e[i]*ue[o*d+i]
       sum = sum + bias[o]
       sum = sum + u[o]
-      row[o] = if sum > 0'f32: sum else: 0'f32
+      if layer.norm: row[o] = sum
+      else: row[o] = if sum > 0'f32: sum else: 0'f32
+    if layer.norm:
+      let gain = uy.at(z*width)
+      layerNorm(row, z, gain, gain.at(z), layer.eps)
+      reluInPlace(row, z)
   checkFinite(buffer, t*z)
   for i in 0..<width: y[i] = x[i]
   tokenPools(buffer, valid, t, z, y.at(width))

@@ -395,6 +395,16 @@ def token_mix_ops(tokens, token_in, width, z):
     return 2 * width * z + width + tokens * (2 * token_in * z + 3 * z) + token_pool_ops(tokens, z)
 
 
+def layer_norm_ops(d):
+    """One LayerNorm row of width d (neural_actor.layerNormOps)."""
+    return 8 * d + 4 * TRANSCENDENTAL_OPS
+
+
+def token_norm_ops(tokens, widths):
+    """What a token layer's norm flag adds: one LayerNorm row per token per normalised width."""
+    return sum(tokens * layer_norm_ops(d) for d in widths)
+
+
 def pointer_ops(tokens, z, width):
     return width + tokens * (2 * z + 2)
 
@@ -522,8 +532,9 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
 
     for k in range(count):
         code = u32()
-        # FP32 parameters (RMSNORM eps, ENTITY_ATTN eps) are read as bits, never as layout words.
-        q = [u32() if (code, j) in ((2, 1), (5, 7)) else word() for j in range(8)]
+        # FP32 parameters (RMSNORM eps, ENTITY_ATTN eps, the token layers' norm eps) are read as bits, never as
+        # layout words.
+        q = [u32() if (code, j) in ((2, 1), (5, 7), (7, 7), (8, 7)) else word() for j in range(8)]
         where = "layer %d: " % k
 
         def unused(first):
@@ -539,6 +550,15 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
         def epsilon(j):
             if not positive_f32(q[j]):
                 bad(where + "eps must be finite and positive")
+
+        def token_norm():
+            """The token layers' params 6 (norm, 0 or 1) and 7 (its eps; 0 without norm)."""
+            norm = flag(6)
+            if norm:
+                epsilon(7)
+            elif q[7] != 0:
+                bad(where + "unused parameter 7 must be 0")
+            return norm
 
         if code == 1:  # DENSE
             out = q[1]
@@ -631,7 +651,9 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
             operations += length
         elif code == 7:  # TOKEN_MLP
             tokens, segments, valid_segment, valid_index, layers = q[:5]
-            unused(5)
+            if q[5] != 0:
+                bad(where + "unused parameter 5 must be 0")
+            norm = token_norm()
             if not 1 <= tokens <= lim["tokens"]:
                 bad(where + "TOKEN_MLP tokens must be 1..%d" % lim["tokens"])
             if not 1 <= segments <= lim["token_segments"]:
@@ -661,24 +683,29 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
                 mlp.append(o)
             for l in range(1, len(mlp)):
                 weights(mlp[l] * mlp[l - 1] + mlp[l])
+                if norm:
+                    weights(2 * mlp[l])  # gain, shift
             out = 2 * mlp[-1]
             token_layers[k] = ("mlp", tokens, mlp[-1])
-            operations += token_mlp_ops(tokens, mlp)
+            operations += token_mlp_ops(tokens, mlp) + (token_norm_ops(tokens, mlp[1:]) if norm else 0)
         elif code == 8:  # TOKEN_MIX
             source, z = q[0], q[1]
-            unused(2)
+            for j in range(2, 6):
+                if q[j] != 0:
+                    bad(where + "unused parameter %d must be 0" % j)
+            norm = token_norm()
             if source >= k or token_layers.get(source, ("",))[0] not in ("mlp", "attn"):
                 bad(where + "TOKEN_MIX source must name an earlier TOKEN_MLP or ENTITY_ATTN layer")
             if not 1 <= z <= lim["token_model"]:
                 bad(where + "TOKEN_MIX width must be 1..%d" % lim["token_model"])
             expose(source)
             _, tokens, token_in = token_layers[source]
-            weights(z * token_in + z + z * width)
+            weights(z * token_in + z + z * width + (2 * z if norm else 0))
             out = width + 2 * z
             if out > lim["width"]:
                 bad(where + "TOKEN_MIX output exceeds %d" % lim["width"])
             token_layers[k] = ("mix", tokens, z)
-            operations += token_mix_ops(tokens, token_in, width, z)
+            operations += token_mix_ops(tokens, token_in, width, z) + (token_norm_ops(tokens, [z]) if norm else 0)
         elif code == 9:  # POINTER
             source, offset = q[0], q[1]
             unused(2)
