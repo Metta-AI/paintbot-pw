@@ -819,3 +819,28 @@ episodes passing. The commit is tagged `coworld-v0.3.88`; Heartland shipped the 
   cell reads (2.06x warm training throughput, identical trajectories), and `pw_terrain_prewarm` /
   `pw_terrain_cache_save` / `pw_terrain_cache_load` let training processes share one precomputed table. Hosted
   and viewer builds are unchanged.
+
+## SeatView: neural seats see and act exactly like BASIC: 0.3.89
+
+Automatic deploy run 36775990740 shipped `118e161` (#185 = `06c3c28`, plus the tournament runner) as 0.3.89 =
+`cow_f741e7d2-9ed6-41ef-b2db-c532875a572e`, now canonical. All ten certification checks passed, and hosted smoke
+certification passed on five episodes (`ereq_1f895fde-9f8c-499a-b525-a1ee0509629a`,
+`ereq_6aef461b-4f5d-4909-a892-9913935147c3`, `ereq_c162cdd0-91be-40dd-8ad7-94dc608c742c`,
+`ereq_d6c7033d-384d-49bb-952a-edc9ca21eeee`, `ereq_faaab296-c5dd-4246-8b72-71b45814d28f`). The commit is tagged
+`coworld-v0.3.89`. Heartland shipped the same commit as `heartland-v0.1.20`
+(`cow_59da791e-2a09-45c6-9bb9-ea55270ffdf9`, canonical).
+
+- #185: `SeatView` (`examples/paintbot/seat_view.nim`) is the single perception boundary. BASIC host functions and
+  the neural encoders and host read only it, and a CI boundary test fails if the neural modules import `sim` or
+  name `World`. The observation contracts are now `teams.view.1` and `ffa.view.1`. Every column is derivable
+  from `SeatView`, and a parity test checks this.
+- Removed from the neural observation: gun cooldown, windup, spray cooldown, shield, respawn, current aim,
+  heart meter, end-tick-derived fields, and the blocked/traversable probes.
+- The native decoder helpers are deleted: retarget, aim snap, spray aim, shot and spray gates, strafe, steady
+  shot, fire hold, lead and self-motion. Heads become orders only in BASIC (`players/neural_decode.bas`).
+- Breaking: staging and load refuse the retired contracts (v1, v2, v3, ffa.v1, ffa.v2) and the retired
+  decoder options by name, so packages built on them must be rebuilt on the view contracts.
+- BASIC-only matches are state_hash-identical to 0.3.88: 36 of 36 runs, seeds 1 to 3 across 12 teams and FFA
+  configurations. BASIC gains `rnd(n)`.
+- Training library only (`-d:pwTraining`): the training-only labels `pw_seat_privileged_labels`, the aim-offset
+  action contract 13, and the removed decoder setters.
