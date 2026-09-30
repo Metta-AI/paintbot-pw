@@ -55,7 +55,7 @@ suite "Action contract teams.view.1 movement-offset":
     for j in 1..<MoveOffsetTable.len:
       let ratio = MoveOffsetTable[j] / MoveOffsetTable[j-1]
       check ratio > 1.6 and ratio < 1.9
-    let decode = readFile(Root / "examples/paintbot/players/neural_decode.bas")
+    let decode = readFile(Root / "examples/paintbot/players/neural_decode.bas").replace("\r\n", "\n")  # Windows checkouts: CRLF
     for j, v in MoveOffsetTable:
       check ("  if mvj = " & $(j+1) & " then\n    mo = " & $v & "\n  end if") in decode
 
