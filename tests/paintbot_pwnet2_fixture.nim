@@ -14,7 +14,7 @@ type Spec* = object
   tensors*: seq[float32]
 
 proc header2*(inputs: int, heads: openArray[int], layers: int,
-    observationContract = ObservationContractHash, actionContract = ActionContractHash): string =
+    observationContract = ObservationContractTeamsView1Hash, actionContract = ActionContractTeamsView1Hash): string =
   result = "PWNET002"
   var outputs = 0
   for h in heads: outputs += h
@@ -25,7 +25,7 @@ proc header2*(inputs: int, heads: openArray[int], layers: int,
   result.u32(layers.uint32)
 
 proc encode2*(inputs: int, heads: openArray[int], specs: openArray[Spec],
-    observationContract = ObservationContractHash, actionContract = ActionContractHash): string =
+    observationContract = ObservationContractTeamsView1Hash, actionContract = ActionContractTeamsView1Hash): string =
   result = header2(inputs, heads, specs.len, observationContract, actionContract)
   for spec in specs:
     result.u32(spec.code)
@@ -123,7 +123,7 @@ proc attnPool*(r: var Rand, source, width, tokenWidth, heads, keyWidth, valueWid
   result.tensors.add r.weights(hv, 0.1)
 
 proc encodeWords*(inputs, outputs: uint32, heads: openArray[uint32], specs: openArray[Spec],
-    observationContract = ObservationContractHash, actionContract = ActionContractHash): string =
+    observationContract = ObservationContractTeamsView1Hash, actionContract = ActionContractTeamsView1Hash): string =
   ## encode2 with the header's widths and head sizes given as raw words (layout words allowed).
   result = "PWNET002"
   for x in [2'u32, inputs, outputs, heads.len.uint32]: result.u32(x)
@@ -151,7 +151,8 @@ proc segmentNear*(tokens, base, stride, x, z, valid: int, exclude: uint32, candi
   result.extra = @[cast[uint32](scaleX), cast[uint32](scaleZ), cast[uint32](radius), dst.uint32, dstStride.uint32]
 
 proc identityNear*(dst: int, radius = 150'f32): Spec =
-  ## The identity block of contract v1/v2 (16 tokens of 8 at 104; x 1, z 2, flag 0, "is self" 6, relative team 3),
+  ## A synthetic identity block (the retired v1/v2 contracts' geometry, kept as fixed layer-test offsets: 16 tokens
+  ## of 8 at 104; x 1, z 2, flag 0, "is self" 6, relative team 3),
   ## "an observed teammate within `radius` of the segment to this identity", flags at dst ..< dst+16.
   segmentNear(16, 104, 8, 1, 2, 0, 6, 3, 16000, 9600, radius, dst, 1)
 
@@ -164,7 +165,8 @@ proc shifted*(specs: seq[Spec], first: Spec): seq[Spec] =
     result.add t
 
 const
-  ## The per-identity token of an entity-factored actor over contract v2u32: identity j's 8 floats, its 2 terrain
+  ## The per-identity token of a synthetic entity-factored actor (the retired v2u32 geometry, kept as fixed
+  ## layer-test offsets over a 538-float input): identity j's 8 floats, its 2 terrain
   ## floats, the seat's own 24 + 2 (shared: stride 0) and two user inputs of its own (506+j, 522+j).
   IdentityTokenSegments* = [[104'u32, 8, 8], [470'u32, 2, 2], [0'u32, 0, 24], [448'u32, 0, 2], [506'u32, 1, 1],
     [522'u32, 1, 1]]
@@ -186,8 +188,8 @@ proc pwnet001*(r: var Rand, inputs, hidden: int): (string, seq[float32], seq[flo
   let dec = r.weights(LogitSize*hidden, 1.0/sqrt(hidden.float))
   var s = "PWNET001"
   for x in [1, inputs, hidden, LogitSize, ActionSizes.len, e.len+rec.len+dec.len]: s.u32(x.uint32)
-  s.add ObservationContractHash
-  s.add ActionContractHash
+  s.add ObservationContractTeamsView1Hash
+  s.add ActionContractTeamsView1Hash
   for x in ActionSizes: s.u32(x.uint32)
   for t in [e, rec, dec]:
     for x in t: s.f32(x)
@@ -203,7 +205,7 @@ proc observation*(r: var Rand, n: int): seq[float32] =
     result[i] = if r.rand(1.0) < 0.3: float32(r.rand(1)) else: float32(r.rand(2.0) - 1.0)
 
 proc nearScene*(r: var Rand, obs: var seq[float32], tokens = 16, base = 104, stride = 8, grid = 32.0) =
-  ## Contract v1/v2 identity-block geometry for SEGMENT_NEAR tests: per token a 0/1 presence flag (+0), x and z
+  ## The synthetic identity-block geometry (identityNear's) for SEGMENT_NEAR tests: per token a 0/1 presence flag (+0), x and z
   ## on a 1/grid lattice so exact ties (d = 0, d = L2, distance = radius) occur (+1, +2), a relative team of +1 / -1
   ## (+3), and "is self" on token 0 (+6).
   for n in 0..<tokens:
@@ -249,7 +251,7 @@ proc withNearFlags*(spec: Spec, obs: seq[float32]): seq[float32] =
   for n, f in flags: result[spec.extra[3].int + n*spec.extra[4].int] = f
 
 proc pointerModel*(r: var Rand): string =
-  ## A layout-word model for observation contract ffa.v2 + action contract ffa.v2 pointer whose
+  ## A layout-word model for observation contract ffa.view.1 + action contract ffa.view.1 pointer whose
   ## weights never depend on the layout, so the same file loads at every seat and heart count:
   ## heart and cog tokens (TOKEN_MLP), the header, an ATTN_POOL over the cogs, per-token mixes,
   ## a DENSE to the 24 fixed logits, PADs that open the heart rows (objective head) and the cog
@@ -275,7 +277,7 @@ proc pointerModel*(r: var Rand): string =
   specs[10].params[1] = layoutWord(0, 3)
   encodeWords(layoutWord(LayoutGlobal, 0), layoutWord(LayoutGlobal, 1),
     [layoutWord(LayoutGlobal, 2, 0), layoutWord(LayoutGlobal, 2, 1), 2'u32, 2, 2], specs,
-    ObservationContractFfaV2Hash, ActionContractFfaV2PointerHash)
+    ObservationContractFfaView1Hash, ActionContractFfaView1PointerHash)
 
 proc condHead*(whenHead, head: int, weights: seq[float32]): Spec =
   ## COND_HEAD: head `head` re-selected with column a of weights [size(head), size(whenHead)] added,

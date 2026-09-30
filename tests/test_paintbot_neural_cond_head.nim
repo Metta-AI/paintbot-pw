@@ -37,11 +37,11 @@ proc standWhenFiring(r: var Rand): seq[float32] =
     result[j*2+1] = if j == 0: 1000'f32 else: float32(r.rand(0.6) - 0.3)
 
 proc condModel(r: var Rand, cond: seq[Spec], hidden = 64): string =
-  ## DENSE -> MINGRU(highway) -> DENSE over observation contract v1, then the COND_HEAD layers.
-  var specs = @[r.dense(ObservationSize, hidden), r.mingru(hidden, hidden, highway = true),
+  ## DENSE -> MINGRU(highway) -> DENSE over observation contract teams.view.1, then the COND_HEAD layers.
+  var specs = @[r.dense(TeamsViewSize, hidden), r.mingru(hidden, hidden, highway = true),
     r.dense(hidden, LogitSize, scale = 0.6/sqrt(hidden.float))]
   for c in cond: specs.add c
-  encode2(ObservationSize, ActionSizes, specs)
+  encode2(TeamsViewSize, ActionSizes, specs)
 
 suite "COND_HEAD selection (reselectHead)":
   test "the same selection and draw as decoder.joint_sampling with the column as offsets":
@@ -111,7 +111,7 @@ suite "COND_HEAD in the model file":
     check actor.operationCount == plain.operationCount + LogitSize + 51
     check actor.parameterCount == plain.parameterCount + 102
     check plain.conditionals.len == 0
-    var obs = newSeq[float32](ObservationSize)
+    var obs = newSeq[float32](TeamsViewSize)
     for i in 0..<obs.len: obs[i] = float32(r.rand(2.0) - 1.0)
     var s1 = newSeq[float32](plain.stateSize)
     var s2 = newSeq[float32](actor.stateSize)
@@ -130,9 +130,9 @@ suite "COND_HEAD in the model file":
     check rejects(r.condModel(@[condHead(2, 0, w), condHead(3, 0, newSeq[float32](102))]), "already re-selected")
     check rejects(r.condModel(@[condHead(2, 0, w), condHead(0, 2, newSeq[float32](102))]),
       "earlier COND_HEAD's condition")
-    var specs = @[r.dense(ObservationSize, 64), condHead(2, 0, w), r.mingru(64, 64, highway = true),
+    var specs = @[r.dense(TeamsViewSize, 64), condHead(2, 0, w), r.mingru(64, 64, highway = true),
       r.dense(64, LogitSize)]
-    check rejects(encode2(ObservationSize, ActionSizes, specs), "must come after every other layer")
+    check rejects(encode2(TeamsViewSize, ActionSizes, specs), "must come after every other layer")
     var nonfinite = w
     nonfinite[5] = Inf.float32
     check rejects(r.condModel(@[condHead(2, 0, nonfinite)]), "nonfinite")
@@ -142,14 +142,15 @@ suite "COND_HEAD in the model file":
 
 suite "COND_HEAD on the hosted seat and the training policy seat":
   configureRules(NativeRules)
+  # The policy selects the heads (neuralSample) and acts through the reference BASIC decode.
   const Source = """
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
-paintbot_act(neuralLogits())
-"""
+neuralSample()
+""" & staticRead("../examples/paintbot/players/neural_decode.bas")
   proc manifestFor(decoder: string): string =
-    "{\"schema\": \"paintbot-neural-basic/2\", \"observation_contract\": \"" & ObservationContractHash &
-      "\", \"action_contract\": \"" & ActionContractHash & "\", \"sha256\": {}" &
+    "{\"schema\": \"paintbot-neural-basic/2\", \"observation_contract\": \"" & ObservationContractTeamsView1Hash &
+      "\", \"action_contract\": \"" & ActionContractTeamsView1Hash & "\", \"sha256\": {}" &
       (if decoder.len > 0: ", \"decoder\": " & decoder else: "") & "}"
 
   proc seats(model, decoder: string): seq[Bot] =
@@ -274,7 +275,7 @@ paintbot_act(neuralLogits())
       hashes.add world.stateHash()
     check neural[0].neural.conditionalDraws > 0
     # The training library: policy seats with the same W, fed the actor's logits.
-    let handle = pw_create_observation(seed, ticks.int32, 1)
+    let handle = pw_create_observation(seed, ticks.int32, 201)
     require handle != nil
     let manifest = manifestFor(Sampled)
     let source = Source
@@ -292,7 +293,7 @@ paintbot_act(neuralLogits())
     check pw_set_seat_conditionals(handle, 0, 1, ibuf(pairs), fbuf(weights), 100) == -2
     var same = [2'i32, 2]
     check pw_set_seat_conditionals(handle, 0, 1, ibuf(same), fbuf(weights), 4) == -2
-    let n = ObservationSize
+    let n = TeamsViewSize
     var observations = newSeq[float32](Seats*n)
     var resets: array[LegacySeats, float32]
     var actions: array[LegacySeats*ActionSizes.len, int32]

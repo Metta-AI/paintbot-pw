@@ -1,4 +1,4 @@
-## PWNET002 for variable-length entity sections (observation contract ffa.v2): token layers up
+## PWNET002 for variable-length entity sections (observation contract ffa.view.1): token layers up
 ## to 256 tokens; layout words, which a model.bin uses for any count, offset or width of the
 ## match layout, so one file loads at 16 and at 50 seats; ENTITY_ATTN's token rows feeding
 ## TOKEN_MIX, POINTER and ATTN_POOL; and the ATTN_POOL layer itself. Models without these load
@@ -107,18 +107,18 @@ suite "PWNET002 for entity sections":
     words[0].params[0] = cogs
     words[0].extra[0] = layoutWord(0, 1)
     words[0].extra[1] = layoutWord(0, 2)
-    let model = encodeWords(layoutWord(LayoutGlobal, 0), 6, [2'u32, 2, 2], words, ObservationContractFfaV2Hash)
+    let model = encodeWords(layoutWord(LayoutGlobal, 0), 6, [2'u32, 2, 2], words, ObservationContractFfaView1Hash)
     check rejects(model, "needs a match layout")
     var sizes: seq[int]
     for (seats, hearts) in [(16, 10), (50, 100)]:
-      let l = ffaV2Layout(seats, hearts)
+      let l = ffaViewLayout(seats, hearts)
       let actor = loadActor(model, actorLayout(l, [2, 2, 2]))
       check actor.inputSize == l.size and actor.outputSize == 6
       check actor.operationCount <= neuralOperationBudget(seats)
       var obs = newSeq[float32](l.size)
-      for k in 0..<l.cogRows div 3: obs[l.cogOffset + k*FfaV2CogWidth] = 1   # a third of the cogs seen
+      for k in 0..<l.cogRows div 3: obs[l.cogOffset + k*FfaCogWidth] = 1   # a third of the cogs seen
       for i in 0..<l.size:
-        if (i - l.cogOffset) mod FfaV2CogWidth != 0: obs[i] = float32(r.rand(2.0) - 1.0)
+        if (i - l.cogOffset) mod FfaCogWidth != 0: obs[i] = float32(r.rand(2.0) - 1.0)
       check actor.run(obs).len == 6
       sizes.add actor.inputSize
     check sizes == @[24 + 15*44 + 10*12 + 24, 24 + 49*44 + 100*12 + 24]
@@ -126,15 +126,15 @@ suite "PWNET002 for entity sections":
     var target = words
     target.add r.pointerHead(0, 0, 8)
     target[4].params[1] = layoutWord(0, 3)
-    check rejects(encodeWords(layoutWord(LayoutGlobal, 0), 6, [2'u32, 2, 2], target, ObservationContractFfaV2Hash),
-      "no pointer target", actorLayout(ffaV2Layout(16, 10), [2, 2, 2]))
+    check rejects(encodeWords(layoutWord(LayoutGlobal, 0), 6, [2'u32, 2, 2], target, ObservationContractFfaView1Hash),
+      "no pointer target", actorLayout(ffaViewLayout(16, 10), [2, 2, 2]))
     var bad = words
     bad[0].params[0] = layoutWord(9, 0)
-    check rejects(encodeWords(layoutWord(LayoutGlobal, 0), 6, [2'u32, 2, 2], bad, ObservationContractFfaV2Hash),
-      "unknown layout word section", actorLayout(ffaV2Layout(16, 10), [2, 2, 2]))
+    check rejects(encodeWords(layoutWord(LayoutGlobal, 0), 6, [2'u32, 2, 2], bad, ObservationContractFfaView1Hash),
+      "unknown layout word section", actorLayout(ffaViewLayout(16, 10), [2, 2, 2]))
     let floatWord = encode2(8, [2, 2, 2], [Spec(code: 2, params: [8'u32, layoutWord(0, 0), 0, 0, 0, 0, 0, 0],
       tensors: newSeq[float32](8)), r.dense(8, 6)])
-    check rejects(floatWord, "cannot be a layout word", actorLayout(ffaV2Layout(16, 10), [2, 2, 2]))
+    check rejects(floatWord, "cannot be a layout word", actorLayout(ffaViewLayout(16, 10), [2, 2, 2]))
     check not isLayoutWord(AttnAlwaysValid) and isLayoutWord(LayoutWordBase)
 
   test "the neural budget scales with seats as BASIC's does":
@@ -283,7 +283,7 @@ suite "PWNET002 token-layer LayerNorm (params 6 = norm, 7 = eps)":
       check rejects(good.with(k, proc (s: var Spec) = s.params[7] = cast[uint32](-1e-5'f32)), "eps must be")
       check rejects(good.with(k, proc (s: var Spec) = s.params[7] = cast[uint32](NaN.float32)), "eps must be")
       check rejects(good.with(k, proc (s: var Spec) = s.params[7] = layoutWord(0, 0)), "cannot be a layout word",
-        actorLayout(ffaV2Layout(16, 10), [4, 5]))
+        actorLayout(ffaViewLayout(16, 10), [4, 5]))
       # Without norm the eps word stays 0; the gain and shift must be present with it (and absent without).
       check rejects(good.with(k, proc (s: var Spec) = s.params[6] = 0), "")
       check rejects(good.with(k, proc (s: var Spec) = s.tensors.setLen(s.tensors.len - 2)), "")
