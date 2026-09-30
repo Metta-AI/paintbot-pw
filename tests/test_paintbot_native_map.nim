@@ -119,10 +119,14 @@ else:
           seats[slot].neural.choicesFed = true
         let commands = decideSeats(seats, world)
         world.step(commands)
-        job.hashes.add world.stateHash()
+        job.hashes[tick] = world.stateHash()
 
   proc referenceRun(map: int, seed: int32, ticks: int): seq[uint32] =
-    var job = ReferenceJob(map: map, seed: seed, ticks: ticks)
+    # The caller allocates the hashes and the thread only writes into them. A seq the thread
+    # grew would belong to its allocator, and freeing it here after the thread exits writes into
+    # that allocator's thread-local state, which MinGW has already freed (heap corruption on
+    # Windows; silent where the thread's TLS outlives it).
+    var job = ReferenceJob(map: map, seed: seed, ticks: ticks, hashes: newSeq[uint32](ticks))
     var thread: Thread[ptr ReferenceJob]
     createThread(thread, referenceThread, addr job)
     joinThread(thread)
