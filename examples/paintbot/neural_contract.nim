@@ -1146,6 +1146,39 @@ proc jointSelect*(logits: openArray[float32], joint: JointSampling, excluded: op
   actions[joint.head] = pick.int32
   true
 
+# COND_HEAD selection (neural_actor.md, "COND_HEAD"): a model's learned conditional heads.
+# After the tick's selection, in layer order, head `head` is selected again from its logits
+# plus column `a` of the layer's weights (a = the choice already selected for `whenHead`),
+# under the same exclusions and temperature it was selected with: argmax (the first maximum
+# among the allowed) at temperature 0, else ONE more uniform53 draw from the seat's
+# sampling stream, the float64 softmax jointSelect uses. Always applies (every choice of
+# the condition head has a column). A model without COND_HEAD layers runs none of this.
+proc reselectHead*(logits: openArray[float32], offset, size: int, offsets: openArray[float32],
+    excluded: openArray[bool], temperature: float32, rng: var Rng): int32 =
+  ## Head selection from logits[offset ..< offset+size] + offsets; `excluded` (true =
+  ## excluded; empty = none), `temperature` 0 = argmax.
+  template allowed(i: int): bool = excluded.len == 0 or not excluded[i]
+  template value(i: int): float64 = float64(logits[offset+i]) + float64(offsets[i])
+  var best = -1
+  for i in 0..<size:
+    if allowed(i) and (best < 0 or value(i) > value(best)): best = i
+  if best < 0: raise newException(ValueError, "every conditional-head candidate is excluded")
+  if temperature <= 0: return best.int32
+  let top = value(best)
+  let inverse = 1.0 / float64(temperature)
+  var total = 0.0
+  for i in 0..<size:
+    if allowed(i): total += exp((value(i) - top) * inverse)
+  let threshold = rng.uniform53() * total
+  var cumulative = 0.0
+  var pick = -1
+  for i in 0..<size:
+    if not allowed(i): continue
+    pick = i   # the last allowed index when rounding leaves the threshold uncovered
+    cumulative += exp((value(i) - top) * inverse)
+    if threshold < cumulative: break
+  pick.int32
+
 # Decoder objective forbid (bundle option decoder.forbid_objectives, schema 2; not a
 # contract change): the listed movement-head candidate indices are never chosen, as if
 # their logits were -inf. The actor's logits are still checked for finiteness exactly as

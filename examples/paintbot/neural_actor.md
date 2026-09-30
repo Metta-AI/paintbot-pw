@@ -123,6 +123,7 @@ when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 | 10 | SEGMENT_NEAR | `tokens, base, stride, x, z, valid, exclude, candidate` | `scale_x, scale_z, radius` (FP32 bits), `dst, dst_stride`; no weights |
 | 11 | ATTN_POOL | `source, heads, key, value` | `Wq[h*key, width]`, `bq[h*key]`, `Wk[h*key, z]`, `bk[h*key]`, `Wv[h*value, z]`, `bv[h*value]` |
 | 12 | PAD | `at, len` | none |
+| 13 | COND_HEAD | `when_head, head` | `W[size(head), size(when_head)]` |
 
 Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1024;
 `act` 0 = none, 1 = relu; `eps` finite and > 0; TOKEN_MLP tokens 1..256, segments 1..8, layers
@@ -287,6 +288,23 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
   from +0 in index order, then the bias).
 - **PAD**: `y = [x[0 ..< at], 0 x len, x[at ..< W]]` (width `W + len`): opens a run of zeros
   where later POINTERs write match-sized heads.
+- **COND_HEAD** (a learned conditional action head): `y = x`; the layer's weights act at
+  selection, not in the vector. `when_head` and `head` are distinct action-head indices, and
+  `W` is `size(head) x size(when_head)` (row-major, part of the model's weights). After the
+  tick's selection (forbid, BASIC masks, argmax or sampling, BASIC temperatures), in layer
+  order, head `head` is selected again from `logits_head[j] + W[j, a]`, with `a` the choice
+  already selected for `when_head`, under the exclusions and temperature the head was selected
+  with: argmax (the first maximum among the allowed) at temperature 0, else exactly one more
+  uniform53 draw from the seat's sampling stream, the float64 softmax of `decoder.joint_sampling`
+  (`neural_contract.reselectHead`; the same draw as joint sampling whose offsets are that
+  column). It always applies, since every choice of `when_head` has a column. So the head's
+  distribution is `softmax((logits_head + W[:, a]) / T)`, learned end to end with the model.
+  Rules: COND_HEAD layers come after every other layer; a head is re-selected by at most one
+  COND_HEAD; a COND_HEAD never re-selects a head an earlier COND_HEAD read as its condition
+  (chains such as 2 -> 0 then 0 -> 1 are allowed); a model with COND_HEAD layers cannot also
+  ask for `decoder.joint_sampling`. The seat log line gains ` cond_heads=h<when>->h<head>,...
+  draws=<n>`. The training library's policy seats have no actor, so the trainer sets the same
+  weights with `pw_set_seat_conditionals` (below). A model without COND_HEAD runs none of this.
 
 Inference validates the observation and state (finite) first, checks every layer's output
 and every new state value is finite, and commits the new state and the logits only when
@@ -321,6 +339,7 @@ unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 | ENTITY_ATTN | `embed + blocks*block + pool` (+ `T*d + T` when a later layer reads its token rows) |
 | ATTN_POOL | `W + (2*W*h*k + h*k) + T*((2*z*h*k + h*k) + h*(2*k + 1) + h*(8 + 3) + (2*z*h*v + h*v) + 2*h*v) + h*(T + 8)` |
 | PAD | `W + len` |
+| COND_HEAD | `W + size(head)` (the copy, and the column add at selection) |
 
 with, for ENTITY_ATTN (T tokens, h heads, F = ff, P = pass_len):
 
@@ -581,7 +600,12 @@ can by the cone it would produce (`neural_basic.md`); the training ABI's
 `pw_seat_spray_stats` (training library only) counts spray damage and kills per seat.
 `decoder.joint_sampling` re-selects one head when another was selected as a given value,
 from its logits plus the bundle's offsets (`neural_basic.md`); candidates and hashes are
-unchanged.
+unchanged. A model's COND_HEAD layers (PWNET002) re-select a head from its logits plus a
+learned column of weights chosen by another head's selection (above); the training ABI's
+`pw_set_seat_conditionals(handle, seat, count, heads[2*count], weights, weight_count)` gives
+a policy seat the same layers (pairs of condition head and re-selected head, their weights
+concatenated; count 0 clears; they stay across `pw_reset`; -1 bad arguments or not a policy
+seat, -2 against COND_HEAD's rules).
 
 Movement (heart, visible pickup or `pos+200*compass`), directional aim
 (`pos+5000*compass`), fire, grenade and sneak decode identically under both.

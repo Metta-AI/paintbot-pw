@@ -5,7 +5,7 @@ import std/[strutils, options]
 from std/json import parseJson
 import jsony
 import sim, kinship, neural_contract, bots, neural_actor, match_config
-from neural_host import MaxNeuralOperations, neuralOperationBudget
+from neural_host import MaxNeuralOperations, neuralOperationBudget, setConditionals
 import polyworld/rngs
 import polyworld/basic
 
@@ -184,6 +184,9 @@ type
     policy: seq[bool]
     policyManifests: seq[string]
     policyCount: int
+    # A policy seat's COND_HEAD layers (pw_set_seat_conditionals): the trainer's current
+    # learned conditional heads, applied to the seat at every install. Empty = none.
+    policyConditionals: seq[seq[Conditional]]
     # FFA-kin. mode is the current world's game mode; nextMode (pw_set_game_mode) and
     # kinLayout (pw_set_kin_layout, -1 = sampled from the seed) are kept across resets and
     # applied at the next reset, like the fire period. kinship is the current world's
@@ -299,6 +302,7 @@ proc allocSeats(env: ptr NativeEnv, n: int) =
   env.decidedValid = false
   env.policy = newSeq[bool](n)
   env.policyManifests = newSeq[string](n)
+  env.policyConditionals = newSeq[seq[Conditional]](n)
   env.policyCount = 0
   env.initCurriculum()
 
@@ -582,6 +586,8 @@ proc installScript(env: ptr NativeEnv, slot: int) =
     env.scriptBots[slot] =
       if env.policy[slot]: loadPolicyBot(env.scripts[slot], env.policyManifests[slot], slot, env.observationHash)
       else: loadScriptBot(env.scripts[slot], slot)
+    if env.policy[slot] and env.policyConditionals[slot].len > 0:
+      env.scriptBots[slot].neural.setConditionals(env.policyConditionals[slot])
     env.scriptStatus[slot] = 1
   except BasicError as e:
     env.scriptStatus[slot] = 2
@@ -1572,6 +1578,40 @@ proc pw_set_seat_policy_script*(handle: pointer, seat: cint, source: ptr Uncheck
   if env.scriptStatus[seat] == 2:
     (if env.scriptErrors[seat].startsWith("policy manifest rejected"): 2 else: 1)
   else: 0
+
+proc pw_set_seat_conditionals*(handle: pointer, seat: cint, count: int32, heads: ptr UncheckedArray[int32],
+    weights: FloatBuffer, weightCount: int32): cint {.exportc, cdecl, dynlib.} =
+  ## A policy seat's learned conditional heads (the model's COND_HEAD layers, neural_actor.md),
+  ## which the trainer holds: `count` pairs (condition head, re-selected head) in `heads`
+  ## [2*count], and their weights concatenated in that order in `weights` (each
+  ## size(head) x size(condition head), row-major). They replace the seat's previous ones, apply
+  ## from its next selection, and stay across pw_reset until set again (count 0 clears them).
+  ## Returns 0, -1 for bad arguments or a seat that is not a policy seat, -2 when the heads or
+  ## weights break COND_HEAD's rules (or the manifest asks for decoder.joint_sampling).
+  if handle == nil or seat notin 0..<seatsOf(handle) or count < 0 or count > 32 or weightCount < 0 or
+      (count > 0 and heads == nil) or (weightCount > 0 and weights == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if not env.policy[seat]: return -1
+  var conditionals: seq[Conditional]
+  var at = 0
+  let bot = env.scriptBots[seat]
+  let sizes = if bot != nil and bot.neural != nil: bot.neural.heads else: @ActionSizes
+  for k in 0..<count.int:
+    var c = Conditional(whenHead: heads[2*k].int, head: heads[2*k+1].int)
+    if c.whenHead notin 0..<sizes.len or c.head notin 0..<sizes.len: return -2
+    let n = sizes[c.head]*sizes[c.whenHead]
+    if at + n > weightCount.int: return -2
+    for i in 0..<n: c.weights.add weights[at+i].float32
+    at += n
+    conditionals.add c
+  if at != weightCount.int: return -2
+  try:
+    checkConditionals(conditionals, sizes)
+    if bot != nil and bot.neural != nil: bot.neural.setConditionals(conditionals)
+  except ValueError: return -2
+  env.policyConditionals[seat] = conditionals
+  0
 
 proc pw_seat_policy_choices*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## What a policy seat's script executed on the last pw_step_logits, 22 int32:

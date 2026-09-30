@@ -47,6 +47,10 @@ type
     sampling*: SamplingOptions
     joint*: JointSampling      # decoder.joint_sampling (disabled = absent)
     jointDraws*: int           # decisions the joint condition held on
+    # The model's COND_HEAD layers (learned conditional heads; the actor's, or for a training
+    # policy seat the trainer's, pw_set_seat_conditionals), and the draws they took.
+    conditionals*: seq[Conditional]
+    conditionalDraws*: int
     sampleRng: Rng
     sampleSeeded: bool
     sampleDraws*: int
@@ -140,6 +144,14 @@ proc samplingTelemetry*(options: SamplingOptions, seed: uint64, draws: int): str
     if on: result.add $head
   result.add " seed=0x" & toHex(seed, 16).toLowerAscii & " draws=" & $draws
 
+proc conditionalTelemetry*(conditionals: openArray[Conditional], draws: int): string =
+  ## The COND_HEAD part of the seat log line: each condition head -> re-selected head, and the draws taken.
+  result = " cond_heads="
+  for k, c in conditionals:
+    if k > 0: result.add ","
+    result.add "h" & $c.whenHead & "->h" & $c.head
+  result.add " draws=" & $draws
+
 proc jointTelemetry*(joint: JointSampling, held: int): string =
   ## The joint-sampling part of the seat log line: the condition, the head re-selected and
   ## how many decisions the condition held on.
@@ -222,7 +234,8 @@ proc telemetry*(seat: NeuralSeat, peakOperations: int64, ticks: int): string =
     (if seat.shotGate.enabled: shotGateTelemetry(seat.shotGate, seat.shotGates) else: "") &
     (if seat.sprayAim.enabled: sprayAimTelemetry(seat.sprayAim, seat.sprayAims) else: "") &
     (if seat.sprayGate.enabled: sprayGateTelemetry(seat.sprayGate, seat.sprayGates) else: "") &
-    (if seat.joint.enabled: jointTelemetry(seat.joint, seat.jointDraws) else: ""),
+    (if seat.joint.enabled: jointTelemetry(seat.joint, seat.jointDraws) else: "") &
+    (if seat.conditionals.len > 0: conditionalTelemetry(seat.conditionals, seat.conditionalDraws) else: ""),
     seat.fireHoldRadius)
 
 proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
@@ -257,6 +270,15 @@ proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
         result.heads[item.getInt] = true
     else: raise newException(ValueError, "unknown decoder.sampling field: " & key)
   if not sawMode: raise newException(ValueError, "decoder.sampling.mode is required")
+
+proc setConditionals*(seat: NeuralSeat, conditionals: seq[Conditional]) =
+  ## The model's COND_HEAD layers onto the seat. A bundle cannot also ask for
+  ## decoder.joint_sampling: both re-select a head after the tick's selection.
+  checkConditionals(conditionals, seat.heads)
+  if conditionals.len > 0 and seat.joint.enabled:
+    raise newException(ValueError, "decoder.joint_sampling cannot be combined with the model's COND_HEAD layers")
+  seat.conditionals = conditionals
+  seat.conditionalDraws = 0
 
 proc parseJointSampling*(value: JsonNode): JointSampling =
   ## decoder.joint_sampling: {"when": {"head": h, "value": v}, "head": g, "offsets": [...]}.
@@ -632,6 +654,7 @@ proc loadPointerSeat(seat: NeuralSeat, sourcePath, data: string) =
       raise newException(ValueError, "user_inputs need observation contract v2u<K> or v3u<K>")
   seat.configureSeat(manifest, 0, observationContract, pointer = true)
   seat.pointerSetup(layout)
+  seat.setConditionals(actor.conditionals)
   seat.actor = actor
   seat.contract = contract
   seat.observationContract = observationContract
@@ -687,6 +710,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
       raise newException(ValueError, "package and actor contract mismatch")
   requireTeamsFor(observationContract)
   result.configureSeat(manifest, userInputs, observationContract)
+  result.setConditionals(actor.conditionals)
   result.actor = actor
   result.contract = contract
   result.observationContract = observationContract
@@ -807,6 +831,26 @@ proc ensureObservation(seat: NeuralSeat) =
     encodeObservation(seat.world[], seat.slot, seat.observation, seat.bodiesFor(), seat.observationContract)
   seat.observationFresh = true
 
+proc selectConditionals(seat: NeuralSeat, actions: var array[ActionSizes.len, int32],
+    temperatures: openArray[float32], masks: HeadMasks, masked: bool) =
+  ## The model's COND_HEAD layers, in order, after the tick's selection (neural_contract.reselectHead):
+  ## each re-selects its head from logits + the column of its condition head's choice, under the
+  ## head's mask (`masked`) and temperature. Nothing runs without COND_HEAD layers.
+  for c in seat.conditionals:
+    let t = temperatures[c.head]
+    if t > 0 and not seat.sampleSeeded:
+      seat.sampleRng = samplingRng(seat.world[].seed, seat.slot)
+      seat.sampleSeeded = true
+    var offset = 0
+    for h in 0..<c.head: offset += seat.heads[h]
+    let size = seat.heads[c.head]
+    let offsets = c.conditionalOffsets(actions[c.whenHead].int, seat.heads)
+    actions[c.head] =
+      if masked: reselectHead(seat.logits, offset, size, offsets, masks[c.head].toOpenArray(0, size-1), t,
+                              seat.sampleRng)
+      else: reselectHead(seat.logits, offset, size, offsets, default(array[0, bool]), t, seat.sampleRng)
+    if t > 0: inc seat.conditionalDraws
+
 proc pointerSample(seat: NeuralSeat) =
   ## Selection under action contract ffa.v2 pointer: per head argmax (first maximum), or with
   ## decoder.sampling / neuralTemperature a categorical draw from softmax(logits / T) on the
@@ -829,6 +873,7 @@ proc pointerSample(seat: NeuralSeat) =
   let picked = pointerSelect(seat.logits, seat.heads, temperatures, seat.sampleRng, draws)
   if draws > 0: inc seat.sampleDraws
   for head in 0..<ActionSizes.len: seat.selected[head] = picked[head]
+  seat.selectConditionals(seat.selected, temperatures, default(HeadMasks), masked = false)
   seat.appliedMasks = default(HeadMasks)
   seat.choices = seat.selected
   seat.sampled = true
@@ -869,6 +914,7 @@ proc samplePhase(seat: NeuralSeat) =
     if seat.joint.enabled and jointSelect(seat.logits, seat.joint, masks[seat.joint.head],
         temperatures[seat.joint.head], seat.sampleRng, actions):
       inc seat.jointDraws
+    if seat.conditionals.len > 0: seat.selectConditionals(actions, temperatures, masks, masked = true)
     seat.appliedMasks = masks
   else:
     actions = if seat.sampling.enabled: sampleActions(seat.logits, seat.sampling, seat.sampleRng, seat.forbidden)
@@ -885,6 +931,13 @@ proc samplePhase(seat: NeuralSeat) =
                  else:
                    jointSelect(seat.logits, seat.joint, default(array[0, bool]), jointTemperature, seat.sampleRng, actions)
       if held: inc seat.jointDraws
+    if seat.conditionals.len > 0:
+      var temperatures: HeadTemperatures
+      var masks: HeadMasks
+      masks[0] = seat.forbidden
+      for head in 0..<ActionSizes.len:
+        if seat.sampling.enabled and seat.sampling.heads[head]: temperatures[head] = seat.sampling.temperature
+      seat.selectConditionals(actions, temperatures, masks, masked = true)
     seat.appliedMasks = default(HeadMasks)
     seat.appliedMasks[0] = seat.forbidden
     for head in 0..<ActionSizes.len:
