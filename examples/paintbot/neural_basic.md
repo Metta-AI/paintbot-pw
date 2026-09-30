@@ -25,9 +25,10 @@ Schema 2 may also carry `decoder` and `user_inputs` (below).
 |---|---|---|
 | teams.view.1 | `paintbot-pw.teams.view.1.action.51-25-2-2-2` | 51, 25, 2, 2, 2 |
 | teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 |
+| teams.view.1 movement-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23` | 51, 25, 2, 2, 2, 23, 23, 23, 23 |
 | ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 |
 
-teams.view.1 (and u<K>) pairs with the teams.view.1 action contract or its aim-offset variant
+teams.view.1 (and u<K>) pairs with the teams.view.1 action contract or its aim-offset or movement-offset variant
 and plays the teams game; ffa.view.1 pairs with ffa.view.1 pointer and plays FFA-kin (Heartland)
 at any seat count. The actor's embedded hashes must equal the manifest's, its input count the
 contract's width, and its heads the action contract's. Every column of both observation
@@ -66,7 +67,7 @@ neuralSample()
 ```
 
 `players/neural_decode.bas` is the reference reading of the teams.view.1 heads (and of the
-aim-offset heads), `players/neural_decode_ffa.bas` that of ffa.view.1 pointer, and
+aim-offset and movement-offset heads), `players/neural_decode_ffa.bas` that of ffa.view.1 pointer, and
 `players/neural_policy.bas` is a complete policy: the three lines above followed by
 `neural_decode.bas` verbatim. The training library decodes a caller's heads with the same files,
 so a policy built on them trains and plays the same way. Everything the retired native decoder
@@ -97,14 +98,14 @@ Builtins (`neural_host.addNeuralFunctions`); none of them acts:
   1.0}`, draw for draw.
 - `neuralSample()`: the tick's selection, once: argmax or the seat's sampling stream, under the
   masks and temperatures, then `decoder.joint_sampling` or the model's COND_HEAD layers.
-- `neuralChoice(h)` reads head h (5 and 6 are the aim-offset heads); `neuralSetChoice(h, i)`
+- `neuralChoice(h)` reads head h (5 and 6 are the aim-offset heads, 7 and 8 the movement-offset heads); `neuralSetChoice(h, i)`
   overrides it (the training ABI's `pw_seat_policy_choices` reports what the script acted on).
 - `neuralInput(i, v)`: user input i (below).
 - `neuralLayout(i)`: for i in 0..15 `pw_observation_layout`'s word i (row floats, header floats,
   cog offset, cog rows, cog width, heart offset, heart rows, heart width, great offset, great
   rows, great width, valid column, seats, control hearts; the section words need ffa.view.1),
-  for i in 16..22 the size of action head i - 16 (0 for a head the contract lacks; 21 and 22 are
-  23 under the aim-offset contract).
+  for i in 16..24 the size of action head i - 16 (0 for a head the contract lacks; 21 and 22 are
+  23 under the aim-offset and movement-offset contracts, 23 and 24 under movement-offset).
 - `neuralRow(section, k)` (ffa.view.1): the entity row k shows this tick: section 0 the seat id
   of cog row k (`nearAgentId(k)` after `nearAgents(20000)`; -1 past the cogs the seat sees), 1 the
   control heart index, 2 the great heart index.
@@ -124,7 +125,8 @@ for an option a release lacks never plays without it. The retired rule names
 - `"sampling": {"mode": "categorical", "temperature": 1.0, "heads": [0, 1, 2, 3, 4]}`
   (absent = argmax): the listed heads are drawn from `softmax(logits / temperature)`, the others
   keep argmax. `temperature` within [0.01, 10] (default 1.0); `heads` distinct head indices
-  (default every head; 5 and 6 only under the aim-offset contract). The draws come from the
+  (default every head; 5 and 6 only under the aim-offset or movement-offset contract, 7 and 8 only
+  under movement-offset; the extra heads are drawn after the five main heads, in head order). The draws come from the
   seat's own stream (`neural_contract.samplingRng`: SplitMix64 seeded from the match seed and
   the slot), one draw per sampled head per decision in head order; the world's stream is never
   touched, so the world hash and every other seat are unaffected. The training ABI's
@@ -171,7 +173,7 @@ package rejected for exceeding the budget logs its cost with `ticks=0` before it
 Training runs the same policy.bas: the native ABI's `pw_set_seat_policy_script` drives a seat
 with the bundle's policy.bas and manifest, the trainer passing each tick's logits to
 `pw_step_logits` and reading the heads the script acted on from `pw_seat_policy_choices` (and
-`pw_seat_policy_offset_choices` for heads 5 and 6). A caller-driven seat's heads (`pw_step`) are
+`pw_seat_policy_offset_choices` for heads 5 and 6, `pw_seat_policy_extra_choices` for heads 5 to 8). A caller-driven seat's heads (`pw_step`) are
 decoded by the reference decoder script. `pw_set_seat_conditionals` gives a policy seat the
 model's COND_HEAD layers. See `native_env.h`.
 

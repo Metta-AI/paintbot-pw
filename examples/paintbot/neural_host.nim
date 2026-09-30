@@ -68,16 +68,18 @@ type
     # A training decoder seat (native pw_step's caller heads): no actor, no logits; the
     # caller's head choices are the tick's selection (neuralChoice reads them).
     fedChoices*: array[ActionSizes.len, int32]
-    fedOffsetChoices*: array[AimOffsetHeads, int32]
+    fedOffsetChoices*: array[ExtraHeadsMax, int32]
     choicesFed*: bool
-    # Action contract teams.view.1 aim-offset: its heads 5 and 6 (23 bins each), selected after
-    # the five main heads by argmax or a temperature (neuralTemperature(5 / 6 / -1), or
-    # decoder.sampling), on the seat's own stream, and read back with neuralChoice(5 / 6).
+    # Action contracts teams.view.1 aim-offset (heads 5 and 6) and movement-offset (heads 5 to
+    # 8), 23 bins each: the extra heads, selected after the five main heads by argmax or a
+    # temperature (neuralTemperature(h / -1), or decoder.sampling), on the seat's own stream in
+    # head order, and read back with neuralChoice(h). extraHeads = how many (0, 2 or 4).
     offsetHeads*: bool
-    offsetTemperatures: array[AimOffsetHeads, float32]
-    offsetTemperatureSet: array[AimOffsetHeads, bool]
-    offsetSelected*, offsetChoices*: array[AimOffsetHeads, int32]
-    appliedOffsetTemperatures*: array[AimOffsetHeads, int32]
+    extraHeads*: int
+    offsetTemperatures: array[ExtraHeadsMax, float32]
+    offsetTemperatureSet: array[ExtraHeadsMax, bool]
+    offsetSelected*, offsetChoices*: array[ExtraHeadsMax, int32]
+    appliedOffsetTemperatures*: array[ExtraHeadsMax, int32]
     # The tick's head-level phase: BASIC masks and temperatures (before selection), the
     # selection and its applied masks / temperatures (milli, 0 = argmax).
     masks: HeadMasks
@@ -163,13 +165,14 @@ proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
   ## decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}. mode is
   ## required and only "categorical" is known; temperature is optional (1.0) within
   ## [MinSamplingTemperature, MaxSamplingTemperature]; heads is optional (every head) and
-  ## lists distinct head indices 0 ..< ActionSizes.len, or 5 and 6 (the aim-offset heads; the
-  ## seat's action contract must have them). Anything else rejects the bundle.
+  ## lists distinct head indices 0 ..< ActionSizes.len, or 5 and 6 (the aim-offset heads) and 7
+  ## and 8 (the movement-offset heads; the seat's action contract must have them). Anything
+  ## else rejects the bundle.
   if value.kind != JObject: raise newException(ValueError, "decoder.sampling must be an object")
   result.enabled = true
   result.temperature = 1'f32
   for head in 0..<ActionSizes.len: result.heads[head] = true
-  for e in 0..<AimOffsetHeads: result.offsetHeads[e] = true
+  for e in 0..<ExtraHeadsMax: result.offsetHeads[e] = true
   var sawMode = false
   for key, field in value:
     case key
@@ -186,15 +189,16 @@ proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
     of "heads":
       if field.kind != JArray or field.len == 0: raise newException(ValueError, "decoder.sampling.heads must be a non-empty array")
       for head in 0..<ActionSizes.len: result.heads[head] = false
-      for e in 0..<AimOffsetHeads: result.offsetHeads[e] = false
+      for e in 0..<ExtraHeadsMax: result.offsetHeads[e] = false
       for item in field:
-        if item.kind != JInt or item.getInt notin 0..<ActionSizesOffset.len:
-          raise newException(ValueError, "decoder.sampling.heads entries must be head indices 0 .. " & $(ActionSizesOffset.len-1))
+        if item.kind != JInt or item.getInt notin 0..<ActionSizesMove.len:
+          raise newException(ValueError, "decoder.sampling.heads entries must be head indices 0 .. " & $(ActionSizesMove.len-1))
         let h = item.getInt
         if h >= ActionSizes.len:
           if result.offsetHeads[h - ActionSizes.len]: raise newException(ValueError, "decoder.sampling.heads repeats a head")
           result.offsetHeads[h - ActionSizes.len] = true
-          result.offsetListed = true
+          if h - ActionSizes.len < AimOffsetHeads: result.offsetListed = true
+          else: result.moveListed = true
           continue
         if result.heads[h]: raise newException(ValueError, "decoder.sampling.heads repeats a head")
         result.heads[h] = true
@@ -303,7 +307,7 @@ const RetiredDecoderOptions* = ["fire_hold_teammates", "strafe_legs", "aim_snap"
   ## Native decoder rules retired for BASIC parity (docs/neural/seat-view.md): a manifest
   ## naming one is refused; write the rule in policy.bas instead.
 
-proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointer = false, offset = false) =
+proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointer = false, extra = 0) =
   ## The manifest's selection options and user inputs onto the seat (nil manifest = none).
   ## `userInputs` is the K the actor's (or handle's) observation contract names.
   var sampling: SamplingOptions
@@ -323,8 +327,10 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
         case key
         of "sampling":
           sampling = parseSamplingOptions(value)
-          if sampling.offsetListed and not offset:
+          if sampling.offsetListed and extra < AimOffsetHeads:
             raise newException(ValueError, "decoder.sampling.heads 5 and 6 need action contract teams.view.1 aim-offset")
+          if sampling.moveListed and extra < AimOffsetHeads + MoveOffsetHeads:
+            raise newException(ValueError, "decoder.sampling.heads 7 and 8 need action contract teams.view.1 movement-offset")
         of "joint_sampling":
           joint = parseJointSampling(value)
         of "forbid_objectives":
@@ -356,9 +362,16 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
   seat.userInputs = init
   seat.userInputView = init
   seat.pointer = pointer
-  seat.offsetHeads = offset
-  seat.heads = if offset: @ActionSizesOffset else: @ActionSizes
-  seat.logits = newSeq[float32](if offset: LogitSizeOffset else: LogitSize)
+  seat.offsetHeads = extra > 0
+  seat.extraHeads = extra
+  seat.heads = case extra
+    of 0: @ActionSizes
+    of AimOffsetHeads: @ActionSizesOffset
+    else: @ActionSizesMove
+  seat.logits = newSeq[float32](case extra
+    of 0: LogitSize
+    of AimOffsetHeads: LogitSizeOffset
+    else: LogitSizeMove)
 
 proc observationFor(hash: string): (ObservationContractVersion, int) =
   ## The encoder and user-input count an observation contract hash names: teams.view.1,
@@ -456,7 +469,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   if actor.inputSize != TeamsViewSize + userInputs or actor.outputSize != outputs or actor.headSizes != heads:
     raise newException(ValueError, "neural actor dimensions do not match Paintbot contract")
   budgetCheck(actor)
-  result.configureSeat(readManifest(sourcePath, actor), userInputs, offset = contract == acTeamsView1Offset)
+  result.configureSeat(readManifest(sourcePath, actor), userInputs, extra = extraHeads(contract))
   result.setConditionals(actor.conditionals)
   result.actor = actor
   result.contract = contract
@@ -483,7 +496,7 @@ proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string)
   requirePairing(observationContract, contract)
   requireMode(observationContract)
   let pointer = contract == acFfaView1Pointer
-  result.configureSeat(manifest, userInputs, pointer, offset = contract == acTeamsView1Offset)
+  result.configureSeat(manifest, userInputs, pointer, extra = extraHeads(contract))
   result.contract = contract
   result.observationContract = observationContract
   if pointer:
@@ -504,7 +517,7 @@ proc decoderNeuralSeat*(slot: int, observationHash: string, contract: ActionCont
   requireMode(observationContract)
   requirePairing(observationContract, contract)
   let pointer = observationContract == ocFfaView1
-  result.configureSeat(nil, 0, pointer, offset = contract == acTeamsView1Offset)
+  result.configureSeat(nil, 0, pointer, extra = extraHeads(contract))
   result.contract = contract
   result.observationContract = observationContract
   if pointer: result.pointerSetup(matchLayout())
@@ -537,7 +550,7 @@ proc beginTick*(seat: NeuralSeat, view: SeatView, matchSeed: int32) =
   if seat.maskSet: seat.masks = default(HeadMasks)
   seat.maskSet = false
   seat.temperatureSet = default(array[ActionSizes.len, bool])
-  seat.offsetTemperatureSet = default(array[AimOffsetHeads, bool])
+  seat.offsetTemperatureSet = default(array[ExtraHeadsMax, bool])
   seat.sampled = false
   if seat.choicesFed:
     seat.selected = seat.fedChoices
@@ -636,12 +649,16 @@ proc pointerSample(seat: NeuralSeat) =
   seat.sampled = true
 
 proc selectOffsets(seat: NeuralSeat) =
-  ## The aim-offset heads (5 and 6) after the five main heads: argmax (first maximum) or, with
-  ## a temperature (neuralTemperature(5 / 6 / -1), else decoder.sampling), one draw each from
-  ## the seat's stream (pointerSelect's rule), in head order.
-  var temperatures: array[AimOffsetHeads, float32]
+  ## The extra heads after the five main heads (aim offsets 5 and 6; under movement-offset
+  ## also 7 and 8): argmax (first maximum) or, with a temperature (neuralTemperature(h / -1),
+  ## else decoder.sampling), one draw each from the seat's stream (pointerSelect's rule), in
+  ## head order. With two extra heads this is exactly the aim-offset selection.
+  let n = seat.extraHeads
+  var temperatures = newSeq[float32](n)
+  var sizes = newSeq[int](n)
   var anyDraw = false
-  for e in 0..<AimOffsetHeads:
+  for e in 0..<n:
+    sizes[e] = seat.heads[ActionSizes.len + e]
     temperatures[e] =
       if seat.offsetTemperatureSet[e]: seat.offsetTemperatures[e]
       elif seat.sampling.enabled and seat.sampling.offsetHeads[e]: seat.sampling.temperature
@@ -651,9 +668,9 @@ proc selectOffsets(seat: NeuralSeat) =
     if temperatures[e] > 0: anyDraw = true
   if anyDraw: seat.seedStream()
   var draws = 0
-  let picked = pointerSelect(seat.logits.toOpenArray(LogitSize, LogitSizeOffset-1), [AimOffsetBins, AimOffsetBins],
+  let picked = pointerSelect(seat.logits.toOpenArray(LogitSize, seat.logits.len-1), sizes,
     temperatures, seat.sampleRng, draws)
-  for e in 0..<AimOffsetHeads:
+  for e in 0..<n:
     seat.offsetSelected[e] = picked[e]
     seat.offsetChoices[e] = picked[e]
 
@@ -816,7 +833,7 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat) =
         seat.temperatures[head] = t
         seat.temperatureSet[head] = true
     if seat.offsetHeads:
-      for e in 0..<AimOffsetHeads:
+      for e in 0..<seat.extraHeads:
         if a[0] == -1 or a[0] == int32(ActionSizes.len + e):
           seat.offsetTemperatures[e] = t
           seat.offsetTemperatureSet[e] = true
@@ -839,10 +856,10 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat) =
     else: seat.choices[a[0]] = a[1]
     1, 4)
   # The observation and action layout (pw_observation_layout's 16 words, then the head
-  # sizes at 16 .. 22, 0 for a head the seat's action contract lacks): neuralLayout(i).
+  # sizes at 16 .. 24, 0 for a head the seat's action contract lacks): neuralLayout(i).
   # ffa.view.1 seats only for the section words; any seat for its width and head sizes.
   discard h.addFunction("neuralLayout", 1, proc(a: openArray[int32]): int32 =
-    seat.require(a[0] in 0'i32..22'i32, "neuralLayout index out of range")
+    seat.require(a[0] in 0'i32..24'i32, "neuralLayout index out of range")
     let i = a[0].int
     if i >= 16:
       let head = i-16

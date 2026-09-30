@@ -17,16 +17,23 @@ ACTION_NAMES = ("move", "aim", "fire", "grenade", "sneak")
 # BASIC decoder adds as ((bin - 11) * 28), mirrored for team 1, to an identity aim point.
 OFFSET_SIZES = ACTION_SIZES + (23, 23)
 OFFSET_NAMES = ACTION_NAMES + ("aim_dx", "aim_dz")
+# Its movement-offset variant (--move-offset): two more 23-bin heads that the reference decoder adds as
+# ((bin - 11) * 40), mirrored for team 1, to the movement goal (clamped to the map).
+MOVE_SIZES = OFFSET_SIZES + (23, 23)
+MOVE_NAMES = OFFSET_NAMES + ("move_dx", "move_dz")
 ACTION_CONTRACTS = {False: (11, "paintbot-pw.teams.view.1.action.51-25-2-2-2"),
-                    True: (13, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23")}
+                    True: (13, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23"),
+                    "move": (14, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23")}
 OPPONENT = Path(__file__).resolve().parents[3] / "examples/paintbot/players/base.bas"
 
 
 class Bridge:
-    def __init__(self, library: Path, variant: str, ticks: int | None, aim_offset: bool = False):
-        self.contract_version, self.action_contract = ACTION_CONTRACTS[aim_offset]
-        self.names = OFFSET_NAMES if aim_offset else ACTION_NAMES
-        self.sizes = OFFSET_SIZES if aim_offset else ACTION_SIZES
+    def __init__(self, library: Path, variant: str, ticks: int | None, aim_offset: bool = False,
+                 move_offset: bool = False):
+        key = "move" if move_offset else aim_offset
+        self.contract_version, self.action_contract = ACTION_CONTRACTS[key]
+        self.names = MOVE_NAMES if move_offset else OFFSET_NAMES if aim_offset else ACTION_NAMES
+        self.sizes = MOVE_SIZES if move_offset else OFFSET_SIZES if aim_offset else ACTION_SIZES
         manifest = json.loads((Path(__file__).resolve().parents[1] / "coworld_manifest_template.json").read_text())
         config = (
             manifest["certification"]["game_config"]
@@ -170,8 +177,10 @@ def main():
     parser.add_argument("--ticks", type=int)
     parser.add_argument("--aim-offset", action="store_true",
                         help="action contract teams.view.1 aim-offset: seven heads (aim_dx, aim_dz: 23 bins)")
+    parser.add_argument("--move-offset", action="store_true",
+                        help="action contract teams.view.1 movement-offset: nine heads (also move_dx, move_dz: 23 bins)")
     args = parser.parse_args()
-    bridge = Bridge(args.library, args.variant, args.ticks, args.aim_offset)
+    bridge = Bridge(args.library, args.variant, args.ticks, args.aim_offset, args.move_offset)
     try:
         for line in sys.stdin:
             print(json.dumps(bridge.handle_request(json.loads(line)), separators=(",", ":")), flush=True)

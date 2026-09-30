@@ -96,6 +96,7 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa_v2.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_aim_offset.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_move_offset.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_parity.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map.nim

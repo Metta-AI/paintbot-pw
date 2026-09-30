@@ -691,26 +691,44 @@ proc pw_action_layout*(handle: pointer, output: ptr UncheckedArray[int32]): cint
 proc pw_action_layout_ext*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## The handle's action heads, 10 int32: [heads (5 or 7), the head sizes (7 slots, 0 past
   ## the last head), logits per seat, 0]. teams.view.1 aim-offset: [7, 51, 25, 2, 2, 2, 23,
-  ## 23, 128, 0]. 0, or -1 bad args.
+  ## 23, 128, 0]. 0, or -1 bad args (and -1 under the nine-head movement-offset contract: use
+  ## pw_action_layout_ext2).
   if handle == nil or output == nil: return -1
   let env = cast[ptr NativeEnv](handle)
   let heads = env.actionHeads
+  if heads.len > ActionSizesOffset.len: return -1
   for i in 0..<10: output[i] = 0
   output[0] = heads.len.int32
   for i, h in heads: output[1+i] = h.int32
   output[8] = env.logitWidth.int32
   0
 
+proc pw_action_layout_ext2*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## The handle's action heads, 12 int32: [heads (5, 7 or 9), the head sizes (9 slots, 0 past
+  ## the last head), logits per seat, 0]. teams.view.1 movement-offset: [9, 51, 25, 2, 2, 2,
+  ## 23, 23, 23, 23, 174, 0]. 0, or -1 bad args.
+  if handle == nil or output == nil: return -1
+  let env = cast[ptr NativeEnv](handle)
+  let heads = env.actionHeads
+  if heads.len > ActionSizesMove.len: return -1
+  for i in 0..<12: output[i] = 0
+  output[0] = heads.len.int32
+  for i, h in heads: output[1+i] = h.int32
+  output[10] = env.logitWidth.int32
+  0
+
 proc pw_set_action_contract*(handle: pointer, version: int32): cint {.exportc, cdecl, dynlib.} =
   ## The action contract pw_step reads the caller's heads under: on a 201 handle 11
   ## (teams.view.1, five heads per seat; the default) or 13 (teams.view.1 aim-offset, seven
   ## heads per seat: the five, then two 23-bin aim offsets the reference decoder adds to an
-  ## identity aim); on a 202 handle 12 only. Kept across pw_reset; every decoder seat starts
-  ## over. 0, or -1 bad args.
+  ## identity aim) or 14 (teams.view.1 movement-offset, nine heads per seat: those seven, then
+  ## two 23-bin offsets the reference decoder adds to the movement goal); on a 202 handle 12
+  ## only. Kept across pw_reset; every decoder seat starts over. 0, or -1 bad args.
   if handle == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
-  if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32]: return -1
+  if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32,
+      acTeamsView1Move.int32]: return -1
   let contract = ActionContractVersion(version)
   if not pairs(env.obsVersion, contract): return -1
   env.actionContract = contract
@@ -1423,13 +1441,14 @@ proc pw_seat_policy_offset_choices*(handle: pointer, seat: cint, output: ptr Unc
   ## int32: [selected5, selected6, final5, final6, temperature_milli5, temperature_milli6]
   ## (selected: the draw or argmax; final: after neuralSetChoice); zeros when the seat did not
   ## select. Returns 0, -1 for bad arguments, a seat that is not a policy seat, or a seat
-  ## without the aim-offset heads.
+  ## without exactly the two aim-offset heads (a movement-offset seat: use
+  ## pw_seat_policy_extra_choices).
   if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if not env.policy[seat]: return -1
   let bot = env.scriptBots[seat]
-  if bot == nil or bot.neural == nil or not bot.neural.offsetHeads: return -1
+  if bot == nil or bot.neural == nil or bot.neural.extraHeads != AimOffsetHeads: return -1
   for i in 0..<6: output[i] = 0
   let n = bot.neural
   if not n.sampled: return 0
@@ -1437,6 +1456,27 @@ proc pw_seat_policy_offset_choices*(handle: pointer, seat: cint, output: ptr Unc
     output[e] = n.offsetSelected[e]
     output[2+e] = n.offsetChoices[e]
     output[4+e] = n.appliedOffsetTemperatures[e]
+  0
+
+proc pw_seat_policy_extra_choices*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## A policy seat's extra heads (5 .. 8: the aim offsets, then under action contract 14 the
+  ## movement offsets) on the last pw_step_logits, twelve int32: [selected5 .. selected8,
+  ## final5 .. final8, temperature_milli5 .. temperature_milli8], zeros for a head the seat's
+  ## contract lacks and when the seat did not select. Returns 0, -1 for bad arguments, a seat
+  ## that is not a policy seat, or a seat without extra heads.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if not env.policy[seat]: return -1
+  let bot = env.scriptBots[seat]
+  if bot == nil or bot.neural == nil or not bot.neural.offsetHeads: return -1
+  for i in 0..<3*ExtraHeadsMax: output[i] = 0
+  let n = bot.neural
+  if not n.sampled: return 0
+  for e in 0..<n.extraHeads:
+    output[e] = n.offsetSelected[e]
+    output[ExtraHeadsMax+e] = n.offsetChoices[e]
+    output[2*ExtraHeadsMax+e] = n.appliedOffsetTemperatures[e]
   0
 
 proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
@@ -1491,9 +1531,10 @@ proc pw_action_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
 proc pw_action_contract_hash*(version: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The 64-hex SHA-256 contract hash an actor and its manifest carry for action contract
-  ## `version` (11, 12 or 13), NUL-terminated into output (capacity >= 65). Returns 0, -1 for a
-  ## bad version (the contracts before these were retired for BASIC parity) or buffer.
-  if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32] or
+  ## `version` (11, 12, 13 or 14), NUL-terminated into output (capacity >= 65). Returns 0, -1
+  ## for a bad version (the contracts before these were retired for BASIC parity) or buffer.
+  if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32,
+      acTeamsView1Move.int32] or
       output == nil or capacity < 65: return -1
   let hash = actionContractHash(ActionContractVersion(version))
   copyMem(output, unsafeAddr hash[0], hash.len)

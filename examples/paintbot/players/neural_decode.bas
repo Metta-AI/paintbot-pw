@@ -14,6 +14,10 @@
 ' Its aim-offset variant (heads 51, 25, 2, 2, 2, 23, 23; neuralLayout(21) = 23) adds
 '   ((ix - 11) * 28, (iz - 11) * 28), mirrored for team 1, to an identity aim point, ix and iz
 '   the choices of heads 5 and 6: an offset the network chooses, no lead computed here.
+' Its movement-offset variant (heads 51, 25, 2, 2, 2, 23, 23, 23, 23; neuralLayout(23) = 23)
+'   also adds ((dx - 11) * 40, (dz - 11) * 40), mirrored for team 1, to the movement goal
+'   above (self for stay or an unseen pickup) and clamps it to the map, dx and dz the choices
+'   of heads 7 and 8: a destination the network chooses, no goal computed here.
 ' fire, grenade and sneak: 1 = on. "Keep" re-issues the aim this script last left the seat
 ' with (its last order, or its walking goal when it gave none), known from the second tick of
 ' a life on; with none known the seat is given no aim and a shot waits for one.
@@ -79,6 +83,11 @@ if m >= 11 and m <= 42 then
 end if
 if m >= 43 then
   clampToMap(selfX + flip * cdx(m - 43) * 200, selfY + flip * cdz(m - 43) * 200)
+  gx = cx
+  gy = cy
+end if
+if neuralLayout(23) = 23 then
+  clampToMap(gx + (neuralChoice(7) - 11) * 40 * flip, gy + (neuralChoice(8) - 11) * 40 * flip)
   gx = cx
   gy = cy
 end if
