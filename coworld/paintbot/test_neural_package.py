@@ -8,7 +8,7 @@ import unittest
 import zipfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
-from neural_package import (unpack_package, validate_aim_retarget, validate_shot_gate, validate_fire_hold, MAX_MODEL_BYTES,
+from neural_package import (layer_norm_ops, token_norm_ops, unpack_package, validate_aim_retarget, validate_shot_gate, validate_fire_hold, MAX_MODEL_BYTES,
                             validate_spray_aim, validate_spray_gate, SPRAY_AIM_DEFAULTS, SPRAY_GATE_DEFAULTS, SPRAY_LIMITS,
                             AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
                             MAX_SHOT_GATE_RANGE, validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS,
@@ -610,6 +610,38 @@ class Pwnet2Tests(unittest.TestCase):
         wide = [self.token_mlp(1, [(0, 0, 200)] * 6, (0, 0), [4]), (1, [8, 9], [], 72)]
         with self.assertRaisesRegex(ValueError, "token input"):
             validate_pwnet2(pwnet2(200, heads, wide))
+
+    def test_token_layer_norm_cost_and_structure(self):
+        # Params 6 = norm (0 or 1) and 7 = eps (FP32 bits) of TOKEN_MLP and TOKEN_MIX: a LayerNorm (gain, shift)
+        # before the relu, T*(8*d + 32) operations per normalised width (neural_actor.layerNormOps).
+        heads = [2, 2, 2, 3]
+        mlp = self.token_mlp(5, [(0, 8, 6), (50, 0, 3)], (0, 0), [8, 5])
+        mix = (8, [0, 4], [], 4 * 5 + 4 + 4 * 10)
+        tail = [(1, [18, 9, 1], [], 18 * 9 + 9), (9, [1, 3], [], 5)]
+        base = validate_pwnet2(pwnet2(64, heads, [mlp, mix] + tail))["operations"]
+        norm_mlp = (7, mlp[1] + [0, 1, EPS], mlp[2], mlp[3] + 2 * 8 + 2 * 5)
+        norm_mix = (8, [0, 4, 0, 0, 0, 0, 1, EPS], [], mix[3] + 2 * 4)
+        info = validate_pwnet2(pwnet2(64, heads, [norm_mlp, norm_mix] + tail))
+        self.assertEqual(layer_norm_ops(8), 96)
+        self.assertEqual(info["operations"], base + token_norm_ops(5, [8, 5]) + token_norm_ops(5, [4]))
+        self.assertEqual(info["operations"], base + 5 * (96 + 72) + 5 * 64)
+        cases = [
+            ([(7, mlp[1] + [0, 2, EPS], mlp[2], norm_mlp[3]), mix] + tail, "parameter 6 must be 0 or 1"),
+            ([(7, mlp[1] + [0, 1, 0], mlp[2], norm_mlp[3]), mix] + tail, "eps must be finite and positive"),
+            ([mlp, (8, [0, 4, 0, 0, 0, 0, 1, 0xFF800000], [], norm_mix[3])] + tail, "eps must be finite and positive"),
+            ([(7, mlp[1] + [0, 0, EPS], mlp[2], mlp[3]), mix] + tail, "unused parameter 7"),
+            ([mlp, (8, [0, 4, 0, 0, 0, 0, 0, EPS], [], mix[3])] + tail, "unused parameter 7"),
+            ([(7, mlp[1] + [1], mlp[2], mlp[3]), mix] + tail, "unused parameter 5"),
+            ([mlp, (8, [0, 4, 1], [], mix[3])] + tail, "unused parameter 2"),
+            ([norm_mlp, (8, [0, 4, 0, 0, 0, 0, 1, EPS], [], mix[3])] + tail, "unknown layer type|truncated|trailing"),
+        ]
+        for layers, fragment in cases:
+            with self.assertRaisesRegex(ValueError, fragment):
+                validate_pwnet2(pwnet2(64, heads, layers))
+        # The eps word is FP32 bits, never a layout word.
+        word_eps = (8, [0, 4, 0, 0, 0, 0, 1, 0xFFFE0000], [], norm_mix[3])
+        with self.assertRaisesRegex(ValueError, "eps must be finite and positive"):
+            validate_pwnet2(pwnet2(64, heads, [mlp, word_eps] + tail))
 
     @staticmethod
     def near(tokens=4, base=0, stride=8, xi=1, zi=2, vi=0, ei=6, ci=3, scale_x=2.0, scale_z=4.0, radius=1.0, dst=32,

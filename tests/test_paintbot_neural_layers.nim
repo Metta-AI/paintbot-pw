@@ -3,7 +3,7 @@
 ## match layout, so one file loads at 16 and at 50 seats; ENTITY_ATTN's token rows feeding
 ## TOKEN_MIX, POINTER and ATTN_POOL; and the ATTN_POOL layer itself. Models without these load
 ## and cost exactly as before (test_paintbot_neural_net2 and its published counts).
-import std/[unittest, random, strutils]
+import std/[unittest, random, strutils, math]
 import ../examples/paintbot/[neural_contract, neural_actor, neural_host]
 import paintbot_pwnet2_fixture
 
@@ -140,3 +140,155 @@ suite "PWNET002 for entity sections":
   test "the neural budget scales with seats as BASIC's does":
     check neuralOperationBudget(16) == 4_000_000 and neuralOperationBudget(8) == 4_000_000
     check neuralOperationBudget(50) == 12_500_000 and neuralOperationBudget(256) == 64_000_000
+
+proc layerNorm32(v: var seq[float32], gain, shift: openArray[float32], eps: float32) =
+  ## neural_actor.md's LayerNorm, term for term: mu = sum/n, var = (sum of (v-mu)^2)/n, r = 1/sqrt(var + eps),
+  ## v = ((v-mu)*r)*gain + shift.
+  let n = v.len
+  var total = 0'f32
+  for x in v: total += x
+  let mu = total / float32(n)
+  var squares = 0'f32
+  for x in v:
+    let c = x - mu
+    squares += c*c
+  let r = 1'f32 / sqrt(squares / float32(n) + eps)
+  for i in 0..<n:
+    let c = v[i] - mu
+    let scaled = c*r
+    let gained = scaled*gain[i]
+    v[i] = gained + shift[i]
+
+proc relu32(v: var seq[float32]) =
+  for x in v.mitems:
+    if not (x > 0'f32): x = 0'f32
+
+proc pools32(rows: seq[seq[float32]], valid: seq[bool], d: int): seq[float32] =
+  result = newSeq[float32](2*d)
+  var count = 0
+  for ok in valid:
+    if ok: inc count
+  if count == 0: return
+  let inverse = 1'f32 / float32(count)
+  for c in 0..<d:
+    var total = 0'f32
+    var best = 0'f32
+    var first = true
+    for n in 0..<rows.len:
+      if not valid[n]: continue
+      total += rows[n][c]
+      if first or rows[n][c] > best:
+        best = rows[n][c]
+        first = false
+    result[c] = total*inverse
+    result[d+c] = best
+
+suite "PWNET002 token-layer LayerNorm (params 6 = norm, 7 = eps)":
+  # 6 tokens of 8 floats (flag at +0) in 0..47, the seat's own 8 floats at 48..55 shared by every token.
+  proc normSpecs(r: var Rand, mlpNorm, mixNorm: bool): seq[Spec] =
+    @[r.tokenMlp(6, [[0'u32, 8, 8], [48'u32, 0, 8]], 0, 0, [10, 7], norm = mlpNorm, eps = 1e-4'f32),  # 14
+      concat(48, 8),                                                                                  # 22
+      r.dense(22, 12, bias = true, relu = true),                                                      # 12
+      r.tokenMix(0, 7, 12, 5, norm = mixNorm, eps = 2e-5'f32),                                        # 22
+      r.dense(22, 9, bias = true),                                                                    # 9
+      r.pointerHead(3, 2, 5)]                                                                         # logits 2..7
+
+  proc tokenObservation(r: var Rand): seq[float32] =
+    result = r.observation(56)
+    for n in 0..<6: result[8*n] = float32(n mod 3 != 1)  # tokens 1 and 4 masked
+
+  test "the engine equals a float32 reimplementation of the equations, term for term":
+    var r = initRand(95)
+    let specs = r.normSpecs(true, true)
+    let actor = loadActor(encode2(56, [4, 5], specs))
+    let mlp = specs[0].tensors
+    let mix = specs[3].tensors
+    for trial in 0..<20:
+      let obs = r.tokenObservation()
+      # TOKEN_MLP: per layer W, b, gain, shift; LayerNorm before the relu.
+      var rows: seq[seq[float32]]
+      var valid: seq[bool]
+      for n in 0..<6:
+        valid.add obs[8*n] > 0.5
+        if not valid[^1]:
+          rows.add newSeq[float32](7)
+          continue
+        var x = obs[8*n ..< 8*n+8] & obs[48 ..< 56]
+        var off = 0
+        for (n0, n1) in [(16, 10), (10, 7)]:
+          var y = dense32(x, mlp[off ..< off+n1*n0], mlp[off+n1*n0 ..< off+n1*n0+n1], n1)
+          layerNorm32(y, mlp[off+n1*n0+n1 ..< off+n1*n0+2*n1], mlp[off+n1*n0+2*n1 ..< off+n1*n0+3*n1], 1e-4'f32)
+          relu32(y)
+          off += n1*n0 + 3*n1
+          x = y
+        rows.add x
+      var h = pools32(rows, valid, 7) & obs[48 ..< 56]
+      h = dense32(h, specs[2].tensors[0 ..< 22*12], specs[2].tensors[22*12 ..< 22*12+12], 12, relu = true)
+      # TOKEN_MIX: Ue [5, 7], b [5], Uy [5, 12], gain [5], shift [5].
+      let u = dense32(h, mix[40 ..< 100], newSeq[float32](5), 5)
+      var zs: seq[seq[float32]]
+      for n in 0..<6:
+        if not valid[n]:
+          zs.add newSeq[float32](5)
+          continue
+        var zrow = dense32(rows[n], mix[0 ..< 35], mix[35 ..< 40], 5)
+        for o in 0..<5: zrow[o] = zrow[o] + u[o]
+        layerNorm32(zrow, mix[100 ..< 105], mix[105 ..< 110], 2e-5'f32)
+        relu32(zrow)
+        zs.add zrow
+      let mixed = h & pools32(zs, valid, 5)
+      var logits = dense32(mixed, specs[4].tensors[0 ..< 22*9], specs[4].tensors[22*9 ..< 22*9+9], 9)
+      let v = specs[5].tensors
+      for n in 0..<6:
+        if not valid[n]: continue
+        var dot = 0'f32
+        for i in 0..<5: dot += zs[n][i]*v[i]
+        logits[2+n] = logits[2+n] + (dot + v[5])
+      check actor.run(obs) == logits
+
+  test "operation counts, masked tokens, and norm off is today's layer":
+    var r = initRand(96)
+    let both = r.normSpecs(true, true)
+    var plain = both
+    plain[0] = r.tokenMlp(6, [[0'u32, 8, 8], [48'u32, 0, 8]], 0, 0, [10, 7])
+    plain[3] = r.tokenMix(0, 7, 12, 5)
+    let base = loadActor(encode2(56, [4, 5], plain)).operationCount
+    check layerNormOps(10) == 8*10 + 32
+    check loadActor(encode2(56, [4, 5], both)).operationCount ==
+      base + 6*(layerNormOps(10) + layerNormOps(7)) + 6*layerNormOps(5)
+    check tokenNormOps(6, [10, 7]) == 6*(112 + 88)
+    # A masked token's floats change nothing.
+    let actor = loadActor(encode2(56, [4, 5], both))
+    var obs = r.tokenObservation()
+    let first = actor.run(obs)
+    for c in 1..7: obs[8+c] = 7.5
+    check actor.run(obs) == first
+    # Constant pre-activations (every token row identical across its units) stay finite: var 0, r = 1/sqrt(eps).
+    let flat = @[Spec(code: 7, params: [2'u32, 1, AttnAlwaysValid, 0, 1, 0, 1, cast[uint32](1e-5'f32)],
+      extra: @[0'u32, 1, 1, 3], tensors: @[0'f32, 0, 0, 0.5, 0.5, 0.5, 1, 1, 1, 0.25, -1, 3]), r.dense(6, 4)]
+    let flatActor = loadActor(encode2(4, [2, 2], flat))
+    check flatActor.run(@[1'f32, 2, 3, 4]).len == 4
+
+  test "the loader checks the norm flag, its eps, and the gain and shift":
+    var r = initRand(97)
+    let good = r.normSpecs(true, true)
+    discard loadActor(encode2(56, [4, 5], good))
+    proc with(specs: seq[Spec], k: int, change: proc (s: var Spec)): string =
+      var v = specs
+      change(v[k])
+      encode2(56, [4, 5], v)
+    for k in [0, 3]:
+      check rejects(good.with(k, proc (s: var Spec) = s.params[6] = 2), "parameter 6 must be 0 or 1")
+      check rejects(good.with(k, proc (s: var Spec) = s.params[7] = 0), "eps must be finite and positive")
+      check rejects(good.with(k, proc (s: var Spec) = s.params[7] = cast[uint32](-1e-5'f32)), "eps must be")
+      check rejects(good.with(k, proc (s: var Spec) = s.params[7] = cast[uint32](NaN.float32)), "eps must be")
+      check rejects(good.with(k, proc (s: var Spec) = s.params[7] = layoutWord(0, 0)), "cannot be a layout word",
+        actorLayout(ffaV2Layout(16, 10), [4, 5]))
+      # Without norm the eps word stays 0; the gain and shift must be present with it (and absent without).
+      check rejects(good.with(k, proc (s: var Spec) = s.params[6] = 0), "")
+      check rejects(good.with(k, proc (s: var Spec) = s.tensors.setLen(s.tensors.len - 2)), "")
+    var plain = r.normSpecs(false, false)
+    for k in [0, 3]:
+      check rejects(plain.with(k, proc (s: var Spec) = s.params[7] = cast[uint32](1e-5'f32)), "unused parameter 7")
+    check rejects(plain.with(3, proc (s: var Spec) = s.params[2] = 1), "unused parameter 2")
+    check rejects(plain.with(0, proc (s: var Spec) = s.params[5] = 1), "unused parameter 5")
