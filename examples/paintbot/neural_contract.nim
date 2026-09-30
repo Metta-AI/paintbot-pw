@@ -29,13 +29,15 @@ const
   LogitSizeOffset* = LogitSize + 2*AimOffsetBins
   ## Its movement-offset variant: the aim-offset contract's seven heads, then two 23-bin
   ## heads (dx, dz) the policy.bas reads as neuralChoice(7) / neuralChoice(8); the reference
-  ## decode adds ((dx - 11) * MoveOffsetStep, (dz - 11) * MoveOffsetStep), mirrored for team 1,
-  ## to the movement head's goal and clamps it to the map. The destination offset is purely
-  ## the network's choice: nothing native computes a goal.
+  ## decode adds (moveOffset(dx), moveOffset(dz)), mirrored for team 1, to the movement head's
+  ## goal and clamps it to the map. moveOffset is symmetric and log-spaced: bin 11 = 0, bin
+  ## 11 ± j = ±MoveOffsetTable[j-1] (16 u .. 4000 u, ratio 250^(1/10)), so one head reaches both
+  ## short corrections and far destinations. The destination offset is purely the network's
+  ## choice: nothing native computes a goal.
   ActionContractTeamsView1Move* = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23"
   MoveOffsetBins* = 23
   MoveOffsetCentre* = 11
-  MoveOffsetStep* = 40
+  MoveOffsetTable* = [16, 28, 48, 84, 146, 253, 439, 763, 1326, 2303, 4000]
   MoveOffsetHeads* = 2
   ExtraHeadsMax* = AimOffsetHeads + MoveOffsetHeads
   ActionSizesMove* = [51, 25, 2, 2, 2, AimOffsetBins, AimOffsetBins, MoveOffsetBins, MoveOffsetBins]
@@ -190,6 +192,12 @@ proc pairs*(observation: ObservationContractVersion, action: ActionContractVersi
   ## or its aim-offset / movement-offset variants, ffa.view.1 with its pointer contract.
   if observation == ocTeamsView1: action in {acTeamsView1, acTeamsView1Offset, acTeamsView1Move}
   else: action == acFfaView1Pointer
+proc moveOffset*(bin: int): int =
+  ## The movement offset (world units, before the team-1 mirror) of a movement-offset bin 0 .. 22:
+  ## 0 at the centre bin 11, else ±MoveOffsetTable[|bin - 11| - 1]. players/neural_decode.bas holds
+  ## the same table.
+  let j = bin - MoveOffsetCentre
+  if j == 0: 0 elif j > 0: MoveOffsetTable[j-1] else: -MoveOffsetTable[-j-1]
 proc extraHeads*(action: ActionContractVersion): int =
   ## The heads after the five main ones: 2 (aim offsets) under teams.view.1 aim-offset, 4 (aim
   ## then movement offsets) under movement-offset, 0 otherwise.

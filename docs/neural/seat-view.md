@@ -60,7 +60,8 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
   `((ix - 11) * 28, (iz - 11) * 28)`, mirrored for team 1, to an identity aim; the offset is
   the network's choice, nothing native computes a lead), its movement-offset variant
   `...51-25-2-2-2-23-23-23-23` (also heads 7 and 8, `neuralChoice(7/8)`: the reference decode adds
-  `((dx - 11) * 40, (dz - 11) * 40)`, mirrored for team 1, to the movement goal and clamps it to
+  `(moveOffset(dx), moveOffset(dz))`, symmetric log-spaced bins from 16 u to 4000 u
+  (`MoveOffsetTable`), mirrored for team 1, to the movement goal and clamps it to
   the map; the destination is the network's choice, nothing native computes a goal) and
   `paintbot-pw.ffa.view.1.action.pointer`.
 - Heads become orders only in BASIC: `players/neural_decode.bas` and `neural_decode_ffa.bas`

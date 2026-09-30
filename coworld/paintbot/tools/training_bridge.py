@@ -17,8 +17,9 @@ ACTION_NAMES = ("move", "aim", "fire", "grenade", "sneak")
 # BASIC decoder adds as ((bin - 11) * 28), mirrored for team 1, to an identity aim point.
 OFFSET_SIZES = ACTION_SIZES + (23, 23)
 OFFSET_NAMES = ACTION_NAMES + ("aim_dx", "aim_dz")
-# Its movement-offset variant (--move-offset): two more 23-bin heads that the reference decoder adds as
-# ((bin - 11) * 40), mirrored for team 1, to the movement goal (clamped to the map).
+# Its movement-offset variant (--move-offset): two more 23-bin heads that the reference decoder maps through a
+# symmetric log-spaced table (bin 11 = 0, bin 11 +- j = +-(16, 28, 48, ..., 2303, 4000)[j-1] u), mirrored for team 1,
+# and adds to the movement goal (clamped to the map).
 MOVE_SIZES = OFFSET_SIZES + (23, 23)
 MOVE_NAMES = OFFSET_NAMES + ("move_dx", "move_dz")
 ACTION_CONTRACTS = {False: (11, "paintbot-pw.teams.view.1.action.51-25-2-2-2"),

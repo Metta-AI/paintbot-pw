@@ -1,7 +1,8 @@
 ## Action contract teams.view.1 movement-offset (paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23):
 ## the aim-offset contract's seven heads, then two 23-bin heads the policy.bas reads as neuralChoice(7) /
-## (8). The reference decode (players/neural_decode.bas) adds ((dx - 11) * 40, (dz - 11) * 40), mirrored
-## for team 1, to the movement head's goal and clamps it to the map; nothing native computes a goal.
+## (8). The reference decode (players/neural_decode.bas) adds (moveOffset(dx), moveOffset(dz)) (symmetric
+## log-spaced bins, 16 u .. 4000 u), mirrored for team 1, to the movement head's goal and clamps it to the
+## map; nothing native computes a goal.
 ## Through the native ABI: pw_set_action_contract(14), nine heads per seat in pw_step,
 ## pw_action_layout_ext2, and a policy seat selecting the extra heads from its logits
 ## (pw_seat_policy_extra_choices). Build with --mm:arc --threads:on -d:pwTraining.
@@ -31,8 +32,8 @@ let policy = "paintbot_observe(neuralObservation())\n" &
 proc expectedGoal(w: World, base: Point, dx, dz, flip: int32): Point =
   ## The decode's goal (base + bins * step * flip, clamped to the map), then the world's own walk
   ## clamp (minX + 100 .. maxX - 100), which applies to every walkTo.
-  let gx = clamp(base.x + (dx-11)*MoveOffsetStep.int32*flip, minX().int32, maxX().int32)
-  let gz = clamp(base.z + (dz-11)*MoveOffsetStep.int32*flip, minZ().int32, maxZ().int32)
+  let gx = clamp(base.x + moveOffset(dx.int).int32*flip, minX().int32, maxX().int32)
+  let gz = clamp(base.z + moveOffset(dz.int).int32*flip, minZ().int32, maxZ().int32)
   Point(x: clamp(gx, (minX()+100).int32, (maxX()-100).int32), z: clamp(gz, (minZ()+100).int32, (maxZ()-100).int32))
 
 suite "Action contract teams.view.1 movement-offset":
@@ -46,10 +47,17 @@ suite "Action contract teams.view.1 movement-offset":
     check extraHeads(acTeamsView1Move) == 4 and extraHeads(acTeamsView1Offset) == 2 and extraHeads(acTeamsView1) == 0
     check pairs(ocTeamsView1, acTeamsView1Move)
     check not pairs(ocFfaView1, acTeamsView1Move)
-    # The reference decode (BASIC has no Nim constants) uses the same step.
+    # The table is symmetric, log-spaced (ratio 250^(1/10)) and reaches 4000 u; the reference decode (BASIC
+    # has no Nim constants) holds the same table.
+    check moveOffset(11) == 0 and moveOffset(12) == 16 and moveOffset(10) == -16
+    check moveOffset(22) == 4000 and moveOffset(0) == -4000
+    for b in 0..22: check moveOffset(b) == -moveOffset(22 - b)
+    for j in 1..<MoveOffsetTable.len:
+      let ratio = MoveOffsetTable[j] / MoveOffsetTable[j-1]
+      check ratio > 1.6 and ratio < 1.9
     let decode = readFile(Root / "examples/paintbot/players/neural_decode.bas")
-    check ("(neuralChoice(7) - 11) * " & $MoveOffsetStep & " * flip") in decode
-    check ("(neuralChoice(8) - 11) * " & $MoveOffsetStep & " * flip") in decode
+    for j, v in MoveOffsetTable:
+      check ("  if mvj = " & $(j+1) & " then\n    mo = " & $v & "\n  end if") in decode
 
   test "pw_set_action_contract(14), pw_action_layout_ext2 and the contract hash; the older calls refuse 14":
     let h = pw_create(7, 600)

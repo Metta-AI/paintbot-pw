@@ -448,7 +448,7 @@ reference reading (`players/neural_decode.bas`, the training library's decoder):
 | 1 aim | 0 keep; 1..16 identity a-1 when visible (its current position); 17..24 compass `pos + 5000*d` | 0 keep; 1..8 compass; 9 + k cog row k (`neuralRow(0, k)`) |
 | 2, 3, 4 | fire, charge grenade, sneak | the same |
 | 5, 6 (aim-offset, movement-offset) | `((ix - 11) * 28, (iz - 11) * 28)`, mirrored for team 1, added to an identity aim | |
-| 7, 8 (movement-offset) | `((dx - 11) * 40, (dz - 11) * 40)`, mirrored for team 1, added to head 0's goal (self for stay or an unseen pickup), clamped to the map | |
+| 7, 8 (movement-offset) | `(moveOffset(dx), moveOffset(dz))`: bin 11 = 0, bin 11 ± j = ±(16, 28, 48, 84, 146, 253, 439, 763, 1326, 2303, 4000)[j-1] u, mirrored for team 1, added to head 0's goal (self for stay or an unseen pickup), clamped to the map | |
 
 with d = (1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1). "Keep" re-issues the aim the
 script last left the seat with. There is no native lead: the retired contract v2 and ffa.v2
