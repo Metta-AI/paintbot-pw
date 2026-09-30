@@ -791,3 +791,14 @@ A team now also earns glory for cogs out of the match (dead with no lives left).
 earns `behind_cogs` per cog it has out beyond the enemy's count, on top of the behind-in-lives award. Every teams
 variant sets `"glory": {"behind_lives": 5, "behind_cogs": 5}`. Rules 46 and older recordings keep their format and
 never pay it.
+
+## No "ACTION ELSEWHERE" inset: 0.3.87
+
+Automatic deploy run 36679417560 shipped `4fac28c` (#180) as 0.3.87 = `cow_a40731a2-1cc9-45d1-a5a3-5239f1389763`,
+now canonical, with all ten certification checks and hosted smoke passing. The commit is tagged `coworld-v0.3.87`
+(Heartland shipped the same commit as `heartland-v0.1.18`). Viewer only; rules and replays are unchanged.
+
+The action camera no longer shows its runner-up shot in the corner inset. That corner is now only the first-person
+BOT EYES view. Instant replay now fires on highlights the main view missed. The hosted viewer bundle
+(`sha256:e762ac8b72a523ed561a4150892c42b346af29ac08be23e139c33327e744442b`) played league replay
+`76c4867d-f744-4a68-a9e7-96cdab8d2831` with Replay hash verified and no inset.
