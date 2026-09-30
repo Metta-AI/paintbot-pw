@@ -4,7 +4,7 @@
 ## (cover index, ray memo) and in the training build (plus the terrain table), e.g.
 ## `nim r tests/test_paintbot_geometry_cache.nim` and
 ## `nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim`.
-import std/[unittest, random]
+import std/[unittest, random, os, math]
 import ../examples/paintbot/[sim, neural_contract]
 
 when not IndexedGeometry: {.error: "this test exercises the geometry caches; drop -d:pwFullScanGeometry".}
@@ -67,7 +67,7 @@ suite "Geometry caches":
   when defined(pwTraining):
     test "tabled terrain equals the direct functions everywhere":
       var rng = initRand(2026)
-      for version in [9, 12, 14, 16, 22, 29, 33, 35, 37]:
+      for version in [9, 12, 14, 16, 22, 29, 33, 35, 37, 40, 48]:
         configureRules(version)
         var checked = 0
         for _ in 0..<20000:
@@ -87,9 +87,63 @@ suite "Geometry caches":
           inc checked
         check checked == 20000
       check terrainCacheResidentBlocks() > 0
+    test "terrain blocks bound every cell they hold":
+      var rng = initRand(64)
+      for version in [22, 35, 48]:
+        configureRules(version)
+        for _ in 0..<12:
+          let x = rng.rand(minX()..maxX())
+          let z = rng.rand(minZ()..maxZ())
+          let b = terrainBlockAt(x, z)
+          check b != nil
+          let x0 = x-floorMod(x+5120, TerrainCacheBlock)
+          let z0 = z-floorMod(z+3072, TerrainCacheBlock)
+          var high = low(int)
+          var low = high(int)
+          for dz in 0..<TerrainCacheBlock:
+            for dx in 0..<TerrainCacheBlock:
+              check terrainBlockAt(x0+dx, z0+dz) == b
+              high = max(high, terrainHeightDirect(x0+dx, z0+dz))
+              low = min(low, islandMarginDirect(x0+dx, z0+dz))
+          check b.maxHeight.int == high and b.minMargin.int == low
+      configureMap(MapNames[0])
+      check terrainBlockAt(100, 100) == nil and prewarmTerrain(minX(), minZ(), maxX(), maxZ()) == 0
+      configureMap("")
+    test "rays past many trenches equal full scans":
+      # More trenches under one ray than the ray lists, and none: both scan paths.
+      var rng = initRand(7)
+      configureRules(48)
+      var w = newWorld(3, 240)
+      let base = w.trenches
+      for count in [0, 3, 40]:
+        w.trenches = base
+        for k in 0..<count:
+          w.trenches.add Cover(x: int32(1000+k*110), z: int32(1800+rng.rand(-200..200)), w: 100, h: 300)
+        for _ in 0..<1500:
+          let a = point(rng.rand(800..5800), rng.rand(1200..2800))
+          let b = point(rng.rand(800..5800), rng.rand(1200..2800))
+          check w.lineClear(a, b) == w.directLineClear(a, b)
+    test "a saved terrain table loads only into a matching build and table":
+      configureRules(48)
+      check prewarmTerrain(0, 0, 700, 500) > 0
+      let path = getTempDir() / "paintbot-terrain-test-" & $getCurrentProcessId() & ".bin"
+      let saved = saveTerrain(path)
+      check saved >= prewarmTerrain(0, 0, 700, 500)
+      check loadTerrain(path) == 0 # every block of that table is already computed
+      configureRules(9) # other terrain flags, another table
+      expect IOError: discard loadTerrain(path)
+      configureRules(48)
+      writeFile(path & ".cut", readFile(path)[0..<100000])
+      expect IOError: discard loadTerrain(path & ".cut")
+      var altered = readFile(path)
+      altered[8] = char(ord(altered[8]) xor 1) # the fingerprint of another terrain build
+      writeFile(path & ".alt", altered)
+      expect IOError: discard loadTerrain(path & ".alt")
+      expect IOError: discard loadTerrain(path & ".missing")
+      for f in [path, path & ".cut", path & ".alt"]: removeFile(f)
   test "indexed obstacle tests equal full scans for every rules version":
     var rng = initRand(37)
-    for version in [8, 12, 14, 22, 35, 37]:
+    for version in [8, 12, 14, 22, 35, 37, 40, 48]:
       configureRules(version)
       let w = newWorld(int32(version), 240)
       for _ in 0..<4000:

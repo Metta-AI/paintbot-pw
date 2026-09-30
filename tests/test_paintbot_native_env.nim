@@ -56,3 +56,20 @@ suite "Native training environment":
       configureRules(NativeRules)
       check pw_state_hash(handle) == newWorld(99,24).stateHash()
       pw_destroy(handle)
+  test "terrain prewarm and shared cache files":
+    check pw_terrain_prewarm(nil) == -1
+    check pw_terrain_cache_save(nil, "x") == -1 and pw_terrain_cache_load(nil, "x") == -1
+    let handle = pw_create(5, 24)
+    require handle != nil
+    let before = pw_state_hash(handle)
+    check pw_terrain_prewarm(handle) > 0
+    check pw_state_hash(handle) == before # prewarming changes no world state
+    let path = getTempDir() / "paintbot-native-terrain-" & $getCurrentProcessId() & ".bin"
+    check pw_terrain_cache_save(handle, path.cstring) >= pw_terrain_prewarm(handle)
+    check pw_terrain_cache_load(handle, path.cstring) == 0 # already resident
+    check pw_terrain_cache_load(handle, (path & ".missing").cstring) == -1
+    check pw_set_map(handle, 0) == 0 and pw_reset(handle, 5, 24) == 0
+    check pw_terrain_prewarm(handle) == 0 # generated maps are read from their grid
+    check pw_terrain_cache_load(handle, path.cstring) == 0
+    removeFile(path)
+    pw_destroy(handle)
