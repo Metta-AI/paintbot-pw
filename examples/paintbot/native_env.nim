@@ -218,6 +218,8 @@ type
     rules, nextRules: int32
     glory, nextGlory: GloryConfig
     vision, nextVision: bool
+    # "vision_range" metres (0 = unlimited), current world's and next reset's, like vision.
+    visionRange, nextVisionRange: int32
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -308,7 +310,7 @@ proc allocSeats(env: ptr NativeEnv, n: int) =
 
 proc ready(handle: pointer = nil) =
   ## Every entry point: the thread's GC, map and rules, and, for a handle, its game mode and
-  ## kinship, and its rules, glory awards and vision. All are threadvars the engine reads
+  ## kinship, and its rules, glory awards, vision and vision range. All are threadvars the engine reads
   ## (terrain, layout, ffa(), scores, glory, sight, the ffa.v1 encoder) and several handles may
   ## share a thread, so each call installs its own handle's; without a handle, NativeRules on
   ## the rules' own island with the default awards. The map goes first so configureRules binds the
@@ -319,11 +321,13 @@ proc ready(handle: pointer = nil) =
     configureRules(NativeRules)
     configureGlory(DefaultGloryConfig)
     teamVision = false
+    configureVisionRange(0)
   else:
     let env = cast[ptr NativeEnv](handle)
     configureRules(env.rulesVersion)
     configureGlory(env.glory)
     teamVision = env.vision
+    configureVisionRange(env.visionRange)
     gameMode = env.mode
     activeKinship = env.kinship
     configureSeats(env.n)
@@ -390,6 +394,7 @@ proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
   configureRules(if env.nextRules == 0: NativeRules else: env.nextRules.int)
   configureGlory(env.nextGlory)
   teamVision = env.nextVision
+  configureVisionRange(env.nextVisionRange)
   let savedKinship = kinshipOverride
   # The eval overrides (pw_set_kin_override, pw_set_spawn_grouping) are 16-seat tables: they
   # apply to 16-seat worlds only.
@@ -407,6 +412,7 @@ proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
   env.rules = env.nextRules
   env.glory = env.nextGlory
   env.vision = env.nextVision
+  env.visionRange = env.nextVisionRange
   env.mode = mode
   env.kinship = if mode == gmFfaKin: activeKinship else: initKinship(seats)
   activeKinship = env.kinship
@@ -1336,12 +1342,12 @@ proc pw_rules*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
 proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length: int32,
     error: ptr UncheckedArray[char], capacity: cint): cint {.exportc, cdecl, dynlib.} =
   ## A whole Coworld game config object (a manifest variant's game_config, verbatim), read by
-  ## the host's own parser (match_config.parseMatchConfig): mode, kin_layout, glory, map and
-  ## vision; its seating and length keys (tokens, players, slots, seed, max_ticks) are
+  ## the host's own parser (match_config.parseMatchConfig): mode, kin_layout, glory, map,
+  ## vision and vision_range; its seating and length keys (tokens, players, slots, seed, max_ticks) are
   ## accepted and ignored, since a handle's seats and match length come from its own calls.
   ## Every match key it has not got takes the host's default, except "map": without it the
   ## handle keeps its map (pw_set_map's, or an earlier config's); "map": "" is the island. They
-  ## replace the handle's mode, kin layout, map, vision and glory awards from its NEXT pw_reset
+  ## replace the handle's mode, kin layout, map, vision, vision range and glory awards from its NEXT pw_reset
   ## on (the current world keeps its own), as pw_set_game_mode, pw_set_kin_layout and pw_set_map
   ## do; the rules stay pw_set_rules'. 0; -1 bad args; -2 a config the host would refuse (or an
   ## FFA-kin config on an observation contract v3 handle), with its reason in `error`
@@ -1365,6 +1371,7 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
   # per reset under one config; "map": "" is the island.
   if config.mapGiven: env.nextMapSlot = int32(mapIndex(config.map)+1)
   env.nextVision = config.vision == "team"
+  env.nextVisionRange = config.visionRange.int32
   env.nextGlory = config.glory
   writeMessage(error, capacity, "")
   0
