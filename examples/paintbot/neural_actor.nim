@@ -7,7 +7,7 @@ type
     ## PWNET002 layer type codes (the u32 `type` of a layer record).
     lkDense = 1, lkRmsNorm = 2, lkMinGru = 3, lkResidual = 4, lkEntityAttn = 5, lkConcatInput = 6,
     lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9, lkSegmentNear = 10, lkAttnPool = 11,
-    lkPad = 12, lkCondHead = 13
+    lkPad = 12, lkCondHead = 13, lkTokenPair = 14
   AttnGroup = object
     offset, stride, count, width, valid: int  # valid = -1: every token of the group is valid
     weight: int                               # E_g [d, width] then e_g [d], offsets into weights
@@ -44,6 +44,9 @@ type
     exposeTokens: bool     # ENTITY_ATTN: a later layer reads its token rows (tokenBuffer / validBuffer)
     keyWidth, valueWidth: int  # ATTN_POOL: per-head key and value widths
     norm: bool             # TOKEN_MLP / TOKEN_MIX: LayerNorm (gain, shift) on each pre-activation row, eps = `eps`
+    pairWidth: int         # TOKEN_PAIR: p, the pair MLP's width
+    geoBase, geoStride, geoX, geoZ: int  # TOKEN_PAIR: token n's (x, z) = input[geoBase + n*geoStride + geoX / geoZ]
+    selfPairs: bool        # TOKEN_PAIR: the pair (n, n) is included
     operations: int64
   Net2Object = object
     layers: seq[NetLayer]
@@ -175,6 +178,8 @@ const
   MaxTokenMlpLayers* = 4
   MaxAttnPoolHeads* = 32
   MaxAttnPoolWidth* = 1024  # ATTN_POOL heads x key width, heads x value width
+  TokenPairFeatures* = 10   # TOKEN_PAIR: the pair geometry features per ordered token pair
+  MaxTokenPairRow* = 1024   # TOKEN_PAIR: d + 2p, the floats of one output row
   ## Published cost constants: a multiply-accumulate is 2 operations, an elementwise add,
   ## multiply, compare, max, relu or copy is 1, an exp, sqrt or division is 8, and a MINGRU
   ## unit's gates, interpolation and highway are 32 (PWNET001's 32 per hidden unit).
@@ -235,6 +240,16 @@ proc tokenMixOps*(tokens, tokenIn, width, z: int): int64 =
 proc pointerOps*(tokens, z, width: int): int64 =
   ## POINTER's published cost: the copy, per token a dot product, its bias and the add.
   int64(width) + int64(tokens)*int64(2*z + 2)
+
+proc tokenPairOps*(tokens, d, p, width: int): int64 =
+  ## TOKEN_PAIR's published cost: the copy of x; per token A e and B e (no bias), its geometry and its row copy; per
+  ## ordered pair the 10 features (18), C g (2*10*p), the bias, the two token terms and relu (4*p), the mean and max
+  ## (2*p); per token the mean's reciprocal and scale (8 + p); then the pools over the rows (d + 2p wide).
+  let T = int64(tokens)
+  let D = int64(d)
+  let P = int64(p)
+  int64(width) + T*(4*D*P + 2 + D) + T*T*(18 + 2*TokenPairFeatures*P + 4*P + 2*P) + T*(TranscendentalOps + P) +
+    tokenPoolOps(tokens, d + 2*p)
 
 proc segmentNearOps*(inputs, tokens: int): int64 =
   ## SEGMENT_NEAR's published cost: the copy of the input, per token pair 12, per token 8.
@@ -573,8 +588,8 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       for j in 2..5:
         if q[j] != 0: net2Error(where & "unused parameter " & $j & " must be 0")
       tokenNorm()
-      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMlp, lkEntityAttn}:
-        net2Error(where & "TOKEN_MIX source must name an earlier TOKEN_MLP or ENTITY_ATTN layer")
+      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMlp, lkEntityAttn, lkTokenPair}:
+        net2Error(where & "TOKEN_MIX source must name an earlier TOKEN_MLP, ENTITY_ATTN or TOKEN_PAIR layer")
       if z notin 1..MaxTokenModel: net2Error(where & "TOKEN_MIX width must be 1.." & $MaxTokenModel)
       net.exposeTokens(layer.source, scratch)
       let src = net.layers[layer.source]
@@ -594,8 +609,8 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       layer.source = int(q[0])
       layer.length = int(q[1])  # the logit offset of token 0
       unused(2)
-      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMix, lkTokenMlp, lkEntityAttn}:
-        net2Error(where & "POINTER source must name an earlier TOKEN_MIX, TOKEN_MLP or ENTITY_ATTN layer")
+      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMix, lkTokenMlp, lkEntityAttn, lkTokenPair}:
+        net2Error(where & "POINTER source must name an earlier TOKEN_MIX, TOKEN_MLP, ENTITY_ATTN or TOKEN_PAIR layer")
       net.exposeTokens(layer.source, scratch)
       let src = net.layers[layer.source]
       layer.tokens = src.tokens
@@ -650,8 +665,8 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       layer.source = int(q[0])
       layer.heads = int(q[1]); layer.keyWidth = int(q[2]); layer.valueWidth = int(q[3])
       unused(4)
-      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMlp, lkTokenMix, lkEntityAttn}:
-        net2Error(where & "ATTN_POOL source must name an earlier TOKEN_MLP, TOKEN_MIX or ENTITY_ATTN layer")
+      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMlp, lkTokenMix, lkEntityAttn, lkTokenPair}:
+        net2Error(where & "ATTN_POOL source must name an earlier TOKEN_MLP, TOKEN_MIX, ENTITY_ATTN or TOKEN_PAIR layer")
       if layer.heads notin 1..MaxAttnPoolHeads: net2Error(where & "ATTN_POOL heads must be 1.." & $MaxAttnPoolHeads)
       if layer.keyWidth notin 1..MaxTokenModel or layer.valueWidth notin 1..MaxTokenModel:
         net2Error(where & "ATTN_POOL key and value widths must be 1.." & $MaxTokenModel)
@@ -669,6 +684,35 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       work = max(work, 2*hk + layer.tokens*layer.heads + hv)
       layer.operations = attnPoolOps(layer.tokens, src.tokenWidth, width, layer.heads, layer.keyWidth,
         layer.valueWidth)
+    of lkTokenPair.uint32:
+      layer.kind = lkTokenPair
+      layer.source = int(q[0])
+      let pw = int(q[1])
+      layer.geoBase = int(q[2]); layer.geoStride = int(q[3]); layer.geoX = int(q[4]); layer.geoZ = int(q[5])
+      layer.selfPairs = flag(6)
+      unused(7)
+      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMlp, lkTokenMix, lkEntityAttn}:
+        net2Error(where & "TOKEN_PAIR source must name an earlier TOKEN_MLP, TOKEN_MIX or ENTITY_ATTN layer")
+      if pw notin 1..MaxTokenModel: net2Error(where & "TOKEN_PAIR width must be 1.." & $MaxTokenModel)
+      net.exposeTokens(layer.source, scratch)
+      let src = net.layers[layer.source]
+      let t = src.tokens
+      if layer.geoStride notin 1..inputs or layer.geoX >= layer.geoStride or layer.geoZ >= layer.geoStride:
+        net2Error(where & "TOKEN_PAIR geometry stride / columns")
+      if layer.geoBase > inputs or (t-1)*layer.geoStride + layer.geoStride > inputs - layer.geoBase:
+        net2Error(where & "TOKEN_PAIR geometry outside the input")
+      let d = src.tokenWidth
+      if d + 2*pw > MaxTokenPairRow: net2Error(where & "TOKEN_PAIR rows exceed " & $MaxTokenPairRow)
+      layer.tokens = t
+      layer.pairWidth = pw
+      layer.tokenWidth = d + 2*pw
+      layer.weight = net.weights.len
+      net.readWeights(data, p, 2*pw*d + pw*TokenPairFeatures + pw)   # A [p, d], B [p, d], C [p, 10], b [p]
+      tokenSpace = t*layer.tokenWidth
+      layer.outWidth = width + 2*layer.tokenWidth
+      if layer.outWidth > MaxNet2Width: net2Error(where & "TOKEN_PAIR output exceeds " & $MaxNet2Width)
+      work = max(work, 2*t*pw + pw + TokenPairFeatures + 2*t)
+      layer.operations = tokenPairOps(t, d, pw, width)
     of lkCondHead.uint32:
       layer.kind = lkCondHead
       let whenHead = int(q[0])
@@ -694,7 +738,7 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       scratch += tokenSpace
     case layer.kind
     of lkTokenMlp: layer.validBuffer = layer.tokenBuffer + layer.tokens*layer.tokenWidth
-    of lkTokenMix, lkPointer, lkAttnPool: layer.validBuffer = net.layers[layer.source].validBuffer
+    of lkTokenMix, lkPointer, lkAttnPool, lkTokenPair: layer.validBuffer = net.layers[layer.source].validBuffer
     else: discard
     layer.output = scratch
     scratch += layer.outWidth
@@ -1122,6 +1166,80 @@ proc attnPool(layer: NetLayer, source: NetLayer, x, w, scratch, work, y: F32s) =
       let weight = score[n*heads+j]
       for c in 0..<vw: pooled[j*vw+c] += weight*value[j*vw+c]
 
+proc tokenPair(layer: NetLayer, source: NetLayer, x, input, w, scratch, work, y: F32s) =
+  ## TOKEN_PAIR (neural_actor.md): for each valid token n and valid partner m (m != n unless selfPairs),
+  ## h = relu((((sum_i g_i*C[o,i]) + b[o]) + a_n[o]) + b_m[o]) with a_n = A e_n, b_m = B e_m (no bias) and g the pair
+  ## geometry; row n = [e_n, masked mean over m of h, masked max over m of h]; y = [x, the pools of the rows].
+  let t = layer.tokens
+  let d = source.tokenWidth
+  let pw = layer.pairWidth
+  let rw = layer.tokenWidth
+  let width = layer.inWidth
+  let tokens = scratch.at(source.tokenBuffer)
+  let valid = scratch.at(layer.validBuffer)
+  let buffer = scratch.at(layer.tokenBuffer)
+  let wa = w.at(layer.weight)
+  let wb = wa.at(pw*d)
+  let wc = wb.at(pw*d)
+  let bias = wc.at(pw*TokenPairFeatures)
+  let ae = work                   # [t, p]
+  let be = ae.at(t*pw)            # [t, p]
+  let g = be.at(t*pw)             # [10]
+  let gx = g.at(TokenPairFeatures)  # [t]
+  let gz = gx.at(t)                 # [t]
+  for n in 0..<t:
+    let at = layer.geoBase + n*layer.geoStride
+    gx[n] = input[at + layer.geoX]
+    gz[n] = input[at + layer.geoZ]
+    if valid[n] == 0'f32: continue
+    dense(tokens.at(n*d), d, wa, nil, pw, false, ae.at(n*pw))
+    dense(tokens.at(n*d), d, wb, nil, pw, false, be.at(n*pw))
+  for n in 0..<t:
+    let row = buffer.at(n*rw)
+    for c in 0..<rw: row[c] = 0'f32
+    if valid[n] == 0'f32: continue
+    for c in 0..<d: row[c] = tokens[n*d + c]
+    let mean = row.at(d)
+    let best = row.at(d + pw)
+    var count = 0
+    for m in 0..<t:
+      if valid[m] == 0'f32 or (m == n and not layer.selfPairs): continue
+      let xn = gx[n]
+      let zn = gz[n]
+      let xm = gx[m]
+      let zm = gz[m]
+      g[0] = xn; g[1] = zn; g[2] = xm; g[3] = zm
+      g[4] = xm - xn
+      g[5] = zm - zn
+      let xx = xn*xm
+      let zz = zn*zm
+      g[6] = xx + zz
+      let xz = xn*zm
+      let zx = zn*xm
+      g[7] = xz - zx
+      let nx = xn*xn
+      let nz = zn*zn
+      g[8] = nx + nz
+      let mx = xm*xm
+      let mz = zm*zm
+      g[9] = mx + mz
+      for o in 0..<pw:
+        var sum = 0'f32
+        for i in 0..<TokenPairFeatures: sum += g[i]*wc[o*TokenPairFeatures + i]
+        sum = sum + bias[o]
+        sum = sum + ae[n*pw + o]
+        sum = sum + be[m*pw + o]
+        let h = if sum > 0'f32: sum else: 0'f32
+        mean[o] = mean[o] + h
+        if count == 0 or h > best[o]: best[o] = h
+      inc count
+    if count > 0:
+      let inverse = 1'f32 / float32(count)
+      for o in 0..<pw: mean[o] = mean[o]*inverse
+  checkFinite(buffer, t*rw)
+  for i in 0..<width: y[i] = x[i]
+  tokenPools(buffer, valid, t, rw, y.at(width))
+
 proc segmentNear(layer: NetLayer, input, y: F32s) =
   ## The input view: y = input, then token n's flag at y[dstOffset + n*dstStride]. Geometry in float64, operation
   ## by operation as neural_actor.md writes it (one product or sum per statement, so no contraction).
@@ -1209,6 +1327,8 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
       segmentNear(layer[], input, y)
     of lkAttnPool:
       attnPool(layer[], net.layers[layer.source], x, w, scratch, scratch.at(net.work), y)
+    of lkTokenPair:
+      tokenPair(layer[], net.layers[layer.source], x, input, w, scratch, scratch.at(net.work), y)
     of lkCondHead:
       # A declaration for the selection (Actor.conditionals); the vector passes through.
       for i in 0..<layer.outWidth: y[i] = x[i]

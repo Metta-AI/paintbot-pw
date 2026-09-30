@@ -8,7 +8,7 @@ import unittest
 import zipfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
-from neural_package import (layer_norm_ops, token_norm_ops, unpack_package, validate_aim_retarget, validate_shot_gate, validate_fire_hold, MAX_MODEL_BYTES,
+from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpack_package, validate_aim_retarget, validate_shot_gate, validate_fire_hold, MAX_MODEL_BYTES,
                             validate_spray_aim, validate_spray_gate, SPRAY_AIM_DEFAULTS, SPRAY_GATE_DEFAULTS, SPRAY_LIMITS,
                             AIM_RETARGET_DEFAULTS, MAX_RETARGET_RANGE, MAX_RETARGET_WEIGHT, SHOT_GATE_DEFAULTS,
                             MAX_SHOT_GATE_RANGE, validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS,
@@ -642,6 +642,31 @@ class Pwnet2Tests(unittest.TestCase):
         word_eps = (8, [0, 4, 0, 0, 0, 0, 1, 0xFFFE0000], [], norm_mix[3])
         with self.assertRaisesRegex(ValueError, "eps must be finite and positive"):
             validate_pwnet2(pwnet2(64, heads, [mlp, word_eps] + tail))
+
+    def test_token_pair_cost_and_structure(self):
+        # TOKEN_PAIR (14): params source, p, geo_base, geo_stride, x, z, self_pairs; A [p, d], B [p, d], C [p, 10], b [p].
+        heads = [2, 2, 2, 3]
+        mlp = self.token_mlp(5, [(0, 8, 6), (50, 0, 3)], (0, 0), [8])     # rows 8, out 16
+        pair = (14, [0, 4, 0, 8, 1, 2, 0], [], 2 * 4 * 8 + 4 * 10 + 4)    # rows 8 + 8 = 16, out 16 + 32 = 48
+        mix = (8, [1, 4], [], 4 * 16 + 4 + 4 * 48)                      # 48 + 8 = 56
+        tail = [(1, [56, 9, 1], [], 56 * 9 + 9), (9, [2, 3], [], 5)]
+        info = validate_pwnet2(pwnet2(64, heads, [mlp, pair, mix] + tail))
+        self.assertEqual(token_pair_ops(5, 8, 4, 16),
+                         16 + 5 * (4 * 8 * 4 + 2 + 8) + 25 * (18 + 80 + 24) + 5 * (8 + 4) + (5 + 2 * 5 * 16 + 16 + 8))
+        ops = (validate_pwnet2(pwnet2(64, heads, [mlp, (1, [16, 9, 1], [], 16 * 9 + 9)]))["operations"]
+               - (2 * 16 * 9 + 9 + 9))
+        self.assertEqual(info["operations"], ops + token_pair_ops(5, 8, 4, 16) + (2 * 48 * 4 + 48 + 5 * (2 * 16 * 4 + 12)
+                         + 5 + 2 * 5 * 4 + 4 + 8) + (2 * 56 * 9 + 9 + 9) + (9 + 5 * (2 * 4 + 2)))
+        cases = [
+            ([mlp, (14, [0, 0, 0, 8, 1, 2], [], 0)] + tail, "TOKEN_PAIR width"),
+            ([mlp, (14, [0, 4, 0, 8, 8, 2], [], pair[3])] + tail, "geometry stride"),
+            ([mlp, (14, [0, 4, 40, 8, 1, 2], [], pair[3])] + tail, "geometry outside the input"),
+            ([mlp, (14, [0, 4, 0, 8, 1, 2, 2], [], pair[3])] + tail, "parameter 6 must be 0 or 1"),
+            ([(1, [64, 10], [], 640), (14, [0, 4, 0, 8, 1, 2], [], pair[3])] + tail, "TOKEN_PAIR source"),
+        ]
+        for layers, fragment in cases:
+            with self.assertRaisesRegex(ValueError, fragment):
+                validate_pwnet2(pwnet2(64, heads, layers))
 
     def test_cond_head_cost_and_structure(self):
         # COND_HEAD (13): params (condition head, re-selected head), weights size(head) x size(condition head),

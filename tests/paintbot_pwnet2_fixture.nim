@@ -281,3 +281,11 @@ proc condHead*(whenHead, head: int, weights: seq[float32]): Spec =
   ## COND_HEAD: head `head` re-selected with column a of weights [size(head), size(whenHead)] added,
   ## a = the choice selected for `whenHead`.
   Spec(code: 13, params: [whenHead.uint32, head.uint32, 0, 0, 0, 0, 0, 0], tensors: weights)
+
+proc tokenPair*(r: var Rand, source, tokenIn, p, geoBase, geoStride, geoX, geoZ: int, selfPairs = false): Spec =
+  ## TOKEN_PAIR: A [p, tokenIn], B [p, tokenIn], C [p, 10], b [p]; token n's (x, z) at geoBase + n*geoStride + geoX / geoZ.
+  result = Spec(code: 14, params: [source.uint32, p.uint32, geoBase.uint32, geoStride.uint32, geoX.uint32,
+    geoZ.uint32, selfPairs.uint32, 0])
+  result.tensors = r.weights(2*p*tokenIn, 1.0/sqrt(tokenIn.float))
+  result.tensors.add r.weights(p*10, 0.5)
+  result.tensors.add r.weights(p, 0.1)
