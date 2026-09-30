@@ -313,7 +313,9 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
   with: argmax (the first maximum among the allowed) at temperature 0, else exactly one more
   uniform53 draw from the seat's sampling stream, the float64 softmax of `decoder.joint_sampling`
   (`neural_contract.reselectHead`; the same draw as joint sampling whose offsets are that
-  column). It always applies, since every choice of `when_head` has a column. So the head's
+  column). When that column is all zero the selection already has that distribution, so it
+  stands and no draw is taken; a COND_HEAD whose W is zero except column `v` (= a joint
+  sampling's offsets) therefore takes exactly `decoder.joint_sampling`'s draws. The head's
   distribution is `softmax((logits_head + W[:, a]) / T)`, learned end to end with the model.
   Rules: COND_HEAD layers come after every other layer; a head is re-selected by at most one
   COND_HEAD; a COND_HEAD never re-selects a head an earlier COND_HEAD read as its condition

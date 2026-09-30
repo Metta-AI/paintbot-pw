@@ -1151,8 +1151,8 @@ proc jointSelect*(logits: openArray[float32], joint: JointSampling, excluded: op
 # plus column `a` of the layer's weights (a = the choice already selected for `whenHead`),
 # under the same exclusions and temperature it was selected with: argmax (the first maximum
 # among the allowed) at temperature 0, else ONE more uniform53 draw from the seat's
-# sampling stream, the float64 softmax jointSelect uses. Always applies (every choice of
-# the condition head has a column). A model without COND_HEAD layers runs none of this.
+# sampling stream, the float64 softmax jointSelect uses. The host skips an all-zero column
+# (the selection stands, no draw). A model without COND_HEAD layers runs none of this.
 proc reselectHead*(logits: openArray[float32], offset, size: int, offsets: openArray[float32],
     excluded: openArray[bool], temperature: float32, rng: var Rng): int32 =
   ## Head selection from logits[offset ..< offset+size] + offsets; `excluded` (true =
