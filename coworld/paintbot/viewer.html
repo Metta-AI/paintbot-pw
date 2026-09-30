@@ -1263,22 +1263,22 @@
   /* FFA-kin (Heartland): the collapsed header keeps the team header's height; the per-cog
      table is an overlay that drops over the top of the board without moving the layout. */
   header.ffa #match-score { display:none; }
-  /* Two rows: families (clock, chips, great hearts) over policies (mean R per cog). The header
+  /* Two rows: families (clock, chips, great hearts) over players (mean R per cog). The header
      grows to 70px in FFA-kin and the board and table move down with it. */
   header.ffa { height:70px; }
   body:has(header.ffa) #canvas { top:70px; height:calc(100% - 154px) !important; }
   body:has(header.ffa) #kin-table { top:70px; }
   #kin-score { flex:1; min-width:0; display:flex; flex-direction:column; justify-content:center; gap:4px; cursor:pointer; height:100%; border-radius:6px; padding:0 6px; }
   .kin-row { display:flex; align-items:center; gap:12px; min-width:0; height:26px; }
-  #kin-policies { gap:5px; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; scrollbar-color:#ffffff40 transparent; height:22px; }
-  .kin-policy { display:flex; align-items:center; gap:5px; padding:1px 8px; border-radius:10px; background:#00000038; box-shadow:inset 0 0 0 1px #ffffff55; font:600 11px sans-serif; font-variant-numeric:tabular-nums; white-space:nowrap; flex:0 0 auto; cursor:pointer; }
-  .kin-policy:hover { background:#ffffff14; }
-  .kin-policy .name { max-width:180px; overflow:hidden; text-overflow:ellipsis; }
-  .kin-policy .count { opacity:.6; font-weight:500; }
-  .kin-policy .mean { font-weight:700; color:#fff3b0; }
-  .kin-policy.out { opacity:.4; }
-  .kin-policy.selected { background:#fff3b0; color:#10221b; box-shadow:0 0 0 2px #fff3b0; opacity:1; }
-  .kin-policy.selected .mean { color:#10221b; }
+  #kin-players { gap:5px; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; scrollbar-color:#ffffff40 transparent; height:22px; }
+  .kin-player { display:flex; align-items:center; gap:5px; padding:1px 8px; border-radius:10px; background:#00000038; box-shadow:inset 0 0 0 1px #ffffff55; font:600 11px sans-serif; font-variant-numeric:tabular-nums; white-space:nowrap; flex:0 0 auto; cursor:pointer; }
+  .kin-player:hover { background:#ffffff14; }
+  .kin-player .name { max-width:180px; overflow:hidden; text-overflow:ellipsis; }
+  .kin-player .count { opacity:.6; font-weight:500; }
+  .kin-player .mean { font-weight:700; color:#fff3b0; }
+  .kin-player.out { opacity:.4; }
+  .kin-player.selected { background:#fff3b0; color:#10221b; box-shadow:0 0 0 2px #fff3b0; opacity:1; }
+  .kin-player.selected .mean { color:#10221b; }
   #kin-score[hidden] { display:none; }
   #kin-score:hover, #kin-score:focus-visible { background:#ffffff10; outline:none; }
   #kin-clock { font:700 14px sans-serif; font-variant-numeric:tabular-nums; opacity:.9; flex:0 0 auto; }
@@ -1345,7 +1345,7 @@
   </div>
   <div id="kin-score" role="button" tabindex="0" aria-expanded="false" aria-controls="kin-table" aria-label="Family scores; click or press Tab for per-cog scores" hidden>
     <div class="kin-row"><span id="kin-clock"></span><div id="kin-chips"></div><div id="kin-great"></div><span class="kin-expand" aria-hidden="true">▾</span></div>
-    <div class="kin-row" id="kin-policies" aria-label="Policies: mean R per cog; click to highlight a policy's cogs"></div>
+    <div class="kin-row" id="kin-players" aria-label="Players: mean R per cog; click to highlight a player's cogs"></div>
   </div>
   <div class="right">
     <button id="fullscreen" aria-label="Fullscreen">⛶</button>

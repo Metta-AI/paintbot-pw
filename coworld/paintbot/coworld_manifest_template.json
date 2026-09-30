@@ -60,6 +60,10 @@
               "name": {
                 "type": "string",
                 "minLength": 1
+              },
+              "owner": {
+                "type": "string",
+                "description": "Optional: short name of the human who owns the seat's player (e.g. \"David B\"); absent for platform-owned seats."
               }
             }
           }
