@@ -48,3 +48,27 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
    do. A parity test asserts that every observation column equals a value derived from `SeatView`
    on the same tick. A regression test covers the fire-hold two-bodies-one-identity case: the
    helper no longer exists, and no view proc reports the farther body.
+
+## Implementation (2026-09-30)
+
+- Observation contracts `paintbot-pw.teams.view.1` (512 floats; `teams.view.1u<K>` appends K
+  user inputs) and `paintbot-pw.ffa.view.1` (width per match). `encodeTeamsView` /
+  `encodeFfaView` take a `SeatView`; `tests/test_paintbot_seat_view_parity.nim` re-derives
+  every column from the view procs.
+- Action contracts `paintbot-pw.teams.view.1.action.51-25-2-2-2`, its aim-offset variant
+  `...51-25-2-2-2-23-23` (heads 5 and 6, `neuralChoice(5/6)`: the reference decode adds
+  `((ix - 11) * 28, (iz - 11) * 28)`, mirrored for team 1, to an identity aim; the offset is
+  the network's choice, nothing native computes a lead) and `paintbot-pw.ffa.view.1.action.pointer`.
+- Heads become orders only in BASIC: `players/neural_decode.bas` and `neural_decode_ffa.bas`
+  are the reference decode, run by `players/neural_policy.bas` and by the training library for
+  every caller-driven seat (`pw_step`). `pw_set_action_contract` chooses only between
+  teams.view.1 (11) and its aim-offset variant (13) on a teams handle.
+- The retired contracts and decoder options are refused by name at staging
+  (`neural_package.py`) and at load (`neural_host.nim`, `neural_contract.retiredContract`).
+- Training-only supervision: `pw_seat_privileged_labels` (21 floats: the retired world fields,
+  a lead point and nine traversable probes) lives in `training_labels.nim`, compiled only with
+  `-d:pwTraining` and imported only by `native_env.nim`; the boundary test enforces both. It is
+  a label source for auxiliary losses, never an observation.
+- The boundary test also checks that `neural_contract.nim`, `neural_actor.nim` and
+  `neural_host.nim` import neither `sim` nor anything naming `World`, and that `host()` in
+  `bots.nim` reads only its `SeatView`.

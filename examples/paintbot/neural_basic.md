@@ -1,343 +1,196 @@
-# Neural BASIC packages (v1)
+# Neural BASIC packages
 
-A neural policy is a ZIP file with exactly three root entries: `manifest.json`,
-`policy.bas`, and `model.bin`. It uses the ordinary opaque file policy upload.
-The manifest has schema `paintbot-neural-basic/1` or `paintbot-neural-basic/2`, a
-`sha256` object mapping `policy.bas` and `model.bin` to lowercase SHA-256 digests, and
-`observation_contract`/`action_contract` containing the contract SHA-256 hashes
-exported in `neural_contract.nim`. The observation contract may be v1 (`ed5d1676…`, 448
-inputs) or v2 (`e0d7b0b9…`, 506 inputs: v1's 448 unchanged followed by a 58-float terrain
-block, water and height for the seat, the hearts and the visible identities; see
-`neural_actor.md`); the actor's embedded hash must equal the manifest's, selects the
-encoder the seat runs and fixes the actor's input count. The action contract may be v1
-(`55922d42…`, identity aim = body position) or v2 (`51f602ef…`, lead-compensated
-identity aim; see `neural_actor.md`); the actor's embedded hash must equal the manifest's
-and selects the decoder the seat runs, so existing v1 bundles keep byte-identical
-behaviour. Schema 2 is for bundles that may name contract v2: a host that only knows
-schema 1 rejects them at staging instead of at model load. Actor metadata must match
-both contracts, the observation contract's input count (448 for v1, 506 for v2), 82
-outputs, and categorical head sizes `[51,25,2,2,2]`. Any combination of observation and
-action contract versions is allowed, under either schema.
-The actor's binary format, PWNET001 (one fixed MinGRU) or PWNET002 (a layer stack from a
-fixed menu: dense, RMS norm, stacked MinGRU, residual, entity attention, input concat), is
-documented in `neural_actor.md`; staging validates a PWNET002 model's structure and
-operation count (`neural_package.py`), and the host validates both formats at load.
+A neural seat perceives and acts exactly like a plain BASIC seat (docs/neural/seat-view.md).
+Its observation is built only from its `SeatView` (`seat_view.nim`), the values its BASIC
+builtins read on the same tick, and the network's output reaches the game only through its
+`policy.bas`: the neural builtins return numbers, and the script turns them into `walkTo`,
+`lookAt`, `shootAt`, `chargeGrenade`, `sneak` and `shout` like any other script.
 
-A schema-2 manifest may carry a `decoder` object of per-bundle decoder options. Every
-key must be one the host knows and every value the declared type; anything else is
-rejected at staging and again at model load, so a bundle asking for an option a release
-lacks never plays without it. Options change nothing in the action contract: the head
-candidates and the contract hashes are the same with or without them.
+## The package
 
-- `"decoder": {"fire_hold_teammates": true}` (default false = byte-identical to before):
-  after the network's heads are decoded, the shoot order is dropped when a teammate the
-  seat can see (fog-gated, apparent team, the gun's line-of-sight test) stands within the
-  gun's hit tolerance (`Radius` = 55 units) of the segment from the seat to the aim the
-  order leaves and no farther along it than the aim point (`neural_contract.holdFire`).
-  The aim, movement and every other head stand: the network keeps choosing fire and the
-  decoder gates it. The same rule is the native training ABI's `pw_set_seat_fire_hold`,
-  so a policy trained under it is deployed under it. With the option on, the seat's
-  telemetry line ends in ` fire_holds=<n>`, the orders held in the match.
-- `"decoder": {"fire_hold_teammates": {"radius": 150}}`: the same hold with a wider
-  radius (`radius` optional, 55, an integer within 1..2000). The object form turns the
-  hold on; `true` keeps meaning exactly the 55-unit hold above, byte-identical, and
-  `{"radius": 55}` equals `true`. pw-diag4 found 97-100 % of the champion's gun friendly
-  fire comes from teammates outside 55 units of the line when the order is given who walk
-  into the ray during the five-tick windup; 150 units holds those orders. The test is
-  otherwise unchanged (visible teammates, apparent team, line of sight, no farther than
-  the aim point). The native training ABI's `pw_set_seat_fire_hold_radius` sets the same
-  radius. With a radius other than 55 the telemetry line gains ` fire_hold_radius=<r>`
-  after ` fire_holds=<n>`.
-- `"decoder": {"sampling": {"mode": "categorical", "temperature": 1.0, "heads": [0, 1, 2, 3, 4]}}`
-  (default absent = argmax, byte-identical to before): the listed heads are drawn from
-  `softmax(logits / temperature)` instead of taken by argmax, the others keep argmax.
-  `mode` is required and only `"categorical"` exists; `temperature` is optional (1.0)
-  within [0.01, 10]; `heads` is optional (every head) and lists distinct head indices.
-  The draws come from a stream the seat owns (`neural_contract.sampleActions`: SplitMix64
-  from `polyworld/rngs`, the engine's replay-portable generator), seeded from the match
-  seed and the seat's slot the first time the seat sees the world, one draw per sampled
-  head per decision, in head order. The world's own random stream is never touched, so
-  the world hash and every other seat are unaffected by the option, and the same match
-  seed replays the same draws on the same engine build. Replays themselves record the
-  commands the seat gave and never re-run the network. The same generator and seeding
-  are the native training ABI's `pw_set_seat_sampling` / `pw_sample_actions`, so a probe
-  that feeds it the hosted actor's logits takes the hosted seat's draws. With the option
-  on, the seat's telemetry line ends in
-  ` sampling=categorical t=<temperature> heads=<indices> seed=0x<stream seed> draws=<n>`.
-  Caveat: the actor's float32 logits are argmax-stable across CPU architectures but not
-  bit-stable, so a sampled match reproduces exactly on one engine build and architecture
-  (the hosted platform's), not necessarily between an arm64 laptop and an x86 host.
-- `"decoder": {"forbid_objectives": [9, 10]}` (default absent = byte-identical to before):
-  the listed movement-head candidate indices (distinct, 0..50, at least one left allowed)
-  are never selected, argmax or sampled, as if their logits were -inf
-  (`neural_contract.argmaxActions` / `sampleActions` with an `ObjectiveMask`); the rest of
-  a sampled movement head is renormalised and every other head is untouched. The actor's
-  logits are still checked for finiteness as before. 9 and 10 are the two river hearts,
-  the pw-diag river veto. The native training ABI's `pw_set_seat_forbid_objectives` is the
-  same mask (its `pw_seat_forbidden_objectives` hands a trainer the logit mask, and
-  `pw_step` refuses a forbidden index from the caller). With the option on, the telemetry
-  line gains ` forbid_objectives=<indices> forbid_hits=<n>`, the decisions whose unmasked
-  argmax objective was forbidden.
-- `"decoder": {"strafe_legs": {"range": 5250, "legs": [3, 6], "shot_legs": [6, 9], "reverse_permille": 800}}`
-  (default absent = byte-identical; every field optional, the defaults shown are base.bas's
-  and the pw-diag measurement's): base.bas's footwork in contact (`neural_contract.strafeActions`).
-  While the seat sees an apparent enemy within `range` and is not in a trench, its movement
-  head is replaced by a compass step (indices 43..50): a leg perpendicular to the nearest
-  such enemy, turned 3/4 lateral plus the direction to the heart or pickup the movement
-  head chose, held `legs` ticks (inclusive range), reversing across the line with
-  probability `reverse_permille`/1000 at each new leg. A shoot order the gun can take this
-  tick is only issued with at least `shot_legs[0]` ticks of the current leg left; when fewer
-  remain a new leg of `shot_legs` ticks starts on that tick, so the seat's own movement
-  over the windup is the planned step contract v2's lead subtracts. No order is dropped;
-  aim, fire, grenade and sneak stand. Out of contact the leg ends. Integer geometry; the
-  draws (two per new leg) come from the seat's own SplitMix64 stream seeded from the match
-  seed and the slot with its own salt (`strafeRng`), so the option never shifts the
-  sampling draws and never touches the world's stream: the same match seed replays the
-  same legs. Order of the options in a decision: forbid and sampling select the heads,
-  the strafe rewrites the movement head, the heads are decoded, the fire hold gates the
-  shot. The native training ABI's `pw_set_seat_strafe` is the same rule on the same
-  stream (`pw_seat_strafe_stats` reports legs, replaced decisions and the executed
-  movement index). With the option on, the telemetry line gains
-  ` strafe=r<range>,legs<a>-<b>,shot<c>-<d>,rev<p> strafe_legs=<n> strafe_ticks=<n>`.
-- `"decoder": {"aim_snap": {"max_angle_deg": 22.5}}` (default absent = byte-identical;
-  `max_angle_deg` optional, 22.5, a multiple of 0.001 within 0.001..90): pw-diag2's lever 1
-  (`neural_contract.aimSnapActions`). When a decision issues a shoot order with a compass
-  aim (aim index 17..24) and an enemy the seat can see (its apparent identities: fog-gated,
-  apparent team, exactly what the observation shows) stands within `max_angle_deg` of that
-  compass heading (mirrored for team 1 as the aim candidate is), the aim head becomes that
-  enemy's identity index (1..16), so the order aims at the identity candidate (under
-  contract v2 the lead-compensated point). The nearest in angle wins, then the nearer body,
-  then the lower identity index. Only shoot orders: an aim without a shot also turns the
-  seat's vision cone, which the option leaves to the policy. Integer geometry against the
-  threshold `round(cos(angle) * 32768)`; stateless, no draws. The native training ABI's
-  `pw_set_seat_aim_snap` (angle in millidegrees) is the same rule (`pw_seat_aim_snap_stats`
-  reports snaps and the executed aim index). With the option on, the telemetry line gains
-  ` aim_snap=<deg>deg,cos_q15=<threshold> aim_snaps=<n>`.
-- `"decoder": {"steady_shot": {}}` (default absent = byte-identical; no parameters): the
-  other half of pw-diag2's lever 1 (`neural_contract.steadyShotActions`). The seat stands
-  still (movement index 0: the goal is its own position, so it makes no step and contract
-  v2's planned own step is zero) on every decision from a shoot order the gun takes until
-  the ray leaves, stated in the gun's own windup state: the order tick (the shoot head is 1
-  and, on the pre-step world, the seat is alive, carries the gun rather than a spray can,
-  its windup is 0 and its cooldown at most 1, which the step decrements before it tests)
-  and every tick whose pre-step windup is above 0 (5..1, whatever the shoot head says; the
-  ray leaves after the move of the tick whose windup is 1). Six decisions per shot and zero
-  own drift over the windup, which is what base.bas does. Stateless, no draws; every other
-  head stands. The fire hold is decided after the decode, so an order it drops has still
-  stood its order tick. Movement index 0 is the steady stance, so a bundle that also
-  forbids index 0 is rejected. The native training ABI's `pw_set_seat_steady_shot` is the
-  same rule (`pw_seat_steady_stats` reports order ticks and decisions held and the executed
-  movement index). With the option on, the telemetry line gains
-  ` steady_shot=on steady_shots=<n> steady_ticks=<n>`.
-- `"decoder": {"aim_retarget": {"max_range": 5250, "hp_weight": 160000, "carry_weight": 2500000}}`
-  (default absent = byte-identical; every field optional with exactly those defaults,
-  integers, `max_range` within 1..20000, both weights within 0..1000000000): pw-diag3's
-  lever 1, target choice (`neural_contract.aimRetargetActions`). On every shoot order the
-  policy makes with an identity or compass aim (1..24; a keep aim, 0, is left alone), the
-  aim head becomes the visible apparent enemy identity (the observation's identity block:
-  present, apparent team enemy) with the smallest
-  `d^2 - (3 - hp) * hp_weight - carrying * carry_weight` among those with `d <= max_range`,
-  where `d` runs from the seat to that identity's aim candidate under the bundle's action
-  contract (v2: the lead-compensated point, with the planned own step of the decision's
-  movement and sneak heads, as `pw_action_candidates` reports it). Ties go to the lower
-  identity; when no enemy qualifies the order stands. The defaults are base.bas's own
-  target rule, which every live-field opponent follows 85-88 % of the time. Integer
-  arithmetic; stateless, no draws; it reads nothing the observation and the aim candidates
-  do not. The native training ABI's `pw_set_seat_aim_retarget` is the same rule
-  (`pw_seat_aim_retarget_stats` reports retargets and the executed aim index). With the
-  option on, the telemetry line gains
-  ` aim_retarget=r<max_range>,hp<hp_weight>,carry<carry_weight> aim_retargets=<n>`.
-- `"decoder": {"shot_gate": {"max_range": 5250}}` (default absent = byte-identical;
-  `max_range` optional, 5250, an integer within 1..20000): pw-diag3's lever 3
-  (`neural_contract.shotGateActions`). After the aim retarget and the aim snap, a shoot
-  order becomes no shot when its aim is still a compass index (no aim snap configured, or
-  no enemy in the snap's cone), when the snap aimed it at an enemy whose body lies beyond
-  `max_range`, or when it is an identity aim whose aim candidate lies beyond `max_range`
-  (measured as the retarget measures it). A keep aim, and an identity aim within range or
-  that no visible body carries, pass; this is exactly pw-diag3's `--shot-gate`. A dropped
-  decision keeps the aim head it had before the snap (the snap rewrites only shoot orders),
-  so the strafe, the steady shot (which then stands no order tick) and the fire hold see a
-  decision without a shot. Stateless, no draws. The native training ABI's
-  `pw_set_seat_shot_gate` is the same rule (`pw_seat_shot_gate_stats` reports dropped
-  orders). With the option on, the telemetry line gains
-  ` shot_gate=r<max_range> shot_gates=<n>`.
-- `"decoder": {"spray_aim": {"max_range": 850}}` and
-  `"decoder": {"spray_gate": {"max_teammates": 0, "min_enemies": 1}}` (default absent =
-  byte-identical; every field optional with those defaults, integers, `max_range` 1..850,
-  `max_teammates` 0..7, `min_enemies` 0..8): PLAN-gcrl-spray S1. A spray can replaces the
-  gun: a shoot order starts a five-tick burst whose cone (reach 850 + the body radius,
-  widening) deals 3 to every body in it, teammates included. Both options act only on a
-  shoot order while the seat holds a ready spray can (the order starts a burst this step)
-  and judge the cone that order would produce on the pre-step world, with the engine's own
-  cone geometry, over the bodies the seat can see under their apparent teams.
-  `spray_aim` turns the aim head to the visible enemy identity within `max_range` (+ the
-  body radius, clear line) whose cone holds the most enemies (ties: nearer, then lower hp,
-  then lower identity); with no such cone the order stands. `spray_gate` drops the order
-  unless its cone holds at least `min_enemies` enemies and at most `max_teammates`
-  teammates. The native training ABI's `pw_set_seat_spray_aim` / `pw_set_seat_spray_gate`
-  are the same rules. The telemetry line gains ` spray_aim=r<max_range> spray_aims=<n>` and
-  ` spray_gate=t<max_teammates>,e<min_enemies> spray_gates=<n>`.
-- `"decoder": {"joint_sampling": {"when": {"head": h, "value": v}, "head": g, "offsets":
-  [...]}}` (default absent = byte-identical; h and g distinct head indices, v a choice of
-  head h, `offsets` exactly one number per choice of head g, each within -1000..1000):
-  a head's selection conditioned on another's (`neural_contract.jointSelect`). After the
-  tick's selection (forbid, BASIC masks, argmax or sampling, BASIC temperatures), when head
-  h was selected as v, head g is selected again from its logits plus `offsets`, under the
-  exclusions and temperature it was selected with: argmax at temperature 0, else exactly
-  one more draw from the seat's sampling stream. Otherwise nothing changes and no draw is
-  taken. For example `{"when": {"head": 2, "value": 1}, "head": 0, "offsets": [1000, 0,
-  ...]}` stands the seat still on every shoot draw, the network's own choice of when to
-  shoot, instead of a rule that overrides it. The telemetry line gains
-  ` joint_sampling=h<h>=<v>->h<g> held=<n>` (decisions the condition held on). A learned
-  version of the same coupling lives in the model instead: PWNET002's COND_HEAD layer
-  (`neural_actor.md`), whose column of weights is chosen by the condition head's selection;
-  a bundle cannot use both.
-- Order of every option within one decision: forbid and sampling (or argmax) select the
-  heads; joint sampling may re-select its head; the aim retarget, the aim snap, then the spray aim rewrite the aim head; the shot
-  gate may drop the shot (undoing the snap and spray aim), then the spray gate may; the
-  strafe, then the steady shot, rewrite the movement head (a steadied decision overrides
-  the strafe's leg for that tick); the heads are decoded under the contract; the fire hold
-  gates the decoded shot.
+A neural policy is a ZIP file with exactly three root entries: `manifest.json`, `policy.bas`
+and `model.bin`. It uses the ordinary opaque file policy upload. The manifest has schema
+`paintbot-neural-basic/1` or `paintbot-neural-basic/2`, a `sha256` object mapping `policy.bas`
+and `model.bin` to lowercase SHA-256 digests, and `observation_contract` / `action_contract`
+holding contract hashes (the SHA-256 of the contract id; `neural_contract.nim` exports them).
+Schema 2 may also carry `decoder` and `user_inputs` (below).
 
-The archive is bounded to 16 MiB model, 64 KiB BASIC, and 8 KiB manifest.
-Duplicates, unexpected paths/files, encryption, incorrect hashes, and oversized
-expanded entries are rejected. Files are never extracted by archive path.
-The host stages the BASIC file with `.model.bin` and `.neural.json` sidecars.
-For local native runs, pass the BASIC filename and place those sidecars beside
-it. The model always validates its own dimensions, finite weights, and contracts;
-the staged manifest additionally binds contract metadata. Plain BASIC needs no
-sidecars and remains supported.
+| observation contract | id | inputs |
+|---|---|---|
+| teams.view.1 | `paintbot-pw.teams.view.1` | 512 |
+| teams.view.1u<K> | `paintbot-pw.teams.view.1u<K>`, K = 1..128 | 512 + K |
+| ffa.view.1 | `paintbot-pw.ffa.view.1` | per match (`ffaViewLayout`) |
+
+| action contract | id | heads |
+|---|---|---|
+| teams.view.1 | `paintbot-pw.teams.view.1.action.51-25-2-2-2` | 51, 25, 2, 2, 2 |
+| teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 |
+| ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 |
+
+teams.view.1 (and u<K>) pairs with the teams.view.1 action contract or its aim-offset variant
+and plays the teams game; ffa.view.1 pairs with ffa.view.1 pointer and plays FFA-kin (Heartland)
+at any seat count. The actor's embedded hashes must equal the manifest's, its input count the
+contract's width, and its heads the action contract's. Every column of both observation
+contracts is documented in `neural_contract.encodeTeamsView` / `encodeFfaView` and in
+`neural_actor.md`; `tests/test_paintbot_seat_view_parity.nim` re-derives each one from the
+SeatView procs.
+
+Retired for BASIC parity and refused at staging and at load, with a message naming
+docs/neural/seat-view.md: observation contracts v1 (`paintbot-pw.rules37.obs.v1.float448`), v2
+(`...rules37.obs.v2.float506`), v3 (`...rules43.obs.v3.float514`), v2u<K>, v3u<K>, ffa.v1
+(`...rules40.obs.ffa.v1.float810`) and ffa.v2 (`...rules48.obs.ffa.v2`); action contracts v1, v2
+(`...rules37.action.v1/v2.51-25-2-2-2`) and ffa.v2 pointer. Their observations carried state no
+BASIC builtin reads (gun cooldown and windup, spray cooldown, shield, respawn, the current aim,
+heart meters, the end tick, blocked/traversable probes), and their actions were decoded natively
+(identity lead, planned own step).
+
+The actor's binary format, PWNET001 (one fixed MinGRU) or PWNET002 (a layer stack: dense, RMS
+norm, stacked MinGRU, residual, entity attention, input concat, TOKEN_MLP / TOKEN_MIX with their
+LayerNorm, SEGMENT_NEAR, COND_HEAD, TOKEN_PAIR, ...), is documented in `neural_actor.md`; staging
+validates a PWNET002 model's structure and operation count (`neural_package.py`), and the host
+validates both formats at load.
+
+The archive is bounded to 16 MiB model, 128 KiB BASIC and 8 KiB manifest. Duplicates,
+unexpected paths or files, encryption, incorrect hashes and oversized expanded entries are
+rejected; files are never extracted by archive path. The host stages the BASIC file with
+`.model.bin` and `.neural.json` sidecars; for local native runs pass the BASIC filename and put
+the sidecars beside it. Plain BASIC needs no sidecars.
+
+## policy.bas
 
 ```basic
 paintbot_observe(neuralObservation())
 run_neural_net(neuralModel(), neuralObservation(), neuralLogits(), neuralState())
-paintbot_act(neuralLogits())
+neuralSample()
+' then turn neuralChoice(0) .. neuralChoice(4) into walkTo / lookAt / shootAt / ...
 ```
 
-Each seat owns observation, logit, and recurrent-state float buffers. The four
-handle functions return typed capabilities scoped to that seat; integers cannot
-refer to another seat's buffers. BASIC never performs FP32 arithmetic itself.
-A tick permits one observation, one inference, and one action decode, in order.
-Invalid handles, missing models, repeated inference, and nonfinite inference
-results disable the seat through the existing policy-failure mechanism and
-produce a safe empty command. All seats observe the pre-action world.
+`players/neural_decode.bas` is the reference reading of the teams.view.1 heads (and of the
+aim-offset heads), `players/neural_decode_ffa.bas` that of ffa.view.1 pointer, and
+`players/neural_policy.bas` is a complete policy: the three lines above followed by
+`neural_decode.bas` verbatim. The training library decodes a caller's heads with the same files,
+so a policy built on them trains and plays the same way. Everything the retired native decoder
+options did (fire hold, strafe legs, aim snap, steady shot, aim retarget, shot gate, spray aim,
+spray gate, the identity lead) is a policy's own business now, written in BASIC from its
+builtins.
 
-## Neural BASIC I/O: user inputs, the head-level phase, the command buffer
+The four handle functions return typed capabilities scoped to the seat; integers cannot refer
+to another seat's buffers, and BASIC never performs FP32 arithmetic itself. Per tick, in order:
+`paintbot_observe` once, `run_neural_net` once, then the head-level phase. Recurrent state
+resets at match start, death and respawn; training must use the same convention. All seats
+observe the pre-action world. Misuse (wrong order, repeated inference, an out-of-range index, a
+head with every choice masked, non-finite logits) disables the seat through the ordinary policy
+failure path; a disabled seat issues nothing.
 
-Everything below is additive: a bundle that uses none of it plays byte-identically, and
-`paintbot_act(neuralLogits())` is exactly `neuralDecode()` followed by `neuralIssue()`.
-All of it counts against the existing instruction/work budget and the 4,000,000-operation
-neural budget; no limit changes. Misuse (wrong order, out-of-range index, a head with every
-choice masked) disables the seat like any other neural error.
+Builtins (`neural_host.addNeuralFunctions`); none of them acts:
 
-**User inputs (BASIC -> net).** A schema-2 manifest may carry
-`"user_inputs": {"count": K, "init": [K integers]}`, K within 1..128, each init value within
--1,000,000..1,000,000. The actor's observation contract is then
-`paintbot-pw.rules39.obs.v2u<K>` (hash = SHA-256 of that id; the table is
-`neural_contract.UserInputsContractHashes`): v2's 506 floats followed by K user floats, so
-the actor has 506 + K inputs. Manifest, actor hash and input count must all agree (checked
-at staging and at load). `neuralInput(i, v)` (i in 0..K-1) sets input i to v clamped to
-+-1,000,000; the net reads `float32(v) / 1000`. Values persist across ticks and deaths
-within a match and start at `init` each match; a value set during tick t is in the
-observation of tick t+1 (one tick of latency, the same in training). An actor on
-observation contract v3 (`paintbot-pw.rules43.obs.v3.float514`, v2 + an 8-float scoreboard,
-teams game only) takes user inputs the same way through `paintbot-pw.rules43.obs.v3u<K>`
-(table `neural_contract.V3UserInputsContractHashes`): 514 + K inputs.
+- `neuralModel() neuralObservation() neuralLogits() neuralState()`: the handles.
+- `paintbot_observe(obs)`, `run_neural_net(model, obs, logits, state)`.
+- `neuralObs(i)`: round(observation[i] x 1000) of this tick's observation (any column,
+  user inputs included). `neuralLogit(i)`: round(logit[i] x 1000), after `run_neural_net`.
+- Before selection: `neuralMask(h, bits)` excludes choice i of head h for each set bit i
+  (choices 0..31), `neuralMaskFrom(h, first, bits)` the choices first..first+31 (head 0 has 51);
+  later calls overwrite their window. `neuralTemperature(h, milli)` sets head h's temperature to
+  milli/1000 for this tick (h = -1 every head; 0 = argmax; 1..100000). Masks add to
+  `decoder.forbid_objectives` on head 0; both last one tick. `neuralMask(0, 1536)` is
+  `forbid_objectives [9, 10]` and `neuralTemperature(-1, 1000)` is `sampling {"temperature":
+  1.0}`, draw for draw.
+- `neuralSample()`: the tick's selection, once: argmax or the seat's sampling stream, under the
+  masks and temperatures, then `decoder.joint_sampling` or the model's COND_HEAD layers.
+- `neuralChoice(h)` reads head h (5 and 6 are the aim-offset heads); `neuralSetChoice(h, i)`
+  overrides it (the training ABI's `pw_seat_policy_choices` reports what the script acted on).
+- `neuralInput(i, v)`: user input i (below).
+- `neuralLayout(i)`: for i in 0..15 `pw_observation_layout`'s word i (row floats, header floats,
+  cog offset, cog rows, cog width, heart offset, heart rows, heart width, great offset, great
+  rows, great width, valid column, seats, control hearts; the section words need ffa.view.1),
+  for i in 16..22 the size of action head i - 16 (0 for a head the contract lacks; 21 and 22 are
+  23 under the aim-offset contract).
+- `neuralRow(section, k)` (ffa.view.1): the entity row k shows this tick: section 0 the seat id
+  of cog row k (`nearAgentId(k)` after `nearAgents(20000)`; -1 past the cogs the seat sees), 1 the
+  control heart index, 2 the great heart index.
 
-**Head-level phase (net -> BASIC).** Per tick, in this order:
+Plain BASIC has `rnd(n)` too: 0 .. n-1 from the seat's own SplitMix64 stream, seeded from the
+match seed and the slot, so a script can sample without a network (`guide.md`).
 
-- before selection: `neuralMask(h, bits)` excludes choice i of head h for each set bit i
-  (choices 0..31), `neuralMaskFrom(h, first, bits)` the choices first..first+31 (head 0 has
-  51); later calls overwrite their window. `neuralTemperature(h, milli)` sets head h's
-  temperature to milli/1000 for this tick (h = -1: every head; 0 = argmax; 1..100000); heads
-  without a call keep `decoder.sampling`. Masks add to `decoder.forbid_objectives` on head 0;
-  both last one tick. `neuralMask(0, 1536)` is `forbid_objectives [9, 10]` and
-  `neuralTemperature(-1, 1000)` is `sampling {"temperature": 1.0}`, draw for draw.
-- `neuralSample()`: selection (argmax or the seat's sampling stream) under those masks and
-  temperatures, then the aim-phase decoder options (aim retarget, aim snap, spray aim, shot
-  gate, spray gate). `neuralChoice(h)` reads a head, `neuralSetChoice(h, i)` overrides it
-  (until `neuralDecode`).
-- `neuralDecode()`: samples first if `neuralSample` was not called, then the movement-phase
-  options (strafe legs, steady shot), the decode under the action contract and the fire
-  hold, into the seat's command buffer. Nothing is issued yet.
-- `cmdWalk() cmdGoalX() cmdGoalZ() cmdShoot() cmdAimX() cmdAimZ() cmdGrenade() cmdSneak()
-  cmdDirect()` read the buffer; `cmdSet(field, value)` edits it with field ids 0..8 in that
-  order (flags are value <> 0; an aim coordinate is clamped to the map as `lookAt` clamps
-  it; a goal is kept as `walkTo` keeps it).
-- `neuralIssue()` issues the buffer (once per tick). A tick that decodes and never issues
-  issues nothing from the net. Host calls after it (`chargeGrenade(0)`, `lookAt`, ...)
-  still edit the seat's order as before.
+## Decoder options (selection only)
 
-Readers: `neuralObs(i)` = round(observation[i] x 1000) of this tick's observation (any
-index of the contract, user inputs included; e.g. a ready spray can is `hasSpray` and
-`neuralObs(23) = 0`, column 23 being spray cooldown / 60). `neuralGoalX/Z(m)` (m in 0..50)
-and `neuralAimX/Z(k)` (k in 0..24) are the points head choice m / k resolves to this tick
-(`pw_action_candidates`' rule; goal 0 = the seat's position, aim 0 = its current aim;
-INT32_MIN when the candidate does not exist now); the aim readers need `neuralSample` first
-and use the tick's movement and sneak choices for a contract-v2 identity lead. Under action
-contract ffa.v2 pointer the index ranges are that match's heads (objective `0 .. 10 + H`,
-aim `0 .. 7 + N`) and the points are the rows' (`neural_actor.md`).
+A schema-2 manifest may carry a `decoder` object. Every option reshapes the selection from the
+network's own distribution; none computes an order. Every key must be one the host knows and
+every value the declared type, checked at staging and again at model load, so a bundle asking
+for an option a release lacks never plays without it. The retired rule names
+(`fire_hold_teammates`, `strafe_legs`, `aim_snap`, `steady_shot`, `aim_retarget`, `shot_gate`,
+`spray_aim`, `spray_gate`) are refused by name.
 
-Layout readers (every seat; the section words need observation contract ffa.v2):
-`neuralLayout(i)` for i in 0..15 is `pw_observation_layout`'s word i (row floats, header
-floats, cog offset, cog rows, cog width, heart offset, heart rows, heart width, great offset,
-great rows, great width, valid column, seats, control hearts), and for i in 16..20 the size of
-action head i - 16. `neuralRow(section, k)` is the entity observation row k shows this tick:
-section 0 the seat id of cog row k (-1 past the cogs the seat sees), 1 the control heart index,
-2 the great heart index (ffa.v2 only).
+- `"sampling": {"mode": "categorical", "temperature": 1.0, "heads": [0, 1, 2, 3, 4]}`
+  (absent = argmax): the listed heads are drawn from `softmax(logits / temperature)`, the others
+  keep argmax. `temperature` within [0.01, 10] (default 1.0); `heads` distinct head indices
+  (default every head; 5 and 6 only under the aim-offset contract). The draws come from the
+  seat's own stream (`neural_contract.samplingRng`: SplitMix64 seeded from the match seed and
+  the slot), one draw per sampled head per decision in head order; the world's stream is never
+  touched, so the world hash and every other seat are unaffected. The training ABI's
+  `pw_set_seat_sampling` / `pw_sample_actions` use the same stream. Telemetry:
+  ` sampling=categorical t=<temperature> heads=<indices> seed=0x<seed> draws=<n>`. Float32 logits
+  are argmax-stable across CPU architectures but not bit-stable, so a sampled match reproduces
+  exactly on one build and architecture.
+- `"forbid_objectives": [9, 10]`: movement-head choices (distinct, 0..50, at least one left) never
+  selected, argmax or sampled, as if their logits were -inf. The training ABI's
+  `pw_set_seat_forbid_objectives` is the same mask. Telemetry
+  ` forbid_objectives=<indices> forbid_hits=<n>`.
+- `"joint_sampling": {"when": {"head": h, "value": v}, "head": g, "offsets": [...]}`: when head h
+  was selected as v, head g is selected again from its logits plus `offsets` (one number per
+  choice of g, each within -1000..1000) under its exclusions and temperature: argmax at
+  temperature 0, else one more draw from the seat's stream. Telemetry
+  ` joint_sampling=h<h>=<v>->h<g> held=<n>`. A learned version lives in the model (PWNET002's
+  COND_HEAD layer, `neural_actor.md`); a bundle cannot use both.
 
-Action contract ffa.v2 pointer seats select by argmax, `decoder.sampling` or
-`neuralTemperature`; `neuralMask` / `neuralMaskFrom` are refused (their bit masks cover the
-fixed contracts' 51 objectives), and so is every manifest `decoder` option but `sampling`.
+Under ffa.view.1 pointer only `sampling` is accepted (`neuralMask` / `neuralMaskFrom` are
+refused too: their bit masks cover the teams heads).
 
-What stays native: the fire hold, aim retarget, aim snap, shot gate, spray aim and strafe
-legs need int64 geometry, path planning or the seat's own streams, so they remain manifest
-`decoder` options. The spray gate, the grenade mask, objective forbids, temperatures and
-anything built on the candidate readers can be written in BASIC; the spray gate written
-between `neuralSample()` and `neuralDecode()` reproduces `decoder.spray_gate` hash for hash
-(`tests/test_paintbot_neural_basic_io.nim`).
+## User inputs (BASIC -> net)
 
-Training runs the same policy.bas: `pw_set_seat_policy_script` in the native ABI drives a
-seat with the bundle's policy.bas and manifest, the trainer passing each tick's logits to
-`pw_step_logits` and reading what the script executed (selected heads, applied masks and
-temperatures) from `pw_seat_policy_choices` (`native_env.h`).
+A schema-2 manifest may carry `"user_inputs": {"count": K, "init": [K integers]}`, K within
+1..128, each value within -1,000,000..1,000,000. The observation contract is then
+`paintbot-pw.teams.view.1u<K>`: teams.view.1's 512 floats followed by K user floats. Manifest,
+actor hash and input count must agree. `neuralInput(i, v)` sets input i to v clamped to
++-1,000,000; the net reads `float32(v) / 1000`. Values persist across ticks and deaths within a
+match and start at `init` each match; a value set during tick t is in the observation of tick
+t + 1 (the same in training).
 
-Native inference has a separate deterministic operation count and a maximum of
-4,000,000 operations per seat/tick, scaled like BASIC's budget above 16 seats
-(`4,000,000 * seats / 16`: 12,500,000 in a 50-seat match). This cannot be bypassed by repeated host
-calls. Bytecode and ordinary host work retain their existing limits. `PW_BASIC_PEAKS=1`
-reports `peak_neural_operations` separately from bytecode work. On the hosted platform
-each seat that loaded a neural package also gets one line in its private seat log at
-match end, `neural: peak_ops=238080 budget=4000000 model=w128 ticks=1200` (peak native
-operations in any tick, the budget, the model: `w<hidden width>` for PWNET001,
-`pwnet2-l<layers>-s<state floats>` for PWNET002, ticks played); a package rejected
-for exceeding the budget gets the same line with the rejected model's cost and `ticks=0`
-before its `BASIC error`. Plain BASIC seats log nothing. Recurrent
-state resets at initial use, match reset, death, and respawn. Training must use
-the same reset convention. Output selection is deterministic headwise argmax unless
-the bundle asks for `decoder.sampling` (above); training samples categorical heads and
-evaluates the deployed artifact under the selection rule it will be deployed with.
+## Budget and telemetry
 
-The versioned neural observation includes public self cooldown and heart-meter
-state as well as the documented feature layout. These are deliberate additions
-to the older BASIC scalar getters; they are not privileged enemy information.
-Neural entity features preserve apparent identity and fog-of-war restrictions.
+Native inference has a deterministic operation count and a maximum of 4,000,000 operations per
+seat/tick, scaled like BASIC's budget above 16 seats (`4,000,000 * seats / 16`). Bytecode and
+ordinary host work keep their own limits. `PW_BASIC_PEAKS=1` reports `peak_neural_operations`
+separately. On the hosted platform each seat that loaded a neural package gets one line in its
+private seat log at match end, `neural: peak_ops=238080 budget=4000000 model=w128 ticks=1200`
+(`pwnet2-l<layers>-s<state floats>` for PWNET002), followed by the telemetry of its options; a
+package rejected for exceeding the budget logs its cost with `ticks=0` before its `BASIC error`.
+
+## Training
+
+Training runs the same policy.bas: the native ABI's `pw_set_seat_policy_script` drives a seat
+with the bundle's policy.bas and manifest, the trainer passing each tick's logits to
+`pw_step_logits` and reading the heads the script acted on from `pw_seat_policy_choices` (and
+`pw_seat_policy_offset_choices` for heads 5 and 6). A caller-driven seat's heads (`pw_step`) are
+decoded by the reference decoder script. `pw_set_seat_conditionals` gives a policy seat the
+model's COND_HEAD layers. See `native_env.h`.
 
 Validation:
 
 ```
-python3 -m unittest coworld/paintbot/test_neural_package.py
-nim c -r -d:headless tests/test_paintbot_neural_host.nim
-nim c -r -d:headless tests/test_paintbot_neural_basic_io.nim
-nim c -r -d:headless tests/test_paintbot_neural_net2.nim
-nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim
-nim c -r -d:headless tests/test_paintbot_neural_contract.nim
-nim c -r -d:headless tests/test_paintbot_neural_obs_v2.nim
-nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_obs_v2.nim
-nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_fire_hold.nim
-nim c -r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
+python -m unittest discover -s coworld/paintbot -p test_neural_package.py
+nim r -d:headless tests/test_paintbot_neural_host.nim
+nim r -d:headless tests/test_paintbot_neural_basic_io.nim
+nim r -d:headless tests/test_paintbot_neural_view_contracts.nim
+nim r -d:headless tests/test_paintbot_seat_view_parity.nim
+nim r tests/test_paintbot_seat_view_boundary.nim
+nim r -d:headless tests/test_paintbot_neural_net2.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_aim_offset.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_parity.nim
 ```
 
-A successful local loader test is not hosted certification. Release must still
-verify platform bundle acceptance, a mixed plain/neural full match, and the
-normal hosted hash-verified replay before claiming deployment.
+A successful local loader test is not hosted certification. Release must still verify platform
+bundle acceptance, a mixed plain/neural full match, and the normal hosted hash-verified replay
+before claiming deployment.

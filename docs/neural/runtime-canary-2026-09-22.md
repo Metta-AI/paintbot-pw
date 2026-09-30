@@ -92,8 +92,9 @@ This is the current local integration canary, not hosted certification.
 
 Model SHA-256: `677f0a8daf0dbab8d97c055f28558adc69b0099c661ed717a8d03de3239e2bc1`.
 BASIC SHA-256 remains `316e4cf91ac9c7f9a0de848c2b59f7575a07666569efad89d9dc521bd69ea99d`.
-Current contracts are `paintbot-pw.rules37.obs.v1.float448` and
-`paintbot-pw.rules37.action.v1.51-25-2-2-2`; hashes are in `neural_contract.nim`.
+The contracts at the time were `paintbot-pw.rules37.obs.v1.float448` and
+`paintbot-pw.rules37.action.v1.51-25-2-2-2`. Both were retired on 2026-09-30 for BASIC parity
+(`seat-view.md`); the current contracts and hashes are in `neural_contract.nim`.
 
 After integration, the BASIC-only Python runtime's 28 tests, six package tests,
 rules 37 glory suite, legacy replay suite, neural-host/contract suites, native
