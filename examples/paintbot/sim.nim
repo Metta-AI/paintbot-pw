@@ -654,6 +654,21 @@ proc configureVision*(mode: string) =
   if mode notin ["", "team"]: raise newException(ValueError, "Unknown Paintbot vision mode: " & mode)
   teamVision = mode == "team"
 proc visionMode*(): string = (if teamVision: "team" else: "")
+# Vision range (opt-in per match with the "vision_range" config, any rules, both modes): per-cog
+# sight lines reach at most this far, which spares the sight-line trace to every cog and
+# pickup beyond it. Absent (0) keeps the rules' own reach: unlimited from rules 5.
+const MaxVisionRangeMetres* = 200
+when defined(pwTraining):
+  var visionRangeCm {.threadvar.}: int
+else:
+  var visionRangeCm = 0 ## set by configureVisionRange, never directly; 0 = unlimited
+proc configureVisionRange*(metres: int) =
+  ## 0 = unlimited (the default), else 1..MaxVisionRangeMetres metres of per-cog sight. Like
+  ## configureVision, it binds the calling thread; set it before newWorld.
+  if metres notin 0..MaxVisionRangeMetres:
+    raise newException(ValueError, "Paintbot vision_range must be 1.." & $MaxVisionRangeMetres & " metres")
+  visionRangeCm = metres*100
+proc visionRangeMetres*(): int = visionRangeCm div 100
 type GloryConfig* = object
   ## Rules 43: the glory awards a match pays, from the Coworld config's "glory" (see
   ## parseGloryConfig in match_config.nim). Periods are whole seconds; teams recordings carry
@@ -754,6 +769,7 @@ proc canSeePoint*(w: World, slot: int, p: Point): bool =
   let distance = distance2(c.pos, p)
   if visionRulesVersion < 5 and distance >
       VisionRange.int64*VisionRange: return false
+  if visionRangeCm > 0 and distance > visionRangeCm.int64*visionRangeCm: return false
   if visionRulesVersion >= 4 and distance > 0:
     let facing = if c.aim == Point(): home(1-team(slot)) else: c.aim
     let fx = int64(facing.x)-c.pos.x

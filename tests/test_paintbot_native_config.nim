@@ -93,13 +93,16 @@ proc variants(): seq[Variant] =
 
 proc hostRun(config: string, seed: int32, ticks: int, rules = LiveRules): Run =
   ## The hosted game's live path (game.setup, game.advance): applyGameConfig, the live rules
-  ## (or `rules`), the config's map and vision (CoworldConfig), its glory, newLiveWorld, BASIC
+  ## (or `rules`), the config's map and vision (CoworldConfig), its vision range and glory,
+  ## newLiveWorld, BASIC
   ## seats deciding on the pre-step world, speech, step.
   applyGameConfig(config)
   let node = parseJson(config)
   configureRules(rules)
   configureMap(node{"map"}.getStr(""))
   configureVision(node{"vision"}.getStr(""))
+  checkVisionRange(visionRangeChoice, visionMode())
+  configureVisionRange(visionRangeChoice)
   configureGlory(gloryChoice)
   var w = newLiveWorld(seed, ticks.int32)
   let players = loadBots(@[BotGroup(path: Base, count: Seats)])
@@ -116,7 +119,7 @@ proc hostRun(config: string, seed: int32, ticks: int, rules = LiveRules): Run =
   # Leave the thread as a training thread finds it: no host pin, the default awards.
   kinLayoutPin = none(KinLayout)
   gameMode = gmTeams
-  configureMap(""); configureVision(""); configureGlory(DefaultGloryConfig)
+  configureMap(""); configureVision(""); configureVisionRange(0); configureGlory(DefaultGloryConfig)
 
 proc nativeHandle(config: string, rules: int, seed: int32, ticks: int): pointer =
   result = pw_create(seed, ticks.int32)
@@ -201,6 +204,12 @@ suite "Native per-handle rules and game config":
         ("""{"map": 3}""", "Paintbot map must be a string"),
         ("""{"vision": "x-ray"}""", "Unknown Paintbot vision mode: x-ray"),
         ("""{"mode": "ffa_kin", "vision": "team"}""", "Team vision applies to the teams game only"),
+        ("""{"vision_range": 0}""", "Paintbot vision_range must be an integer 1..200 (metres)"),
+        ("""{"vision_range": 201}""", "Paintbot vision_range must be an integer 1..200 (metres)"),
+        ("""{"vision_range": "20"}""", "Paintbot vision_range must be an integer 1..200 (metres)"),
+        ("""{"vision_range": 20.5}""", "Paintbot vision_range must be an integer 1..200 (metres)"),
+        ("""{"vision": "team", "vision_range": 20}""",
+          "Paintbot vision_range applies to per-cog vision only, not \"vision\": \"team\""),
         ("""{"glory": """, "")]:
       checkpoint text
       check handle.setConfig(text, message) == -2
@@ -212,6 +221,8 @@ suite "Native per-handle rules and game config":
     expect ValueError: applyGameConfig("""{"mode": "ffa_kin", "glory": {"behind_lives": 5}}""")
     expect ValueError: configureMap("nowhere")
     expect ValueError: configureVision("x-ray")
+    expect ValueError: applyGameConfig("""{"vision_range": 0}""")
+    expect ValueError: configureVisionRange(201)
     kinLayoutPin = none(KinLayout); gameMode = gmTeams
     pw_destroy(handle)
 
@@ -254,7 +265,11 @@ suite "Native per-handle rules and game config":
         ("""{"glory": {"quiet_supplies": 40, "quiet_supplies_seconds": 7, "behind_lives_seconds": 2}}""", LiveRules),
         ("""{"mode": "ffa_kin"}""", LiveRules), ("""{"mode": "ffa_kin"}""", NativeRules),
         ("""{"mode": "ffa_kin", "map": "atoll"}""", 43),
-        ("""{"map": "highlands", "glory": {"behind_lives": 5}}""", NativeRules)]:
+        ("""{"map": "highlands", "glory": {"behind_lives": 5}}""", NativeRules),
+        ("""{"vision_range": 20, "glory": {"behind_lives": 5}}""", LiveRules),
+        ("""{"vision_range": 20}""", NativeRules),
+        ("""{"map": "crater", "vision_range": 12}""", LiveRules),
+        ("""{"mode": "ffa_kin", "vision_range": 20}""", LiveRules)]:
       checkpoint config & " at rules " & $rules
       let expected = hostRun(config, 77, ticks, rules)
       let got = nativeRun(config, rules, 77, ticks)
@@ -267,7 +282,9 @@ suite "Native per-handle rules and game config":
                  ("""{}""", NativeRules, 32'i32),
                  ("""{"map": "crater", "glory": {"behind_lives": 5, "heart": 50}}""", LiveRules, 33'i32),
                  ("""{"map": "big-twin-mesas", "vision": "team"}""", LiveRules, 34'i32),
-                 ("""{"mode": "ffa_kin", "kin_layout": "cousins"}""", LiveRules, 35'i32)]
+                 ("""{"mode": "ffa_kin", "kin_layout": "cousins"}""", LiveRules, 35'i32),
+                 ("""{"vision_range": 20}""", LiveRules, 36'i32),
+                 ("""{"mode": "ffa_kin", "vision_range": 15}""", LiveRules, 37'i32)]
     var alone: seq[Run]
     for (config, rules, seed) in specs: alone.add nativeRun(config, rules, seed, ticks)
     var handles: seq[pointer]
@@ -284,6 +301,23 @@ suite "Native per-handle rules and game config":
     for i in 0..<specs.len:
       checkSame("spec " & $i, runs[i].hashes, alone[i].hashes)
       pw_destroy(handles[i])
+
+  test "vision_range changes BASIC play, and a range covering the map changes nothing":
+    let unlimited = nativeRun("""{}""", LiveRules, 71, 300)
+    check nativeRun("""{"vision_range": 200}""", LiveRules, 71, 300).hashes == unlimited.hashes
+    check nativeRun("""{"vision_range": 20}""", LiveRules, 71, 300).hashes != unlimited.hashes
+    # A later config without the key restores unlimited sight from the next reset.
+    let handle = nativeHandle("""{"vision_range": 20}""", LiveRules, 71, 300)
+    var message: string
+    check handle.setConfig("""{}""", message) == 0
+    check pw_reset(handle, 71, 300) == 0
+    let source = readFile(Base)
+    for slot in 0..<Seats:
+      check pw_set_seat_script(handle, slot.cint, cbuf(source), source.len.int32) == 0
+    var got: Run
+    while handle.nativeStep(got): discard
+    checkSame("range cleared", got.hashes, unlimited.hashes)
+    pw_destroy(handle)
 
   test "a config without \"map\" keeps the handle's pw_set_map map":
     for name in ["crater", "atoll", "big-deep-forest"]:

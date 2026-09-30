@@ -363,6 +363,17 @@ direction, is blocked by cover, and is occluded by terrain. It is computed once 
 longer traces one sight line per pair of cogs. Without the option, every variant keeps per-cog
 sight lines, and the game plays exactly as under rules 41. Replays record the mode.
 
+### Vision range (opt-in, any rules)
+
+`"vision_range": <metres>` (an integer, 1 to 200) caps how far per-cog sight lines reach, in
+both the teams game and FFA-kin. A cog or pickup farther away than that from a cog is not visible
+to it, before the view cone and the sight line are checked; within the range nothing changes.
+`20` matches team vision's 20 m reach. It cannot be combined with `"vision": "team"`, which has
+its own reach. Shots, spray and grenades are weapons, not sight, and ignore it. Without the key,
+per-cog sight lines stay unlimited and every variant plays exactly as before. It adds no rules
+version: a replay with a range is stamped 2000 above its usual version (2048, or 3048 for
+FFA-kin) and records the range; replays without one are unchanged.
+
 ### Generated maps (rules 41)
 
 Rules 41 add ten generated maps beside Heartwick island. Each map has its own variant,

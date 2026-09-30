@@ -67,19 +67,34 @@ proc parseKinLayout*(config: JsonNode, mode: GameMode): Option[KinLayout] =
   of "clones": some(klClones)
   of "tribes": some(klTribes)
   else: raise newException(ValueError, "Unknown Paintbot kin_layout: " & layout.getStr)
+proc parseVisionRange*(config: JsonNode): int =
+  ## The coworld config's optional "vision_range": whole metres (1..MaxVisionRangeMetres) that
+  ## per-cog sight lines reach; absent or null is 0, the rules' own unlimited reach.
+  let node = config{"vision_range"}
+  if node.isNil or node.kind == JNull: return 0
+  if node.kind != JInt or node.getBiggestInt notin 1'i64..MaxVisionRangeMetres.int64:
+    raise newException(ValueError, "Paintbot vision_range must be an integer 1.." &
+      $MaxVisionRangeMetres & " (metres)")
+  node.getBiggestInt.int
+proc checkVisionRange*(visionRange: int, vision: string) =
+  ## Team vision has its own 20 m reach: a config may not set both.
+  if visionRange > 0 and vision == "team":
+    raise newException(ValueError, "Paintbot vision_range applies to per-cog vision only, not \"vision\": \"team\"")
 
 type MatchConfig* = object
   ## What a match plays, from the Coworld game config: the host reads each key here (mode,
-  ## kin_layout, glory) or through CoworldConfig (map, vision); pw_set_config_json reads them all.
+  ## kin_layout, glory, vision_range) or through CoworldConfig (map, vision); pw_set_config_json
+  ## reads them all.
   mode*: GameMode
   kinLayout*: Option[KinLayout]
   glory*: GloryConfig
   map*: string   ## "" = Heartwick island, else a MapNames entry
   mapGiven*: bool ## the config names a map ("" included); the host plays Heartwick without one
   vision*: string ## "" = per-cog sight lines, "team" = one sight grid per team
+  visionRange*: int ## metres of per-cog sight; 0 = unlimited (no "vision_range")
 
 const
-  MatchConfigKeys* = ["mode", "kin_layout", "glory", "map", "vision"]
+  MatchConfigKeys* = ["mode", "kin_layout", "glory", "map", "vision", "vision_range"]
   ## The config schema's other keys (coworld_manifest_template.json config_schema): the host's
   ## seating and match length, which a training handle takes from its own calls.
   SeatingConfigKeys* = ["tokens", "players", "slots", "seed", "max_ticks"]
@@ -107,3 +122,5 @@ proc parseMatchConfig*(config: JsonNode): MatchConfig =
     raise newException(ValueError, "Unknown Paintbot vision mode: " & result.vision)
   if result.vision.len > 0 and result.mode == gmFfaKin:
     raise newException(ValueError, "Team vision applies to the teams game only")
+  result.visionRange = parseVisionRange(config)
+  checkVisionRange(result.visionRange, result.vision)

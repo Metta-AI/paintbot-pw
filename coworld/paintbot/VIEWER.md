@@ -33,6 +33,10 @@ The viewer reads original v1 files and v2 files. V2 adds bounded player display 
 
 Policies can explicitly publish a shout with `result = shout(strNew("Guard the heart"))`. BASIC `PRINT` remains a private diagnostic log. Shouts are currently spectator messages; they do not add a new policy observation channel. BASIC permits four shouts per seat per tick, maximum 1024 bytes per string; the replay caps public messages at 20,000.
 
+A match played with a `"vision_range"` config is stamped 2000 above its usual version (2048
+teams, 3048 FFA-kin) and records the range after the usual payload; loading it binds the range
+before the viewer resimulates. Replays without one keep their versions and bytes.
+
 ## FFA-kin (Heartland) replays
 
 FFA-kin replays (version 1000 + rules: 1040, or 1041, which also records the map) carry the

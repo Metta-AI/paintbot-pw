@@ -144,6 +144,16 @@ type
     family*: seq[int8]
     genes*: seq[uint32]
     ibd*: seq[seq[int8]]
+  RecordingRanged = object
+    ## Teams recordings with a vision range (gameVersion VisionRangeReplayVersionBase + rules):
+    ## Recording, then the range in metres.
+    recording: Recording
+    visionRange: int32
+  RecordingFfaRanged = object
+    ## FFA-kin recordings with a vision range (gameVersion VisionRangeReplayVersionBase +
+    ## FfaReplayVersionBase + rules): RecordingFfa, then the range in metres.
+    ffa: RecordingFfa
+    visionRange: int32
   BridgeReply = object
     ## The host's answer to one bridge line: settled advisor-oracle requests, nothing else.
     oracle: seq[OracleReply]
@@ -203,6 +213,12 @@ const
   FfaRulesVersions = [40, 41, 42, 43, 44, 45, 46, 47, 48]
   SeatCountRules* = 46 ## The first rules whose recordings carry their seat count.
   BehindCogsRules* = 47 ## The first rules whose recordings carry the behind-in-cogs award.
+  VisionRangeReplayVersionBase* = 2000
+    ## A match played with a "vision_range" (sim.visionRangeMetres) is stamped 2000 over its
+    ## usual version (2048 teams, 3048 FFA-kin today) and stores the range after the usual
+    ## payload. A match without one saves exactly as before. Like FFA kinship, the range is
+    ## the thread's: saving reads it, loading binds it (0 for every other recording).
+  VisionRangeRules* = 48 ## The first rules whose recordings may carry a vision range.
 proc toPreCogs(g: GloryConfig): PreCogsGloryConfig =
   PreCogsGloryConfig(quietSupplies: g.quietSupplies, quietSupplySeconds: g.quietSupplySeconds,
     behindLives: g.behindLives, behindLivesSeconds: g.behindLivesSeconds, heart: g.heart)
@@ -213,21 +229,30 @@ proc fromPreCogs(g: PreCogsGloryConfig): GloryConfig =
     behindCogs: DefaultGloryConfig.behindCogs, behindCogsSeconds: DefaultGloryConfig.behindCogsSeconds)
 proc replayGameVersion*(): uint16 =
   ## The header version a recording made now is saved with.
-  uint16((if ffa(): FfaReplayVersionBase else: 0) + replayRulesVersion)
+  uint16((if visionRangeMetres() > 0: VisionRangeReplayVersionBase else: 0) +
+    (if ffa(): FfaReplayVersionBase else: 0) + replayRulesVersion)
+proc checkRangedRules(rules: int) =
+  if visionRangeMetres() > 0 and rules notin VisionRangeRules..LiveRules:
+    raise newException(ReplayError, "Recordings with a vision range need rules " &
+      $VisionRangeRules & ".." & $LiveRules)
 proc toFfaRecording(r: Recording, k: Kinship): RecordingFfa =
   RecordingFfa(seed: r.seed, frames: r.frames, names: r.names, communications: r.communications,
     endTick: r.endTick, map: r.map, seats: r.seats, mode: gameMode.uint8, layout: k.layout.uint8,
     family: k.family, genes: k.genes, ibd: k.ibd)
 proc saveRecordingAs*(path: string, version: int, r: Recording) =
   ## A teams recording in exactly the shape loadRecording reads at `version`; every version
-  ## before rules 46 holds 16 seats.
+  ## before rules 46 holds 16 seats. With a vision range, the ranged shape (rules 48 on).
+  checkRangedRules(version)
   let v = version.uint16
   if version < SeatCountRules and r.frames.len > 0 and r.frames[0].commands.len != LegacySeats:
     raise newException(ReplayError, "Recordings before rules 46 hold exactly 16 seats")
   if version >= SeatCountRules:
     var r = r
     if r.seats == 0: r.seats = (if r.names.len > 0: r.names.len else: Seats).int32
-    if version >= BehindCogsRules: saveReplayFile(path, "paintbot_pw", v, r)
+    if visionRangeMetres() > 0:
+      saveReplayFile(path, "paintbot_pw", uint16(VisionRangeReplayVersionBase+version),
+        RecordingRanged(recording: r, visionRange: visionRangeMetres().int32))
+    elif version >= BehindCogsRules: saveReplayFile(path, "paintbot_pw", v, r)
     else: saveReplayFile(path, "paintbot_pw", v, Recording46(seed: r.seed, frames: r.frames,
       names: r.names, communications: r.communications, endTick: r.endTick, map: r.map,
       vision: r.vision, glory: toPreCogs(r.glory), seats: r.seats))
@@ -265,7 +290,11 @@ proc saveRecording*(path: string, r: Recording) =
     raise newException(ReplayError, "Recordings before rules 46 hold exactly 16 seats")
   if ffa():
     let k = activeKinship
-    if replayRulesVersion >= SeatCountRules:
+    checkRangedRules(replayRulesVersion)
+    if visionRangeMetres() > 0:
+      saveReplayFile(path, "paintbot_pw", replayGameVersion(), RecordingFfaRanged(
+        ffa: r.toFfaRecording(k), visionRange: visionRangeMetres().int32))
+    elif replayRulesVersion >= SeatCountRules:
       saveReplayFile(path, "paintbot_pw", replayGameVersion(), r.toFfaRecording(k))
     elif replayRulesVersion >= 41:
       saveReplayFile(path, "paintbot_pw", replayGameVersion(), RecordingFfa41(seed: r.seed,
@@ -279,12 +308,19 @@ proc saveRecording*(path: string, r: Recording) =
         family: toArray16(k.family), genes: toArray16(k.genes), ibd: toIbd16(k.ibd)))
   else: saveRecordingAs(path, replayRulesVersion, r)
 proc validSeatCount(seats: int32): bool = seats.int in 2..MaxSeats
-proc loadFfaRecording(path: string, version: int): Recording =
+proc loadFfaRecording(path: string, version: int, ranged: bool, visionRange: var int32): Recording =
+  ## version: the header's, less VisionRangeReplayVersionBase when ranged (then visionRange is
+  ## the recorded range on return).
   let rules = version - FfaReplayVersionBase
-  if rules notin FfaRulesVersions:
+  if rules notin FfaRulesVersions or (ranged and rules notin VisionRangeRules..LiveRules):
     raise newException(ReplayError, "Unsupported Paintbot FFA replay version")
   let old =
-    if rules >= SeatCountRules: loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa)
+    if ranged:
+      let pre = loadReplayFile(path, "paintbot_pw", uint16(VisionRangeReplayVersionBase+version),
+        RecordingFfaRanged)
+      visionRange = pre.visionRange
+      pre.ffa
+    elif rules >= SeatCountRules: loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa)
     elif rules >= 41:
       let pre = loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa41)
       RecordingFfa(seed: pre.seed, frames: convertFrames(pre.frames), names: @(pre.names),
@@ -320,16 +356,30 @@ proc loadFfaRecording(path: string, version: int): Recording =
   Recording(seed: old.seed, frames: old.frames, names: old.names,
     communications: old.communications, endTick: old.endTick, map: old.map, seats: old.seats)
 proc loadRecording*(path: string): Recording =
-  ## Loads a recording, binds its rules, mode, map, vision, glory awards and seat count
-  ## (configureSeats), and checks its shape.
-  let version = loadReplayFileHeader(path).gameVersion.int
+  ## Loads a recording, binds its rules, mode, map, vision, vision range, glory awards and seat
+  ## count (configureSeats), and checks its shape.
+  var version = loadReplayFileHeader(path).gameVersion.int
+  # A vision range stamps VisionRangeReplayVersionBase over the usual version; 0 = none.
+  let ranged = version >= VisionRangeReplayVersionBase
+  if ranged: version -= VisionRangeReplayVersionBase
+  var visionRange = 0'i32
   # A replay sets the mode it was played in; teams replays never inherit an FFA override.
   gameMode = gmTeams
   kinshipOverride = none(Kinship)
   replayRulesVersion = version
   visionRulesVersion = replayRulesVersion
   if version >= FfaReplayVersionBase:
-    result = loadFfaRecording(path, version)
+    result = loadFfaRecording(path, version, ranged, visionRange)
+  elif ranged:
+    if replayRulesVersion notin VisionRangeRules..LiveRules:
+      raise newException(ReplayError, "Unsupported Paintbot replay version")
+    let old = loadReplayFile(path, "paintbot_pw", uint16(VisionRangeReplayVersionBase+version),
+      RecordingRanged)
+    result = old.recording
+    visionRange = old.visionRange
+    discard mapIndex(result.map) # an unknown map is an invalid replay
+    if result.vision != "": raise newException(ReplayError, "A vision range needs per-cog vision")
+    if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
   elif replayRulesVersion == 1:
     let old = loadReplayFile(path, "paintbot_pw", 1, LegacyRecording)
     result.seed = old.seed
@@ -385,6 +435,8 @@ proc loadRecording*(path: string): Recording =
   else:
     raise newException(ReplayError, "Unsupported Paintbot replay version")
   if replayRulesVersion < SeatCountRules: result.seats = LegacySeats
+  if ranged and visionRange notin 1'i32..MaxVisionRangeMetres.int32:
+    raise newException(ReplayError, "Invalid Paintbot vision range")
   if not validSeatCount(result.seats) or result.names.len notin [0, result.seats.int]:
     raise newException(ReplayError, "Invalid Paintbot seat count")
   for f in result.frames:
@@ -411,6 +463,7 @@ proc loadRecording*(path: string): Recording =
   # (replay_stats, the viewer's index, kin_replay_counters) plays on the recorded ground.
   configureMap(result.map)
   configureVision(result.vision)
+  configureVisionRange(visionRange.int)
   configureGlory(result.glory)
 var
   world*: World
@@ -421,6 +474,7 @@ var
   bridge: File
   mapChoice*: string ## live games: --map:<name>, or the Coworld config's "map"
   visionChoice*: string ## live teams games: --vision:team, or the Coworld config's "vision"
+  visionRangeChoice*: int ## live games: --vision-range:<metres>, or the Coworld config's "vision_range"
   gloryChoice* = DefaultGloryConfig ## live teams games: --glory:<json>, or the Coworld config's "glory"
 proc applyGameConfig*(text: string) =
   ## Reads the keys CoworldConfig skips. An FFA-kin match lasts at most six minutes.
@@ -431,6 +485,7 @@ proc applyGameConfig*(text: string) =
   if not glory.isNil and glory.kind != JNull and ffa():
     raise newException(ValueError, "Paintbot glory awards apply to the teams game only")
   gloryChoice = parseGloryConfig(glory)
+  visionRangeChoice = parseVisionRange(config)
   if ffa():
     options.maximumTicks = min(options.maximumTicks, FfaMatchTicks.int32)
     options.seconds = options.maximumTicks div TickRate
@@ -464,6 +519,12 @@ proc setup*() =
         inc i; continue
       if args[i].startsWith("--vision:"):
         visionChoice = args[i]["--vision:".len..^1]; configureVision(visionChoice); inc i; continue
+      if args[i].startsWith("--vision-range:"):
+        # Metres of per-cog sight, as the Coworld config's "vision_range" (1..200).
+        let text = args[i]["--vision-range:".len..^1]
+        let node = (try: newJInt(parseInt(text)) except ValueError: newJString(text))
+        visionRangeChoice = parseVisionRange(%*{"vision_range": node})
+        inc i; continue
       if args[i].startsWith("--glory:"):
         gloryChoice = parseGloryConfig(parseJson(args[i]["--glory:".len..^1])); inc i; continue
       if not options.takeCommonFlag(args, i, args[i]): raise newException(
@@ -491,6 +552,8 @@ proc setup*() =
     if visionChoice.len > 0 and ffa():
       raise newException(ValueError, "Team vision applies to the teams game only")
     configureVision(visionChoice); recording.vision = visionMode()
+    checkVisionRange(visionRangeChoice, visionMode())
+    configureVisionRange(visionRangeChoice) # saveRecording records it
     configureGlory(gloryChoice); recording.glory = gloryChoice
     world = newLiveWorld(options.seed, options.maximumTicks); recording.seed = options.seed
     recording.seats = Seats.int32

@@ -910,6 +910,16 @@ class ManifestTests(unittest.TestCase):
                     {"behind_cogs_seconds": 0}, {"behind_cogs": -1}, []):
             self.assertTrue(_schema_errors(schema, dict(competition, glory=bad)), bad)
 
+    def test_vision_range_is_an_optional_whole_number_of_metres(self):
+        schema = self.manifest["game"]["config_schema"]
+        competition = self._config("competition")
+        for variant in self.manifest["variants"]:
+            self.assertNotIn("vision_range", variant["game_config"])
+        for good in (1, 20, 200):
+            self.assertEqual(_schema_errors(schema, dict(competition, vision_range=good)), [])
+        for bad in (0, 201, -20, "20", 20.5, True):
+            self.assertTrue(_schema_errors(schema, dict(competition, vision_range=bad)), bad)
+
     def test_heartland_is_competition_in_ffa_kin_mode(self):
         # Heartland is its own Coworld now (coworld/heartland), on this same engine: its config is
         # the competition config in FFA-kin mode, and this manifest's schema still accepts it.
@@ -1033,7 +1043,7 @@ class HeartlandManifestTests(unittest.TestCase):
             theirs = {k: v for k, v in self.paintbot["game"]["config_schema"]["properties"][key].items()
                       if k not in ("minItems", "maxItems", "description")}
             self.assertEqual(ours, theirs, key)
-        for key in ("seed", "max_ticks", "kin_layout", "map"):
+        for key in ("seed", "max_ticks", "kin_layout", "map", "vision_range"):
             self.assertEqual(self.manifest["game"]["config_schema"]["properties"][key],
                              self.paintbot["game"]["config_schema"]["properties"][key], key)
 
