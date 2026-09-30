@@ -89,14 +89,22 @@ int pw_set_seat_command(void *handle, int seat, const int32_t *nine);
  * glory as before). 1000 is exact. Returns 0, -1 bad args. */
 int pw_set_seat_fire_period(void *handle, int seat, int32_t period);
 int pw_set_seat_damage_scale(void *handle, int seat, int32_t permille);
-/* Action contracts. Each observation contract has one: teams.view.1 (version 11,
- * "paintbot-pw.teams.view.1.action.51-25-2-2-2") and ffa.view.1 pointer (12,
- * "paintbot-pw.ffa.view.1.action.pointer"). pw_action_contract returns the handle's;
+/* Action contracts. teams.view.1 (version 11, "paintbot-pw.teams.view.1.action.51-25-2-2-2"),
+ * its aim-offset variant (13, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23": the five
+ * heads, then two 23-bin heads x, z; the reference decode adds ((ix - 11) * 28, (iz - 11) * 28),
+ * mirrored for team 1, to an identity aim) and ffa.view.1 pointer (12,
+ * "paintbot-pw.ffa.view.1.action.pointer"). pw_set_action_contract selects the contract
+ * pw_step reads the caller's heads under: 11 (default) or 13 on a 201 handle, 12 only on a 202
+ * handle; kept across pw_reset; 0, or -1 bad args. Under 13 a seat's action row is seven
+ * int32 and pw_action_layout returns -1: use pw_action_layout_ext (int32[10] = {heads, seven
+ * head-size slots, logits per seat, 0}). pw_action_contract returns the handle's;
  * pw_action_contract_hash writes the 64-hex SHA-256 an actor and manifest carry
  * (NUL-terminated, capacity >= 65; -1 for another version). What each head index means is
  * the seat's policy.bas's to decide; pw_step decodes a caller-driven seat's heads with the
  * reference decoder script (players/neural_decode.bas, neural_decode_ffa.bas) through the
  * seat's SeatView, as a hosted policy.bas does. */
+int pw_set_action_contract(void *handle, int32_t version);
+int pw_action_layout_ext(void *handle, int32_t *ten);
 int pw_action_contract(void *handle);
 int pw_action_contract_hash(int32_t version, char *sixty_five_bytes, int32_t capacity);
 /* Mapping-ceiling diagnostics (pw-bc). pw_script_decide runs the scripted seats'
@@ -237,6 +245,19 @@ int pw_set_seat_policy_script(void *handle, int seat, const char *bas, int32_t b
 int pw_step_logits(void *handle, const int32_t *actions, const float *logits, float *rewards,
     float *terminals);
 int pw_seat_policy_choices(void *handle, int seat, int32_t *twenty_two);
+/* pw_seat_policy_offset_choices: a policy seat's aim-offset heads (action contract 13) on the
+ * last pw_step_logits, int32[6] = {selected5, selected6, final5, final6, temperature_milli5,
+ * temperature_milli6}; zeros when the seat did not select. -1 bad args, not a policy seat, or
+ * no aim-offset heads.
+ * pw_set_seat_conditionals: a policy seat's COND_HEAD layers held by the trainer: count pairs
+ * (condition head, re-selected head) in heads[2 * count], their weights (size(head) x
+ * size(condition head), row-major) concatenated in that order; replaces the seat's previous
+ * ones from its next selection, kept across pw_reset (count 0 clears). A zero weight column
+ * takes no draw. 0; -1 bad args or not a policy seat; -2 against COND_HEAD's rules (or with
+ * decoder.joint_sampling). */
+int pw_seat_policy_offset_choices(void *handle, int seat, int32_t *six);
+int pw_set_seat_conditionals(void *handle, int seat, int32_t count, const int32_t *heads,
+                             const float *weights, int32_t weight_count);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */
 int pw_terrain_cache_blocks(void);
 /* Terrain table of the handle's rules and map (shared by every handle and thread of the process
