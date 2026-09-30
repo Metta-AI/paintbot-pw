@@ -78,7 +78,8 @@ suite "SeatView boundary":
     check readFile(Paintbot / "training_labels.nim").contains("when not defined(pwTraining): {.error:")
     # The probe sits under the repository so config.nims gives it the engine's paths.
     let probe = Root / "tests" / ("tmp_boundary_labels_probe_" & $getCurrentProcessId() & ".nim")
-    writeFile(probe, "import \"" & (Paintbot / "training_labels") & "\"\n")
+    # A relative import with forward slashes: an absolute Windows path would be read as escapes.
+    writeFile(probe, "import ../examples/paintbot/training_labels\n")
     defer: removeFile(probe)
     let (output, code) = execCmdEx("nim check --hints:off " & quoteShell(probe))
     check code != 0
