@@ -16,6 +16,17 @@ const
   ## reference reading of every index).
   ObservationContractTeamsView1* = "paintbot-pw.teams.view.1"
   ActionContractTeamsView1* = "paintbot-pw.teams.view.1.action.51-25-2-2-2"
+  ## Its aim-offset variant: the same five heads, then two 23-bin heads (x, z) the policy.bas
+  ## reads as neuralChoice(5) / neuralChoice(6); the reference decode adds
+  ## ((ix - 11) * 28, (iz - 11) * 28), mirrored for team 1, to an identity aim point. The
+  ## offset is purely the network's choice: nothing native computes a lead.
+  ActionContractTeamsView1Offset* = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23"
+  AimOffsetBins* = 23
+  AimOffsetCentre* = 11
+  AimOffsetStep* = 28
+  AimOffsetHeads* = 2
+  ActionSizesOffset* = [51, 25, 2, 2, 2, AimOffsetBins, AimOffsetBins]
+  LogitSizeOffset* = LogitSize + 2*AimOffsetBins
   ## Observation contract ffa.view.1 (FFA-kin at any seat count; its width follows the match,
   ## ffaViewLayout) and its action contract, whose heads are sized by the same layout and
   ## point at the observation's rows of the same tick.
@@ -63,13 +74,14 @@ type
     ## Version numbers are the native ABI's (pw_create_observation).
     ocTeamsView1 = 201, ocFfaView1 = 202
   ActionContractVersion* = enum
-    acTeamsView1 = 11, acFfaView1Pointer = 12
+    acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13
 
 const
   ObservationContractTeamsView1Hash* = sha256Hex(ObservationContractTeamsView1)
   ObservationContractFfaView1Hash* = sha256Hex(ObservationContractFfaView1)
   ActionContractTeamsView1Hash* = sha256Hex(ActionContractTeamsView1)
   ActionContractFfaView1PointerHash* = sha256Hex(ActionContractFfaView1Pointer)
+  ActionContractTeamsView1OffsetHash* = sha256Hex(ActionContractTeamsView1Offset)
 
 const
   ## Contracts retired for BASIC parity (docs/neural/seat-view.md): their observations read
@@ -119,14 +131,17 @@ proc actionContractHash*(version: ActionContractVersion): string =
   case version
   of acTeamsView1: ActionContractTeamsView1Hash
   of acFfaView1Pointer: ActionContractFfaView1PointerHash
+  of acTeamsView1Offset: ActionContractTeamsView1OffsetHash
 proc actionContractId*(version: ActionContractVersion): string =
   case version
   of acTeamsView1: ActionContractTeamsView1
   of acFfaView1Pointer: ActionContractFfaView1Pointer
+  of acTeamsView1Offset: ActionContractTeamsView1Offset
 proc actionContractVersion*(hash: string): ActionContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ActionContractTeamsView1Hash: acTeamsView1
   elif hash == ActionContractFfaView1PointerHash: acFfaView1Pointer
+  elif hash == ActionContractTeamsView1OffsetHash: acTeamsView1Offset
   elif retiredContract(hash): raise newException(ValueError, "neural action contract " & RetiredMessage)
   else: raise newException(ValueError, "unknown neural action contract")
 
@@ -151,8 +166,19 @@ proc observationContractVersion*(hash: string): ObservationContractVersion =
   elif retiredContract(hash): raise newException(ValueError, "neural observation contract " & RetiredMessage)
   else: raise newException(ValueError, "unknown neural observation contract")
 proc pairedAction*(version: ObservationContractVersion): ActionContractVersion =
-  ## Each observation contract has exactly one action contract.
+  ## The observation contract's default action contract.
   if version == ocTeamsView1: acTeamsView1 else: acFfaView1Pointer
+proc pairs*(observation: ObservationContractVersion, action: ActionContractVersion): bool =
+  ## Whether the two contracts go together: teams.view.1 with its five-head action contract
+  ## or its aim-offset variant, ffa.view.1 with its pointer contract.
+  if observation == ocTeamsView1: action in {acTeamsView1, acTeamsView1Offset}
+  else: action == acFfaView1Pointer
+proc actionHeadSizes*(action: ActionContractVersion): seq[int] =
+  ## The head sizes of a fixed-size action contract (ffa.view.1 pointer: see pointerHeads).
+  case action
+  of acTeamsView1: @ActionSizes
+  of acTeamsView1Offset: @ActionSizesOffset
+  of acFfaView1Pointer: raise newException(ValueError, "action contract ffa.view.1 pointer is sized by the match (pointerHeads)")
 
 proc mapFlip*(slot: int): int =
   ## The teams game mirrors odd seats' observations and compass heads (team 1 plays from
@@ -542,6 +568,10 @@ type
     enabled*: bool
     temperature*: float32      # > 0; 1.0 = the training-time distribution
     heads*: array[ActionSizes.len, bool]  # which heads are sampled; the rest take argmax
+    ## The aim-offset heads 5 and 6 (action contract teams.view.1 aim-offset only): sampled
+    ## when listed in decoder.sampling.heads, or when heads is absent (every head).
+    offsetHeads*: array[AimOffsetHeads, bool]
+    offsetListed*: bool  # heads named 5 or 6 explicitly
 
 const
   SamplingSalt* = 0x53414d504c450000'u64  # "SAMPLE" in the high bytes, slot below it

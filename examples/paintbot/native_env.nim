@@ -69,6 +69,10 @@ type
     # through the seat's SeatView, as a hosted neural seat's policy.bas decodes its heads.
     # Built on first use and dropped by every create/reset.
     decoders: seq[Bot]
+    # The action contract pw_step's caller heads are read under (pw_set_action_contract):
+    # teams.view.1 (11, the default of a 201 handle) or its aim-offset variant (13, seven heads
+    # per seat), ffa.view.1 pointer (12, a 202 handle's only one). Kept across resets.
+    actionContract: ActionContractVersion
     # Privileged supervision labels (pw_seat_privileged_labels, training_labels.nim): the
     # pre-step positions of the last step, for the lead label's velocity. Never observed.
     labelMemory: LabelMemory
@@ -104,8 +108,7 @@ type
     decidedTick: int32
     decidedValid: bool
     # Observation contract the handle encodes (chosen at create, kept across resets):
-    # teams.view.1 (pw_create) or ffa.view.1; its action contract is the paired one
-    # (pairedAction). The world never reads it.
+    # teams.view.1 (pw_create) or ffa.view.1. The world never reads it.
     obsVersion: ObservationContractVersion
     # Neural BASIC I/O. userInputs: the K of observation contract teams.view.1u<K>
     # (pw_create_observation_inputs / _v; 0 otherwise): every pw_observe row is 512 + K
@@ -485,7 +488,7 @@ const
   DecoderSource = staticRead("players/neural_decode.bas")
   DecoderSourceFfa = staticRead("players/neural_decode_ffa.bas")
 
-proc contract(env: ptr NativeEnv): ActionContractVersion = pairedAction(env.obsVersion)
+proc contract(env: ptr NativeEnv): ActionContractVersion = env.actionContract
 
 proc rowsFor(env: ptr NativeEnv, slot: int): FfaViewRows =
   ## The seat's ffa.view.1 row -> entity map on the current unchanged world, from its view.
@@ -496,7 +499,7 @@ proc decoderFor(env: ptr NativeEnv, slot: int): Bot =
   ## The seat's decoder seat for this match (built on first use).
   if env.decoders[slot].isNil:
     env.decoders[slot] = loadDecoderBot(if env.obsVersion == ocFfaView1: DecoderSourceFfa else: DecoderSource,
-      slot, env.observationHash)
+      slot, env.observationHash, env.actionContract)
   env.decoders[slot]
 
 proc pw_env_version*(): cint {.exportc, cdecl, dynlib.} = 1
@@ -518,7 +521,7 @@ proc rowWidth(env: ptr NativeEnv): int =
 proc actionHeads(env: ptr NativeEnv): seq[int] =
   ## The head sizes of the handle's action contract (teams.view.1: ActionSizes; ffa.view.1
   ## pointer: the current world's layout).
-  if env.obsVersion == ocFfaView1: pointerHeads(env.layoutOf) else: @ActionSizes
+  if env.obsVersion == ocFfaView1: pointerHeads(env.layoutOf) else: actionHeadSizes(env.actionContract)
 proc logitWidth(env: ptr NativeEnv): int =
   ## Logits per seat under the handle's action contract (pw_step_logits' row stride).
   for h in env.actionHeads: result += h
@@ -529,6 +532,7 @@ proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): p
   let env = cast[ptr NativeEnv](allocShared0(sizeof(NativeEnv)))
   try:
     env.obsVersion = obsVersion
+    env.actionContract = pairedAction(obsVersion)
     env.kinLayout = -1
     env.glory = DefaultGloryConfig
     env.nextGlory = DefaultGloryConfig
@@ -673,14 +677,44 @@ proc pw_action_layout*(handle: pointer, output: ptr UncheckedArray[int32]): cint
   ## The handle's action heads for the current world, 8 int32: [heads (5), the five head
   ## sizes, logits per seat (pw_step_logits' row stride), 0]. teams.view.1: [5, 51, 25, 2, 2,
   ## 2, 82, 0]; ffa.view.1 pointer: [5, 11 + control hearts, 9 + cog rows, 2, 2, 2, total, 0].
-  ## 0, or -1.
+  ## 0, or -1 (and -1 under the seven-head aim-offset contract: use pw_action_layout_ext).
   if handle == nil or output == nil: return -1
   let env = cast[ptr NativeEnv](handle)
   let heads = env.actionHeads
+  if heads.len > ActionSizes.len: return -1
   output[0] = heads.len.int32
   for i, h in heads: output[1+i] = h.int32
   output[6] = env.logitWidth.int32
   output[7] = 0
+  0
+
+proc pw_action_layout_ext*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## The handle's action heads, 10 int32: [heads (5 or 7), the head sizes (7 slots, 0 past
+  ## the last head), logits per seat, 0]. teams.view.1 aim-offset: [7, 51, 25, 2, 2, 2, 23,
+  ## 23, 128, 0]. 0, or -1 bad args.
+  if handle == nil or output == nil: return -1
+  let env = cast[ptr NativeEnv](handle)
+  let heads = env.actionHeads
+  for i in 0..<10: output[i] = 0
+  output[0] = heads.len.int32
+  for i, h in heads: output[1+i] = h.int32
+  output[8] = env.logitWidth.int32
+  0
+
+proc pw_set_action_contract*(handle: pointer, version: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The action contract pw_step reads the caller's heads under: on a 201 handle 11
+  ## (teams.view.1, five heads per seat; the default) or 13 (teams.view.1 aim-offset, seven
+  ## heads per seat: the five, then two 23-bin aim offsets the reference decoder adds to an
+  ## identity aim); on a 202 handle 12 only. Kept across pw_reset; every decoder seat starts
+  ## over. 0, or -1 bad args.
+  if handle == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32]: return -1
+  let contract = ActionContractVersion(version)
+  if not pairs(env.obsVersion, contract): return -1
+  env.actionContract = contract
+  env.resetDecoders()
   0
 
 proc pw_user_inputs_contract_hash*(userInputs: int32, output: ptr UncheckedArray[char],
@@ -825,7 +859,7 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     if env.contract == acFfaView1Pointer: break  # forbid masks name the teams contract's movement indices
     if not env.forbidAny[slot] or env.world.cogs[slot].hp <= 0 or env.commandPending[slot] or
         (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
-    let movement = actions[slot*ActionSizes.len]
+    let movement = actions[slot*heads.len]
     if movement in 0'i32..<ActionSizes[0].int32 and env.forbidden[slot][movement]: return -3
   try:
     var commands = newSeq[Command](env.n)
@@ -836,9 +870,10 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       if env.commandPending[slot] or (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
       let bot = env.decoderFor(slot)
       for head, size in heads:
-        let choice = actions[slot*ActionSizes.len+head]
+        let choice = actions[slot*heads.len+head]
         if choice < 0 or choice >= size.int32: raise newException(ValueError, "neural action index out of range")
-        bot.neural.fedChoices[head] = choice
+        if head < ActionSizes.len: bot.neural.fedChoices[head] = choice
+        else: bot.neural.fedOffsetChoices[head-ActionSizes.len] = choice
       bot.neural.choicesFed = true
       decoders[slot] = bot
     let decoded = decideSeats(decoders, env.world)
@@ -971,17 +1006,20 @@ proc pw_results*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, d
 
 proc pw_bot_actions*(handle: pointer, side, level: cint,
     actions: ActionBuffer): cint {.exportc, cdecl, dynlib.} =
-  ## Write only the selected team's slots in a full 16-seat action buffer.
+  ## Write only the selected team's slots in a full 16-seat action buffer (rows of the
+  ## handle's head count; the aim-offset heads, when present, get the centre bin 11).
   ## -1 in FFA-kin (the built-in bot plays sides; use pw_set_seat_script with ffa.bas).
   if handle == nil or actions == nil or side notin 0..1 or level notin 1..2: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if env.mode == gmFfaKin or env.n != LegacySeats: return -1
+  let stride = env.actionHeads.len
   beginViews(env.world)
   for slot in 0..<env.n:
     if team(slot) == side:
       trainingBotActions(seatView(slot),level.int,
-        actions.toOpenArray(slot*ActionSizes.len,(slot+1)*ActionSizes.len-1))
+        actions.toOpenArray(slot*stride,slot*stride+ActionSizes.len-1))
+      for head in ActionSizes.len..<stride: actions[slot*stride+head] = AimOffsetCentre.int32
   return 0
 
 proc pw_seat_stats*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
@@ -1380,6 +1418,27 @@ proc pw_seat_policy_choices*(handle: pointer, seat: cint, output: ptr UncheckedA
     output[17+head] = bits(n.appliedMasks[head].toOpenArray(0, ActionSizes[head]-1), 0)
   0
 
+proc pw_seat_policy_offset_choices*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## A policy seat's aim-offset heads (action contract 13) on the last pw_step_logits, six
+  ## int32: [selected5, selected6, final5, final6, temperature_milli5, temperature_milli6]
+  ## (selected: the draw or argmax; final: after neuralSetChoice); zeros when the seat did not
+  ## select. Returns 0, -1 for bad arguments, a seat that is not a policy seat, or a seat
+  ## without the aim-offset heads.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if not env.policy[seat]: return -1
+  let bot = env.scriptBots[seat]
+  if bot == nil or bot.neural == nil or not bot.neural.offsetHeads: return -1
+  for i in 0..<6: output[i] = 0
+  let n = bot.neural
+  if not n.sampled: return 0
+  for e in 0..<AimOffsetHeads:
+    output[e] = n.offsetSelected[e]
+    output[2+e] = n.offsetChoices[e]
+    output[4+e] = n.appliedOffsetTemperatures[e]
+  0
+
 proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## The command a scripted seat issued on the last pw_step, ten int32:
   ## [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct, scripted].
@@ -1423,8 +1482,8 @@ proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[
   0
 
 proc pw_action_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
-  ## The handle's action contract version: 11 (teams.view.1) or 12 (ffa.view.1 pointer), the
-  ## one paired with its observation contract; -1 for a bad handle.
+  ## The handle's action contract version: 11 (teams.view.1), 12 (ffa.view.1 pointer) or 13
+  ## (teams.view.1 aim-offset); -1 for a bad handle.
   if handle == nil: return -1
   ready(handle)
   cint(cast[ptr NativeEnv](handle).contract)
@@ -1432,9 +1491,10 @@ proc pw_action_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
 proc pw_action_contract_hash*(version: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The 64-hex SHA-256 contract hash an actor and its manifest carry for action contract
-  ## `version` (11 or 12), NUL-terminated into output (capacity >= 65). Returns 0, -1 for a
+  ## `version` (11, 12 or 13), NUL-terminated into output (capacity >= 65). Returns 0, -1 for a
   ## bad version (the contracts before these were retired for BASIC parity) or buffer.
-  if version notin [acTeamsView1.int32, acFfaView1Pointer.int32] or output == nil or capacity < 65: return -1
+  if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32] or
+      output == nil or capacity < 65: return -1
   let hash = actionContractHash(ActionContractVersion(version))
   copyMem(output, unsafeAddr hash[0], hash.len)
   output[hash.len] = '\0'

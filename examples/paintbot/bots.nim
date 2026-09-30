@@ -1,6 +1,7 @@
 ## Bounded, persistent BASIC players: every seat is a BASIC script with typed observations.
 import polyworld/[basic, cli, controllers, rngs]
 import sim, oracle, neural_host, seat_view
+from neural_contract import ActionContractVersion
 export oracle, seat_view
 when defined(coworld): import polyworld/coworld
 
@@ -222,12 +223,13 @@ when defined(pwTraining):
     ## Raises ValueError when the manifest is rejected, BasicError when the source does not
     ## compile.
     scriptBot(source, slot, policyNeuralSeat(manifest, slot, observationHash))
-  proc loadDecoderBot*(source: string, slot: int, observationHash: string): Bot =
+  proc loadDecoderBot*(source: string, slot: int, observationHash: string,
+      contract: ActionContractVersion): Bot =
     ## A training seat whose head choices the caller gives (pw_step): `source` (the reference
     ## decoder, players/neural_decode.bas) turns them into BASIC verbs through the seat's
     ## SeatView, as a hosted neural seat's policy.bas does. neural_host.decoderNeuralSeat
     ## holds the fed choices.
-    scriptBot(source, slot, decoderNeuralSeat(slot, observationHash))
+    scriptBot(source, slot, decoderNeuralSeat(slot, observationHash, contract))
 else:
   var peakInstructions*, peakWork*, peakStrings*, peakNativeWork*: array[MaxSeats, int64] ## per-seat BASIC peaks, for PW_BASIC_PEAKS
 proc logNeuralTelemetry*(bots: openArray[Bot], ticks: int,

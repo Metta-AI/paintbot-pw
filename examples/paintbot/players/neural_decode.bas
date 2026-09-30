@@ -11,6 +11,9 @@
 '     43..50 compass step: self + 200 * Directions(m-43), clamped to the map
 '   aim 0 keep, 1..16 identity a-1 when visible (else keep), 17..24 compass: self + 5000 *
 '     Directions(a-17), clamped
+' Its aim-offset variant (heads 51, 25, 2, 2, 2, 23, 23; neuralLayout(21) = 23) adds
+'   ((ix - 11) * 28, (iz - 11) * 28), mirrored for team 1, to an identity aim point, ix and iz
+'   the choices of heads 5 and 6: an offset the network chooses, no lead computed here.
 ' fire, grenade and sneak: 1 = on. "Keep" re-issues the aim this script last left the seat
 ' with (its last order, or its walking goal when it gave none), known from the second tick of
 ' a life on; with none known the seat is given no aim and a shot waits for one.
@@ -88,6 +91,10 @@ if a >= 1 and a <= 16 then
     ax = playerX(a - 1)
     ay = playerY(a - 1)
     have = 1
+    if neuralLayout(21) = 23 then
+      ax = ax + (neuralChoice(5) - 11) * 28 * flip
+      ay = ay + (neuralChoice(6) - 11) * 28 * flip
+    end if
   end if
 end if
 if a >= 17 then
