@@ -835,7 +835,8 @@ proc selectConditionals(seat: NeuralSeat, actions: var array[ActionSizes.len, in
     temperatures: openArray[float32], masks: HeadMasks, masked: bool) =
   ## The model's COND_HEAD layers, in order, after the tick's selection (neural_contract.reselectHead):
   ## each re-selects its head from logits + the column of its condition head's choice, under the
-  ## head's mask (`masked`) and temperature. Nothing runs without COND_HEAD layers.
+  ## head's mask (`masked`) and temperature; an all-zero column changes nothing and takes no draw.
+  ## Nothing runs without COND_HEAD layers.
   for c in seat.conditionals:
     let t = temperatures[c.head]
     if t > 0 and not seat.sampleSeeded:
@@ -845,6 +846,13 @@ proc selectConditionals(seat: NeuralSeat, actions: var array[ActionSizes.len, in
     for h in 0..<c.head: offset += seat.heads[h]
     let size = seat.heads[c.head]
     let offsets = c.conditionalOffsets(actions[c.whenHead].int, seat.heads)
+    var zero = true
+    for x in offsets:
+      if x != 0'f32: zero = false
+    # An all-zero column leaves the head's distribution as it was selected: the selection
+    # stands and no draw is taken (so a COND_HEAD twin of a joint_sampling bundle draws the
+    # same stream as it).
+    if zero: continue
     actions[c.head] =
       if masked: reselectHead(seat.logits, offset, size, offsets, masks[c.head].toOpenArray(0, size-1), t,
                               seat.sampleRng)

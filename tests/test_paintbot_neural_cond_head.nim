@@ -202,6 +202,42 @@ paintbot_act(neuralLogits())
     check "cond_heads=h3->h4 draws=0" in b[0].neural.telemetry(1, 200)
     check "cond_heads" notin a[0].neural.telemetry(1, 200)
 
+  test "a COND_HEAD twin of a joint_sampling bundle (zero column 0, the offsets as column 1) plays it bitwise":
+    var r = initRand(9)
+    var offsets = newSeq[float32](51)
+    for j in 0..<51: offsets[j] = float32(r.rand(4.0) - 2.0)
+    offsets[0] = 3.5
+    var w = newSeq[float32](51*2)
+    for j in 0..<51: w[j*2+1] = offsets[j]
+    var ra = initRand(10)
+    let plain = ra.condModel(@[])
+    var rb = initRand(10)
+    let twin = rb.condModel(@[condHead(2, 0, w)])
+    var parts: seq[string]
+    for x in offsets: parts.add $x
+    let joint = """{"sampling": {"mode": "categorical", "temperature": 0.9}, "joint_sampling": """ &
+      """{"when": {"head": 2, "value": 1}, "head": 0, "offsets": [""" & parts.join(", ") & "]}}"
+    let a = seats(plain, joint)
+    let b = seats(twin, """{"sampling": {"mode": "categorical", "temperature": 0.9}}""")
+    require not a[0].failed and not b[0].failed
+    var wa = newWorld(77)
+    var wb = newWorld(77)
+    var held = 0
+    for tick in 0..<250:
+      let ca = a.decide(wa)
+      let cb = b.decide(wb)
+      for slot in 0..<Seats:
+        require a[slot].neural.sampled == b[slot].neural.sampled
+        if a[slot].neural.sampled:
+          require a[slot].neural.selected == b[slot].neural.selected
+      wa.step(ca); wb.step(cb)
+      require wa.stateHash() == wb.stateHash()
+    for slot in 0..<Seats: held += a[slot].neural.jointDraws
+    check held > 50
+    var draws = 0
+    for slot in 0..<Seats: draws += b[slot].neural.conditionalDraws
+    check draws == held   # a draw exactly where the joint condition held
+
   test "decoder.joint_sampling and COND_HEAD layers together are rejected":
     var r = initRand(7)
     let joint = """{"joint_sampling": {"when": {"head": 3, "value": 0}, "head": 4, "offsets": [0, 0]}}"""
