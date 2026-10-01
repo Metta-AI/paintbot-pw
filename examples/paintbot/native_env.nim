@@ -5,7 +5,7 @@ import std/[strutils, options]
 from std/json import parseJson
 import jsony
 import sim, kinship, neural_contract, bots, neural_actor, match_config, training_labels
-from neural_host import MaxNeuralOperations, neuralOperationBudget, setConditionals
+from neural_host import MaxNeuralOperations, neuralOperationBudget, setConditionals, NeuralSeat
 import polyworld/rngs
 import polyworld/basic
 import snapshot, contract_hash
