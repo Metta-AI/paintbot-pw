@@ -644,6 +644,26 @@ proc samplingSeed*(matchSeed: int32, slot: int): uint64 =
   ## The stream's initial state, for telemetry.
   samplingRng(matchSeed, slot).state
 
+# Sampling salt (training library only: native pw_set_sampling_salt; a hosted seat never has
+# one): lets two byte-identical bundles on the same (match seed, slot) draw independent
+# samples, for an identical-policy null. The salt's 64 bits go through the SplitMix64 output
+# finalizer (polyworld/rngs' mix constants), a bijection that maps 0 to 0 and every other salt
+# to a non-zero, well-spread word, which is xor-ed into samplingRng's initRng salt. Salt 0 is
+# samplingRng itself, so a library that never sets a salt draws exactly as before.
+proc mixSamplingSalt*(salt: int64): uint64 =
+  ## z = salt bits; z = (z xor z shr 30) * 0xBF58476D1CE4E5B9; z = (z xor z shr 27) *
+  ## 0x94D049BB133111EB; z xor z shr 31.
+  var z = cast[uint64](salt)
+  z = (z xor (z shr 30)) * 0xBF58476D1CE4E5B9'u64
+  z = (z xor (z shr 27)) * 0x94D049BB133111EB'u64
+  z xor (z shr 31)
+
+proc samplingRngSalted*(matchSeed: int32, slot: int, salt: int64): Rng =
+  ## samplingRng for a salted seat: initRng(matchSeed, SamplingSalt xor (slot+1) shl 32 xor
+  ## mixSamplingSalt(salt)). Salt 0 returns samplingRng(matchSeed, slot) unchanged.
+  if salt == 0: return samplingRng(matchSeed, slot)
+  initRng(matchSeed, SamplingSalt xor (uint64(slot+1) shl 32) xor mixSamplingSalt(salt))
+
 proc uniform53(rng: var Rng): float64 =
   float64(rng.next() shr 11) * (1.0 / 9007199254740992.0)
 

@@ -476,7 +476,11 @@ masked heads: the mapping-ceiling diagnostics, exact with mask 0.
 `pw_set_seat_sampling(handle, seat, temperature_permille, head_mask)` and
 `pw_sample_actions(handle, seat, float[82], int32[5])` select a seat's head actions from
 logits the way a sampling bundle would (`pw_seat_sample_draws` counts; with sampling off it is
-plain argmax). `pw_set_seat_forbid_objectives(handle, seat, int32 indices[], count)` masks
+plain argmax). `pw_set_sampling_salt(handle, int64 salt)` salts every seat's stream (those and each
+policy seat's own) with `neural_contract.samplingRngSalted`, so byte-identical bundles on the same
+(seed, slot) draw independently (an identical-policy null); 0, the default, is the unsalted stream
+exactly; kept across `pw_reset`, applied from the next one; training library only, never hosted.
+`pw_set_seat_forbid_objectives(handle, seat, int32 indices[], count)` masks
 movement-head candidates out of `pw_sample_actions` and makes `pw_step` return -3 (nothing
 stepped) when the caller hands a live caller-driven seat a forbidden one;
 `pw_seat_forbidden_objectives(handle, seat, int32 out[51])` returns the mask.

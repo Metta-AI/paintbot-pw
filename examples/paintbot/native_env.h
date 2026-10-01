@@ -157,6 +157,16 @@ int pw_set_seat_override(void *handle, int seat, int32_t mask);
 int pw_set_seat_sampling(void *handle, int seat, int32_t temperature_permille, int32_t head_mask);
 int pw_sample_actions(void *handle, int seat, const float *logits, int32_t *actions);
 int pw_seat_sample_draws(void *handle, int seat);
+/* Sampling salt (additive, training library only; a hosted seat has none). Non-zero salt
+ * seeds every seat's sampling stream (pw_sample_actions' and each policy seat's own) from
+ * neural_contract.samplingRngSalted(match seed, slot, salt) = SplitMix64 initRng(seed,
+ * 0x53414d504c450000 ^ (slot+1) << 32 ^ mix(salt)), mix = the SplitMix64 output finalizer
+ * (mix(0) = 0), so byte-identical bundles on the same (seed, slot) draw independent samples:
+ * an identical-policy null. 0 (the default) is the unsalted stream exactly: a library that
+ * never makes the call, or makes it with 0, is byte-identical to one without it. Kept across
+ * pw_reset, applied from the next pw_reset and to policy seats installed after the call. The
+ * world, its hash and pw_step are untouched. Returns 0, -1 for a nil handle. */
+int pw_set_sampling_salt(void *handle, int64_t salt);
 /* A hosted seat decides, and so draws, only on ticks it is alive on the pre-step world: a
  * probe that wants the hosted seat's exact draws calls pw_sample_actions for live seats only. */
 /* Decoder objective forbid (additive; the hosted bundle option decoder.forbid_objectives).
