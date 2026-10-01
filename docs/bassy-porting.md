@@ -45,6 +45,7 @@ TYPE MotionMemory
 END TYPE
 DIM motion(16) AS MotionMemory
 
+i = me.id
 motion(i).x = agents(i).x
 motion(i).y = agents(i).y
 motion(i).seen = me.tick

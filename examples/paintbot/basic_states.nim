@@ -1,3 +1,7 @@
+## Adapts the pinned Bassy runtime to Paintbot training snapshots.
+## Mutable fields are encoded explicitly while programs, callbacks, record
+## bindings, and compiled machine code remain attached to the rebuilt runtime.
+
 import
   bassy,
   snapshot
