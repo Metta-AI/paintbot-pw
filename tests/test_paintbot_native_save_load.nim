@@ -159,9 +159,16 @@ suite "World snapshots":
       # ticks); every other mode has base.bas seats that do.
       if kind == kCaller and at == atGrenade: continue
       test "save " & $at & ", load into a fresh handle: the next " & $K & " ticks are identical (" & $kind & ")":
-        let a = setup(kind, 51, 2400)
-        defer: pw_destroy(a)
-        let t = a.runTo(kind, at)
+        # Respawns and grenade flights are not guaranteed on one seed: the first of up to 8 seeds that has one.
+        var a: pointer = nil
+        var t = -1
+        for seed in 51'i32 .. 58'i32:
+          a = setup(kind, seed, 2400)
+          t = a.runTo(kind, at)
+          if t > 0 or at in {at1, at137, at600}: break
+          pw_destroy(a)
+          a = nil
+        defer: (if a != nil: pw_destroy(a))
         check t > 0
         if t > 0:
           let blob = save(a)
