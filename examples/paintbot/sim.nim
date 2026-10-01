@@ -606,9 +606,10 @@ proc lineClearRay(w: World, a, b: Point): bool =
       let eye = if elevated: startHeight+120+(endHeight-startHeight)*i.int div steps.int else: 0
       let blk = terrainBlockAt(p.x.int, p.z.int)
       if blk == nil:
-        # Not tabled (a generated map, or outside the span): the direct lookups. On a generated map the grid cell's bounds (maps.cellMaxHeight / cellMinMargin) settle
-        # most samples without interpolating: a cell whose lowest margin is >= 40 cannot fail the
-        # coast test, one whose highest ground is at or below the eye line cannot block it.
+        # Not tabled (a generated map, or outside the span): the direct lookups. On a generated
+        # map the grid cell's bounds (maps.cellMaxHeight / cellMinMargin) settle most samples
+        # without interpolating: a cell whose lowest margin is >= 40 cannot fail the coast test,
+        # one whose highest ground is at or below the eye line cannot block it.
         let cell = if activeMap() >= 0: mapCell(p.x.int, p.z.int) else: -1
         if island and (cell < 0 or mapCellMinMargin(cell) < 40) and islandMargin(p.x.int, p.z.int) < 40:
           return false
