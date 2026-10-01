@@ -97,6 +97,7 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa_v2.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_aim_offset.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_move_offset.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_ffa_shout.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_parity.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_map.nim
@@ -126,6 +127,7 @@ python coworld/paintbot/tools/make_jev_baseline.py --check
 [posix-only cwd=coworld/paintbot] python -m unittest test_semantic_trajectory
 [posix-only] python coworld/paintbot/test_training_bridge.py
 [posix-only] python coworld/paintbot/test_user_inputs_mirror.py
+[posix-only] python coworld/paintbot/test_shout_mirror.py
 # Heartland kinship evals: ffa_blind.bas is current, every kin_eval.py suite runs (2 short
 # episodes), and replay-recomputed pair counters equal the live ones. Multiprocessing + ctypes.
 [posix-only] python tools/test_kin_eval.py

@@ -21,6 +21,8 @@ Schema 2 may also carry `decoder` and `user_inputs` (below).
 | teams.view.1u<K> | `paintbot-pw.teams.view.1u<K>`, K = 1..256 | 512 + K |
 | ffa.view.1 | `paintbot-pw.ffa.view.1` | per match (`ffaViewLayout`) |
 | ffa.view.1u<K> | `paintbot-pw.ffa.view.1u<K>`, K = 1..256 | per match + K |
+| ffa.view.1h | `paintbot-pw.ffa.view.1h` | per match + 128 |
+| ffa.view.1hu<K> | `paintbot-pw.ffa.view.1hu<K>`, K = 1..256 | per match + 128 + K |
 
 | action contract | id | heads |
 |---|---|---|
@@ -28,10 +30,11 @@ Schema 2 may also carry `decoder` and `user_inputs` (below).
 | teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 |
 | teams.view.1 movement-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23` | 51, 25, 2, 2, 2, 23, 23, 23, 23 |
 | ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 |
+| ffa.view.1 pointer shout | `paintbot-pw.ffa.view.1.action.pointer.shout-hurt-at` | 11 + H, 9 + C, 2, 2, 2, 3 |
 
 teams.view.1 (and u<K>) pairs with the teams.view.1 action contract or its aim-offset or movement-offset variant
-and plays the teams game; ffa.view.1 (and u<K>) pairs with ffa.view.1 pointer and plays FFA-kin (Heartland)
-at any seat count. The actor's embedded hashes must equal the manifest's, its input count the
+and plays the teams game; ffa.view.1 (and u<K>, h, hu<K>) pairs with ffa.view.1 pointer or its shout variant
+and plays FFA-kin (Heartland) at any seat count. The actor's embedded hashes must equal the manifest's, its input count the
 contract's width, and its heads the action contract's. Every column of both observation
 contracts is documented in `neural_contract.encodeTeamsView` / `encodeFfaView` and in
 `neural_actor.md`; `tests/test_paintbot_seat_view_parity.nim` re-derives each one from the
@@ -68,7 +71,8 @@ neuralSample()
 ```
 
 `players/neural_decode.bas` is the reference reading of the teams.view.1 heads (and of the
-aim-offset and movement-offset heads), `players/neural_decode_ffa.bas` that of ffa.view.1 pointer, and
+aim-offset and movement-offset heads), `players/neural_decode_ffa.bas` that of ffa.view.1 pointer (and of
+the shout head), and
 `players/neural_policy.bas` is a complete policy: the three lines above followed by
 `neural_decode.bas` verbatim. The training library decodes a caller's heads with the same files,
 so a policy built on them trains and plays the same way. Everything the retired native decoder
@@ -99,14 +103,17 @@ Builtins (`neural_host.addNeuralFunctions`); none of them acts:
   1.0}`, draw for draw.
 - `neuralSample()`: the tick's selection, once: argmax or the seat's sampling stream, under the
   masks and temperatures, then `decoder.joint_sampling` or the model's COND_HEAD layers.
-- `neuralChoice(h)` reads head h (5 and 6 are the aim-offset heads, 7 and 8 the movement-offset heads); `neuralSetChoice(h, i)`
+- `neuralChoice(h)` reads head h (5 and 6 are the aim-offset heads, 7 and 8 the movement-offset heads; under
+  ffa.view.1 pointer shout 5 is the shout head); `neuralSetChoice(h, i)`
   overrides it (the training ABI's `pw_seat_policy_choices` reports what the script acted on).
 - `neuralInput(i, v)`: user input i (below).
 - `neuralLayout(i)`: for i in 0..15 `pw_observation_layout`'s word i (row floats, header floats,
   cog offset, cog rows, cog width, heart offset, heart rows, heart width, great offset, great
-  rows, great width, valid column, seats, control hearts; the section words need ffa.view.1),
+  rows, great width, valid column, seats, control hearts; the section words need ffa.view.1; 14
+  and 15 are the heard rows' offset and count under ffa.view.1h, else 0),
   for i in 16..24 the size of action head i - 16 (0 for a head the contract lacks; 21 and 22 are
-  23 under the aim-offset and movement-offset contracts, 23 and 24 under movement-offset).
+  23 under the aim-offset and movement-offset contracts, 23 and 24 under movement-offset; 21 is 3
+  under ffa.view.1 pointer shout).
 - `neuralRow(section, k)` (ffa.view.1): the entity row k shows this tick: section 0 the seat id
   of cog row k (`nearAgentId(k)` after `nearAgents(20000)`; -1 past the cogs the seat sees), 1 the
   control heart index, 2 the great heart index.
@@ -147,7 +154,31 @@ for an option a release lacks never plays without it. The retired rule names
   COND_HEAD layer, `neural_actor.md`); a bundle cannot use both.
 
 Under ffa.view.1 pointer only `sampling` is accepted (`neuralMask` / `neuralMaskFrom` are
-refused too: their bit masks cover the teams heads).
+refused too: their bit masks cover the teams heads). Under its shout variant `sampling.heads` may
+list 5 (the shout head), and without `heads` it covers it.
+
+## Speech (ffa.view.1 pointer shout, ffa.view.1h)
+
+BASIC `shout(text)` takes any text (at most 4 a tick, 256 bytes each); `heardCount` /
+`heardText(i)` / `heardSlot(i)` / `heardX(i)` / `heardY(i)` read what was shouted last tick
+within 20 % of the map width. The plain contracts give the network neither.
+
+- **Saying.** Action contract `ffa.view.1 pointer shout` adds head 5 with three classes: 0 says
+  nothing, 1 says `"hurt"`, 2 says `"at"`. That is exactly the FFA-kin baseline's vocabulary
+  (`players/ffa.bas` shouts `"hurt"` when it loses health and `"at"` every fourth tick of a fight),
+  so a neural seat can say nothing a BASIC seat does not. The reference decode
+  (`neural_decode_ffa.bas`, keyed on `neuralLayout(21) = 3`) calls `shout()` with that text; the
+  policy.bas may say anything else itself. Head 5 is selected after the five heads and COND_HEAD,
+  as the teams contracts select their extra heads.
+- **Hearing.** Observation contract `ffa.view.1h` is ffa.view.1, byte for byte, then 16 rows of 8
+  floats, one per heard message in `heardText` order (`neural_contract.encodeFfaHeard`): valid,
+  said "hurt", said "at", said anything else, dx, dz (over the map spans), `kin(heardSlot)/100`,
+  `heardSlot/255`. Every column is a BASIC heard* / kin value of the same tick. `ffa.view.1hu<K>`
+  appends K user inputs after them; a layout-word model's first heard column is section 2 offset
+  + 24.
+- **Labels.** The training ABI's `pw_seat_shouts` reports what a seat said as a head class (its
+  first in-vocabulary shout of the tick); `neural_package.shout_class` / `shout_labels` map a
+  recorded shout text (a replay's `communications`, recorded at tick + 1) the same way.
 
 ## User inputs (BASIC -> net)
 

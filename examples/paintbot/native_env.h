@@ -62,6 +62,15 @@ int pw_seat_script_status(void *handle, int seat, char *message, int32_t capacit
  * a visible body's position or pos+5000*compass (clamped); anything else has no exact
  * candidate. */
 int pw_seat_orders(void *handle, int seat, int32_t *ten);
+/* What a seat said on the last decision, as shout-head labels (action contract ffa.view.1
+ * pointer shout, 15), four int32: {class, vocabulary mask, shouts, other shouts}. class: the
+ * shout-head class of its first shout() whose text is in the vocabulary (1 "hurt", 2 "at"; 0
+ * none), the behaviour-cloning label of the tick; mask bit c - 1: class c was said (a script
+ * may say several phrases in a tick; the head carries the first); shouts: shout() calls kept
+ * (at most 4 a tick); other shouts: texts outside the vocabulary. A scripted seat reports its
+ * script's speech with pw_seat_orders' timing (after pw_script_decide, the coming step's), a
+ * caller-driven seat its reference decoder's. 0, or -1 bad args. */
+int pw_seat_shouts(void *handle, int seat, int32_t *four);
 /* Raw command (additive; command-space opponents and replayed recordings). The seat
  * executes nine = {walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak,
  * direct} (flags 0/1) on the NEXT pw_step only, built as BASIC's orders build a command:
@@ -96,10 +105,16 @@ int pw_set_seat_damage_scale(void *handle, int seat, int32_t permille);
  * "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23": those seven heads, then two 23-bin
  * heads dx, dz; the reference decode adds symmetric log-spaced offsets (bin 11 = 0, bin 11 +- j =
  * +-{16, 28, 48, 84, 146, 253, 439, 763, 1326, 2303, 4000}[j-1]), mirrored for
- * team 1, to the movement goal and clamps it to the map) and ffa.view.1 pointer (12,
- * "paintbot-pw.ffa.view.1.action.pointer"). pw_set_action_contract selects the contract
- * pw_step reads the caller's heads under: 11 (default), 13 or 14 on a 201 handle, 12 only on a
- * 202 handle; kept across pw_reset; 0, or -1 bad args. Under 13 a seat's action row is seven
+ * team 1, to the movement goal and clamps it to the map), ffa.view.1 pointer (12,
+ * "paintbot-pw.ffa.view.1.action.pointer") and its shout variant (15, opt-in,
+ * "paintbot-pw.ffa.view.1.action.pointer.shout-hurt-at": the five pointer heads, then head 5
+ * with 3 classes; the reference decode says nothing for 0, shout("hurt") for 1, shout("at")
+ * for 2: the FFA-kin baseline ffa.bas's whole vocabulary, through BASIC shout()). A
+ * caller-driven seat's decoded speech is delivered with the scripts' for next tick (a scripted
+ * seat under override bit 32 says its decoder's). pw_set_action_contract selects the contract
+ * pw_step reads the caller's heads under: 11 (default), 13 or 14 on a 201 handle, 12 (default)
+ * or 15 on a 202 / 203 handle; kept across pw_reset; 0, or -1 bad args. Under 15 a seat's
+ * action row is six int32 and pw_action_layout returns -1: use pw_action_layout_ext. Under 13 a seat's action row is seven
  * int32 and pw_action_layout returns -1: use pw_action_layout_ext (int32[10] = {heads, seven
  * head-size slots, logits per seat, 0}). Under 14 it is nine int32 and pw_action_layout_ext
  * returns -1 too: use pw_action_layout_ext2 (int32[12] = {heads, nine head-size slots, logits
@@ -120,7 +135,8 @@ int pw_action_contract_hash(int32_t version, char *sixty_five_bytes, int32_t cap
  * every override mask 0 the world is byte-identical whether or not it is called.
  * Returns 1 decided, 0 nothing to do, -1 bad handle. pw_set_seat_override makes a
  * scripted seat execute the caller's action (decoded by the reference decoder script) for the masked heads instead of its
- * script's order (bits: 1 walk/goal/direct, 2 aim, 4 shoot, 8 grenade, 16 sneak; 0 =
+ * script's order (bits: 1 walk/goal/direct, 2 aim, 4 shoot, 8 grenade, 16 sneak, 32 shout:
+ * the seat says what its decoder says, under 15, instead of its script's speech; 0 =
  * exact script play); the script still runs and reports its orders. Kept across
  * pw_reset. Returns 0, -1 bad args. */
 int pw_script_decide(void *handle);
@@ -205,7 +221,11 @@ int pw_elevation(void *handle, int32_t x, int32_t z);
  * is computed from the seat's SeatView. NULL for any other version (1, 2, 3, 101 and 102
  * were retired for BASIC parity) or a bad max_ticks. pw_observe / pw_observe_seats rows are
  * then that many floats apart. pw_observation_size() = 512; pw_observation_size_for(201) =
- * 512 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
+ * 512 (-1 otherwise, 202 included: its width follows the match); 203 = ffa.view.1h
+ * "paintbot-pw.ffa.view.1h" (opt-in: ffa.view.1's floats byte for byte, then 16 heard-speech
+ * rows of 8 floats, neural_contract.nim encodeFfaHeard: valid, said "hurt", said "at", said
+ * anything else, dx, dz, kin(speaker)/100, speaker/255 for heard message i in BASIC's heard*
+ * order; speech is delivered every step on such a handle); pw_handle_observation_size
  * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
  * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
  * 0, or -1 bad args). */
@@ -226,8 +246,9 @@ int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, in
  * 1..256, 0 = pw_create_observation(..., 202)): every row is the match's ffa.view.1 floats,
  * byte for byte, followed by the same K user-input floats; pw_handle_observation_size and
  * pw_observation_layout's row floats = the layout's size + K (the sections are unchanged);
- * pw_net_load_layout resolves the input count to the layout's size + K. Any other
- * obs_version: NULL / -1.
+ * pw_net_load_layout resolves the input count to the layout's size + K. 203 = ffa.view.1hu<K>
+ * "paintbot-pw.ffa.view.1hu<K>": ffa.view.1h's floats (the 128 heard floats included), then
+ * the K user inputs. Any other obs_version: NULL / -1.
  * pw_set_seat_policy_script: the seat runs a bundle's policy.bas under its manifest.json
  * exactly as the hosted neural seat does (selection options, user inputs, action contract;
  * the seat's own sampling stream from the match seed and slot), with no actor:
@@ -263,7 +284,7 @@ int pw_seat_policy_choices(void *handle, int seat, int32_t *twenty_two);
  * temperature_milli6}; zeros when the seat did not select. -1 bad args, not a policy seat, or
  * not exactly the two aim-offset heads (under 14 use pw_seat_policy_extra_choices).
  * pw_seat_policy_extra_choices: a policy seat's extra heads 5 .. 8 (13: aim offsets; 14: aim
- * then movement offsets), int32[12] = {selected5..8, final5..8, temperature_milli5..8}; zeros
+ * then movement offsets; 15: the shout head 5), int32[12] = {selected5..8, final5..8, temperature_milli5..8}; zeros
  * for heads the contract lacks and when the seat did not select. -1 bad args, not a policy
  * seat, or no extra heads.
  * pw_set_seat_conditionals: a policy seat's COND_HEAD layers held by the trainer: count pairs
@@ -425,7 +446,8 @@ int pw_set_config_json(void *handle, const char *json, int32_t length, char *err
  * pw_observation_layout(h, int32[16]): [row floats, header floats, cog offset, cog rows, cog
  * width, heart offset, heart rows, heart width, great offset, great rows, great width, valid
  * column, seats, control hearts, 0, 0] for the current world (teams.view.1: [row floats, row
- * floats, 0 x 9, -1, seats, control hearts, 0, 0]). pw_observation_rows(h, seat, int32 *out,
+ * floats, 0 x 9, -1, seats, control hearts, 0, 0]; a 203 handle: words 14, 15 = the heard
+ * rows' offset and count). pw_observation_rows(h, seat, int32 *out,
  * capacity): the seat's row -> entity map for the observation pw_observe writes before the
  * next pw_step: the cog rows' identities (-1 past the agents seen), then the heart rows'
  * control heart indices, then the 2 great heart indices; returns that count and writes only

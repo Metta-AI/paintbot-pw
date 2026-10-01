@@ -24,6 +24,16 @@ ACTION_CONTRACT_TEAMS_VIEW_1 = "paintbot-pw.teams.view.1.action.51-25-2-2-2"
 ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23"
 ACTION_CONTRACT_TEAMS_VIEW_1_MOVE = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23"
 ACTION_CONTRACT_FFA_VIEW_1_POINTER = "paintbot-pw.ffa.view.1.action.pointer"
+# Its shout variant (opt-in): the five pointer heads, then head 5 with SHOUT_CLASSES classes: 0 says nothing,
+# c >= 1 says SHOUT_VOCABULARY[c - 1] through BASIC shout() (players/neural_decode_ffa.bas). The vocabulary is
+# exactly what the FFA-kin baseline (players/ffa.bas) shouts.
+ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT = "paintbot-pw.ffa.view.1.action.pointer.shout-hurt-at"
+SHOUT_VOCABULARY = ("hurt", "at")
+SHOUT_CLASSES = 1 + len(SHOUT_VOCABULARY)
+# Observation contract ffa.view.1h (opt-in, native version 203): ffa.view.1's floats, then FFA_HEARD_ROWS rows of
+# FFA_HEARD_WIDTH heard-speech floats (neural_contract.nim encodeFfaHeard); ffa.view.1hu<K> appends K user inputs.
+OBSERVATION_CONTRACT_FFA_VIEW_1_HEARD = "paintbot-pw.ffa.view.1h"
+FFA_HEARD_ROWS, FFA_HEARD_WIDTH = 16, 8
 
 
 def contract_hash(contract_id):
@@ -36,12 +46,34 @@ ACTION_CONTRACT_TEAMS_VIEW_1_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1)
 ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET)
 ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_MOVE)
 ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH = contract_hash(ACTION_CONTRACT_FFA_VIEW_1_POINTER)
+ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT_HASH = contract_hash(ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT)
+FFA_ACTION_CONTRACT_HASHES = (ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT_HASH)
 TEAMS_VIEW_1_SIZE = 512
 ACTION_SIZES = (51, 25, 2, 2, 2)  # action contract teams.view.1
 ACTION_SIZES_OFFSET = (51, 25, 2, 2, 2, 23, 23)  # its aim-offset variant
 ACTION_SIZES_MOVE = (51, 25, 2, 2, 2, 23, 23, 23, 23)  # its movement-offset variant
-# Heads after the five main ones, per teams action contract: aim offsets 5-6, then movement offsets 7-8.
-EXTRA_HEADS = {ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH: 2, ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH: 4}
+# Heads after the five main ones, per action contract: aim offsets 5-6, then movement offsets 7-8 (teams); the
+# shout head 5 (ffa.view.1 pointer shout).
+EXTRA_HEADS = {ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH: 2, ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH: 4,
+               ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT_HASH: 1}
+
+
+def shout_class(text):
+    """The shout-head class of a BASIC shout() text (neural_contract.nim shoutClass): 1 + its index in
+    SHOUT_VOCABULARY, 0 for any other text. The behaviour-cloning label of a recorded shout."""
+    return SHOUT_VOCABULARY.index(text) + 1 if text in SHOUT_VOCABULARY else 0
+
+
+def shout_labels(communications, ticks, seats):
+    """Shout-head labels from a replay's speech: communications is the recording's [{tick, slot, text}] (a shout
+    made while deciding tick t is recorded at t + 1, when it is heard); returns labels[t][slot], the class of the
+    seat's first in-vocabulary shout decided on tick t (0 none), the rule pw_seat_shouts applies live."""
+    labels = [[0] * seats for _ in range(ticks)]
+    for item in communications:
+        t, slot = int(item["tick"]) - 1, int(item["slot"])
+        if 0 <= t < ticks and 0 <= slot < seats and labels[t][slot] == 0:
+            labels[t][slot] = shout_class(item["text"])
+    return labels
 # Contracts retired for BASIC parity: their observations read state a BASIC seat cannot (cooldowns,
 # shield, aim, heart meters, the end tick, cover probes), or their actions were decoded natively.
 RETIRED_OBSERVATION_CONTRACTS = ("paintbot-pw.rules37.obs.v1.float448", "paintbot-pw.rules37.obs.v2.float506",
@@ -80,6 +112,15 @@ def user_inputs_contract_id(count, base=OBSERVATION_CONTRACT_TEAMS_VIEW_1):
 USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k)): k for k in range(1, MAX_USER_INPUTS + 1)}
 FFA_USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k, OBSERVATION_CONTRACT_FFA_VIEW_1)): k
                                    for k in range(1, MAX_USER_INPUTS + 1)}
+
+
+def heard_contract_id(count):
+    """Observation contract ffa.view.1h (count 0) or ffa.view.1hu<K> (neural_contract.nim heardContractId)."""
+    return OBSERVATION_CONTRACT_FFA_VIEW_1_HEARD + ("u%d" % count if count else "")
+
+
+# ffa.view.1h (K = 0) and ffa.view.1hu<K> hash -> K.
+FFA_HEARD_CONTRACT_HASHES = {contract_hash(heard_contract_id(k)): k for k in range(0, MAX_USER_INPUTS + 1)}
 
 
 def user_input_feature(value):
@@ -189,10 +230,11 @@ def validate_joint_sampling(value):
             raise ValueError("decoder.joint_sampling.offsets must be within [-1000, 1000]")
 
 
-def validate_sampling(value, offset_heads=False):
+def validate_sampling(value, offset_heads=False, pointer=False):
     """decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}; heads 5 and 6 only
-    under action contract teams.view.1 aim-offset or movement-offset, heads 7 and 8 only under movement-offset.
-    offset_heads: the contract's extra heads (0, 2 or 4; True = 2, the aim-offset contract)."""
+    under action contract teams.view.1 aim-offset or movement-offset, heads 7 and 8 only under movement-offset;
+    under ffa.view.1 pointer shout (pointer, one extra head) head 5 and no head past it.
+    offset_heads: the contract's extra heads (0, 1, 2 or 4; True = 2, the aim-offset contract)."""
     extra = 2 if offset_heads is True else int(offset_heads)
     if not isinstance(value, dict):
         raise ValueError("decoder.sampling must be an object")
@@ -215,6 +257,11 @@ def validate_sampling(value, offset_heads=False):
                                      % (len(ACTION_SIZES_MOVE) - 1))
             if len(set(field)) != len(field):
                 raise ValueError("decoder.sampling.heads repeats a head")
+            if pointer and extra > 0:
+                if any(item >= SAMPLING_HEADS + extra for item in field):
+                    raise ValueError("decoder.sampling.heads 6, 7 and 8 do not exist under action contract "
+                                     "ffa.view.1 pointer shout")
+                continue
             if extra < 2 and any(SAMPLING_HEADS <= item < SAMPLING_HEADS + 2 for item in field):
                 raise ValueError("decoder.sampling.heads 5 and 6 need action contract teams.view.1 aim-offset")
             if extra < 4 and any(item >= SAMPLING_HEADS + 2 for item in field):
@@ -758,14 +805,16 @@ def unpack_package(data, seats=16):
             raise ValueError("neural %s contract %s" % (field, RETIRED_MESSAGE))
     teams_inputs = USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
     ffa_inputs = FFA_USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
-    user_inputs_named = teams_inputs or ffa_inputs
+    heard_inputs = FFA_HEARD_CONTRACT_HASHES.get(observation_contract, -1)
+    heard = heard_inputs >= 0
+    user_inputs_named = teams_inputs or ffa_inputs or max(heard_inputs, 0)
     teams = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH or teams_inputs > 0
-    if not teams and observation_contract != OBSERVATION_CONTRACT_FFA_VIEW_1_HASH and not ffa_inputs:
+    if not teams and observation_contract != OBSERVATION_CONTRACT_FFA_VIEW_1_HASH and not ffa_inputs and not heard:
         raise ValueError("unknown neural observation contract")
     if action_contract not in (ACTION_CONTRACT_TEAMS_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH,
-                               ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
+                               ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH) + FFA_ACTION_CONTRACT_HASHES:
         raise ValueError("unknown neural action contract")
-    if teams != (action_contract != ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
+    if teams != (action_contract not in FFA_ACTION_CONTRACT_HASHES):
         raise ValueError("observation contract teams.view.1 goes with action contract teams.view.1 (or its aim-offset "
                          "variant), ffa.view.1 with ffa.view.1 pointer")
     offset = EXTRA_HEADS.get(action_contract, 0)
@@ -784,7 +833,7 @@ def unpack_package(data, seats=16):
             if type(value) is not DECODER_OPTIONS[key]:
                 raise ValueError("decoder." + key + " must be a " + DECODER_OPTIONS[key].__name__)
             if key == "sampling":
-                validate_sampling(value, offset)
+                validate_sampling(value, offset, pointer=not teams)
             elif key == "forbid_objectives":
                 validate_forbid_objectives(value)
             elif key == "joint_sampling":
@@ -797,7 +846,7 @@ def unpack_package(data, seats=16):
         if manifest.get("schema") != "paintbot-neural-basic/2":
             raise ValueError("user_inputs need package schema 2")
         user_inputs = validate_user_inputs(manifest["user_inputs"])
-    family = "teams.view.1u" if teams else "ffa.view.1u"
+    family = "teams.view.1u" if teams else "ffa.view.1hu" if heard else "ffa.view.1u"
     if user_inputs and not user_inputs_named:
         raise ValueError("user_inputs need observation contract %s<K>" % family)
     if user_inputs_named and not user_inputs:

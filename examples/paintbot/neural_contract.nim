@@ -47,6 +47,26 @@ const
   ## point at the observation's rows of the same tick.
   ObservationContractFfaView1* = "paintbot-pw.ffa.view.1"
   ActionContractFfaView1Pointer* = "paintbot-pw.ffa.view.1.action.pointer"
+  ## Its shout variant (opt-in): the pointer contract's five heads, then one shout head (head
+  ## 5, ShoutClasses wide) the policy.bas reads as neuralChoice(5): 0 says nothing, c >= 1 says
+  ## ShoutVocabulary[c - 1] through BASIC shout(). The vocabulary is exactly what the FFA-kin
+  ## baseline (players/ffa.bas) shouts: "hurt" (it lost health) and "at" (where it stands, in
+  ## a fight). BASIC shout() takes any text; a neural seat gets that finite set, so it can say
+  ## nothing a BASIC seat cannot. The reference decode (players/neural_decode_ffa.bas) makes the
+  ## call; nothing native speaks.
+  ActionContractFfaView1PointerShout* = "paintbot-pw.ffa.view.1.action.pointer.shout-hurt-at"
+  ShoutVocabulary* = ["hurt", "at"]
+  ShoutClasses* = 1 + ShoutVocabulary.len
+  ShoutHeads* = 1
+  ## Observation contract ffa.view.1h (opt-in): ffa.view.1's floats unchanged, then
+  ## FfaHeardRows heard-speech rows (encodeFfaHeard): what heardCount / heardText / heardSlot /
+  ## heardX / heardY give the seat's BASIC this tick. ffa.view.1hu<K> appends K user inputs
+  ## after them, as ffa.view.1u<K> does after ffa.view.1. Native ABI version 203.
+  ObservationContractFfaView1Heard* = "paintbot-pw.ffa.view.1h"
+  FfaHeardRows* = 16
+  FfaHeardWidth* = 8
+  FfaHeardSize* = FfaHeardRows*FfaHeardWidth
+  NativeObservationFfaHeard* = 203
   ## Heights (SeatView.terrainHeight, centimetres) are divided by this.
   TerrainHeightScale* = 800
   Directions* = [(1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1)]
@@ -89,7 +109,8 @@ type
     ## Version numbers are the native ABI's (pw_create_observation).
     ocTeamsView1 = 201, ocFfaView1 = 202
   ActionContractVersion* = enum
-    acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13, acTeamsView1Move = 14
+    acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13, acTeamsView1Move = 14,
+    acFfaView1PointerShout = 15
 
 const
   ObservationContractTeamsView1Hash* = sha256Hex(ObservationContractTeamsView1)
@@ -98,6 +119,8 @@ const
   ActionContractFfaView1PointerHash* = sha256Hex(ActionContractFfaView1Pointer)
   ActionContractTeamsView1OffsetHash* = sha256Hex(ActionContractTeamsView1Offset)
   ActionContractTeamsView1MoveHash* = sha256Hex(ActionContractTeamsView1Move)
+  ActionContractFfaView1PointerShoutHash* = sha256Hex(ActionContractFfaView1PointerShout)
+  ObservationContractFfaView1HeardHash* = sha256Hex(ObservationContractFfaView1Heard)
 
 const
   ## Contracts retired for BASIC parity (docs/neural/seat-view.md): their observations read
@@ -157,24 +180,47 @@ proc userInputsContract*(hash: string): (ObservationContractVersion, int) =
     if k > 0: return (base, k)
   (ocTeamsView1, 0)
 
+proc heardContractId*(k: int): string =
+  ## Observation contract ffa.view.1h (k = 0) or ffa.view.1hu<K> (ffa.view.1h's floats, then K
+  ## user inputs).
+  if k == 0: ObservationContractFfaView1Heard else: ObservationContractFfaView1Heard & "u" & $k
+
+var heardHashes {.threadvar.}: seq[string]
+
+proc heardContractHash*(k: int): string =
+  ## The hash of observation contract ffa.view.1h (k = 0) or ffa.view.1hu<K>, K = 1 .. 256.
+  if k notin 0..MaxUserInputs: raise newException(ValueError, "no heard-speech observation contract for that count")
+  if heardHashes.len == 0:
+    for i in 0..MaxUserInputs: heardHashes.add sha256Hex(heardContractId(i))
+  heardHashes[k]
+
+proc heardContractFromHash*(hash: string): int =
+  ## K when `hash` names ffa.view.1h (0) or ffa.view.1hu<K> (K); -1 otherwise.
+  for k in 0..MaxUserInputs:
+    if heardContractHash(k) == hash: return k
+  -1
+
 proc actionContractHash*(version: ActionContractVersion): string =
   case version
   of acTeamsView1: ActionContractTeamsView1Hash
   of acFfaView1Pointer: ActionContractFfaView1PointerHash
   of acTeamsView1Offset: ActionContractTeamsView1OffsetHash
   of acTeamsView1Move: ActionContractTeamsView1MoveHash
+  of acFfaView1PointerShout: ActionContractFfaView1PointerShoutHash
 proc actionContractId*(version: ActionContractVersion): string =
   case version
   of acTeamsView1: ActionContractTeamsView1
   of acFfaView1Pointer: ActionContractFfaView1Pointer
   of acTeamsView1Offset: ActionContractTeamsView1Offset
   of acTeamsView1Move: ActionContractTeamsView1Move
+  of acFfaView1PointerShout: ActionContractFfaView1PointerShout
 proc actionContractVersion*(hash: string): ActionContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ActionContractTeamsView1Hash: acTeamsView1
   elif hash == ActionContractFfaView1PointerHash: acFfaView1Pointer
   elif hash == ActionContractTeamsView1OffsetHash: acTeamsView1Offset
   elif hash == ActionContractTeamsView1MoveHash: acTeamsView1Move
+  elif hash == ActionContractFfaView1PointerShoutHash: acFfaView1PointerShout
   elif retiredContract(hash): raise newException(ValueError, "neural action contract " & RetiredMessage)
   else: raise newException(ValueError, "unknown neural action contract")
 
@@ -203,9 +249,19 @@ proc pairedAction*(version: ObservationContractVersion): ActionContractVersion =
   if version == ocTeamsView1: acTeamsView1 else: acFfaView1Pointer
 proc pairs*(observation: ObservationContractVersion, action: ActionContractVersion): bool =
   ## Whether the two contracts go together: teams.view.1 with its five-head action contract
-  ## or its aim-offset / movement-offset variants, ffa.view.1 with its pointer contract.
+  ## or its aim-offset / movement-offset variants, ffa.view.1 (and its u<K>, h and hu<K>
+  ## variants) with its pointer contract or the pointer contract's shout variant.
   if observation == ocTeamsView1: action in {acTeamsView1, acTeamsView1Offset, acTeamsView1Move}
-  else: action == acFfaView1Pointer
+  else: action in {acFfaView1Pointer, acFfaView1PointerShout}
+proc shoutClass*(text: string): int =
+  ## The shout-head class of a BASIC shout() text: 1 + its index in ShoutVocabulary, 0 for any
+  ## other text (no class says it). The behaviour-cloning label of a recorded shout.
+  for i, phrase in ShoutVocabulary:
+    if text == phrase: return i + 1
+  0
+proc shoutText*(class: int): string =
+  ## What the reference decode shouts for a shout-head class: "" for 0 (nothing).
+  if class in 1..ShoutVocabulary.len: ShoutVocabulary[class - 1] else: ""
 proc moveOffset*(bin: int): int =
   ## The movement offset (world units, before the team-1 mirror) of a movement-offset bin 0 .. 22:
   ## 0 at the centre bin 11, else ±MoveOffsetTable[|bin - 11| - 1]. players/neural_decode.bas holds
@@ -214,10 +270,12 @@ proc moveOffset*(bin: int): int =
   if j == 0: 0 elif j > 0: MoveOffsetTable[j-1] else: -MoveOffsetTable[-j-1]
 proc extraHeads*(action: ActionContractVersion): int =
   ## The heads after the five main ones: 2 (aim offsets) under teams.view.1 aim-offset, 4 (aim
-  ## then movement offsets) under movement-offset, 0 otherwise.
+  ## then movement offsets) under movement-offset, 1 (shout) under ffa.view.1 pointer shout, 0
+  ## otherwise.
   case action
   of acTeamsView1Offset: AimOffsetHeads
   of acTeamsView1Move: AimOffsetHeads + MoveOffsetHeads
+  of acFfaView1PointerShout: ShoutHeads
   else: 0
 proc actionHeadSizes*(action: ActionContractVersion): seq[int] =
   ## The head sizes of a fixed-size action contract (ffa.view.1 pointer: see pointerHeads).
@@ -225,7 +283,8 @@ proc actionHeadSizes*(action: ActionContractVersion): seq[int] =
   of acTeamsView1: @ActionSizes
   of acTeamsView1Offset: @ActionSizesOffset
   of acTeamsView1Move: @ActionSizesMove
-  of acFfaView1Pointer: raise newException(ValueError, "action contract ffa.view.1 pointer is sized by the match (pointerHeads)")
+  of acFfaView1Pointer, acFfaView1PointerShout:
+    raise newException(ValueError, "action contract ffa.view.1 pointer is sized by the match (pointerHeads)")
 
 proc mapFlip*(slot: int): int =
   ## The teams game mirrors odd seats' observations and compass heads (team 1 plays from
@@ -397,16 +456,18 @@ proc ffaViewLayout*(v: SeatView): FfaViewLayout =
   ffaViewLayout(v.seatCount.int, v.heartCount.int)
 
 proc actorLayout*(l: FfaViewLayout, heads: openArray[int], targets = [-1, -1, -1, -1],
-    userInputs = 0): ActorLayout =
+    userInputs = 0, heard = false): ActorLayout =
   ## The match layout a PWNET002 model's layout words resolve against for an ffa.view.1 seat:
   ## section 0 the cog rows, 1 the control heart rows, 2 the great heart rows, 3 the control
   ## and great heart rows as one run (they are contiguous and equally wide); `heads` the
   ## action contract's head sizes and `targets` each section's pointer target (the logit
   ## offset of its row 0; -1 none). Under ffa.view.1u<K> (`userInputs` = K) the input count is
   ## l.size + K: the K user inputs are the last K columns, l.size .. l.size + K - 1 (the layout
-  ## word section 2 offset + 24 names the first: the great heart rows end there).
+  ## word section 2 offset + 24 names the first: the great heart rows end there). Under
+  ## ffa.view.1h (`heard`) the FfaHeardSize heard-speech columns come first, l.size ..
+  ## l.size + FfaHeardSize - 1 (section 2 offset + 24 names the first), then any user inputs.
   result.present = true
-  result.inputs = l.size + userInputs
+  result.inputs = l.size + (if heard: FfaHeardSize else: 0) + userInputs
   result.heads = @heads
   for h in heads: result.outputs += h
   result.sections[0] = LayoutSection(offset: l.cogOffset, rows: l.cogRows, width: FfaCogWidth, target: targets[0])
@@ -569,17 +630,50 @@ proc encodeFfaView*(v: SeatView, output: var openArray[float32], rows: FfaViewRo
     output[o+10] = float32(v.waterAt(x.int, z.int))
     output[o+11] = dh(x, z)
 
+proc encodeFfaHeard*(v: SeatView, output: var openArray[float32], mask = 0'u32) =
+  ## The heard-speech rows of observation contract ffa.view.1h (FfaHeardSize floats, after
+  ## ffa.view.1's): row i describes heard message i (heardText(i), heardSlot(i), heardX(i),
+  ## heardY(i): what was shouted last tick within earshot, in the order BASIC reads it), for
+  ## i < min(heardCount, FfaHeardRows); the rest are zero rows. Every column is computed from
+  ## those SeatView procs, kin and the map bounds (the BASIC builtins of the same name):
+  ##   0 valid (1), 1 text = "hurt", 2 text = "at" (shoutClass: one-hot over ShoutVocabulary),
+  ##   3 any other text, 4 dx = (heardX - selfX) / spanX, 5 dz = (heardY - selfY) / spanZ,
+  ##   6 kin(heardSlot)/100 (0 unknown, or under mask bit 0), 7 heardSlot/255
+  ## mask bit 0 (FfaObsMaskKin, training only) zeroes column 6.
+  if output.len != FfaHeardSize: raise newException(ValueError, "invalid neural observation dimensions")
+  for i in 0..<output.len: output[i] = 0
+  let hideKin = (mask and FfaObsMaskKin) != 0
+  let spanX = float32(v.mapMaxX - v.mapMinX)
+  let spanZ = float32(v.mapMaxY - v.mapMinY)
+  let sx = v.selfX
+  let sz = v.selfY
+  for i in 0..<min(v.heardCount.int, FfaHeardRows):
+    let o = i*FfaHeardWidth
+    let class = shoutClass(v.heardText(i))
+    let speaker = v.heardSlot(i).int
+    output[o] = 1
+    output[o + 3] = 1
+    if class > 0:
+      output[o + 3] = 0
+      output[o + class] = 1
+    output[o + 4] = float32(v.heardX(i) - sx) / spanX
+    output[o + 5] = float32(v.heardY(i) - sz) / spanZ
+    if not hideKin and speaker >= 0 and v.kin(speaker) >= 0: output[o + 6] = float32(v.kin(speaker)) / 100
+    if speaker >= 0: output[o + 7] = float32(speaker) / float32(MaxSeats-1)
+static: doAssert ShoutClasses == 3 and FfaHeardWidth == 1 + ShoutVocabulary.len + 1 + 4
+
 proc userInputFeature*(value: int32): float32 =
   ## The float a user input value feeds the net: float32(v) / 1000 (v already clamped).
   float32(value) / 1000'f32
 proc clampUserInput*(value: int32): int32 = clamp(value, -UserInputLimit, UserInputLimit)
 
 proc encodeObservation*(v: SeatView, version: ObservationContractVersion, output: var openArray[float32],
-    inputs: openArray[int32] = [], rows = FfaViewRows(), mask = 0'u32) =
+    inputs: openArray[int32] = [], rows = FfaViewRows(), mask = 0'u32, heard = false) =
   ## The observation of the given contract: teams.view.1 (then the K user inputs of
   ## teams.view.1u<K>, K = inputs.len) or ffa.view.1 against `rows` (ffaViewRows of the view;
-  ## then the K user inputs of ffa.view.1u<K>). The user-input columns follow the base
-  ## contract's floats unchanged: with no inputs every byte is the base contract's.
+  ## with `heard`, ffa.view.1h: then the heard-speech rows, encodeFfaHeard; then the K user
+  ## inputs of ffa.view.1u<K> / ffa.view.1hu<K>). Each block follows the one before unchanged:
+  ## with no inputs and no heard rows every byte is the base contract's.
   case version
   of ocTeamsView1:
     if output.len != TeamsViewSize + inputs.len or inputs.len > MaxUserInputs:
@@ -587,10 +681,12 @@ proc encodeObservation*(v: SeatView, version: ObservationContractVersion, output
     encodeTeamsView(v, output.toOpenArray(0, TeamsViewSize-1))
     for i, value in inputs: output[TeamsViewSize+i] = userInputFeature(value)
   of ocFfaView1:
-    let size = output.len - inputs.len
+    let extra = if heard: FfaHeardSize else: 0
+    let size = output.len - inputs.len - extra
     if size < 0 or inputs.len > MaxUserInputs: raise newException(ValueError, "invalid neural observation dimensions")
     encodeFfaView(v, output.toOpenArray(0, size-1), rows, mask)
-    for i, value in inputs: output[size+i] = userInputFeature(value)
+    if heard: encodeFfaHeard(v, output.toOpenArray(size, size+extra-1), mask)
+    for i, value in inputs: output[size+extra+i] = userInputFeature(value)
 
 proc argmaxActions*(logits: openArray[float32]): array[ActionSizes.len, int32] =
   ## Deterministic headwise argmax, the deployed selection rule (first maximum wins).
@@ -890,17 +986,19 @@ proc sampleHeads*(logits: openArray[float32], temps: HeadTemperatures, masks: He
 # Action contract ffa.view.1 pointer (observation contract ffa.view.1 only). Five heads, sized
 # by the match layout (seats N, control hearts H, cog rows C = min(N - 1, 64)):
 #   head 0 objective, 11 + H; head 1 aim, 9 + C; heads 2, 3, 4: 2 each. What each index means
-# is the seat's policy.bas's business (players/neural_decode.bas is the reference reading:
+# is the seat's policy.bas's business (players/neural_decode_ffa.bas is the reference reading:
 # 0 stay / keep aim, 1..8 compass, then the observation's heart rows and cog rows, read back
-# with neuralRow).
+# with neuralRow). Its shout variant adds head 5, ShoutClasses (0 nothing, then ShoutVocabulary).
 const
   PointerCompass* = 8
   PointerObjectiveFirstRow* = 1 + PointerCompass   # 9: control heart row 0
   PointerAimFirstRow* = 1 + PointerCompass         # 9: cog row 0
 
-proc pointerHeads*(l: FfaViewLayout): seq[int] =
-  ## The head sizes of action contract ffa.view.1 pointer for a match layout.
-  @[1 + PointerCompass + l.heartRows + l.greatRows, 1 + PointerCompass + l.cogRows, 2, 2, 2]
+proc pointerHeads*(l: FfaViewLayout, contract = acFfaView1Pointer): seq[int] =
+  ## The head sizes of action contract ffa.view.1 pointer for a match layout; under its shout
+  ## variant (acFfaView1PointerShout) the shout head (ShoutClasses) follows the five.
+  result = @[1 + PointerCompass + l.heartRows + l.greatRows, 1 + PointerCompass + l.cogRows, 2, 2, 2]
+  if contract == acFfaView1PointerShout: result.add ShoutClasses
 
 proc pointerTargets*(l: FfaViewLayout): array[4, int] =
   ## The logit offset of each observation section's row 0 (neural_actor layout words, field
