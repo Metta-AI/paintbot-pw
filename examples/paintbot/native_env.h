@@ -83,12 +83,25 @@ int pw_set_seat_command(void *handle, int seat, const int32_t *nine);
  * so period 4 = at most one honoured shot per 96 ticks, the same unit as the adapter's
  * fire-gated Nim bot. Only the issued order is gated: the interpreter, the script's
  * state and its aim are untouched. Period 1 never gates. Returns 0, -1 bad args.
- * pw_set_seat_damage_scale: damage dealt BY the seat is scaled by permille/1000 with
- * floor rounding (a 1-point gun hit deals 0 below 1000; grenade 2/6 and spray 3 step
- * down), the hit itself still lands (shield, cooldown relief, telemetry and friendly-fire
- * glory as before). 1000 is exact. Returns 0, -1 bad args. */
+ * pw_set_seat_damage_scale: damage dealt BY the seat is scaled by permille/1000, the
+ * fraction carried to the seat's next hit (500 = every other 1-point gun hit lands; 0 = no
+ * damage), the hit itself still lands (shield, cooldown relief, telemetry and friendly-fire
+ * glory as before). 1000 is exact. Returns 0, -1 bad args.
+ * Handicaps (all kept across pw_reset; 0 restores the rules' value unless noted):
+ * pw_set_seat_max_hp: spawn/respawn/medkit HP, 1..6 (rules: 3 in teams; initial spawn at the
+ * next pw_reset). pw_set_seat_lives: lives a match starts with, 1..8 (rules: 4 in teams;
+ * next pw_reset). pw_set_seat_damage_taken: damage dealt TO the seat scaled by
+ * permille/1000 with the fraction carried, 0..10000, 1000 = exact. pw_set_team_capture_ticks:
+ * ticks team 0/1 holds a control heart alone to capture it, 36..144 (rules: 72).
+ * pw_set_seat_respawn_ticks: respawn delay, 1..1440 (rules: 72). Each returns 0, -1 bad
+ * args. With every knob neutral a match is byte-identical to one without them. */
 int pw_set_seat_fire_period(void *handle, int seat, int32_t period);
 int pw_set_seat_damage_scale(void *handle, int seat, int32_t permille);
+int pw_set_seat_max_hp(void *handle, int seat, int32_t hp);
+int pw_set_seat_lives(void *handle, int seat, int32_t lives);
+int pw_set_seat_damage_taken(void *handle, int seat, int32_t permille);
+int pw_set_team_capture_ticks(void *handle, int side, int32_t ticks);
+int pw_set_seat_respawn_ticks(void *handle, int seat, int32_t ticks);
 /* Action contracts. teams.view.1 (version 11, "paintbot-pw.teams.view.1.action.51-25-2-2-2"),
  * its aim-offset variant (13, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23": the five
  * heads, then two 23-bin heads x, z; the reference decode adds ((ix - 11) * 28, (iz - 11) * 28),

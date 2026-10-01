@@ -277,6 +277,16 @@ when defined(pwTraining):
   # Per-attacker damage scale in permille, pointed at by the host for one step; nil or
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
   var damageScale* {.threadvar.}: ptr array[MaxSeats, int32]
+  # Training-only handicaps (native pw_set_seat_max_hp, pw_set_seat_lives,
+  # pw_set_seat_damage_taken, pw_set_team_capture_ticks, pw_set_seat_respawn_ticks),
+  # pointed at by the host for one reset or step; nil, 0 (and damageTaken 1000) leave the
+  # rules' values exactly. remOut / remIn carry the fractional damage of a scale between
+  # hits (per attacker / per victim, match-scoped). A training curriculum knob only.
+  type Handicap* = object
+    maxHp*, lives*, respawnTicks*, damageTaken*: array[MaxSeats, int32]
+    captureTicks*: array[2, int32]
+    remOut*, remIn*: array[MaxSeats, int32]
+  var handicap* {.threadvar.}: ptr Handicap
   # FFA-kin pair counters (native pw_pair_stats): the host points this at a proc for one
   # step and damage() reports every damage event past the shield and life checks, with the
   # health it removed. Telemetry only; never part of World, its hash or any decision.
@@ -298,6 +308,27 @@ proc wadesToWetGoals*(): bool =
 proc maxHp*(): int32 =
   ## Base HP a cog spawns with and a medkit restores: FfaMaxHp in FFA-kin, 3 otherwise.
   if ffa(): FfaMaxHp.int32 else: TeamsMaxHp.int32
+proc seatMaxHp*(slot: int): int32 =
+  ## The HP this seat spawns with and a medkit restores: maxHp(), or a training handicap.
+  when defined(pwTraining):
+    if handicap != nil and handicap.maxHp[slot] > 0: return handicap.maxHp[slot]
+  maxHp()
+proc seatRespawnTicks*(slot: int): int32 =
+  ## Ticks a dead seat waits to respawn: RespawnTicks, or a training handicap.
+  when defined(pwTraining):
+    if handicap != nil and handicap.respawnTicks[slot] > 0: return handicap.respawnTicks[slot]
+  RespawnTicks.int32
+proc seatStartingLives*(slot: int, rulesLives: int32): int32 =
+  ## The lives a seat starts a match with: the rules', or a training handicap.
+  when defined(pwTraining):
+    if handicap != nil and handicap.lives[slot] > 0: return handicap.lives[slot]
+  rulesLives
+proc teamCaptureTicks*(side: int): int32 =
+  ## Ticks a team holds a control heart alone to capture it: HeartCaptureTicks, or a
+  ## training handicap.
+  when defined(pwTraining):
+    if handicap != nil and side in 0..1 and handicap.captureTicks[side] > 0: return handicap.captureTicks[side]
+  HeartCaptureTicks.int32
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).
   if visionRulesVersion >= 27 and w.uniforms[slot]: 1-team(slot) else: team(slot)
@@ -841,7 +872,7 @@ proc spawnNear(w: var World, slot: int, origin: Point): bool =
     if distance2(origin, p) > radius.int64*radius: continue
     if w.blocked(p) or w.occupied(p, slot) or not w.traversable(origin, p): continue
     w.cogs[slot].pos = p; w.cogs[slot].goal = p
-    w.cogs[slot].hp = maxHp(); w.cogs[slot].shield = 36
+    w.cogs[slot].hp = seatMaxHp(slot); w.cogs[slot].shield = 36
     w.cogs[slot].firing = false; w.cogs[slot].carrying = false
     return true
 
@@ -870,7 +901,7 @@ proc spawn(w: var World, slot: int, solid = true) =
               break search
     if not found: return # Retry next tick rather than overlap a living cog.
   w.cogs[slot].pos = p; w.cogs[slot].goal = p
-  w.cogs[slot].hp = maxHp(); w.cogs[slot].shield = 36
+  w.cogs[slot].hp = seatMaxHp(slot); w.cogs[slot].shield = 36
   w.cogs[slot].firing = false; w.cogs[slot].carrying = false
 proc resetHeart*(w: var World, side: int) =
   w.hearts[side] = Heart(pos: home(side), carrier: -1)
@@ -1146,7 +1177,7 @@ proc hit*(w: var World, victim, attacker: int) =
   if observeHit != nil: observeHit(w.tick, victim, attacker, w.cogs[victim].pos)
   dec w.cogs[victim].hp
   if w.cogs[victim].hp == 0:
-    w.dropHeart(victim); w.cogs[victim].respawn = RespawnTicks
+    w.dropHeart(victim); w.cogs[victim].respawn = seatRespawnTicks(victim)
     inc w.cogs[attacker].tags
     if observeTag != nil: observeTag(w.tick, victim, attacker, w.cogs[victim].pos)
 proc legacyWaypoint(w: World, start, goal: Point): Point =

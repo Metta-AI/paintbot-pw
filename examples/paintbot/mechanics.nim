@@ -110,7 +110,7 @@ proc initializeMapEquipment(w: var World) =
   ## FFA-kin on a map follows the island's FFA rules: one life, no uniforms, every heart
   ## unowned, no captures, and the great-heart pair.
   for i in 0..<Seats:
-    w.equipment[i].lives = (if ffa(): 1 else: 4)
+    w.equipment[i].lives = seatStartingLives(i, (if ffa(): 1'i32 else: 4'i32))
     w.cogs[i].aim = home(1-team(i))
   let m = currentMap()
   for p in m.pickups:
@@ -143,7 +143,7 @@ proc initializeEquipment(w: var World) =
     for q in [spots[0], spots[1]]:
       w.pickups.add Pickup(pos: q, kind: uniformPickup)
   for i in 0..<Seats:
-    w.equipment[i].lives = (if ffa(): 1 elif visionRulesVersion >= 19: 4 else: StartingLives)
+    w.equipment[i].lives = seatStartingLives(i, (if ffa(): 1'i32 elif visionRulesVersion >= 19: 4'i32 else: StartingLives.int32))
     w.cogs[i].aim = home(1-team(i))
   # Mirrors use the same symmetry as this arena's terrain (180-degree rotation).
   for p in [point(300, 300), point(300, Height-300)]:
@@ -344,7 +344,7 @@ proc updateTerritory*(w:var World) =
       if w.heartCaptures[index].team != attacker:
         w.heartCaptures[index] = HeartCapture(team: attacker)
       inc w.heartCaptures[index].ticks
-      if w.heartCaptures[index].ticks < HeartCaptureTicks: continue
+      if w.heartCaptures[index].ticks < teamCaptureTicks(attacker): continue
       w.heartCaptures[index] = HeartCapture(team: -1)
     if touching[0] != touching[1]:
       let owner=(if touching[0]:0'i32 else:1'i32)
@@ -370,11 +370,25 @@ proc updateTerritory*(w:var World) =
 proc damage*(w: var World, victim, attacker, amount: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
   when defined(pwTraining):
-    # Curriculum: scale what this attacker deals (floor; 1000 is exact). The hit still
-    # happens, so shields, cooldown relief, telemetry and friendly-fire glory are as before.
+    # Curriculum: scale what this attacker deals (damageScale) and what this victim takes
+    # (handicap.damageTaken), permille, 1000 = exact. With the handicap the fractional part
+    # carries to the next hit (remOut per attacker, then remIn per victim), so 500 lands
+    # every other 1-point hit; without it the old floor. Both at 1000 is the rules' damage
+    # exactly. The hit still happens, so shields, cooldown relief, telemetry and
+    # friendly-fire glory are as before.
     var amount = amount
-    if damageScale != nil and attacker >= 0 and damageScale[attacker] != 1000:
-      amount = int(int64(amount)*damageScale[attacker] div 1000)
+    let attackerScale = if damageScale != nil and attacker >= 0: damageScale[attacker] else: 1000'i32
+    let victimScale = if handicap != nil: handicap.damageTaken[victim] else: 1000'i32
+    if attackerScale != 1000 or victimScale != 1000:
+      if handicap == nil:
+        amount = int(int64(amount)*attackerScale div 1000)
+      else:
+        if attackerScale != 1000:
+          let t = int64(amount)*attackerScale + handicap.remOut[attacker]
+          amount = int(t div 1000); handicap.remOut[attacker] = int32(t mod 1000)
+        if victimScale != 1000:
+          let t = int64(amount)*victimScale + handicap.remIn[victim]
+          amount = int(t div 1000); handicap.remIn[victim] = int32(t mod 1000)
   if observeHit != nil: observeHit(w.tick, victim, attacker, w.cogs[victim].pos)
   if attacker >= 0 and attacker != victim and team(attacker) == team(victim) and
       w.tick < GloryFriendlyFireTicks and visionRulesVersion < 39:
@@ -444,7 +458,7 @@ proc damage*(w: var World, victim, attacker, amount: int) =
   let lives = if visionRulesVersion in 13..18:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
   w.equipment[victim] = Equipment(lives: lives)
   w.uniforms[victim] = false
-  w.cogs[victim].respawn = RespawnTicks
+  w.cogs[victim].respawn = seatRespawnTicks(victim)
   w.cogs[victim].cooldown = 0
   if attacker >= 0 and attacker != victim:
     inc w.cogs[attacker].tags
@@ -546,7 +560,7 @@ proc pickupEquipment(w: var World, attacked: openArray[bool]) =
       of sprayPickup:
         if not w.equipment[i].sprayCan: w.equipment[i].sprayCan = true; taken = true
       of medkitPickup:
-        if w.cogs[i].hp < maxHp(): w.cogs[i].hp = maxHp(); taken = true
+        if w.cogs[i].hp < seatMaxHp(i): w.cogs[i].hp = seatMaxHp(i); taken = true
       of uniformPickup:
         if visionRulesVersion >= 27 and not w.uniforms[i] and not attacked[i] and
             not w.cogs[i].firing and w.equipment[i].windup == 0 and
@@ -606,7 +620,7 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
             let x = w.rng.between(150, 800)
             let p = point(if team(i) == 0: x else: Width-x, w.rng.between(150, Height-150))
             if not w.movementBlocked(p, i, true):
-              w.cogs[i].pos = p; w.cogs[i].goal = p; w.cogs[i].hp = maxHp()
+              w.cogs[i].pos = p; w.cogs[i].goal = p; w.cogs[i].hp = seatMaxHp(i)
               w.cogs[i].shield = 36; placed = true; break
           if not placed: w.spawn(i)
       continue
