@@ -20,6 +20,9 @@ SCHEMAS = ("paintbot-neural-basic/1", "paintbot-neural-basic/2")
 # through policy.bas. neural_contract.nim holds the same ids.
 OBSERVATION_CONTRACT_TEAMS_VIEW_1 = "paintbot-pw.teams.view.1"
 OBSERVATION_CONTRACT_FFA_VIEW_1 = "paintbot-pw.ffa.view.1"
+# teams.view.1h (203): teams.view.1's 512 floats, then the engine's 100-float motion-history block (612 floats);
+# neural_contract.nim encodeTeamsViewH.
+OBSERVATION_CONTRACT_TEAMS_VIEW_1H = "paintbot-pw.teams.view.1h"
 ACTION_CONTRACT_TEAMS_VIEW_1 = "paintbot-pw.teams.view.1.action.51-25-2-2-2"
 ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23"
 ACTION_CONTRACT_TEAMS_VIEW_1_MOVE = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23"
@@ -38,6 +41,7 @@ def contract_hash(contract_id):
 
 OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH = contract_hash(OBSERVATION_CONTRACT_TEAMS_VIEW_1)
 OBSERVATION_CONTRACT_FFA_VIEW_1_HASH = contract_hash(OBSERVATION_CONTRACT_FFA_VIEW_1)
+OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH = contract_hash(OBSERVATION_CONTRACT_TEAMS_VIEW_1H)
 ACTION_CONTRACT_TEAMS_VIEW_1_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1)
 ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET)
 ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_MOVE)
@@ -45,6 +49,7 @@ ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH = contract_hash(ACTION_CONTRACT_TEAMS_V
 ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_RAW)
 ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH = contract_hash(ACTION_CONTRACT_FFA_VIEW_1_POINTER)
 TEAMS_VIEW_1_SIZE = 512
+TEAMS_VIEW_1H_SIZE = 612
 ACTION_SIZES = (51, 25, 2, 2, 2)  # action contract teams.view.1
 ACTION_SIZES_OFFSET = (51, 25, 2, 2, 2, 23, 23)  # its aim-offset variant
 ACTION_SIZES_MOVE = (51, 25, 2, 2, 2, 23, 23, 23, 23)  # its movement-offset variant
@@ -89,6 +94,8 @@ def user_inputs_contract_id(count, base=OBSERVATION_CONTRACT_TEAMS_VIEW_1):
 USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k)): k for k in range(1, MAX_USER_INPUTS + 1)}
 FFA_USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k, OBSERVATION_CONTRACT_FFA_VIEW_1)): k
                                    for k in range(1, MAX_USER_INPUTS + 1)}
+TEAMS_H_USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k, OBSERVATION_CONTRACT_TEAMS_VIEW_1H)): k
+                                       for k in range(1, MAX_USER_INPUTS + 1)}
 
 
 def user_input_feature(value):
@@ -787,8 +794,10 @@ def unpack_package(data, seats=16):
             raise ValueError("neural %s contract %s" % (field, RETIRED_MESSAGE))
     teams_inputs = USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
     ffa_inputs = FFA_USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
-    user_inputs_named = teams_inputs or ffa_inputs
-    teams = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH or teams_inputs > 0
+    teams_h_inputs = TEAMS_H_USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
+    user_inputs_named = teams_inputs or ffa_inputs or teams_h_inputs
+    teams_h = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH or teams_h_inputs > 0
+    teams = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH or teams_inputs > 0 or teams_h
     if not teams and observation_contract != OBSERVATION_CONTRACT_FFA_VIEW_1_HASH and not ffa_inputs:
         raise ValueError("unknown neural observation contract")
     if action_contract not in (ACTION_CONTRACT_TEAMS_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH,
@@ -827,7 +836,7 @@ def unpack_package(data, seats=16):
         if manifest.get("schema") != "paintbot-neural-basic/2":
             raise ValueError("user_inputs need package schema 2")
         user_inputs = validate_user_inputs(manifest["user_inputs"])
-    family = "teams.view.1u" if teams else "ffa.view.1u"
+    family = "teams.view.1hu" if teams_h else "teams.view.1u" if teams else "ffa.view.1u"
     if user_inputs and not user_inputs_named:
         raise ValueError("user_inputs need observation contract %s<K>" % family)
     if user_inputs_named and not user_inputs:
@@ -848,9 +857,10 @@ def unpack_package(data, seats=16):
         inputs, observation = actor_header(files["model.bin"])
         if observation != observation_contract:
             raise ValueError("package and actor contract mismatch")
-        if inputs != TEAMS_VIEW_1_SIZE + user_inputs:
-            raise ValueError("neural actor input count must be %d for observation contract teams.view.1%s"
-                             % (TEAMS_VIEW_1_SIZE + user_inputs, "u%d" % user_inputs if user_inputs else ""))
+        base_size = TEAMS_VIEW_1H_SIZE if teams_h else TEAMS_VIEW_1_SIZE
+        if inputs != base_size + user_inputs:
+            raise ValueError("neural actor input count must be %d for observation contract teams.view.1%s%s"
+                             % (base_size + user_inputs, "h" if teams_h else "", "u%d" % user_inputs if user_inputs else ""))
     return files["policy.bas"], files["model.bin"], manifest
 
 
