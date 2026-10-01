@@ -282,7 +282,10 @@ int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, in
  * pw_seat_script_status), -1 bad args. While any policy seat is installed pw_step and
  * pw_script_decide return -4.
  * pw_step_logits: pw_step with logits = float[n * logits per seat] in seat order (only
- * policy seats' rows are read). The trainer runs the actor on the seat's pw_observe row every
+ * policy seats' rows are read). Logits per seat is the handle's action contract's (82; 128 / 174
+ * under contracts 13 / 14). A policy seat whose own manifest contract is narrower reads the leading
+ * logits of its row, so contracts 11, 13 and 14 can share a handle set to the widest of them
+ * (pw_seat_policy_extra_choices then reports zeros for a seat without extra heads). The trainer runs the actor on the seat's pw_observe row every
  * tick the seat is alive, its recurrent state cleared as the host clears it (dead, alive
  * after a death, new match).
  * pw_seat_policy_choices: int32[22] of the last step = {decided, selected[5], final[5],

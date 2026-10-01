@@ -890,8 +890,12 @@ proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatB
 
 proc pw_step_logits*(handle: pointer, actions: ActionBuffer, logits, rewards,
     terminals: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
-  ## pw_step for a handle with policy seats: `logits` holds n x 82 floats in seat order (n = pw_seats),
-  ## and each policy seat's row is what run_neural_net yields to its policy.bas this tick
+  ## pw_step for a handle with policy seats: `logits` holds n rows in seat order (n = pw_seats), each as
+  ## wide as the handle's action contract (82 floats; 128 / 174 under contracts 13 / 14). A policy seat
+  ## whose own manifest contract is narrower than the handle's reads the leading logits of its row (the
+  ## teams layouts are prefixes of one another), so seats of contracts 11, 13 and 14 can share a handle
+  ## set to the widest; a seat wider than the handle is an error.
+  ## Each policy seat's row is what run_neural_net yields to its policy.bas this tick
   ## (the trainer ran the actor on the seat's pw_observe row). Sampling, every decoder
   ## option, masks, temperatures and the command are the script's, on the seat's own
   ## streams, exactly as the hosted seat plays; read what it executed with
@@ -940,9 +944,14 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
           for slot in 0..<env.n:
             let bot = env.scriptBots[slot]
             if not env.policy[slot] or bot == nil or bot.neural == nil: continue
-            if bot.neural.fedLogits.len != stride:
+            # A seat's action contract is its manifest's. The teams contracts' layouts are prefixes of one
+            # another (11: 82 logits, 13: 128, 14: 174), so a seat narrower than the handle's contract reads
+            # the leading logits of its row: one world can seat contracts 11, 13 and 14 side by side on a
+            # handle set to the widest of them.
+            let own = bot.neural.fedLogits.len
+            if own > stride or (own != stride and env.obsVersion == ocFfaView1):
               raise newException(ValueError, "policy seat logits do not match the handle's action layout")
-            for i in 0..<stride: bot.neural.fedLogits[i] = logits[slot*stride+i]
+            for i in 0..<own: bot.neural.fedLogits[i] = logits[slot*stride+i]
             bot.neural.logitsFed = true
         try: env.scriptDecide()
         finally:
@@ -1500,13 +1509,18 @@ proc pw_seat_policy_extra_choices*(handle: pointer, seat: cint, output: ptr Unch
   ## movement offsets) on the last pw_step_logits, twelve int32: [selected5 .. selected8,
   ## final5 .. final8, temperature_milli5 .. temperature_milli8], zeros for a head the seat's
   ## contract lacks and when the seat did not select. Returns 0, -1 for bad arguments, a seat
-  ## that is not a policy seat, or a seat without extra heads.
+  ## that is not a policy seat, or a seat without extra heads on a handle whose own contract has
+  ## none (on a contract 13 / 14 handle such a seat reports zeros, so every seat's row reads alike).
   if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if not env.policy[seat]: return -1
   let bot = env.scriptBots[seat]
-  if bot == nil or bot.neural == nil or not bot.neural.offsetHeads: return -1
+  if bot == nil or bot.neural == nil: return -1
+  if not bot.neural.offsetHeads:
+    if env.obsVersion == ocFfaView1 or extraHeads(env.actionContract) == 0: return -1
+    for i in 0..<3*ExtraHeadsMax: output[i] = 0
+    return 0
   for i in 0..<3*ExtraHeadsMax: output[i] = 0
   let n = bot.neural
   if not n.sampled: return 0
