@@ -137,6 +137,22 @@ proc playerCarrying*(v: SeatView, identity: int): int32 =
   let body = v.bodyForSeat(identity)
   if body >= 0: v.world.cogs[body].carrying.int32 else: 0
 
+type IdentityRow* = object
+  ## visible(identity) and playerX / playerY / playerTeam / playerHp / playerCarrying(identity)
+  ## of one tick, from one body resolution (the observation encoders read all six together).
+  visible*: bool
+  x*, z*, team*, hp*, carrying*: int32
+
+proc identityRow*(v: SeatView, identity: int): IdentityRow =
+  ## Exactly what visible, playerX, playerY, playerTeam, playerHp and playerCarrying return for
+  ## `identity` (one bodyForSeat instead of six).
+  let body = v.bodyForSeat(identity)
+  if body < 0: return IdentityRow(visible: false, x: -1, z: -1, team: -1, hp: 0, carrying: 0)
+  let c = v.world.cogs[body]
+  IdentityRow(visible: true, x: c.pos.x, z: c.pos.z,
+    team: (if ffa(): body.int32 else: v.world.observedTeam(v.slot, body).int32),
+    hp: c.hp, carrying: c.carrying.int32)
+
 # ---------------------------------------------------------------------------------------
 # Nearby agents.
 proc buildNearGrid(w: World) =
@@ -308,6 +324,12 @@ proc soundKind*(v: SeatView, i: int): int32 = v.soundField(i, 0)
 proc soundDirection*(v: SeatView, i: int): int32 = v.soundField(i, 1)
 proc soundDistance*(v: SeatView, i: int): int32 = v.soundField(i, 2)
 proc soundAge*(v: SeatView, i: int): int32 = v.soundField(i, 3)
+iterator liveSounds*(v: SeatView): tuple[kind, direction, distance, age: int32] =
+  ## The seat's sounds in soundKind / soundDirection / soundDistance / soundAge index order
+  ## (index i is the i-th yielded; soundCount is how many), in one pass over the cues.
+  for cue in v.world.sounds:
+    if cue.listener != v.slot.int32 or v.world.tick-cue.tick > SoundLifetime: continue
+    yield (cue.kind, cue.direction, cue.distance, v.world.tick-cue.tick)
 
 proc heardCount*(v: SeatView): int32 = heard[v.slot].len.int32
 proc heardText*(v: SeatView, i: int): string =
@@ -342,6 +364,11 @@ proc pickupVisible*(v: SeatView, i: int): int32 = int32(v.pickupSeen(i))
 proc pickupX*(v: SeatView, i: int): int32 = (if v.pickupSeen(i): v.world.pickups[i].pos.x else: -1'i32)
 proc pickupY*(v: SeatView, i: int): int32 = (if v.pickupSeen(i): v.world.pickups[i].pos.z else: -1'i32)
 proc pickupKind*(v: SeatView, i: int): int32 = (if v.pickupSeen(i): v.world.pickups[i].kind.int32 else: -1'i32)
+proc pickupRow*(v: SeatView, i: int): tuple[visible: bool, x, z, kind: int32] =
+  ## pickupVisible, pickupX, pickupY and pickupKind of pickup i from one sight test.
+  if not v.pickupSeen(i): return (false, -1'i32, -1'i32, -1'i32)
+  let p = v.world.pickups[i]
+  (true, p.pos.x, p.pos.z, p.kind.int32)
 
 proc heartCount*(v: SeatView): int32 = v.world.controlHearts.len.int32
 proc glory*(v: SeatView, side: int): int32 =
@@ -464,5 +491,7 @@ proc trenchAt*(v: SeatView, x, z: int32): int32 = v.world.trenchAt(Point(x: x, z
 # the shortest way to a heart is the slowest one - and the most exposed.
 proc waterAt*(v: SeatView, x, z: int): int32 =
   let cx = clamp(x, minX(), maxX()); let cz = clamp(z, minZ(), maxZ())
-  int32(visionRulesVersion >= 30 and riverBlend(cx, cz) > 0 and terrainHeight(cx, cz) < RiverWaterHeight)
+  # Both tests are pure functions of the point; the tabled height goes first so the untabled
+  # riverBlend runs only for ground below the waterline (the same answer either way).
+  int32(visionRulesVersion >= 30 and terrainHeight(cx, cz) < RiverWaterHeight and riverBlend(cx, cz) > 0)
 

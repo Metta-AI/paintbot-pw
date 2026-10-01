@@ -606,9 +606,31 @@ proc lineClearRay(w: World, a, b: Point): bool =
       let eye = if elevated: startHeight+120+(endHeight-startHeight)*i.int div steps.int else: 0
       let blk = terrainBlockAt(p.x.int, p.z.int)
       if blk == nil:
-        # Not tabled (a generated map, or outside the span): the direct lookups, as before.
-        if island and islandMargin(p.x.int, p.z.int) < 40: return false
-        if elevated and w.elevation(p) > eye: return false
+        # Not tabled (a generated map, or outside the span): the direct lookups. On a generated
+        # map the grid cell's bounds (maps.cellMaxHeight / cellMinMargin) settle most samples
+        # without interpolating: a cell whose lowest margin is >= 40 cannot fail the coast test,
+        # one whose highest ground is at or below the eye line cannot block it.
+        let cell = if activeMap() >= 0: mapCell(p.x.int, p.z.int) else: -1
+        if island and (cell < 0 or mapCellMinMargin(cell) < 40) and islandMargin(p.x.int, p.z.int) < 40:
+          return false
+        if elevated and (cell < 0 or mapCellMaxHeight(cell) > eye):
+          # w.elevation(p) > eye: the ground, 60 lower inside a trench. A trench only lowers it,
+          # so ground at or below the eye line is clear without the trench scan; above it, the
+          # trenches listed for the ray (every trench that can hold a sample) are scanned.
+          var height = terrainHeight(p.x.int, p.z.int)
+          if height > eye:
+            if listed:
+              for k in 0..<trenchCount:
+                let t = w.trenches[rayTrenches[k]]
+                if p.x >= t.x and p.x < t.x+t.w and p.z >= t.z and p.z < t.z+t.h:
+                  height -= 60
+                  break
+            else:
+              for t in w.trenches:
+                if p.x >= t.x and p.x < t.x+t.w and p.z >= t.z and p.z < t.z+t.h:
+                  height -= 60
+                  break
+            if height > eye: return false
       elif (island and blk.minMargin.int < 40) or (elevated and blk.maxHeight.int > eye):
         let cell = blk.cellIn(p.x.int, p.z.int)
         if island and cell.margin.int < 40: return false
