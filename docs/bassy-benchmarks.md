@@ -10,14 +10,14 @@ shows medians of six runs per engine. Decision time excludes world simulation.
 
 | Policy | Old decisions (ms) | JIT decisions (ms) | Speedup |
 | --- | ---: | ---: | ---: |
-| base | 2226.6 | 2106.0 | 1.057x |
-| jev | 2357.6 | 2136.6 | 1.103x |
+| base | 2240.8 | 2135.7 | 1.049x |
+| jev | 2379.5 | 2161.7 | 1.101x |
 
 All 24 runs reached state hash `2770947189`. End-to-end decision plus
 simulation
-speedups were base: 1.052x, jev: 1.094x.
+speedups were base: 1.043x, jev: 1.092x.
 One-time startup includes compilation and is slower with the JIT:
-base: 8.0 ms old, 36.3 ms new, jev: 29.1 ms old, 122.8 ms new.
+base: 7.7 ms old, 35.8 ms new, jev: 30.6 ms old, 120.1 ms new.
 Individual timings vary with other work on this computer. Every sample is saved
 in `bassy-benchmarks.json`.
 
