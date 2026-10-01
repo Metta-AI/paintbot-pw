@@ -250,8 +250,9 @@ proc withNearFlags*(spec: Spec, obs: seq[float32]): seq[float32] =
   let flags = nearFlagsReference(spec, obs)
   for n, f in flags: result[spec.extra[3].int + n*spec.extra[4].int] = f
 
-proc pointerModel*(r: var Rand): string =
-  ## A layout-word model for observation contract ffa.view.1 + action contract ffa.view.1 pointer whose
+proc pointerModel*(r: var Rand, observationContract = ObservationContractFfaView1Hash): string =
+  ## A layout-word model for observation contract ffa.view.1 (or ffa.view.1u<K>: the input count word
+  ## then resolves to the layout's size + K, which no layer reads) + action contract ffa.view.1 pointer whose
   ## weights never depend on the layout, so the same file loads at every seat and heart count:
   ## heart and cog tokens (TOKEN_MLP), the header, an ATTN_POOL over the cogs, per-token mixes,
   ## a DENSE to the 24 fixed logits, PADs that open the heart rows (objective head) and the cog
@@ -277,7 +278,7 @@ proc pointerModel*(r: var Rand): string =
   specs[10].params[1] = layoutWord(0, 3)
   encodeWords(layoutWord(LayoutGlobal, 0), layoutWord(LayoutGlobal, 1),
     [layoutWord(LayoutGlobal, 2, 0), layoutWord(LayoutGlobal, 2, 1), 2'u32, 2, 2], specs,
-    ObservationContractFfaView1Hash, ActionContractFfaView1PointerHash)
+    observationContract, ActionContractFfaView1PointerHash)
 
 proc condHead*(whenHead, head: int, weights: seq[float32]): Spec =
   ## COND_HEAD: head `head` re-selected with column a of weights [size(head), size(whenHead)] added,

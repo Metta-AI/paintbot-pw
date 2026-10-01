@@ -113,11 +113,14 @@ const
   RetiredUserInputsMax* = 128
   UserInputLimit* = 1_000_000'i32
 
-proc userInputsContractId*(k: int): string = ObservationContractTeamsView1 & "u" & $k
-  ## Observation contract teams.view.1u<K>: teams.view.1's floats, then K user inputs.
+proc userInputsContractId*(k: int, base = ocTeamsView1): string =
+  ## Observation contract teams.view.1u<K> (teams.view.1's 512 floats, then K user inputs) or,
+  ## with base ocFfaView1, ffa.view.1u<K> (the match's ffa.view.1 floats, then K user inputs).
+  ## The user inputs are written only by the seat's policy.bas (neuralInput).
+  (if base == ocTeamsView1: ObservationContractTeamsView1 else: ObservationContractFfaView1) & "u" & $k
 
 var retiredHashes {.threadvar.}: seq[string]
-var userInputHashes {.threadvar.}: seq[string]
+var userInputHashes {.threadvar.}: array[ObservationContractVersion, seq[string]]
 
 proc retiredContract*(hash: string): bool =
   ## Whether `hash` names a contract retired for BASIC parity (the v2u<K> / v3u<K> families
@@ -132,18 +135,27 @@ proc retiredContract*(hash: string): bool =
 
 const RetiredMessage* = "was retired for BASIC parity (docs/neural/seat-view.md); retrain on teams.view.1 or ffa.view.1"
 
-proc userInputsContractHash*(k: int): string =
-  ## The hash of observation contract teams.view.1u<K>, K = 1 .. 256.
+proc userInputsContractHash*(k: int, base = ocTeamsView1): string =
+  ## The hash of observation contract teams.view.1u<K> (or ffa.view.1u<K>, base ocFfaView1),
+  ## K = 1 .. 256.
   if k notin 1..MaxUserInputs: raise newException(ValueError, "no user-input observation contract for that count")
-  if userInputHashes.len == 0:
-    for i in 1..MaxUserInputs: userInputHashes.add sha256Hex(userInputsContractId(i))
-  userInputHashes[k-1]
+  if userInputHashes[base].len == 0:
+    for i in 1..MaxUserInputs: userInputHashes[base].add sha256Hex(userInputsContractId(i, base))
+  userInputHashes[base][k-1]
 
-proc userInputsFromHash*(hash: string): int =
-  ## K when `hash` names observation contract teams.view.1u<K>; 0 otherwise.
+proc userInputsFromHash*(hash: string, base = ocTeamsView1): int =
+  ## K when `hash` names observation contract teams.view.1u<K> (or ffa.view.1u<K>, base
+  ## ocFfaView1); 0 otherwise.
   for k in 1..MaxUserInputs:
-    if userInputsContractHash(k) == hash: return k
+    if userInputsContractHash(k, base) == hash: return k
   0
+
+proc userInputsContract*(hash: string): (ObservationContractVersion, int) =
+  ## The base contract and K when `hash` names teams.view.1u<K> or ffa.view.1u<K>; K = 0 otherwise.
+  for base in ObservationContractVersion:
+    let k = userInputsFromHash(hash, base)
+    if k > 0: return (base, k)
+  (ocTeamsView1, 0)
 
 proc actionContractHash*(version: ActionContractVersion): string =
   case version
@@ -384,14 +396,17 @@ proc ffaViewLayout*(v: SeatView): FfaViewLayout =
   ## The layout of the view's match: its seats and its control hearts.
   ffaViewLayout(v.seatCount.int, v.heartCount.int)
 
-proc actorLayout*(l: FfaViewLayout, heads: openArray[int], targets = [-1, -1, -1, -1]): ActorLayout =
+proc actorLayout*(l: FfaViewLayout, heads: openArray[int], targets = [-1, -1, -1, -1],
+    userInputs = 0): ActorLayout =
   ## The match layout a PWNET002 model's layout words resolve against for an ffa.view.1 seat:
   ## section 0 the cog rows, 1 the control heart rows, 2 the great heart rows, 3 the control
   ## and great heart rows as one run (they are contiguous and equally wide); `heads` the
   ## action contract's head sizes and `targets` each section's pointer target (the logit
-  ## offset of its row 0; -1 none).
+  ## offset of its row 0; -1 none). Under ffa.view.1u<K> (`userInputs` = K) the input count is
+  ## l.size + K: the K user inputs are the last K columns, l.size .. l.size + K - 1 (the layout
+  ## word section 2 offset + 24 names the first: the great heart rows end there).
   result.present = true
-  result.inputs = l.size
+  result.inputs = l.size + userInputs
   result.heads = @heads
   for h in heads: result.outputs += h
   result.sections[0] = LayoutSection(offset: l.cogOffset, rows: l.cogRows, width: FfaCogWidth, target: targets[0])
@@ -562,7 +577,9 @@ proc clampUserInput*(value: int32): int32 = clamp(value, -UserInputLimit, UserIn
 proc encodeObservation*(v: SeatView, version: ObservationContractVersion, output: var openArray[float32],
     inputs: openArray[int32] = [], rows = FfaViewRows(), mask = 0'u32) =
   ## The observation of the given contract: teams.view.1 (then the K user inputs of
-  ## teams.view.1u<K>, K = inputs.len) or ffa.view.1 against `rows` (ffaViewRows of the view).
+  ## teams.view.1u<K>, K = inputs.len) or ffa.view.1 against `rows` (ffaViewRows of the view;
+  ## then the K user inputs of ffa.view.1u<K>). The user-input columns follow the base
+  ## contract's floats unchanged: with no inputs every byte is the base contract's.
   case version
   of ocTeamsView1:
     if output.len != TeamsViewSize + inputs.len or inputs.len > MaxUserInputs:
@@ -570,8 +587,10 @@ proc encodeObservation*(v: SeatView, version: ObservationContractVersion, output
     encodeTeamsView(v, output.toOpenArray(0, TeamsViewSize-1))
     for i, value in inputs: output[TeamsViewSize+i] = userInputFeature(value)
   of ocFfaView1:
-    if inputs.len > 0: raise newException(ValueError, "user inputs need observation contract teams.view.1")
-    encodeFfaView(v, output, rows, mask)
+    let size = output.len - inputs.len
+    if size < 0 or inputs.len > MaxUserInputs: raise newException(ValueError, "invalid neural observation dimensions")
+    encodeFfaView(v, output.toOpenArray(0, size-1), rows, mask)
+    for i, value in inputs: output[size+i] = userInputFeature(value)
 
 proc argmaxActions*(logits: openArray[float32]): array[ActionSizes.len, int32] =
   ## Deterministic headwise argmax, the deployed selection rule (first maximum wins).

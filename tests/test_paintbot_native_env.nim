@@ -113,7 +113,9 @@ suite "Native training environment":
 
   test "teams.view.1u<K> handles and hashes":
     check pw_create_observation_inputs(1, 100, -1) == nil and pw_create_observation_inputs(1, 100, 257) == nil
-    for (v, k) in [(202'i32, 3'i32), (1'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32), (201'i32, 257'i32), (201'i32, -1'i32)]:
+    # (202 = ffa.view.1u<K>: tests/test_paintbot_native_ffa_v2.nim.)
+    for (v, k) in [(1'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32), (203'i32, 3'i32), (201'i32, 257'i32),
+        (201'i32, -1'i32), (202'i32, 257'i32), (202'i32, -1'i32)]:
       check pw_create_observation_inputs_v(1, 100, v, k) == nil
     check pw_create_observation_inputs_v(1, HeartMeterMatchTicks+1, 201, 3) == nil
     for k in [1'i32, 3, 32, 64, 65, 128]:
@@ -130,7 +132,8 @@ suite "Native training environment":
         (0.cint, userInputsContractHash(k.int))
       check userInputsContractHash(k.int) == sha256Hex("paintbot-pw.teams.view.1u" & $k)
       pw_destroy(a); pw_destroy(b)
-    for (v, k) in [(201'i32, 0'i32), (201'i32, 257'i32), (202'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32)]:
+    for (v, k) in [(201'i32, 0'i32), (201'i32, 257'i32), (202'i32, 0'i32), (202'i32, 257'i32), (203'i32, 3'i32),
+        (2'i32, 3'i32), (3'i32, 3'i32)]:
       check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash_v(v, k, o, 65))[0] == -1
     check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash(3, o, 64))[0] == -1
     let zero = pw_create_observation_inputs(1, 100, 0)

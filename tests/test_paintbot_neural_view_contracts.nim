@@ -330,8 +330,69 @@ suite "SeatView neural contracts":
     let f = newWorld(3)
     beginViews(f)
     let fv = seatView(0)
+    # ffa.view.1 takes user inputs only as ffa.view.1u<K> (its own test below): the width must
+    # be the layout's size + K exactly.
     var fo = newSeq[float32](fv.ffaViewLayout.size + 1)
-    expect ValueError: encodeObservation(fv, ocFfaView1, fo, [1'i32], rows = ffaViewRows(fv))
+    expect ValueError: encodeObservation(fv, ocFfaView1, fo, [1'i32, 2], rows = ffaViewRows(fv))
+    expect ValueError: encodeObservation(fv, ocFfaView1, fo, rows = ffaViewRows(fv))
+
+  test "ffa.view.1u<K>: ids, hashes, K, layout, and the K user inputs after the match's ffa.view.1 floats":
+    for k in [1, 2, 5, 7, 64, MaxUserInputs]:
+      check userInputsContractId(k, ocFfaView1) == "paintbot-pw.ffa.view.1u" & $k
+      check userInputsContractHash(k, ocFfaView1) == sha256Hex("paintbot-pw.ffa.view.1u" & $k)
+      check userInputsFromHash(userInputsContractHash(k, ocFfaView1), ocFfaView1) == k
+      check userInputsContract(userInputsContractHash(k, ocFfaView1)) == (ocFfaView1, k)
+      check userInputsContract(userInputsContractHash(k)) == (ocTeamsView1, k)
+      # The two families are disjoint, and neither is a base contract or retired.
+      check userInputsFromHash(userInputsContractHash(k, ocFfaView1)) == 0
+      check userInputsFromHash(userInputsContractHash(k), ocFfaView1) == 0
+      check not retiredContract(userInputsContractHash(k, ocFfaView1))
+      expect ValueError: discard observationContractVersion(userInputsContractHash(k, ocFfaView1))
+    check userInputsContract(ObservationContractFfaView1Hash) == (ocTeamsView1, 0)
+    check userInputsContract(ObservationContractTeamsView1Hash) == (ocTeamsView1, 0)
+    check userInputsFromHash(ObservationContractFfaView1Hash, ocFfaView1) == 0
+    expect ValueError: discard userInputsContractHash(0, ocFfaView1)
+    expect ValueError: discard userInputsContractHash(MaxUserInputs+1, ocFfaView1)
+    # The base contracts' hashes are unchanged (the ids are).
+    check ObservationContractFfaView1Hash == sha256Hex("paintbot-pw.ffa.view.1")
+    check ObservationContractTeamsView1Hash == sha256Hex("paintbot-pw.teams.view.1")
+    # Layout: the sections are ffa.view.1's; the input count adds K.
+    for l in [ffaViewLayout(16, 10), ffaViewLayout(50, 100)]:
+      let a = actorLayout(l, pointerHeads(l), pointerTargets(l), 5)
+      let b = actorLayout(l, pointerHeads(l), pointerTargets(l))
+      check a.inputs == l.size + 5 and b.inputs == l.size
+      check a.sections == b.sections and a.heads == b.heads and a.outputs == b.outputs
+      # Layout word section 2 offset + 24 names the first user input.
+      check resolveWord(a, layoutWord(2, 1, 24), "") == l.size.uint32
+      check resolveWord(a, layoutWord(LayoutGlobal, 0), "") == uint32(l.size + 5)
+    # Every seat at 16 and 50 seats: the first size floats are encodeFfaView's, byte for byte
+    # (with and without the kin mask); then float32(v) / 1000 of each (clamped) input.
+    for (seats, map, layout) in [(16, "", klCousins), (50, "big-twin-mesas", klTribes)]:
+      configureSeats(seats)
+      configureMap(map)
+      gameMode = gmFfaKin
+      kinLayoutPin = some(layout)
+      let w = newWorld(2026, 0)
+      let l = ffaViewLayout(seats, w.controlHearts.len)
+      beginViews(w)
+      let inputs = [5'i32, -2000, 0, 1_500_000, -1_000_000]
+      for slot in 0..<seats:
+        let v = seatView(slot)
+        for mask in [0'u32, FfaObsMaskKin]:
+          var plain = newSeq[float32](l.size)
+          encodeFfaView(v, plain, ffaViewRows(v), mask)
+          var o = newSeq[float32](l.size + inputs.len)
+          encodeObservation(v, ocFfaView1, o, inputs, rows = ffaViewRows(v), mask = mask)
+          for i in 0..<l.size: check cast[uint32](o[i]) == cast[uint32](plain[i])
+          check o[l.size] == 0.005'f32 and o[l.size+1] == -2'f32 and o[l.size+2] == 0
+          check o[l.size+3] == userInputFeature(1_500_000) and o[l.size+4] == -1000'f32
+          # K = 0 is ffa.view.1 itself.
+          var none0 = newSeq[float32](l.size)
+          encodeObservation(v, ocFfaView1, none0, rows = ffaViewRows(v), mask = mask)
+          check none0 == plain
+      let v0 = seatView(0)
+      var wide = newSeq[float32](l.size + MaxUserInputs + 1)
+      expect ValueError: encodeObservation(v0, ocFfaView1, wide, newSeq[int32](MaxUserInputs + 1), rows = ffaViewRows(v0))
 
   test "encodeFfaView rows are nearAgents(20000)'s list, entry by entry":
     let k = kinshipFor(klStrangers, 3)
@@ -550,3 +611,134 @@ suite "SeatView neural contracts":
     gameMode = gmTeams
     configureSeats(LegacySeats)
     check "FFA-kin only" in loadError(dense)
+
+  test "ffa.view.1u<K>: the hosted loader, manifest checks, one tick of latency; zero inputs play ffa.view.1's match":
+    const K = 5
+    var r = initRand(97)
+    configureSeats(16)
+    gameMode = gmFfaKin
+    kinLayoutPin = some(klCousins)
+    let l = matchLayout()
+    let heads = pointerHeads(l)
+    var total = 0
+    for x in heads: total += x
+    let contract = userInputsContractHash(K, ocFfaView1)
+    # The ffa.view.1 model, and its ffa.view.1u5 twin: the same weights for the first l.size
+    # inputs, K more (nonzero) weights per output for the user inputs.
+    let baseDense = r.dense(l.size, total, bias = true)
+    var twinDense = Spec(code: 1, params: [uint32(l.size + K), total.uint32, 1, 0, 0, 0, 0, 0])
+    let extra = r.weights(total*K, 0.5)
+    for o in 0..<total:
+      for i in 0..<l.size: twinDense.tensors.add baseDense.tensors[o*l.size + i]
+      for j in 0..<K: twinDense.tensors.add extra[o*K + j]
+    for o in 0..<total: twinDense.tensors.add baseDense.tensors[total*l.size + o]
+    let baseModel = encode2(l.size, heads, [baseDense], ObservationContractFfaView1Hash, ActionContractFfaView1PointerHash)
+    let twinModel = encode2(l.size + K, heads, [twinDense], contract, ActionContractFfaView1PointerHash)
+    proc inputsManifest(count: int, init: string): string =
+      let base = manifestFor(contract, ActionContractFfaView1PointerHash)
+      base[0 ..< base.len-1] & ", \"user_inputs\": {\"count\": " & $count & ", \"init\": " & init & "}}"
+    let manifest = inputsManifest(K, "[0, 0, 0, 0, 0]")
+    # Load checks.
+    check loadError(twinModel, manifest) == ""
+    check "observation contract ffa.view.1u5 needs manifest user_inputs" in loadError(twinModel)
+    check "user_inputs.count does not match observation contract ffa.view.1u5" in
+      loadError(twinModel, inputsManifest(4, "[0, 0, 0, 0]"))
+    check "user_inputs need observation contract ffa.view.1u<K>" in loadError(baseModel, manifestFor(
+      ObservationContractFfaView1Hash, ActionContractFfaView1PointerHash)[0 ..< ^1] &
+      ", \"user_inputs\": {\"count\": 1, \"init\": [0]}}")
+    check "ffa.view.1 layout" in loadError(encode2(l.size + K - 1, heads, [r.dense(l.size + K - 1, total)], contract,
+      ActionContractFfaView1PointerHash), manifest)
+    check "ffa.view.1 layout" in loadError(encode2(l.size, heads, [r.dense(l.size, total)], contract,
+      ActionContractFfaView1PointerHash), manifest)
+    check "cannot be played under action contract" in loadError(encode2(l.size + K, ActionSizes,
+      [r.dense(l.size + K, LogitSize)], contract, ActionContractTeamsView1Hash), manifest)
+    # (1) Zero user inputs (what a deployed policy.bas writes): the twin plays ffa.view.1's
+    # match tick for tick: the same state hashes, the same observation bytes before the tail.
+    proc run(model, man, pre: string, ticks: int): (seq[uint32], seq[seq[seq[float32]]], seq[seq[seq[int32]]]) =
+      var players = bundle(pre & policy("neural_decode_ffa.bas"), model, man, count = 16)
+      var w = newWorld(2026, ticks.int32)
+      var hashes: seq[uint32]
+      var observed: seq[seq[seq[float32]]]
+      var inputs: seq[seq[seq[int32]]]
+      while w.winner == -1 and w.tick < w.endTick:
+        let commands = players.decide(w)
+        var obsTick: seq[seq[float32]]
+        var inputTick: seq[seq[int32]]
+        for slot in 0..<16:
+          doAssert not players[slot].failed
+          obsTick.add (if w.cogs[slot].hp > 0: players[slot].neural.observation else: @[])
+          inputTick.add players[slot].neural.userInputs
+        deliverSpeech(w)
+        w.step(commands)
+        hashes.add w.stateHash()
+        observed.add obsTick
+        inputs.add inputTick
+      (hashes, observed, inputs)
+    let zeroWrites = "neuralInput(0, 0)\nneuralInput(4, 0)\n"
+    let (baseHashes, baseObs, _) = run(baseModel, "", "", 240)
+    let (twinHashes, twinObs, _) = run(twinModel, manifest, zeroWrites, 240)
+    check baseHashes.len == 240 and twinHashes == baseHashes
+    var compared = 0
+    for t in 0..<baseObs.len:
+      for slot in 0..<16:
+        if baseObs[t][slot].len == 0: continue
+        require twinObs[t][slot].len == l.size + K
+        for i in 0..<l.size: require cast[uint32](twinObs[t][slot][i]) == cast[uint32](baseObs[t][slot][i])
+        for j in 0..<K: require twinObs[t][slot][l.size + j] == 0
+        inc compared
+    check compared > 1000
+    # (2) Inputs written by policy.bas reach the net one tick later, clamped, persisting
+    # across ticks; the prefix is still the seat's own ffa.view.1 of the tick.
+    let writes = "neuralInput(0, worldTick)\nneuralInput(1, selfX)\nneuralInput(2, 0 - selfY)\n" &
+      "neuralInput(3, 2000000)\nif worldTick = 0 then\n  neuralInput(4, 777)\nend if\n"
+    let (liveHashes, liveObs, liveInputs) = run(twinModel, inputsManifest(K, "[1, 2, 3, 4, 5]"), writes, 240)
+    check liveHashes.len == 240
+    var tails = 0
+    for t in 0..<liveObs.len:
+      for slot in 0..<16:
+        if liveObs[t][slot].len == 0: continue
+        let o = liveObs[t][slot]
+        let want = if t == 0: @[1'i32, 2, 3, 4, 5] else: liveInputs[t-1][slot]
+        for j in 0..<K: require o[l.size + j] == userInputFeature(want[j])
+        if t > 0 and liveInputs[t-1][slot][0] == int32(t-1): inc tails
+    check tails > 1000
+    for slot in 0..<16:
+      check liveInputs[^1][slot][3] == UserInputLimit and liveInputs[^1][slot][4] == 777
+    # The net reads them: the live run diverges from the zero-input run.
+    check liveHashes != twinHashes
+    kinLayoutPin = none(KinLayout)
+    # ffa.view.1u5 in the teams game is refused.
+    gameMode = gmTeams
+    configureSeats(LegacySeats)
+    check "FFA-kin only" in loadError(twinModel, manifest)
+
+  test "ffa.view.1u<K>: a layout-word model loads at 16 and 50 seats with the input count + K":
+    var r = initRand(98)
+    const K = 16
+    let contract = userInputsContractHash(K, ocFfaView1)
+    let model = r.pointerModel(contract)
+    let base = manifestFor(contract, ActionContractFfaView1PointerHash)
+    let manifest = base[0 ..< base.len-1] & ", \"user_inputs\": {\"count\": 16, \"init\": [" &
+      newSeq[int](K).join(", ") & "]}}"
+    for (seats, map, layout) in [(16, "", klCousins), (50, "big-twin-mesas", klTribes)]:
+      configureSeats(seats)
+      configureMap(map)
+      gameMode = gmFfaKin
+      kinLayoutPin = some(layout)
+      let l = matchLayout()
+      let actor = loadActor(model, actorLayout(l, pointerHeads(l), pointerTargets(l), K))
+      check actor.inputSize == l.size + K
+      check actor.operationCount <= neuralOperationBudget(seats)
+      let players = bundle(policy("neural_decode_ffa.bas"), model, manifest, count = seats)
+      for slot in 0..<seats:
+        require not players[slot].failed
+        check players[slot].neural.observationContract == ocFfaView1
+        check players[slot].neural.observation.len == l.size + K
+        check players[slot].neural.userInputs == newSeq[int32](K)
+      var w = newWorld(2026, 60)
+      while w.winner == -1 and w.tick < w.endTick:
+        let commands = players.decide(w)
+        for slot in 0..<seats: require not players[slot].failed
+        deliverSpeech(w)
+        w.step(commands)
+      check w.tick == 60

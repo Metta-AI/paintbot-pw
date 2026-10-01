@@ -20,6 +20,7 @@ Schema 2 may also carry `decoder` and `user_inputs` (below).
 | teams.view.1 | `paintbot-pw.teams.view.1` | 512 |
 | teams.view.1u<K> | `paintbot-pw.teams.view.1u<K>`, K = 1..256 | 512 + K |
 | ffa.view.1 | `paintbot-pw.ffa.view.1` | per match (`ffaViewLayout`) |
+| ffa.view.1u<K> | `paintbot-pw.ffa.view.1u<K>`, K = 1..256 | per match + K |
 
 | action contract | id | heads |
 |---|---|---|
@@ -29,7 +30,7 @@ Schema 2 may also carry `decoder` and `user_inputs` (below).
 | ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 |
 
 teams.view.1 (and u<K>) pairs with the teams.view.1 action contract or its aim-offset or movement-offset variant
-and plays the teams game; ffa.view.1 pairs with ffa.view.1 pointer and plays FFA-kin (Heartland)
+and plays the teams game; ffa.view.1 (and u<K>) pairs with ffa.view.1 pointer and plays FFA-kin (Heartland)
 at any seat count. The actor's embedded hashes must equal the manifest's, its input count the
 contract's width, and its heads the action contract's. Every column of both observation
 contracts is documented in `neural_contract.encodeTeamsView` / `encodeFfaView` and in
@@ -152,8 +153,12 @@ refused too: their bit masks cover the teams heads).
 
 A schema-2 manifest may carry `"user_inputs": {"count": K, "init": [K integers]}`, K within
 1..256, each value within -1,000,000..1,000,000. The observation contract is then
-`paintbot-pw.teams.view.1u<K>`: teams.view.1's 512 floats followed by K user floats. Manifest,
-actor hash and input count must agree. `neuralInput(i, v)` sets input i to v clamped to
+`paintbot-pw.teams.view.1u<K>` (teams.view.1's 512 floats followed by K user floats) or, in
+FFA-kin, `paintbot-pw.ffa.view.1u<K>` (the match's ffa.view.1 floats, byte for byte, followed by
+K user floats: the row's last K columns; a layout-word model reads the first at section 2
+offset + 24 and its input count is the layout's size + K). Manifest, actor hash and input count
+must agree. User inputs are only what the seat's own policy.bas wrote, so they carry nothing a
+BASIC seat could not already read (SeatView boundary). `neuralInput(i, v)` sets input i to v clamped to
 +-1,000,000; the net reads `float32(v) / 1000`. Values persist across ticks and deaths within a
 match and start at `init` each match; a value set during tick t is in the observation of tick
 t + 1 (the same in training).

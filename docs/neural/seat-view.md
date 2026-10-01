@@ -52,7 +52,9 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
 ## Implementation (2026-09-30)
 
 - Observation contracts `paintbot-pw.teams.view.1` (512 floats; `teams.view.1u<K>` appends K
-  user inputs) and `paintbot-pw.ffa.view.1` (width per match). `encodeTeamsView` /
+  user inputs) and `paintbot-pw.ffa.view.1` (width per match; `ffa.view.1u<K>` appends K user
+  inputs). User inputs are written only by the seat's policy.bas (`neuralInput`), so they add no
+  information the boundary does not already give BASIC. `encodeTeamsView` /
   `encodeFfaView` take a `SeatView`; `tests/test_paintbot_seat_view_parity.nim` re-derives
   every column from the view procs.
 - Action contracts `paintbot-pw.teams.view.1.action.51-25-2-2-2`, its aim-offset variant

@@ -94,8 +94,10 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 | L layer records | `type`, `param[8]`, payload (below) |
 
 A PWNET002 actor may name any observation contract the host knows, including teams.view.1u<K>
-(`neural_basic.md`, manifest `user_inputs`): its input count is then 512 + K, the K user inputs are
-ordinary input columns 512.. (DENSE, CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP and SEGMENT_NEAR slices may read them), and the operation
+and ffa.view.1u<K> (`neural_basic.md`, manifest `user_inputs`): its input count is then 512 + K
+(ffa.view.1u<K>: the layout's size + K, which the input-count layout word `0xFFFEE000` resolves to),
+the K user inputs are ordinary input columns 512.. (ffa.view.1u<K>: the layout's size.., layout
+word section 2 offset + 24) (DENSE, CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP and SEGMENT_NEAR slices may read them), and the operation
 count includes them like any other input. Staging reads the input count and contract from the PWNET002
 header. The file length must be exact: no trailing bytes. The package manifest binds the SHA-256
 of the whole file, as for PWNET001. Every weight must be finite; every unused `param` word
@@ -416,6 +418,7 @@ SHA-256 (the hash of the id string).
 | teams.view.1 | `paintbot-pw.teams.view.1` | 512 | 201 (`pw_create`) |
 | teams.view.1u<K> | `paintbot-pw.teams.view.1u<K>`, K = 1..256 | 512 + K | 201 + `pw_create_observation_inputs` |
 | ffa.view.1 | `paintbot-pw.ffa.view.1` | per match (`ffaViewLayout`) | 202 |
+| ffa.view.1u<K> | `paintbot-pw.ffa.view.1u<K>`, K = 1..256 | per match + K | 202 + `pw_create_observation_inputs_v` |
 
 `neural_contract.encodeTeamsView` and `encodeFfaView` document every column. teams.view.1 (the
 teams game, 16 seats): self and scoreboard (0..24), ten heart rows of 10 (25..124), sixteen

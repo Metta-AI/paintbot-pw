@@ -221,7 +221,13 @@ int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, in
  * policy.bas left them (float32(v) / 1000: what its next decision's observation reads),
  * zeros for every other seat. pw_handle_user_inputs = the handle's K;
  * pw_handle_observation_size = 512 + K; pw_user_inputs_contract_hash writes the
- * teams.view.1u<K> SHA-256 (0, or -1 bad args). The _v forms take obs_version 201 only.
+ * teams.view.1u<K> SHA-256 (0, or -1 bad args). The _v forms name the base contract:
+ * 201 as above, or 202 = ffa.view.1u<K> "paintbot-pw.ffa.view.1u<K>" (default off; K =
+ * 1..256, 0 = pw_create_observation(..., 202)): every row is the match's ffa.view.1 floats,
+ * byte for byte, followed by the same K user-input floats; pw_handle_observation_size and
+ * pw_observation_layout's row floats = the layout's size + K (the sections are unchanged);
+ * pw_net_load_layout resolves the input count to the layout's size + K. Any other
+ * obs_version: NULL / -1.
  * pw_set_seat_policy_script: the seat runs a bundle's policy.bas under its manifest.json
  * exactly as the hosted neural seat does (selection options, user inputs, action contract;
  * the seat's own sampling stream from the match seed and slot), with no actor:

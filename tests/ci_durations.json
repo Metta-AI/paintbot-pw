@@ -83,6 +83,7 @@
     "python -m unittest test_runtime": 17.7,
     "python -m unittest test_semantic_trajectory": 1.0,
     "python coworld/paintbot/test_training_bridge.py": 2.4,
+    "python coworld/paintbot/test_user_inputs_mirror.py": 40,
     "python tools/test_kin_eval.py": 81.9,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_ffa_fog.nim": 20.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa_v2.nim": 30.0,

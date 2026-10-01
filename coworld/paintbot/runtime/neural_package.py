@@ -70,12 +70,30 @@ OBJECTIVE_CANDIDATES = 51  # movement-head size of action contract teams.view.1
 ACTOR_MAGIC = b"PWNET001"
 
 
-def user_inputs_contract_id(count):
-    """Observation contract teams.view.1u<K>: teams.view.1's 512 floats, then K user inputs."""
-    return OBSERVATION_CONTRACT_TEAMS_VIEW_1 + "u%d" % count
+def user_inputs_contract_id(count, base=OBSERVATION_CONTRACT_TEAMS_VIEW_1):
+    """Observation contract teams.view.1u<K> (teams.view.1's 512 floats, then K user inputs) or, with base
+    ffa.view.1, ffa.view.1u<K> (the match's ffa.view.1 floats, then K user inputs). neural_contract.nim
+    userInputsContractId."""
+    return base + "u%d" % count
 
 
 USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k)): k for k in range(1, MAX_USER_INPUTS + 1)}
+FFA_USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k, OBSERVATION_CONTRACT_FFA_VIEW_1)): k
+                                   for k in range(1, MAX_USER_INPUTS + 1)}
+
+
+def user_input_feature(value):
+    """The float32 a user input feeds the net (neural_contract.nim userInputFeature after clampUserInput):
+    float32(clamp(v, +-1,000,000)) / 1000 in float32. The value is exact in float32 and the float64 quotient
+    rounds to the float32 quotient (53 >= 2 * 24 + 2), so this is bit-identical to the engine."""
+    v = max(-USER_INPUT_LIMIT, min(USER_INPUT_LIMIT, int(value)))
+    return struct.unpack("<f", struct.pack("<f", v / 1000.0))[0]
+
+
+def user_inputs_row(base_row, inputs):
+    """The row of observation contract teams.view.1u<K> / ffa.view.1u<K>: the base contract's row unchanged,
+    then the K user-input features (zeros for a seat whose policy.bas wrote none)."""
+    return list(base_row) + [user_input_feature(v) for v in inputs]
 
 
 def validate_user_inputs(value):
@@ -738,9 +756,11 @@ def unpack_package(data, seats=16):
     for field, digest in (("observation", observation_contract), ("action", action_contract)):
         if digest in RETIRED_CONTRACT_HASHES:
             raise ValueError("neural %s contract %s" % (field, RETIRED_MESSAGE))
-    user_inputs_named = USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
-    teams = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH or user_inputs_named > 0
-    if not teams and observation_contract != OBSERVATION_CONTRACT_FFA_VIEW_1_HASH:
+    teams_inputs = USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
+    ffa_inputs = FFA_USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
+    user_inputs_named = teams_inputs or ffa_inputs
+    teams = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH or teams_inputs > 0
+    if not teams and observation_contract != OBSERVATION_CONTRACT_FFA_VIEW_1_HASH and not ffa_inputs:
         raise ValueError("unknown neural observation contract")
     if action_contract not in (ACTION_CONTRACT_TEAMS_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH,
                                ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
@@ -777,12 +797,13 @@ def unpack_package(data, seats=16):
         if manifest.get("schema") != "paintbot-neural-basic/2":
             raise ValueError("user_inputs need package schema 2")
         user_inputs = validate_user_inputs(manifest["user_inputs"])
+    family = "teams.view.1u" if teams else "ffa.view.1u"
     if user_inputs and not user_inputs_named:
-        raise ValueError("user_inputs need observation contract teams.view.1u<K>")
+        raise ValueError("user_inputs need observation contract %s<K>" % family)
     if user_inputs_named and not user_inputs:
-        raise ValueError("observation contract teams.view.1u%d needs manifest user_inputs" % user_inputs_named)
+        raise ValueError("observation contract %s%d needs manifest user_inputs" % (family, user_inputs_named))
     if user_inputs and user_inputs_named != user_inputs:
-        raise ValueError("user_inputs.count does not match observation contract teams.view.1u%d" % user_inputs_named)
+        raise ValueError("user_inputs.count does not match observation contract %s%d" % (family, user_inputs_named))
     files["policy.bas"].decode("utf-8")
     if not files["model.bin"]:
         raise ValueError("empty neural model")

@@ -2,8 +2,8 @@
 ## pw_set_seats, the per-match row width and section layout, the row -> entity map, and
 ## observe / step / scripts / raw commands / kin / scores / reward split / results at 16 and
 ## at 50 seats (the Heartland and Heartland Big configs).
-import std/[unittest, os, importutils, random]
-import ../examples/paintbot/[sim, kinship, neural_contract, native_env, seat_view, bots, neural_host]
+import std/[unittest, os, importutils, random, strutils]
+import ../examples/paintbot/[sim, kinship, neural_contract, native_env, seat_view, bots, neural_host, contract_hash]
 import paintbot_pwnet2_fixture
 privateAccess(NativeEnv)
 
@@ -23,8 +23,9 @@ proc ip(buffer: var seq[int32]): ptr UncheckedArray[int32] =
 proc cp(text: string): ptr UncheckedArray[char] = cast[ptr UncheckedArray[char]](unsafeAddr text[0])
 proc envOf(h: pointer): ptr NativeEnv = cast[ptr NativeEnv](h)
 
-proc heartland(seats: int, config: string, ticks = 240'i32): pointer =
-  result = pw_create_observation(7, 0, ocFfaView1.int32)
+proc heartland(seats: int, config: string, ticks = 240'i32, userInputs = 0'i32): pointer =
+  result = if userInputs == 0: pw_create_observation(7, 0, ocFfaView1.int32)
+           else: pw_create_observation_inputs_v(7, 0, ocFfaView1.int32, userInputs)
   doAssert result != nil
   doAssert pw_set_rules(result, LiveRules) == 0
   doAssert pw_set_config_json(result, cp(config), config.len.int32, nil, 0) == 0
@@ -348,3 +349,107 @@ suite "Native ffa.view.1 and N-seat handles":
       check pw_seat_script_status(h, 0, nil, 0) == 1
       pw_net_destroy(net)
       pw_destroy(h)
+
+  test "ffa.view.1u<K> (202 + K): handles, hashes, widths, layout words; rows are ffa.view.1's bytes + the policy seat's inputs":
+    var text: array[65, char]
+    template hashV(v, k: int32): cint = pw_user_inputs_contract_hash_v(v, k, cast[ptr UncheckedArray[char]](addr text[0]), 65)
+    for k in [1'i32, 5, 64, 128, 256]:
+      check hashV(202, k) == 0 and $cast[cstring](addr text[0]) == userInputsContractHash(k.int, ocFfaView1)
+      check $cast[cstring](addr text[0]) == sha256Hex("paintbot-pw.ffa.view.1u" & $k)
+      check hashV(201, k) == 0 and $cast[cstring](addr text[0]) == userInputsContractHash(k.int)
+    for (v, k) in [(202'i32, 0'i32), (202'i32, 257'i32), (203'i32, 5'i32)]: check hashV(v, k) == -1
+    check pw_user_inputs_contract_hash_v(202, 5, cast[ptr UncheckedArray[char]](addr text[0]), 64) == -1
+    for (v, k) in [(202'i32, -1'i32), (202'i32, 257'i32), (203'i32, 5'i32)]:
+      check pw_create_observation_inputs_v(7, 0, v, k) == nil
+    check pw_create_observation_inputs_v(7, HeartMeterMatchTicks+1, 202, 5) == nil
+    # K = 0 is a plain 202 handle.
+    let zero = pw_create_observation_inputs_v(7, 0, 202, 0)
+    check pw_observation_contract(zero) == 202 and pw_handle_user_inputs(zero) == 0
+    pw_destroy(zero)
+    for (seats, config) in [(16, HeartlandConfig), (50, HeartlandBigConfig)]:
+      for k in [1'i32, 5, 16, 256]:
+        let h = heartland(seats, config, 24, k)
+        let b = heartland(seats, config, 24)
+        check pw_observation_contract(h) == 202 and pw_handle_user_inputs(h) == k and pw_seats(h) == seats.int32
+        let l = h.layoutOf
+        check pw_handle_observation_size(h) == l.size + k and pw_handle_observation_size(b) == l.size
+        var words, baseWords = newSeq[int32](ObservationLayoutWords)
+        check pw_observation_layout(h, ip(words)) == 0 and pw_observation_layout(b, ip(baseWords)) == 0
+        check words[0] == int32(l.size) + k and words[1 .. ^1] == baseWords[1 .. ^1]
+        var actions = newSeq[int32](8)
+        var baseActions = newSeq[int32](8)
+        check pw_action_layout(h, ip(actions)) == 0 and pw_action_layout(b, ip(baseActions)) == 0
+        check actions == baseActions
+        pw_destroy(h); pw_destroy(b)
+
+  test "ffa.view.1u5 and u16 in lockstep with ffa.view.1: same worlds, same row bytes, the policy seat's inputs one tick later":
+    for K in [5, 16]:
+      let contract = userInputsContractHash(K, ocFfaView1)
+      var init: seq[int32]
+      for j in 0..<K: init.add int32((j + 1) * (if j mod 2 == 0: 37 else: -37))
+      let manifest = """{"schema": "paintbot-neural-basic/2", "observation_contract": """" & contract &
+        """", "action_contract": """" & ActionContractFfaView1PointerHash &
+        """", "user_inputs": {"count": """ & $K & """, "init": [""" & init.join(", ") & """]}}"""
+      let writes = "neuralInput(0, worldTick)\nneuralInput(1, selfX)\nneuralInput(2, 0 - selfY)\n" &
+        "neuralInput(3, 2000000)\n"
+      let policyU = writes & PolicyFfa
+      var r = initRand(17)
+      let model = r.pointerModel(contract)
+      for (seats, config) in [(16, HeartlandConfig), (50, HeartlandBigConfig)]:
+        let h = heartland(seats, config, 120, K.int32)
+        let b = heartland(seats, config, 120)
+        # The mismatched manifests are rejected (2): the handle's contract governs.
+        check pw_set_seat_policy_script(h, 0, cp(PolicyFfa), PolicyFfa.len.int32, cp(PointerManifest),
+          PointerManifest.len.int32) == 2
+        check pw_set_seat_policy_script(b, 0, cp(policyU), policyU.len.int32, cp(manifest), manifest.len.int32) == 2
+        check pw_set_seat_policy_script(h, 0, cp(policyU), policyU.len.int32, cp(manifest), manifest.len.int32) == 0
+        check pw_set_seat_policy_script(b, 0, cp(PolicyFfa), PolicyFfa.len.int32, cp(PointerManifest),
+          PointerManifest.len.int32) == 0
+        let source = readFile(Root / "coworld/heartland/players/ffa.bas")
+        for seat in 1..<seats:
+          check pw_set_seat_script(h, seat.cint, cp(source), source.len.int32) == 0
+          check pw_set_seat_script(b, seat.cint, cp(source), source.len.int32) == 0
+        let l = h.layoutOf
+        let n = pw_handle_observation_size(h).int
+        let nb = pw_handle_observation_size(b).int
+        check n == l.size + K and nb == l.size
+        # A layout-word model loads on the handle with the input count + K and infers on its rows.
+        var message = newString(256)
+        let net = pw_net_load_layout(h, unsafeAddr model[0], model.len.int64,
+          cast[ptr UncheckedArray[char]](addr message[0]), 256)
+        require net != nil
+        var layout = newSeq[int32](8)
+        check pw_action_layout(h, ip(layout)) == 0
+        let width = layout[6].int
+        var obs = newSeq[float32](seats*n)
+        var baseObs = newSeq[float32](seats*nb)
+        var resets = newSeq[float32](seats)
+        var actions = newSeq[int32](seats*ActionSizes.len)
+        var logits = newSeq[float32](seats*width)
+        var rewards = newSeq[float32](seats)
+        var terminals = newSeq[float32](seats)
+        var previous = init
+        var steps, fresh = 0
+        while true:
+          check pw_observe(h, fp(obs), fp(resets)) == 0
+          check pw_observe(b, fp(baseObs), fp(resets)) == 0
+          for s in 0..<seats:
+            for i in 0..<l.size: require cast[uint32](obs[s*n+i]) == cast[uint32](baseObs[s*nb+i])
+            for j in 0..<K:
+              let want = if s == 0: userInputFeature(previous[j]) else: 0'f32
+              require obs[s*n+l.size+j] == want
+          check pw_net_infer(net, cast[ptr UncheckedArray[float32]](addr obs[0]), nil,
+            cast[ptr UncheckedArray[float32]](addr logits[0])) == 0
+          let code = pw_step_logits(h, ip(actions), fp(logits), fp(rewards), fp(terminals))
+          check pw_step_logits(b, ip(actions), fp(logits), fp(rewards), fp(terminals)) == code
+          if code != 0: break
+          inc steps
+          check pw_state_hash(h) == pw_state_hash(b)
+          let seat = h.envOf.scriptBots[0].neural
+          if seat.userInputs[0] == int32(steps - 1): inc fresh
+          previous = seat.userInputs
+          check previous[3] == UserInputLimit
+        check steps == 120 and fresh > 10
+        check pw_seat_script_status(h, 0, nil, 0) == 1 and pw_seat_script_status(b, 0, nil, 0) == 1
+        pw_net_destroy(net)
+        pw_destroy(h); pw_destroy(b)
