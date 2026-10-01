@@ -3,6 +3,7 @@
 ## exactly a POINTER with v = V[k], c = c[k] (same float32 terms in the same order); its published cost; its
 ## rejections; and a hosted contract-15 actor (818 logits) that loads, plays and draws no offset without a target.
 import std/[unittest, random, os, strutils]
+import polyworld/cli
 import ../examples/paintbot/[sim, bots, neural_contract, neural_actor]
 from ../examples/paintbot/neural_host import loadNeuralSeat
 import paintbot_pwnet2_fixture
@@ -73,7 +74,6 @@ suite "POINTER_K":
 
 suite "Hosted target-offset seats (action contract 15)":
   test "a contract-15 actor loads and plays; keep and compass aims draw the centre bin; 128-wide is refused":
-    configureRules(NativeRules)
     var r = initRand(154)
     let heads = actionLogitHeads(acTeamsView1Target)
     let model = encode2(TeamsViewSize, heads, [r.dense(TeamsViewSize, LogitSizeTarget, bias = true)],
