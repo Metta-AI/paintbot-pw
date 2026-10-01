@@ -118,6 +118,12 @@ type
     decided: seq[Command]
     decidedTick: int32
     decidedValid: bool
+    # pw_seat_decided_orders: the order each BASIC seat's own program (script or policy.bas)
+    # decided on the last pw_step, whatever the seat executed (a pending raw command, an
+    # override mask); lastDecidedSet = the seat's program ran on that step. A read-only
+    # record: nothing in the world or its hash depends on it.
+    lastDecided: seq[Command]
+    lastDecidedSet: seq[bool]
     # Observation contract the handle encodes (chosen at create, kept across resets):
     # teams.view.1 (pw_create) or ffa.view.1. The world never reads it.
     obsVersion: ObservationContractVersion
@@ -221,6 +227,8 @@ proc allocSeats(env: ptr NativeEnv, n: int) =
   env.commandShown = newSeq[bool](n)
   env.decided = newSeq[Command](n)
   env.decidedValid = false
+  env.lastDecided = newSeq[Command](n)
+  env.lastDecidedSet = newSeq[bool](n)
   env.policy = newSeq[bool](n)
   env.policyManifests = newSeq[string](n)
   env.policyConditionals = newSeq[seq[Conditional]](n)
@@ -474,6 +482,9 @@ proc installScript(env: ptr NativeEnv, slot: int) =
   env.scriptBots[slot] = nil
   env.scriptErrors[slot] = ""
   env.scriptOrders[slot] = Command()
+  if slot < env.lastDecidedSet.len:
+    env.lastDecided[slot] = Command()
+    env.lastDecidedSet[slot] = false
   if env.scripts[slot].len == 0:
     env.scriptStatus[slot] = 0
     return
@@ -497,6 +508,9 @@ proc sizeHeard(env: ptr NativeEnv) =
 proc resetScripts(env: ptr NativeEnv) =
   env.scriptCount = 0
   env.decidedValid = false
+  for slot in 0..<env.lastDecidedSet.len:
+    env.lastDecided[slot] = Command()
+    env.lastDecidedSet[slot] = false
   env.scriptHeard = newSeq[seq[HeardMessage]](env.n)
   for slot in 0..<env.n:
     env.installScript(slot)
@@ -964,6 +978,7 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     var commands = newSeq[Command](env.n)
     var wasDead = newSeq[bool](env.n)
     var decoders = newSeq[Bot](env.n)
+    for slot in 0..<env.n: env.lastDecidedSet[slot] = false
     for slot in 0..<env.n:
       wasDead[slot] = env.world.cogs[slot].hp <= 0
       if env.commandPending[slot] or (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
@@ -1008,6 +1023,8 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       env.decidedValid = false
       for slot in 0..<env.n:
         if env.scripts[slot].len == 0: continue
+        env.lastDecided[slot] = env.decided[slot]
+        env.lastDecidedSet[slot] = true
         let mask = env.overrideMask[slot]
         if mask == 0:
           commands[slot] = env.decided[slot]
@@ -1621,6 +1638,26 @@ proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int
   output[9] = int32(env.scripts[seat].len > 0)
   0
 
+proc pw_seat_decided_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## The order the seat's own BASIC program (its script, or its policy.bas on the caller's
+  ## logits) decided on the last pw_step, ten int32 in pw_seat_orders' layout:
+  ## [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct, ran], whatever
+  ## the seat executed: a pending raw command (pw_set_seat_command) or an override mask
+  ## replaces the executed order, never this one. ran = 1 when the program ran on that step;
+  ## a seat without a program, or before any step since the last reset or script change,
+  ## reports zeros with ran = 0. A pure read; never calling it changes nothing. Returns 0, -1
+  ## for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  let ran = env.lastDecidedSet[seat]
+  let c = if ran: env.lastDecided[seat] else: Command()
+  output[0] = c.walk.int32; output[1] = c.goal.x; output[2] = c.goal.z
+  output[3] = c.shoot.int32; output[4] = c.aim.x; output[5] = c.aim.z
+  output[6] = c.chargeGrenade.int32; output[7] = c.sneak.int32; output[8] = c.direct.int32
+  output[9] = ran.int32
+  0
+
 proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## A raw command for one seat on the next pw_step only, nine int32 in pw_seat_orders'
   ## layout: [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct],
@@ -1629,7 +1666,11 @@ proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[
   ## point), lookAt/shootAt's aim clamped to the map (aim (0,0) = no aim order). A harness
   ## tool (replays, probes), not a seat: for that step the seat's heads are not decoded and
   ## not checked against its forbid mask, and a scripted seat's script still runs but its
-  ## order is replaced. The fire period applies only if already set on the seat (off by
+  ## order is replaced. A policy seat (pw_set_seat_policy_script) likewise still runs its
+  ## policy.bas on the caller's logits (pw_step_logits), so its BASIC state, user inputs and
+  ## sampling streams advance as if it had acted; only the executed command is the raw one.
+  ## pw_seat_decided_orders reads what that program decided (a net teacher shadowing the
+  ## seat while a student's command plays). The fire period applies only if already set on the seat (off by
   ## default).
   ## pw_seat_orders echoes the command after the step (an unscripted seat reports zeros
   ## again after a step without one). A later call before the step replaces it; pw_reset

@@ -68,12 +68,21 @@ int pw_seat_orders(void *handle, int seat, int32_t *ten);
  * the goal verbatim (walkTo; the world clamps where it walks and stores the point), the aim
  * clamped to the map (lookAt/shootAt; (0,0) = no aim order). For that step the seat's
  * action heads are neither decoded nor checked against its forbid mask; a scripted seat's
- * script still runs but its order is replaced. A harness tool, not a seat. The fire period
+ * script still runs but its order is replaced, and a policy seat still runs its policy.bas on
+ * the caller's logits (pw_step_logits): its BASIC state, user inputs and sampling advance. A harness tool, not a seat. The fire period
  * applies only if already set on the seat (off by default). pw_seat_orders echoes the executed command (an
  * unscripted seat reports zeros again after a step without one). A second call before the
  * step replaces the first; pw_reset drops it. A library whose caller never calls it is
  * byte-identical to one without it. Returns 0, -1 bad args. */
 int pw_set_seat_command(void *handle, int seat, const int32_t *nine);
+/* The order the seat's own BASIC program (script, or policy.bas on the caller's logits)
+ * decided on the last pw_step, ten = {walk, goal_x, goal_z, shoot, aim_x, aim_z,
+ * charge_grenade, sneak, direct, ran}, whatever the seat executed (a pending raw command or
+ * an override mask replaces the executed order, never this one). ran = 1 when the program
+ * ran on that step; otherwise zeros with ran = 0 (no program, or no step since the last reset
+ * or script change). With pw_set_seat_command this lets a teacher's program shadow a seat
+ * while a student's command plays. A pure read. Returns 0, -1 bad args. */
+int pw_seat_decided_orders(void *handle, int seat, int32_t *ten);
 /* Curriculum knobs (additive to v1), kept across pw_reset; defaults 1 and 1000 leave
  * every world byte-identical to a library without them.
  * pw_set_seat_fire_period: the seat's shoot order (script, Nim bot or caller) is honoured
