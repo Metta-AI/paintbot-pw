@@ -93,6 +93,12 @@ type
     sampling: seq[SamplingOptions]
     sampleRng: seq[Rng]
     sampleDraws: seq[int32]
+    # Sampling salt (pw_set_sampling_salt, one per handle, kept across resets; 0 by default):
+    # non-zero seeds every seat's stream above, and every policy seat's own, from
+    # neural_contract.samplingRngSalted instead, so byte-identical bundles on the same (seed,
+    # slot) draw independently (an identical-policy null). Applied from the next pw_reset
+    # (and to a policy seat installed after it). Never part of the world or its hash.
+    samplingSalt: int64
     # Decoder objective forbid (pw_set_seat_forbid_objectives, kept across resets): the
     # movement-head indices pw_sample_actions never selects for the seat and pw_step
     # refuses from the caller for it (the hosted bundle option decoder.forbid_objectives).
@@ -424,7 +430,9 @@ proc kinAfterStep(env: ptr NativeEnv, preScore, preGreat: openArray[int32],
 proc resetSampling(env: ptr NativeEnv) =
   ## Fresh streams for the new match (options persist); draw counts belong to the match.
   for slot in 0..<env.n:
-    env.sampleRng[slot] = samplingRng(env.world.seed, slot)
+    env.sampleRng[slot] =
+      if env.samplingSalt == 0: samplingRng(env.world.seed, slot)
+      else: samplingRngSalted(env.world.seed, slot, env.samplingSalt)
     env.sampleDraws[slot] = 0
 proc resetCurriculum(env: ptr NativeEnv) =
   ## Knob values persist; the shot history belongs to the match.
@@ -469,6 +477,7 @@ proc installScript(env: ptr NativeEnv, slot: int) =
       else: loadScriptBot(env.scripts[slot], slot)
     if env.policy[slot] and env.policyConditionals[slot].len > 0:
       env.scriptBots[slot].neural.setConditionals(env.policyConditionals[slot])
+    if env.policy[slot]: env.scriptBots[slot].neural.sampleSalt = env.samplingSalt
     env.scriptStatus[slot] = 1
   except BasicError as e:
     env.scriptStatus[slot] = 2
@@ -1747,6 +1756,21 @@ proc pw_sample_actions*(handle: pointer, seat: cint, logits: FloatBuffer, action
     for head in 0..<ActionSizes.len: actions[head] = picked[head]
     return 0
   except CatchableError: return -1
+
+proc pw_set_sampling_salt*(handle: pointer, salt: int64): cint {.exportc, cdecl, dynlib.} =
+  ## Salt every seat's sampling stream (pw_sample_actions' and each policy seat's own): with
+  ## salt != 0 the streams are seeded by neural_contract.samplingRngSalted(match seed, slot,
+  ## salt) instead of samplingRng, so two byte-identical bundles on the same (seed, slot) draw
+  ## independent samples (an identical-policy null). 0 (the default) is samplingRng exactly:
+  ## a library that never makes this call, or makes it with 0, is byte-identical to one
+  ## without it. Kept across pw_reset; applied from the next pw_reset (the current match's
+  ## streams are already seeded), and to a policy seat installed after the call. The world,
+  ## its hash and pw_step are untouched; a hosted seat has no salt. Returns 0, -1 for a nil
+  ## handle.
+  if handle == nil: return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).samplingSalt = salt
+  0
 
 proc pw_seat_sample_draws*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
   ## Decisions pw_sample_actions drew for the seat since the last create/reset (0 with

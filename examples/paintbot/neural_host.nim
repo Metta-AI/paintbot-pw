@@ -50,6 +50,10 @@ type
     sampleRng: Rng
     sampleSeeded: bool
     sampleDraws*: int
+    # Training library only (native pw_set_sampling_salt, on a policy seat): a salt mixed into
+    # the stream's seed (neural_contract.samplingRngSalted). A hosted seat never sets it: 0 =
+    # samplingRng exactly.
+    sampleSalt*: int64
     # decoder.forbid_objectives: movement-head indices never selected (argmax or draw);
     # forbidHits counts decisions whose unmasked argmax objective was one of them.
     forbidden*: ObjectiveMask
@@ -101,11 +105,17 @@ type
     rows: FfaViewRows
     rowsReady: bool
 
+proc streamStart(seat: NeuralSeat): Rng =
+  ## The seat's stream at match start: samplingRng from the match seed and slot (salted only
+  ## on a training policy seat given pw_set_sampling_salt).
+  if seat.sampleSalt == 0: samplingRng(seat.matchSeed, seat.slot)
+  else: samplingRngSalted(seat.matchSeed, seat.slot, seat.sampleSalt)
+
 proc samplingLogSeed(seat: NeuralSeat): uint64 =
   ## The stream's initial state for the log (the state before any draw), recomputed from
   ## the match seed so the line does not depend on how far the stream has advanced; 0
   ## until the seat has drawn.
-  if seat.sampleSeeded: samplingSeed(seat.matchSeed, seat.slot) else: 0
+  if seat.sampleSeeded: seat.streamStart.state else: 0
 
 proc samplingTelemetry*(options: SamplingOptions, seed: uint64, draws: int): string =
   ## The sampling part of the seat log line: mode, temperature, the heads sampled, the
@@ -567,7 +577,7 @@ proc seedStream(seat: NeuralSeat) =
   ## One stream per seat per match, from the match seed: its position depends only on the
   ## decisions taken, and it survives death and respawn.
   if not seat.sampleSeeded:
-    seat.sampleRng = samplingRng(seat.matchSeed, seat.slot)
+    seat.sampleRng = seat.streamStart
     seat.sampleSeeded = true
 
 proc headSize(seat: NeuralSeat, head: int): int =
