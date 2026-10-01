@@ -98,6 +98,7 @@
     "nim r tests/test_paintbot_seat_view_boundary.nim": 10.0,
     "nim r -d:headless tests/test_paintbot_seat_view_parity.nim": 7.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_aim_offset.nim": 27.0,
-    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_move_offset.nim": 30.0
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_move_offset.nim": 30.0,
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_mixed_contracts.nim": 30.0
   }
 }
