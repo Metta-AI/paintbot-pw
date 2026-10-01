@@ -88,11 +88,13 @@ int pw_set_seat_command(void *handle, int seat, const int32_t *nine);
  * damage), the hit itself still lands (shield, cooldown relief, telemetry and friendly-fire
  * glory as before). 1000 is exact. Returns 0, -1 bad args.
  * Handicaps (all kept across pw_reset; 0 restores the rules' value unless noted):
- * pw_set_seat_max_hp: spawn/respawn/medkit HP, 1..6 (rules: 3 in teams; initial spawn at the
- * next pw_reset). pw_set_seat_lives: lives a match starts with, 1..8 (rules: 4 in teams;
+ * pw_set_seat_max_hp: spawn/respawn/medkit HP, 1..30 (rules: 3 in teams, 10 in FFA-kin;
+ * initial spawn at the next pw_reset). pw_set_seat_lives: lives a match starts with, 1..8 (rules: 4 in teams;
  * next pw_reset). pw_set_seat_damage_taken: damage dealt TO the seat scaled by
  * permille/1000 with the fraction carried, 0..10000, 1000 = exact. pw_set_team_capture_ticks:
  * ticks team 0/1 holds a control heart alone to capture it, 36..144 (rules: 72).
+ * pw_set_seat_capture_ticks: FFA-kin, ticks the seat holds a control heart alone to capture
+ * it, 1..1440 (rules: 72; great hearts unaffected).
  * pw_set_seat_respawn_ticks: respawn delay, 1..1440 (rules: 72). Each returns 0, -1 bad
  * args. With every knob neutral a match is byte-identical to one without them. */
 int pw_set_seat_fire_period(void *handle, int seat, int32_t period);
@@ -101,6 +103,7 @@ int pw_set_seat_max_hp(void *handle, int seat, int32_t hp);
 int pw_set_seat_lives(void *handle, int seat, int32_t lives);
 int pw_set_seat_damage_taken(void *handle, int seat, int32_t permille);
 int pw_set_team_capture_ticks(void *handle, int side, int32_t ticks);
+int pw_set_seat_capture_ticks(void *handle, int seat, int32_t ticks);
 int pw_set_seat_respawn_ticks(void *handle, int seat, int32_t ticks);
 /* Action contracts. teams.view.1 (version 11, "paintbot-pw.teams.view.1.action.51-25-2-2-2"),
  * its aim-offset variant (13, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23": the five
@@ -168,6 +171,13 @@ int pw_seat_forbidden_objectives(void *handle, int seat, int32_t *mask);
 /* pw_seat_spray_stats (training library only): int32[4] = {enemy damage, teammate damage,
  * enemy kills, teammate kills} dealt by the seat's spray since the last create/reset. */
 int pw_seat_spray_stats(void *handle, int seat, int32_t *stats);
+/* pw_seat_pickup_stats (training library only): int32[5] = pickups the seat took since the
+ * last create/reset, {grenade, spray, medkit, armor, uniform}.
+ * pw_seat_shout_stats (training library only): int32[3] = {shouts emitted (accepted by
+ * shout()), their total bytes, messages heard} since the last create/reset. Shouts are untyped
+ * free text. Both pure telemetry; -1 bad args. */
+int pw_seat_pickup_stats(void *handle, int seat, int32_t *stats);
+int pw_seat_shout_stats(void *handle, int seat, int32_t *stats);
 /* pw_seat_weapon_stats (training library only): int32[9] per seat, cumulative since the last
  * create/reset, attributed to the damage's owner, enemy victims only: {gun kills, grenade kills,
  * spray kills, hits from water, hits from high ground, hits from a trench, hits to water, hits

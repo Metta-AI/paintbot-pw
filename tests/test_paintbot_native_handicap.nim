@@ -191,7 +191,7 @@ suite "Native curriculum handicaps":
     let h = pw_create(3, 600)
     require h != nil
     defer: pw_destroy(h)
-    check pw_set_seat_max_hp(h, 0, 7) == -1 and pw_set_seat_max_hp(h, 0, -1) == -1 and pw_set_seat_max_hp(h, 16, 3) == -1
+    check pw_set_seat_max_hp(h, 0, 31) == -1 and pw_set_seat_max_hp(h, 0, -1) == -1 and pw_set_seat_max_hp(h, 16, 3) == -1
     check pw_set_seat_lives(h, 0, 9) == -1 and pw_set_seat_lives(nil, 0, 2) == -1
     check pw_set_seat_damage_taken(h, 0, -1) == -1 and pw_set_seat_damage_taken(h, 0, 10001) == -1
     check pw_set_team_capture_ticks(h, 2, 72) == -1 and pw_set_team_capture_ticks(h, 0, 35) == -1

@@ -290,7 +290,7 @@ proc updateFfaTerritory(w: var World) =
     if w.heartCaptures[index].team != seat:
       w.heartCaptures[index] = HeartCapture(team: seat)
     inc w.heartCaptures[index].ticks
-    if w.heartCaptures[index].ticks < HeartCaptureTicks: continue
+    if w.heartCaptures[index].ticks < seatCaptureTicks(seat): continue
     w.heartCaptures[index] = HeartCapture(team: -1)
     heart.owner = seat
     inc w.cogs[seat].captures
@@ -569,6 +569,8 @@ proc pickupEquipment(w: var World, attacked: openArray[bool]) =
       of armorPickup:
         if w.equipment[i].armor < 3: w.equipment[i].armor = 3; taken = true
       if taken:
+        when defined(pwTraining):
+          if combatTelemetry != nil: inc combatTelemetry[i].pickups[w.pickups[k].kind]
         w.lastSupplyTick[team(i)] = w.tick
         w.pickups[k].readyAt = w.tick+(if w.pickups[k].kind ==
             grenadePickup: 120 else: 720)
