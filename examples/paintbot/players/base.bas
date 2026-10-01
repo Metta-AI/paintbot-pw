@@ -1,20 +1,27 @@
 ' Paintbot PW baseline. Every cog runs this file on its own: no shared memory, fog-gated
-' vision, int32 only. Territory play is built from four habits that measurably win fights:
+' Vision uses typed integer records and explicit integer division.
+' Territory play is built from four habits that measurably win fights:
 '   1. lead the target by the full gun windup and cancel out our own movement,
 '   2. never walk in a straight line while an opponent can see us,
 '   3. move in squads of four that agree on a heart without talking,
 '   4. refuse a fight we are visibly losing.
-' Budget: 20,000 instructions per decision; an overrun disables the cog, so every loop here
+' Budget: 50,000 instructions per decision; an overrun disables the cog, so every loop here
 ' is bounded by the 16 seats, the heart count, or a fixed iteration count.
 dim avoidUntil(16)
-dim pickupMemoryX(32)
-dim pickupMemoryY(32)
-dim pickupMemoryKind(32)
-dim pickupMemoryTick(32)
+TYPE SupplyMemory
+  x AS INTEGER
+  y AS INTEGER
+  kind AS INTEGER
+  tick AS INTEGER
+END TYPE
+TYPE MotionMemory
+  x AS INTEGER
+  y AS INTEGER
+  seen AS INTEGER
+END TYPE
+DIM supplies(32) AS SupplyMemory
+DIM motion(16) AS MotionMemory
 dim drF(6)
-dim oldX(16)
-dim oldY(16)
-dim lastSeen(16)
 
 ' Integer square root by Newton's method from above. 23170^2 exceeds any squared map distance.
 sub isqrt(n)
@@ -23,11 +30,11 @@ sub isqrt(n)
     exit sub
   end if
   root = 23170
-  guess = (root + n / root) / 2
+  guess = (root + n \ root) \ 2
   iterations = 0
   while guess < root and iterations < 24
     root = guess
-    guess = (root + n / root) / 2
+    guess = (root + n \ root) \ 2
     iterations = iterations + 1
   wend
 end sub
@@ -37,7 +44,7 @@ sub wetLine(ax, ay, bx, by)
   wet = 0
   s3 = 1
   while s3 <= 10
-    if waterAt(ax + (bx - ax) * s3 / 10, ay + (by - ay) * s3 / 10) then
+    if waterAt(ax + (bx - ax) * s3 \ 10, ay + (by - ay) * s3 \ 10) then
       wet = wet + 1
     end if
     s3 = s3 + 1
@@ -48,7 +55,7 @@ end sub
 sub legTime(ax, ay, bx, by)
   wetLine(ax, ay, bx, by)
   isqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
-  legCost = root / 100 + root / 100 * wet * (kWetCost - 1) / 10
+  legCost = root \ 100 + root \ 100 * wet * (kWetCost - 1) \ 10
 end sub
 
 ' Small linear congruential generator; every product stays far inside int32.
@@ -68,34 +75,38 @@ sub planLeg(minTicks, maxTicks)
   end if
   nextRandom()
   legTicks = minTicks + rngState mod (maxTicks - minTicks + 1)
-  tx = threatX - selfX
-  ty = threatY - selfY
+  tx = threatX - me.x
+  ty = threatY - me.y
   isqrt(tx * tx + ty * ty)
   legX = 0
   legY = 0
   if root > 0 then
     ' Perpendicular to the threat, scaled to 100.
-    legX = (0 - ty) * 100 * zig / root
-    legY = tx * 100 * zig / root
+    legX = (0 - ty) * 100 * zig \ root
+    legY = tx * 100 * zig \ root
   end if
   if holding = 0 then
-    fx = goalX - selfX
-    fy = goalY - selfY
+    fx = goalX - me.x
+    fy = goalY - me.y
     isqrt(fx * fx + fy * fy)
     if root > 60 then
-      legX = legX * 3 / 4 + fx * 100 / root
-      legY = legY * 3 / 4 + fy * 100 / root
+      legX = legX * 3 \ 4 + fx * 100 \ root
+      legY = legY * 3 \ 4 + fy * 100 \ root
     end if
   end if
   isqrt(legX * legX + legY * legY)
   if root > 0 then
-    legX = legX * 28 / root
-    legY = legY * 28 / root
+    legX = legX * 28 \ root
+    legY = legY * 28 \ root
   end if
 end sub
 
 if started = 0 then
   started = 1
+  rosterLimit = 16
+  if me.seats < rosterLimit then
+    rosterLimit = me.seats
+  end if
   ' Detour offsets beside a wet route, as tenths of the route's length (see Dry route below).
   drF(0) = -10
   drF(1) = -6
@@ -104,16 +115,16 @@ if started = 0 then
   drF(4) = 6
   drF(5) = 10
   kWetCost = 6
-  rngState = selfId * 4099 + 977
+  rngState = me.id * 4099 + 977
   zig = 1
-  if selfId mod 4 >= 2 then
+  if me.id mod 4 >= 2 then
     zig = -1
   end if
-  lastX = selfX
-  lastY = selfY
+  lastX = me.x
+  lastY = me.y
 end if
-myVX = selfX - lastX
-myVY = selfY - lastY
+myVX = me.x - lastX
+myVY = me.y - lastY
 if myVX > 60 or myVX < -60 or myVY > 60 or myVY < -60 then
   ' A respawn teleports us; that is not a velocity.
   myVX = 0
@@ -125,18 +136,18 @@ if gunWait > 0 then
 end if
 
 ' Drop an unreachable assignment after three seconds without meaningful progress.
-if worldTick mod 72 = 0 then
-  dxProgress = selfX - progressX
-  dyProgress = selfY - progressY
+if me.tick mod 72 = 0 then
+  dxProgress = me.x - progressX
+  dyProgress = me.y - progressY
   if dxProgress * dxProgress + dyProgress * dyProgress < 40000 and objective >= 0 and objective < 16 then
-    dxHeart = controlX(objective) - selfX
-    dyHeart = controlY(objective) - selfY
+    dxHeart = controlX(objective) - me.x
+    dyHeart = controlY(objective) - me.y
     if dxHeart * dxHeart + dyHeart * dyHeart > 160000 then
-      avoidUntil(objective) = worldTick + 360
+      avoidUntil(objective) = me.tick + 360
     end if
   end if
-  progressX = selfX
-  progressY = selfY
+  progressX = me.x
+  progressY = me.y
 end if
 
 ' Opponents and teammates in view. Every query is fog gated.
@@ -149,14 +160,14 @@ foeSumX = 0
 foeSumY = 0
 foesSeen = 0
 i = 0
-while i < 16
-  if i <> selfId and visible(i) then
-    dx = playerX(i) - selfX
-    dy = playerY(i) - selfY
+while i < rosterLimit
+  if i <> me.id and agents(i).visible then
+    dx = agents(i).x - me.x
+    dy = agents(i).y - me.y
     d2 = dx * dx + dy * dy
-    if i mod 2 <> selfTeam then
-      cost = d2 - (3 - playerHp(i)) * 160000
-      if playerCarrying(i) then
+    if i mod 2 <> me.team then
+      cost = d2 - (3 - agents(i).hp) * 160000
+      if agents(i).carrying then
         cost = cost - 2500000
         thief = i
       end if
@@ -165,8 +176,8 @@ while i < 16
         bestCost = cost
       end if
       foesSeen = foesSeen + 1
-      foeSumX = foeSumX + playerX(i)
-      foeSumY = foeSumY + playerY(i)
+      foeSumX = foeSumX + agents(i).x
+      foeSumY = foeSumY + agents(i).y
       if d2 < 6760000 then
         foesNear = foesNear + 1
       end if
@@ -180,24 +191,24 @@ while i < 16
 wend
 
 ' Where we want to be. Later rules override earlier ones; one walkTo is issued at the end.
-goalX = selfX
-goalY = selfY
+goalX = me.x
+goalY = me.y
 holding = 0
-if carrying then
-  if ownHeartStolen and thief >= 0 then
-    goalX = playerX(thief)
-    goalY = playerY(thief)
+if me.carrying then
+  if me.ownHeartStolen and thief >= 0 then
+    goalX = agents(thief).x
+    goalY = agents(thief).y
   else
-    goalX = homeX
-    goalY = homeY
+    goalX = me.homeX
+    goalY = me.homeY
   end if
 else
   if thief >= 0 then
-    goalX = playerX(thief)
-    goalY = playerY(thief)
+    goalX = agents(thief).x
+    goalY = agents(thief).y
   else
-    goalX = heartX
-    goalY = heartY
+    goalX = me.heartX
+    goalY = me.heartY
   end if
 end if
 
@@ -207,17 +218,17 @@ end if
 ' (mirrored for blue, so the two teams play the half turn of each other).
 objective = -1
 if heartCount() > 0 then
-  member = (selfId / 2) mod 8
-  squad = member / 4
+  member = (me.id \ 2) mod 8
+  squad = member \ 4
   seat = member mod 4
   otherTarget = -1
   pass = 0
   while pass < 2
-    refY = homeY - 1500
+    refY = me.homeY - 1500
     if pass = 1 then
-      refY = homeY + 1500
+      refY = me.homeY + 1500
     end if
-    if selfTeam = 1 then
+    if me.team = 1 then
       ' Mirror play: blue's first squad works from below home, the half turn of red's.
       refY = 4000 - refY
     end if
@@ -225,14 +236,14 @@ if heartCount() > 0 then
     choiceCost = 2147483647
     j = 0
     while j < heartCount() and j < 16
-      if controlOwner(j) <> selfTeam and j <> otherTarget then
-        dx = (controlX(j) - homeX) / 8
-        dy = (controlY(j) - refY) / 8
+      if controlOwner(j) <> me.team and j <> otherTarget then
+        dx = (controlX(j) - me.homeX) \ 8
+        dy = (controlY(j) - refY) \ 8
         cost = dx * dx + dy * dy
         if controlOwner(j) = -1 then
           cost = cost - 20000
         end if
-        if pass = squad and avoidUntil(j) > worldTick then
+        if pass = squad and avoidUntil(j) > me.tick then
           cost = cost + 4000000
         end if
         if cost < choiceCost then
@@ -262,14 +273,14 @@ if heartCount() > 0 then
     ' Seats 0 and 1 stand in the ring (capturer and backup). Seats 2 and 3 cover from outside
     ' it on the opposing side, and step in if nobody on our team is capturing.
     if seat >= 2 then
-      capturing = controlCaptureTeam(objective) = selfTeam
+      capturing = controlCaptureTeam(objective) = me.team
       if capturing then
         idleCapture = 0
       else
         idleCapture = idleCapture + 1
       end if
-      dx = hx - selfX
-      dy = hy - selfY
+      dx = hx - me.x
+      dy = hy - me.y
       if dx * dx + dy * dy > 640000 or idleCapture < 96 then
         side = 1
         if seat = 3 then
@@ -277,20 +288,20 @@ if heartCount() > 0 then
         end if
         ax = 3200 - hx
         ay = 2000 - hy
-        if selfTeam = 0 then
+        if me.team = 0 then
           ax = ax + 1200
         else
           ax = ax - 1200
         end if
         isqrt(ax * ax + ay * ay)
         if root > 0 then
-          goalX = hx + (ax * 3 - ay * 2 * side) * 90 / root
-          goalY = hy + (ay * 3 + ax * 2 * side) * 90 / root
+          goalX = hx + (ax * 3 - ay * 2 * side) * 90 \ root
+          goalY = hy + (ay * 3 + ax * 2 * side) * 90 \ root
         end if
       end if
     end if
-    dx = goalX - selfX
-    dy = goalY - selfY
+    dx = goalX - me.x
+    dy = goalY - me.y
     if dx * dx + dy * dy < 8100 then
       holding = 1
     end if
@@ -301,31 +312,31 @@ end if
 i = 0
 while i < pickupCount() and i < 32
   if pickupVisible(i) then
-    pickupMemoryX(i) = pickupX(i)
-    pickupMemoryY(i) = pickupY(i)
-    pickupMemoryKind(i) = pickupKind(i)
-    pickupMemoryTick(i) = worldTick + 1
+    supplies(i).x = pickupX(i)
+    supplies(i).y = pickupY(i)
+    supplies(i).kind = pickupKind(i)
+    supplies(i).tick = me.tick + 1
   end if
   i = i + 1
 wend
-if not carrying and thief < 0 then
+if (me.carrying = 0) and thief < 0 then
   nearest = -1
   nearestCost = 4840000
   j = 0
   while j < pickupCount() and j < 32
-    if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
-      kind = pickupMemoryKind(j)
-      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3 and selfHp = 3)
+    if supplies(j).tick > 0 and me.tick - supplies(j).tick < 240 then
+      kind = supplies(j).kind
+      wanted = (kind = 0 and (me.hasGrenade = 0)) or (kind = 2 and me.hp < 3) or (kind = 3 and me.armorHp < 3 and me.hp = 3)
       if wanted then
-        dx = pickupMemoryX(j) - selfX
-        dy = pickupMemoryY(j) - selfY
+        dx = supplies(j).x - me.x
+        dy = supplies(j).y - me.y
         cost = dx * dx + dy * dy
-        if kind = 2 and selfHp = 1 then
+        if kind = 2 and me.hp = 1 then
           ' A medkit is worth a whole life to a cog on one hit point.
-          cost = cost / 4
+          cost = cost \ 4
         end if
-        if cost < 10000 and not pickupVisible(j) then
-          pickupMemoryTick(j) = 0
+        if cost < 10000 and (pickupVisible(j) = 0) then
+          supplies(j).tick = 0
         else
           if cost < nearestCost then
             nearest = j
@@ -336,26 +347,26 @@ if not carrying and thief < 0 then
     end if
     j = j + 1
   wend
-  if nearest >= 0 and (best < 0 or bestCost > 1440000 or selfHp = 1) then
-    goalX = pickupMemoryX(nearest)
-    goalY = pickupMemoryY(nearest)
+  if nearest >= 0 and (best < 0 or bestCost > 1440000 or me.hp = 1) then
+    goalX = supplies(nearest).x
+    goalY = supplies(nearest).y
     holding = 0
   end if
 end if
 
 ' Refuse a fight we are visibly losing: head for the heart that is far from them and near us.
-if foesNear - friendsNear >= 1 and not carrying then
-  cx = foeSumX / foesSeen
-  cy = foeSumY / foesSeen
+if foesNear - friendsNear >= 1 and (me.carrying = 0) then
+  cx = foeSumX \ foesSeen
+  cy = foeSumY \ foesSeen
   away = -1
   awayScore = -2147483647
   j = 0
   while j < heartCount() and j < 16
-    ex = (controlX(j) - cx) / 16
-    ey = (controlY(j) - cy) / 16
-    mx = (controlX(j) - selfX) / 16
-    my = (controlY(j) - selfY) / 16
-    score = ex * ex + ey * ey - (mx * mx + my * my) / 2
+    ex = (controlX(j) - cx) \ 16
+    ey = (controlY(j) - cy) \ 16
+    mx = (controlX(j) - me.x) \ 16
+    my = (controlY(j) - me.y) \ 16
+    score = ex * ex + ey * ey - (mx * mx + my * my) \ 2
     if score > awayScore then
       away = j
       awayScore = score
@@ -371,24 +382,24 @@ end if
 
 ' Facing with nothing to shoot: sweep, then turn to speech and sound.
 if best < 0 then
-  scan = (worldTick / 24 + selfId) mod 4
+  scan = (me.tick \ 24 + me.id) mod 4
   lookX = goalX
   lookY = goalY
   if holding or scan = 1 then
     ' Sweep toward the enemy side first; blue's sweep is the half turn of red's.
-    facing = 1 - 2 * selfTeam
-    lookX = selfX + 2000 * facing
-    lookY = selfY
+    facing = 1 - 2 * me.team
+    lookX = me.x + 2000 * facing
+    lookY = me.y
     if scan = 1 then
-      lookX = selfX
-      lookY = selfY + 2000 * facing
+      lookX = me.x
+      lookY = me.y + 2000 * facing
     end if
     if scan = 2 then
-      lookX = selfX - 2000 * facing
+      lookX = me.x - 2000 * facing
     end if
     if scan = 3 then
-      lookX = selfX
-      lookY = selfY - 2000 * facing
+      lookX = me.x
+      lookY = me.y - 2000 * facing
     end if
   end if
   if heardCount() > 0 then
@@ -426,14 +437,14 @@ if best < 0 then
       if bearing = 5 or bearing = 6 or bearing = 7 then
         dySound = -1000
       end if
-      lookX = selfX + dxSound
-      lookY = selfY + dySound
+      lookX = me.x + dxSound
+      lookY = me.y + dySound
     end if
   end if
   lookAt(lookX, lookY)
 end if
 
-if worldTick mod 360 = selfId * 21 then
+if me.tick mod 360 = me.id * 21 then
   if best >= 0 then
     shout(strNew("Contact! Cover this lane."))
   else
@@ -449,10 +460,10 @@ end if
 ' ordered at the start of a leg that lasts the whole windup, so our own movement is known.
 moveX = goalX
 moveY = goalY
-inContact = best >= 0 and trenchId < 0
+inContact = best >= 0 and me.trenchId < 0
 if inContact then
-  threatX = playerX(best)
-  threatY = playerY(best)
+  threatX = agents(best).x
+  threatY = agents(best).y
   ' Blocked for three ticks: let the engine's pathing take over for a second.
   if legTicks > 0 and myVX * myVX + myVY * myVY < 64 then
     stalled = stalled + 1
@@ -460,12 +471,12 @@ if inContact then
     stalled = 0
   end if
   if stalled >= 3 then
-    pathUntil = worldTick + 24
+    pathUntil = me.tick + 24
     stalled = 0
     legTicks = 0
   end if
-  wantShot = gunWait = 0 and (hasSpray = 0 or bestCost < 640000)
-  if worldTick >= pathUntil then
+  wantShot = gunWait = 0 and (me.hasSpray = 0 or bestCost < 640000)
+  if me.tick >= pathUntil then
     if legTicks <= 0 or (wantShot and legTicks < 6) then
       if wantShot then
         planLeg(6, 9)
@@ -474,12 +485,12 @@ if inContact then
       end if
     end if
     legTicks = legTicks - 1
-    moveX = selfX + legX * 4
-    moveY = selfY + legY * 4
+    moveX = me.x + legX * 4
+    moveY = me.y + legY * 4
     if holding then
       ' Stay inside the ring: turn back toward its centre when the leg would leave it.
-      dx = selfX + legX * 2 - goalX
-      dy = selfY + legY * 2 - goalY
+      dx = me.x + legX * 2 - goalX
+      dy = me.y + legY * 2 - goalY
       if dx * dx + dy * dy > 9000 then
         moveX = goalX
         moveY = goalY
@@ -500,8 +511,8 @@ end if
 drWalk = 0
 drTx = moveX
 drTy = moveY
-drDx = drTx - selfX
-drDy = drTy - selfY
+drDx = drTx - me.x
+drDy = drTy - me.y
 if drDx * drDx + drDy * drDy > 640000 then
   if drActive then
     drEx = drTx - drGx
@@ -509,30 +520,30 @@ if drDx * drDx + drDy * drDy > 640000 then
     if drEx * drEx + drEy * drEy > 1000000 then
       drActive = 0
     end if
-    drEx = drWx - selfX
-    drEy = drWy - selfY
+    drEx = drWx - me.x
+    drEy = drWy - me.y
     if drEx * drEx + drEy * drEy < 90000 then
       drActive = 0
     end if
-    if worldTick - drTick > 240 then
+    if me.tick - drTick > 240 then
       drActive = 0
     end if
   end if
-  if drActive = 0 and worldTick - drTick >= 12 then
-    drTick = worldTick
-    legTime(selfX, selfY, drTx, drTy)
+  if drActive = 0 and me.tick - drTick >= 12 then
+    drTick = me.tick
+    legTime(me.x, me.y, drTx, drTy)
     if wet > 0 then
       drBest = legCost
       drBestK = -1
-      drMx = selfX + drDx / 2
-      drMy = selfY + drDy / 2
+      drMx = me.x + drDx \ 2
+      drMy = me.y + drDy \ 2
       drK = 0
       while drK < 6
-        drCx = drMx - drDy * drF(drK) / 10
-        drCy = drMy + drDx * drF(drK) / 10
+        drCx = drMx - drDy * drF(drK) \ 10
+        drCy = drMy + drDx * drF(drK) \ 10
         if drCx > mapMinX() + 200 and drCx < mapMaxX() - 200 and drCy > mapMinY() + 200 and drCy < mapMaxY() - 200 then
           if waterAt(drCx, drCy) = 0 then
-            legTime(selfX, selfY, drCx, drCy)
+            legTime(me.x, me.y, drCx, drCy)
             drSc = legCost
             legTime(drCx, drCy, drTx, drTy)
             drSc = drSc + legCost
@@ -566,13 +577,13 @@ end if
 ' Gun: the ray leaves six moves after the order, from wherever we then stand, along the
 ' direction locked one move from now. Aim where they will be, minus our own drift.
 if best >= 0 then
-  tx = playerX(best)
-  ty = playerY(best)
-  if lastSeen(best) = worldTick - 1 then
-    tx = tx + (tx - oldX(best)) * 6
-    ty = ty + (ty - oldY(best)) * 6
+  tx = agents(best).x
+  ty = agents(best).y
+  if motion(best).seen = me.tick - 1 then
+    tx = tx + (tx - motion(best).x) * 6
+    ty = ty + (ty - motion(best).y) * 6
   end if
-  if inContact and worldTick >= pathUntil then
+  if inContact and me.tick >= pathUntil then
     tx = tx - legX * 5
     ty = ty - legY * 5
   else
@@ -581,18 +592,18 @@ if best >= 0 then
   end if
   ' Hold fire when a visible teammate stands in the line.
   clear = 1
-  sx = tx - selfX
-  sy = ty - selfY
+  sx = tx - me.x
+  sy = ty - me.y
   isqrt(sx * sx + sy * sy)
   reach = root
   if reach > 0 then
     i = 0
-    while i < 16
-      if i <> selfId and i mod 2 = selfTeam and visible(i) then
-        ox = playerX(i) - selfX
-        oy = playerY(i) - selfY
-        along = (ox * sx + oy * sy) / reach
-        across = (ox * sy - oy * sx) / reach
+    while i < rosterLimit
+      if i <> me.id and i mod 2 = me.team and agents(i).visible then
+        ox = agents(i).x - me.x
+        oy = agents(i).y - me.y
+        along = (ox * sx + oy * sy) \ reach
+        across = (ox * sy - oy * sx) \ reach
         if across < 0 then
           across = 0 - across
         end if
@@ -603,14 +614,14 @@ if best >= 0 then
       i = i + 1
     wend
   end if
-  if hasSpray = 0 or bestCost < 640000 then
+  if me.hasSpray = 0 or bestCost < 640000 then
     if clear and gunWait = 0 then
       shootAt(tx, ty)
       gunWait = 25
-      if armorHp > 0 or trenchId >= 0 or carrying then
+      if me.armorHp > 0 or me.trenchId >= 0 or me.carrying then
         gunWait = 73
       end if
-      if hasSpray then
+      if me.hasSpray then
         gunWait = 25
       end if
     else
@@ -622,28 +633,28 @@ if best >= 0 then
 end if
 
 i = 0
-while i < 16
-  if visible(i) then
-    oldX(i) = playerX(i)
-    oldY(i) = playerY(i)
-    lastSeen(i) = worldTick
+while i < rosterLimit
+  if agents(i).visible then
+    motion(i).x = agents(i).x
+    motion(i).y = agents(i).y
+    motion(i).seen = me.tick
   end if
   i = i + 1
 wend
 
 ' Grenade: match the charge to the distance, never onto a visible teammate.
-if hasGrenade and best >= 0 then
-  nx = playerX(best)
-  ny = playerY(best)
-  dx = nx - selfX
-  dy = ny - selfY
+if me.hasGrenade and best >= 0 then
+  nx = agents(best).x
+  ny = agents(best).y
+  dx = nx - me.x
+  dy = ny - me.y
   d2 = dx * dx + dy * dy
   safe = 1
   i = 0
-  while i < 16
-    if i mod 2 = selfTeam and visible(i) then
-      fx = playerX(i) - nx
-      fy = playerY(i) - ny
+  while i < rosterLimit
+    if i mod 2 = me.team and agents(i).visible then
+      fx = agents(i).x - nx
+      fy = agents(i).y - ny
       if fx * fx + fy * fy < 202500 then
         safe = 0
       end if
@@ -652,13 +663,13 @@ if hasGrenade and best >= 0 then
   wend
   if safe and d2 > 160000 and d2 < 1562500 then
     isqrt(d2)
-    need = (root - 150) * 24 / 1130 + 1
+    need = (root - 150) * 24 \ 1130 + 1
     if need < 1 then
       need = 1
     end if
     lookAt(nx, ny)
-    chargeGrenade(grenadeCharge < need)
-    if grenadeCharge >= need then
+    chargeGrenade(me.grenadeCharge < need)
+    if me.grenadeCharge >= need then
       shout(strNew("Grenade out!"))
     end if
   end if
@@ -666,12 +677,12 @@ end if
 
 ' Quiet approach to the objective when nothing is in sight but something was heard.
 if best < 0 and soundCount() > 0 and objective >= 0 then
-  dx = controlX(objective) - selfX
-  dy = controlY(objective) - selfY
+  dx = controlX(objective) - me.x
+  dy = controlY(objective) - me.y
   if dx * dx + dy * dy < 810000 then
     sneak(1)
   end if
 end if
 
-lastX = selfX
-lastY = selfY
+lastX = me.x
+lastY = me.y

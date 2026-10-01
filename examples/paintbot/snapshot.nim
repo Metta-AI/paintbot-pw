@@ -7,7 +7,7 @@
 when not defined(pwTraining): {.error: "snapshot.nim is part of the training library only (-d:pwTraining)".}
 
 import std/[options, typetraits]
-import polyworld/basic
+import bassy
 import seat_view, neural_actor
 
 type
@@ -44,6 +44,19 @@ proc skipped(T: typedesc): bool {.compileTime.} =
 proc put*[T](w: var SnapWriter, x: T) =
   when skipped(T):
     discard
+  elif T is Value:
+    w.putU64(uint64(ord(x.kind)))
+    case x.kind
+    of IntegerValue:
+      w.putU64(cast[uint32](x.asInt).uint64)
+    of FixedValue:
+      w.putU64(cast[uint32](x.asFixed).uint64)
+    of StringValue:
+      w.putU64(x.stringOwner.uint64)
+      w.putU64(cast[uint32](x.stringHandle).uint64)
+    of ArrayValue, BlobValue:
+      w.putU64(x.bufferOwner.uint64)
+      w.putU64(cast[uint32](x.bufferSlot).uint64)
   elif T is bool:
     w.putU64(uint64(ord(x)))
   elif T is enum:
@@ -91,6 +104,23 @@ proc put*[T](w: var SnapWriter, x: T) =
 proc get*[T](r: var SnapReader, x: var T) =
   when skipped(T):
     discard
+  elif T is Value:
+    let kind = r.getU64()
+    if kind > uint64(ord(high(ValueKind))):
+      r.fail("bad BASIC value kind")
+    case ValueKind(kind)
+    of IntegerValue:
+      x = toValue(cast[int32](uint32(r.getU64())))
+    of FixedValue:
+      x = toValue(cast[Fixed](uint32(r.getU64())))
+    of StringValue:
+      let owner = uint32(r.getU64())
+      x = stringValue(owner, cast[int32](uint32(r.getU64())))
+    of ArrayValue, BlobValue:
+      let owner = uint32(r.getU64())
+      x = bufferValue(
+        ValueKind(kind), owner, cast[int32](uint32(r.getU64()))
+      )
   elif T is bool:
     x = r.getU64() != 0
   elif T is enum:

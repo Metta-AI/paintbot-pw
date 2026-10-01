@@ -48,11 +48,11 @@ sub isqrt(n)
     exit sub
   end if
   root = 23170
-  guess = (root + n / root) / 2
+  guess = (root + n \ root) \ 2
   iterations = 0
   while guess < root and iterations < 24
     root = guess
-    guess = (root + n / root) / 2
+    guess = (root + n \ root) \ 2
     iterations = iterations + 1
   wend
 end sub
@@ -62,7 +62,7 @@ sub wetLine(ax, ay, bx, by)
   wet = 0
   s3 = 1
   while s3 <= 10
-    if waterAt(ax + (bx - ax) * s3 / 10, ay + (by - ay) * s3 / 10) then
+    if waterAt(ax + (bx - ax) * s3 \ 10, ay + (by - ay) * s3 \ 10) then
       wet = wet + 1
     end if
     s3 = s3 + 1
@@ -73,7 +73,7 @@ end sub
 sub legTime(ax, ay, bx, by)
   wetLine(ax, ay, bx, by)
   isqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
-  legCost = root / 100 + root / 100 * wet * (kWetCost - 1) / 10
+  legCost = root \ 100 + root \ 100 * wet * (kWetCost - 1) \ 10
 end sub
 
 sub nextRandom()
@@ -97,22 +97,22 @@ sub planLeg(minTicks, maxTicks)
   legX = 0
   legY = 0
   if root > 0 then
-    legX = (0 - ty) * 100 * zig / root
-    legY = tx * 100 * zig / root
+    legX = (0 - ty) * 100 * zig \ root
+    legY = tx * 100 * zig \ root
   end if
   if holding = 0 then
     fx = goalX - selfX
     fy = goalY - selfY
     isqrt(fx * fx + fy * fy)
     if root > 60 then
-      legX = legX * 3 / 4 + fx * 100 / root
-      legY = legY * 3 / 4 + fy * 100 / root
+      legX = legX * 3 \ 4 + fx * 100 \ root
+      legY = legY * 3 \ 4 + fy * 100 \ root
     end if
   end if
   isqrt(legX * legX + legY * legY)
   if root > 0 then
-    legX = legX * 28 / root
-    legY = legY * 28 / root
+    legX = legX * 28 \ root
+    legY = legY * 28 \ root
   end if
 end sub
 
@@ -123,17 +123,17 @@ end sub
 ' reaches 850 (+ a body radius) and is along * 4/5 + a body radius wide on each side, plus a
 ' 40-unit margin for movement during the burst. Into blocked.
 sub kinAt(ox, oy)
-  along = (ox * sx + oy * sy) / reach
-  across = (ox * sy - oy * sx) / reach
+  along = (ox * sx + oy * sy) \ reach
+  across = (ox * sy - oy * sx) \ reach
   if across < 0 then
     across = 0 - across
   end if
   if hasSpray then
-    if along > -40 and along <= 945 and across <= along * 4 / 5 + 95 then
+    if along > -40 and along <= 945 and across <= along * 4 \ 5 + 95 then
       blocked = 1
     end if
   else
-    if along > -40 and along < 2120 and across < 150 + along / 10 then
+    if along > -40 and along < 2120 and across < 150 + along \ 10 then
       blocked = 1
     end if
   end if
@@ -157,7 +157,7 @@ sub kinInLine(ex, ey)
     ' the past six ticks, stands in for where they are.
     k = 0
     while k < nSeats
-      if k <> selfId and spokeTick(k) > 0 and worldTick - spokeTick(k) <= 6 and kinK(k) >= 25 and not visible(k) then
+      if k <> selfId and spokeTick(k) > 0 and worldTick - spokeTick(k) <= 6 and kinK(k) >= 25 and (visible(k) = 0) then
         kinAt(spokeX(k) - selfX, spokeY(k) - selfY)
       end if
       k = k + 1
@@ -166,7 +166,7 @@ sub kinInLine(ex, ey)
     ' so this only catches the ones who just left the cone).
     k = 0
     while k < nSeats
-      if k <> selfId and lastSeen(k) > 0 and worldTick - lastSeen(k) <= 24 and kinK(k) >= 25 and not visible(k) then
+      if k <> selfId and lastSeen(k) > 0 and worldTick - lastSeen(k) <= 24 and kinK(k) >= 25 and (visible(k) = 0) then
         kinAt(oldX(k) - selfX, oldY(k) - selfY)
       end if
       k = k + 1
@@ -378,8 +378,8 @@ if objective < 0 and mine < 2 then
         ok = kinK(c) < 50
       end if
       if ok then
-        dx = (controlX(j) - homeX) / 8
-        dy = (controlY(j) - homeY) / 8
+        dx = (controlX(j) - homeX) \ 8
+        dy = (controlY(j) - homeY) \ 8
         cost = dx * dx + dy * dy
         if cost < choiceCost then
           choice = j
@@ -445,8 +445,8 @@ if neutral = 0 then
         ok = kinK(c) < 50
       end if
       if ok then
-        dx = (controlX(j) - selfX) / 8
-        dy = (controlY(j) - selfY) / 8
+        dx = (controlX(j) - selfX) \ 8
+        dy = (controlY(j) - selfY) \ 8
         if dx * dx + dy * dy < stealD then
           steal = j
           stealD = dx * dx + dy * dy
@@ -535,7 +535,7 @@ else
     post = nearestMine
     if worldTick - lastThreat > 240 and mine >= 2 then
       ' Quiet: walk the rounds of our hearts, one post every 20 s, rather than parking.
-      want = (worldTick / 480 + selfId) mod mine
+      want = (worldTick \ 480 + selfId) mod mine
       j = 0
       while j < heartCount() and j < 64
         if heartOwner(j) = selfId then
@@ -560,7 +560,7 @@ end if
 if greatGoal >= 0 then
   ' Spread a little inside the 200-unit zone so bodies do not jam.
   goalX = greatX + (selfId mod 4 - 1) * 50
-  goalY = greatY + (selfId / 4 mod 4 - 1) * 50
+  goalY = greatY + (selfId \ 4 mod 4 - 1) * 50
   mode = 2
 end if
 dx = goalX - selfX
@@ -651,15 +651,15 @@ if mode <> 2 and controlCaptureTeam(objective) <> selfId then
   while j < pickupCount() and j < 64
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
       kind = pickupMemoryKind(j)
-      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < kMaxHp) or (kind = 3 and armorHp < 3 and selfHp = kMaxHp)
+      wanted = (kind = 0 and (hasGrenade = 0)) or (kind = 2 and selfHp < kMaxHp) or (kind = 3 and armorHp < 3 and selfHp = kMaxHp)
       if wanted then
         dx = pickupMemoryX(j) - selfX
         dy = pickupMemoryY(j) - selfY
         cost = dx * dx + dy * dy
         if kind = 2 and selfHp <= 3 then
-          cost = cost / 4
+          cost = cost \ 4
         end if
-        if cost < 10000 and not pickupVisible(j) then
+        if cost < 10000 and (pickupVisible(j) = 0) then
           pickupMemoryTick(j) = 0
         else
           if cost < nearestCost then
@@ -687,7 +687,7 @@ end if
 
 ' Nothing to shoot: sweep, then turn toward speech and sound.
 if best < 0 then
-  scan = (worldTick / 24 + selfId) mod 4
+  scan = (worldTick \ 24 + selfId) mod 4
   lookX = goalX
   lookY = goalY
   if holding or scan = 1 then
@@ -815,12 +815,12 @@ if drDx * drDx + drDy * drDy > 640000 then
     if wet > 0 then
       drBest = legCost
       drBestK = -1
-      drMx = selfX + drDx / 2
-      drMy = selfY + drDy / 2
+      drMx = selfX + drDx \ 2
+      drMy = selfY + drDy \ 2
       drK = 0
       while drK < 6
-        drCx = drMx - drDy * drF(drK) / 10
-        drCy = drMy + drDx * drF(drK) / 10
+        drCx = drMx - drDy * drF(drK) \ 10
+        drCy = drMy + drDx * drF(drK) \ 10
         if drCx > mapMinX() + 200 and drCx < mapMaxX() - 200 and drCy > mapMinY() + 200 and drCy < mapMaxY() - 200 then
           if waterAt(drCx, drCy) = 0 then
             legTime(selfX, selfY, drCx, drCy)
@@ -909,7 +909,7 @@ if hasGrenade and best >= 0 then
   wend
   if safe and d2 > 250000 and d2 < 1562500 then
     isqrt(d2)
-    need = (root - 150) * 24 / 1130 + 1
+    need = (root - 150) * 24 \ 1130 + 1
     if need < 1 then
       need = 1
     end if

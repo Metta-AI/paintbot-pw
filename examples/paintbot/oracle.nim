@@ -4,7 +4,7 @@
 ## on a later tick. Everything a script sees is int32; probabilities, scores and confidences are
 ## scaled by 1000. Without a configured oracle every ask is refused and nothing else changes.
 import std/[json, tables, hashes, strutils]
-import polyworld/basic
+import bassy
 import sim
 
 const

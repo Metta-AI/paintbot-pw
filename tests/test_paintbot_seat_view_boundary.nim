@@ -9,7 +9,8 @@ import std/[unittest, os, strutils, osproc]
 const
   Root = currentSourcePath().parentDir.parentDir
   Paintbot = Root / "examples/paintbot"
-  NeuralModules = ["neural_contract.nim", "neural_actor.nim", "neural_host.nim"]
+  NeuralModules = ["neural_contract.nim", "neural_actor.nim", "neural_host.nim",
+    "observations.nim"]
 
 proc imports(text: string): seq[string] =
   ## Every module an `import` / `from ... import` / `include` line names (last path segment).

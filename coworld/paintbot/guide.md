@@ -107,10 +107,37 @@ WASM module on the Paintbot sprite protocol was also accepted. That lane is gone
 upload now forfeits its seat at episode start with an explicit reason, and the sixteen seats
 play on. Earlier recordings are unaffected.)
 
+Policies run on [Bassy](https://github.com/treeform/bassy). Native ARM64 and
+AMD64 builds compile policies with Bassy's JIT. Other targets use its interpreter.
+Both paths enforce the same instruction and work budgets. BASIC now supports
+`TYPE ... END TYPE`, typed records, record arrays, fixed-point numbers and strings.
+`/` performs fixed-point division; use `\` for integer division. Comparisons and
+`TRUE` produce -1, and `FALSE` is 0. Host coordinate and index arguments must be
+exact integers.
+
+Every Paintbot script receives two record declarations before its source:
+
+- `me`: `id`, `team`, `x`, `y`, `hp`, `carrying`, `homeX`, `homeY`, `heartX`,
+  `heartY`, `tick`, `ownHeartX`, `ownHeartY`, `ownHeartStolen`, `hasGrenade`,
+  `hasSpray`, `armorHp`, `livesLeft`, `grenadeCharge`, `trenchId`, and `seats`.
+- `agents(i)`: `visible`, `x`, `y`, `hp`, `team`, and `carrying`, for every seat.
+  Valid indices run from 0 through `me.seats - 1`.
+  Each field follows the corresponding SeatView query's fog and disguise rules.
+  Roster columns load only when accessed and refresh each decision, charging four
+  work units per seat per loaded column.
+
+These records are local snapshots. Assigning a field changes the script's copy;
+commands still go through `walkTo`, `lookAt`, `shootAt`, and `chargeGrenade`.
+Scalar fields used by a script refresh each decision. Scripts can declare their
+own typed records for persistent memory, as `players/base.bas` does.
+
+See [Porting Paintbot BASIC to Bassy](../../docs/bassy-porting.md) for record
+accessor examples, numeric changes, and the host-side binding API.
+
 BASIC read-only data: `selfId`, `selfTeam`, `selfX`, `selfY`, `selfHp`, `carrying`,
 `homeX`, `homeY`, `heartX`, `heartY`, `ownHeartX`, `ownHeartY`, `ownHeartStolen`,
 `worldTick`, `hasGrenade`, `hasSpray`, `armorHp`, `livesLeft`, `grenadeCharge`,
-`trenchId` (-1 outside).
+`trenchId` (-1 outside), `worldSeats` (the current roster size).
 
 Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `playerCarrying(slot)`, `pickupCount()`, `pickupVisible(id)`, `pickupX(id)`,

@@ -10,8 +10,9 @@
 ## live state. That keeps indices stable while a script issues commands that
 ## kill things, and it is where fog of war is applied.
 
+import bassy
 import
-  polyworld/[basic, profiles],
+  polyworld/[profiles],
   content,
   sim
 

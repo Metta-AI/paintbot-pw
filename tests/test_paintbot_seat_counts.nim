@@ -5,10 +5,12 @@ import std/[unittest, os, options]
 import polyworld/[cli, tapes]
 import ../examples/paintbot/[sim, game, bots, kinship]
 
-const Root = currentSourcePath().parentDir.parentDir
-const Base = Root / "coworld/paintbot/players/base.bas"
-const Ffa = Root / "coworld/paintbot/players/ffa.bas"
-const Ticks = 240'i32
+const
+  Root = currentSourcePath().parentDir.parentDir
+  Base = Root / "coworld/paintbot/players/base.bas"
+  Jev = Root / "coworld/paintbot/players/jev.bas"
+  Ffa = Root / "coworld/paintbot/players/ffa.bas"
+  Ticks = 240'i32
 
 proc play(seats: int, script, map: string): Recording =
   ## A live match of `seats` seats on `map`, recorded the way game.advance records it.
@@ -92,6 +94,9 @@ suite "Paintbot seat counts are per match":
   for (seats, map) in [(8, ""), (16, ""), (50, "big-twin-mesas")]:
     test "teams with " & $seats & " seats play and replay":
       replays(play(seats, Base, map), "teams-" & $seats)
+
+  test "Jev with eight seats plays and replays":
+    replays(play(8, Jev, ""), "jev-8")
 
   for (seats, map) in [(50, "big-twin-mesas"), (100, "big-twin-mesas")]:
     test "Heartland with " & $seats & " seats in tribes plays and replays":

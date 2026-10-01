@@ -1,7 +1,7 @@
 import
   std/[os, posix, strutils, times, uri],
   jsony, mummy,
-  basic, cli
+  bassy, cli
 
 const
   PlayerLogLimit* = 10 * 1024 * 1024
@@ -176,6 +176,8 @@ proc playerPrinter*(slot: int): PrintProc =
       playerLog(slot, event.text)
     of ValuePrint:
       playerLog(slot, $event.value)
+    of FixedPrint:
+      playerLog(slot, $event.fixedValue)
     of NewlinePrint:
       playerLog(slot, "\n")
 
