@@ -1794,6 +1794,21 @@ proc pw_seat_grenade_stats*(handle: pointer, seat: cint, output: ptr UncheckedAr
     output[i] = v
   0
 
+proc pw_seat_damage_taken_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Damage taken by one seat (training library only), eight int32, cumulative since the last
+  ## create/reset: [hits, health lost] from enemy guns, enemy grenades, enemy spray, and from
+  ## everything else (the seat's own or a teammate's weapon, the map), in that order. A hit is
+  ## a damage event past the shield and life checks (pw_seat_stats' hits_taken counts every
+  ## one, so the four hit counts sum to it); health lost is after armor (armor's share is
+  ## pw_seat_equip_stats[5]). Pure telemetry. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let s = cast[ptr NativeEnv](handle).stats[seat]
+  for k in 0..3:
+    output[2*k] = s.takenHits[k]
+    output[2*k+1] = s.takenHealth[k]
+  0
+
 proc pw_seat_equip_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## Equipment and disguise telemetry for one seat (training library only), eight int32,
   ## cumulative since the last create/reset: [armor pickups, uniform (disguise) pickups,

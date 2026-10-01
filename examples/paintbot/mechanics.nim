@@ -409,6 +409,9 @@ proc damage*(w: var World, victim, attacker, amount: int) =
       let killed = w.cogs[victim].hp == 0
       inc t[victim].hitsTaken
       if killed: inc t[victim].deaths
+      let fromEnemy = attacker >= 0 and attacker != victim and team(attacker) != team(victim)
+      let source = if fromEnemy and damageWeapon != dwNone: ord(damageWeapon)-1 else: 3
+      inc t[victim].takenHits[source]; t[victim].takenHealth[source] += removed
       t[victim].armorAbsorbed += absorbed
       if attacker >= 0 and attacker != victim:
         if team(attacker) == team(victim):

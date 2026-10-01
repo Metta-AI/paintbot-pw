@@ -269,6 +269,10 @@ when defined(pwTraining):
       # made while disguised.
       armorPickups*, uniformPickups*, medkitPickups*, grenadePickups*, sprayPickups*: int32
       armorAbsorbed*, disguisedTicks*, disguisedKillsCaptures*: int32
+      # Damage taken (pw_seat_damage_taken_stats): hits and health lost by this seat as the
+      # victim, by source: enemy gun, enemy grenade, enemy spray, and everything else (its own
+      # or a teammate's weapon, the map).
+      takenHits*, takenHealth*: array[4, int32]
     CombatTelemetry* = array[MaxSeats, SeatStats] # one entry per seat the training library plays
   const HighGroundHeight* = 216 # pw_seat_weapon_stats' "high": terrainHeight >= this
   type DamageWeapon* = enum

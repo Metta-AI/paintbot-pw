@@ -61,6 +61,7 @@
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_weapon_stats.nim": 38.1,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_training_telemetry.nim": 38.1,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_save_load.nim": 38.1,
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_damage_taken.nim": 40.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.nim": 3.6,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim": 17.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim": 16.0,

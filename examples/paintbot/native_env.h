@@ -200,6 +200,11 @@ int pw_heart_terrain(void *handle, int32_t *output, int32_t capacity);
 int64_t pw_world_save(void *handle, void *output, int64_t capacity);
 int pw_world_load(void *handle, const void *data, int64_t length);
 int pw_world_load_error(char *output, int32_t capacity);
+/* pw_seat_damage_taken_stats (training library only; pure read, cumulative since the last
+ * create/reset): int32[8] = {hits, health lost} from enemy guns, enemy grenades, enemy spray,
+ * and everything else (own / teammate weapon, map). The hit counts sum to pw_seat_stats'
+ * hits_taken; health lost is after armor. -1 bad args. */
+int pw_seat_damage_taken_stats(void *handle, int seat, int32_t *eight);
 /* pw_seat_privileged_labels (TRAINING-ONLY supervision labels; training_labels.nim): float[21]
  * for the seat on the current pre-step world = {gun cooldown, gun windup, spray cooldown,
  * shield, respawn (ticks), aim x, aim z, own heart meter, enemy heart meter (scoreTicks; 0 in
