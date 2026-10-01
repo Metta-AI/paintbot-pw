@@ -13,7 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent / "runtime"))
 from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpack_package, MAX_MODEL_BYTES,
                             validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS, USER_INPUT_LIMIT, RETIRED_USER_INPUTS,
                             validate_pwnet2, attention_ops, MAX_NEURAL_OPERATIONS, PWNET2_LIMITS,
-                            USER_INPUTS_CONTRACT_HASHES, segment_near_ops, neural_budget, attn_pool_ops,
+                            USER_INPUTS_CONTRACT_HASHES, FFA_USER_INPUTS_CONTRACT_HASHES, user_input_feature,
+                            user_inputs_row, segment_near_ops, neural_budget, attn_pool_ops,
                             LAYOUT_WORD_PREFIX, TEAMS_VIEW_1_SIZE, ACTION_SIZES, ACTION_SIZES_OFFSET, ACTION_SIZES_MOVE,
                             ACTION_CONTRACT_TEAMS_VIEW_1_MOVE, ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH,
                             OBSERVATION_CONTRACT_TEAMS_VIEW_1, OBSERVATION_CONTRACT_FFA_VIEW_1,
@@ -39,6 +40,11 @@ def sha(text):
 def tv1u_hash(k):
     """Observation contract teams.view.1u<K>."""
     return sha(user_inputs_contract_id(k))
+
+
+def fv1u_hash(k):
+    """Observation contract ffa.view.1u<K>."""
+    return sha(user_inputs_contract_id(k, OBSERVATION_CONTRACT_FFA_VIEW_1))
 
 
 def actor_bytes(inputs, observation_hash, hidden=64, heads=ACTION_SIZES, action_hash=ACT):
@@ -284,7 +290,8 @@ class ContractTests(unittest.TestCase):
 
     def test_unknown_contracts_are_refused(self):
         for digest in ("a" * 64, sha("paintbot-pw.teams.view.2"), sha(user_inputs_contract_id(0)),
-                       sha(user_inputs_contract_id(MAX_USER_INPUTS + 1)), sha("paintbot-pw.ffa.view.1u3"), ACT, POINTER):
+                       sha(user_inputs_contract_id(MAX_USER_INPUTS + 1)), sha("paintbot-pw.ffa.view.1u0"),
+                       sha("paintbot-pw.ffa.view.1u257"), ACT, POINTER):
             with self.assertRaisesRegex(ValueError, "unknown neural observation contract", msg=digest):
                 unpack_package(package({"observation_contract": digest}))
         for digest in ("b" * 64, TEAMS, FFA, sha("paintbot-pw.teams.view.1.action.51-25-2-2-2-23"),
@@ -389,7 +396,7 @@ class ContractTests(unittest.TestCase):
                         {"joint_sampling": {"when": {"head": 2, "value": 1}, "head": 0, "offsets": [0] * 51}}):
             with self.assertRaisesRegex(ValueError, "not available under action contract ffa.view.1 pointer"):
                 unpack_package(package({**ffa, "decoder": decoder}, model=FFA_MODEL))
-        with self.assertRaisesRegex(ValueError, "user_inputs need observation contract teams.view.1u<K>"):
+        with self.assertRaisesRegex(ValueError, "user_inputs need observation contract ffa.view.1u<K>"):
             unpack_package(package({**ffa, "user_inputs": {"count": 1, "init": [0]}}, model=FFA_MODEL))
 
 
@@ -460,8 +467,11 @@ class UserInputTests(unittest.TestCase):
 
     def test_user_inputs_contract_ids_match_the_engine(self):
         source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
-        self.assertIn('proc userInputsContractId*(k: int): string = ObservationContractTeamsView1 & "u" & $k', source)
+        self.assertIn('proc userInputsContractId*(k: int, base = ocTeamsView1): string =', source)
+        self.assertIn('(if base == ocTeamsView1: ObservationContractTeamsView1 else: ObservationContractFfaView1) & "u" & $k',
+                      source)
         self.assertEqual(user_inputs_contract_id(7), "paintbot-pw.teams.view.1u7")
+        self.assertEqual(user_inputs_contract_id(5, OBSERVATION_CONTRACT_FFA_VIEW_1), "paintbot-pw.ffa.view.1u5")
         consts = {name: int(value.replace("_", "")) for name, value in
                   re.findall(r"^  (\w+)\* = ([0-9_]+)(?:'i32)?$", source, re.M)}
         self.assertEqual((MAX_USER_INPUTS, USER_INPUT_LIMIT), (consts["MaxUserInputs"], consts["UserInputLimit"]))
@@ -482,6 +492,18 @@ class UserInputTests(unittest.TestCase):
         _, model, manifest = unpack_package(package(SCHEMA2))
         self.assertEqual(model, TEAMS_MODEL)
         self.assertNotIn("user_inputs", manifest)
+
+    def test_user_input_feature_mirrors_the_engine(self):
+        # float32(clamp(v)) / 1000 in float32 (neural_contract.nim userInputFeature, clampUserInput).
+        f32 = lambda x: struct.unpack("<f", struct.pack("<f", x))[0]
+        self.assertEqual(user_input_feature(1500), 1.5)
+        self.assertEqual(user_input_feature(-2000), -2.0)
+        self.assertEqual(user_input_feature(0), 0.0)
+        self.assertEqual(user_input_feature(5), f32(0.005))
+        self.assertEqual(user_input_feature(5_000_000), 1000.0)
+        self.assertEqual(user_input_feature(-5_000_000), -1000.0)
+        self.assertEqual(user_inputs_row([0.25, -1.0], [1500, -700]), [0.25, -1.0, 1.5, f32(-0.7)])
+        self.assertEqual(user_inputs_row([0.25], []), [0.25])
 
 
 def pwnet2(inputs, heads, layers, obs=TEAMS, act=ACT):
@@ -940,6 +962,55 @@ class FfaView1PackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "operation budget"):
             self.bundle(big)
         self.bundle(big, seats=50)
+
+
+class FfaUserInputTests(unittest.TestCase):
+    """Observation contract ffa.view.1u<K>: the match's ffa.view.1 floats, then K user inputs (default off)."""
+
+    def ffa_package(self, k=5, observation=None, user_inputs="default", action=POINTER):
+        observation = observation or fv1u_hash(k)
+        heads = [21, 24, 2, 2, 2] if action == POINTER else list(ACTION_SIZES)
+        model = pwnet2(40, heads, [(1, [40, sum(heads)], [], 40 * sum(heads))], obs=observation, act=action)
+        overrides = {**SCHEMA2, "observation_contract": observation, "action_contract": action}
+        if user_inputs == "default":
+            overrides["user_inputs"] = {"count": k, "init": [0] * k}
+        elif user_inputs is not None:
+            overrides["user_inputs"] = user_inputs
+        return package(overrides, model=model)
+
+    def test_ids_and_hashes_match_the_engine(self):
+        self.assertEqual(fv1u_hash(5), sha("paintbot-pw.ffa.view.1u5"))
+        self.assertEqual(FFA_USER_INPUTS_CONTRACT_HASHES, {fv1u_hash(k): k for k in range(1, MAX_USER_INPUTS + 1)})
+        self.assertFalse(set(FFA_USER_INPUTS_CONTRACT_HASHES) & (set(USER_INPUTS_CONTRACT_HASHES) | RETIRED_CONTRACT_HASHES
+                                                                | {TEAMS, FFA, ACT, OFFSET, POINTER}))
+        # The base contracts and the teams family are unchanged.
+        self.assertEqual(FFA, sha("paintbot-pw.ffa.view.1"))
+        self.assertEqual(TEAMS, sha("paintbot-pw.teams.view.1"))
+        self.assertEqual(USER_INPUTS_CONTRACT_HASHES, {sha("paintbot-pw.teams.view.1u%d" % k): k for k in range(1, MAX_USER_INPUTS + 1)})
+
+    def test_staged_with_pointer_and_matching_user_inputs(self):
+        for k in (1, 5, 64, MAX_USER_INPUTS):
+            _, _, manifest = unpack_package(self.ffa_package(k))
+            self.assertEqual(manifest["user_inputs"]["count"], k)
+            self.assertEqual(manifest["observation_contract"], fv1u_hash(k))
+
+    def test_refusals(self):
+        with self.assertRaisesRegex(ValueError, "ffa.view.1u5 needs manifest user_inputs"):
+            unpack_package(self.ffa_package(5, user_inputs=None))
+        with self.assertRaisesRegex(ValueError, "does not match observation contract ffa.view.1u5"):
+            unpack_package(self.ffa_package(5, user_inputs={"count": 4, "init": [0] * 4}))
+        with self.assertRaisesRegex(ValueError, "user_inputs need observation contract ffa.view.1u<K>"):
+            unpack_package(self.ffa_package(5, observation=FFA))
+        with self.assertRaisesRegex(ValueError, "goes with"):
+            unpack_package(self.ffa_package(5, action=ACT))
+        with self.assertRaisesRegex(ValueError, "user_inputs need package schema 2"):
+            unpack_package(package({"schema": "paintbot-neural-basic/1", "observation_contract": fv1u_hash(5),
+                                    "action_contract": POINTER, "user_inputs": {"count": 5, "init": [0] * 5}},
+                                   model=pwnet2(40, [21, 24, 2, 2, 2], [(1, [40, 51], [], 40 * 51)], obs=fv1u_hash(5),
+                                                act=POINTER)))
+        # A teams.view.1u<K> hash under the pointer contract is still refused.
+        with self.assertRaisesRegex(ValueError, "goes with"):
+            unpack_package(self.ffa_package(5, observation=tv1u_hash(5)))
 
 
 if __name__ == "__main__":

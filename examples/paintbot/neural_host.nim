@@ -33,7 +33,8 @@ type
     previouslyAlive: bool
     nativeWork*: int64
     # The action contract the actor was trained against (named by its embedded hash) and the
-    # observation contract (teams.view.1, teams.view.1u<K> or ffa.view.1): selects the encoder.
+    # observation contract (teams.view.1 or ffa.view.1, either with K user inputs: u<K>):
+    # selects the encoder.
     contract*: ActionContractVersion
     observationContract*: ObservationContractVersion
     # decoder.sampling: the seat's own draw stream (seeded from the match seed and the
@@ -54,7 +55,8 @@ type
     forbidden*: ObjectiveMask
     forbidAny*: bool
     forbidHits*: int
-    # User inputs (manifest "user_inputs", observation contract teams.view.1u<K>): the live
+    # User inputs (manifest "user_inputs", observation contract teams.view.1u<K> or
+    # ffa.view.1u<K>): the live
     # values neuralInput writes (K = len), their match-start values, and the snapshot the
     # tick's observation reads (taken at beginTick: one tick of latency).
     userInputs*, userInputInit*: seq[int32]
@@ -348,12 +350,14 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
         raise newException(ValueError, "user_inputs need package schema 2")
       init = parseUserInputs(manifest["user_inputs"])
       sawInputs = true
+  # The user-input family of the seat's base contract (pointer: ffa.view.1, else teams.view.1).
+  let family = if pointer: "ffa.view.1u" else: "teams.view.1u"
   if sawInputs and userInputs == 0:
-    raise newException(ValueError, "user_inputs need observation contract teams.view.1u<K>")
+    raise newException(ValueError, "user_inputs need observation contract " & family & "<K>")
   if userInputs > 0 and not sawInputs:
-    raise newException(ValueError, "observation contract teams.view.1u" & $userInputs & " needs manifest user_inputs")
+    raise newException(ValueError, "observation contract " & family & $userInputs & " needs manifest user_inputs")
   if sawInputs and init.len != userInputs:
-    raise newException(ValueError, "user_inputs.count does not match observation contract teams.view.1u" & $userInputs)
+    raise newException(ValueError, "user_inputs.count does not match observation contract " & family & $userInputs)
   seat.sampling = sampling
   seat.joint = joint
   seat.forbidden = forbidden
@@ -375,10 +379,10 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
 
 proc observationFor(hash: string): (ObservationContractVersion, int) =
   ## The encoder and user-input count an observation contract hash names: teams.view.1,
-  ## teams.view.1u<K> (= teams.view.1 + K) or ffa.view.1; ValueError for anything else
-  ## (a retired contract says so).
-  let k = userInputsFromHash(hash)
-  if k > 0: return (ocTeamsView1, k)
+  ## teams.view.1u<K> (= teams.view.1 + K), ffa.view.1 or ffa.view.1u<K> (= ffa.view.1 + K);
+  ## ValueError for anything else (a retired contract says so).
+  let (base, k) = userInputsContract(hash)
+  if k > 0: return (base, k)
   (observationContractVersion(hash), 0)
 
 proc requireMode(observationContract: ObservationContractVersion) =
@@ -445,21 +449,19 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
     let heads = pointerHeads(layout)
     var total = 0
     for h in heads: total += h
-    let actor = loadActor(data, actorLayout(layout, heads, pointerTargets(layout)))
-    if actor.inputSize != layout.size or actor.outputSize != total or actor.headSizes != heads:
+    let actor = loadActor(data, actorLayout(layout, heads, pointerTargets(layout), userInputs))
+    if actor.inputSize != layout.size + userInputs or actor.outputSize != total or actor.headSizes != heads:
       raise newException(ValueError, "neural actor dimensions do not match this match's ffa.view.1 layout (" &
-        $layout.seats & " seats, " & $layout.hearts & " control hearts)")
+        $layout.seats & " seats, " & $layout.hearts & " control hearts" &
+        (if userInputs > 0: ", " & $userInputs & " user inputs" else: "") & ")")
     budgetCheck(actor)
-    let manifest = readManifest(sourcePath, actor)
-    if not manifest.isNil and manifest.hasKey("user_inputs"):
-      raise newException(ValueError, "user_inputs need observation contract teams.view.1u<K>")
-    result.configureSeat(manifest, 0, pointer = true)
+    result.configureSeat(readManifest(sourcePath, actor), userInputs, pointer = true)
     result.pointerSetup(layout)
     result.setConditionals(actor.conditionals)
     result.actor = actor
     result.contract = contract
     result.observationContract = observationContract
-    result.observation = newSeq[float32](layout.size)
+    result.observation = newSeq[float32](layout.size + userInputs)
     result.state = newSeq[float32](actor.stateSize)
     return
   let actor = loadActor(data)
@@ -501,7 +503,7 @@ proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string)
   result.observationContract = observationContract
   if pointer:
     result.pointerSetup(matchLayout())
-    result.observation = newSeq[float32](result.layout.size)
+    result.observation = newSeq[float32](result.layout.size + userInputs)
     result.fedLogits = newSeq[float32](result.logits.len)
     return
   result.observation = newSeq[float32](TeamsViewSize + userInputs)
@@ -592,7 +594,7 @@ proc ensureObservation(seat: NeuralSeat) =
   if seat.observationContract == ocFfaView1:
     if ffaViewLayout(seat.view) != seat.layout:
       raise newException(ValueError, "the match's ffa.view.1 layout differs from the one the seat was loaded for")
-    encodeObservation(seat.view, ocFfaView1, seat.observation, rows = seat.rowsFor())
+    encodeObservation(seat.view, ocFfaView1, seat.observation, seat.userInputView, rows = seat.rowsFor())
   else:
     encodeObservation(seat.view, ocTeamsView1, seat.observation, seat.userInputView)
   seat.observationFresh = true

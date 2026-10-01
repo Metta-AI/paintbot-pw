@@ -110,9 +110,10 @@ type
     # Observation contract the handle encodes (chosen at create, kept across resets):
     # teams.view.1 (pw_create) or ffa.view.1. The world never reads it.
     obsVersion: ObservationContractVersion
-    # Neural BASIC I/O. userInputs: the K of observation contract teams.view.1u<K>
-    # (pw_create_observation_inputs / _v; 0 otherwise): every pw_observe row is 512 + K
-    # floats, the last K a policy seat's user inputs (zeros for any other seat). policy:
+    # Neural BASIC I/O. userInputs: the K of observation contract teams.view.1u<K> or
+    # ffa.view.1u<K> (pw_create_observation_inputs / _v; 0 otherwise): every pw_observe row is
+    # the base contract's floats + K, the last K a policy seat's user inputs (zeros for any
+    # other seat). policy:
     # the seats running a bundle's policy.bas under its manifest
     # (pw_set_seat_policy_script), stepped only by pw_step_logits. Unused, nothing here
     # runs and every path is byte-identical.
@@ -431,8 +432,8 @@ proc gateFire(env: ptr NativeEnv, slot: int, command: var Command) =
   else:
     command.shoot = false
 proc observationHash(env: ptr NativeEnv): string =
-  ## The observation contract hash this handle encodes (teams.view.1, teams.view.1u<K> or ffa.view.1).
-  if env.userInputs > 0: userInputsContractHash(env.userInputs)
+  ## The observation contract hash this handle encodes (teams.view.1 or ffa.view.1, or either's u<K>).
+  if env.userInputs > 0: userInputsContractHash(env.userInputs, env.obsVersion)
   else: observationContractHash(env.obsVersion)
 proc installScript(env: ptr NativeEnv, slot: int) =
   ## A fresh runtime for the seat's source, as a new match loads its bots. A policy seat
@@ -516,7 +517,7 @@ proc layoutOf(env: ptr NativeEnv): FfaViewLayout =
 proc rowWidth(env: ptr NativeEnv): int =
   ## Floats per seat this handle's pw_observe writes: the contract's width (ffa.view.1: the
   ## current world's layout) plus the user inputs.
-  if env.obsVersion == ocFfaView1: env.layoutOf.size
+  if env.obsVersion == ocFfaView1: env.layoutOf.size + env.userInputs
   else: TeamsViewSize + env.userInputs
 proc actionHeads(env: ptr NativeEnv): seq[int] =
   ## The head sizes of the handle's action contract (teams.view.1: ActionSizes; ffa.view.1
@@ -589,10 +590,15 @@ proc pw_create_observation_inputs*(seed, maxTicks, userInputs: int32): pointer {
   if result != nil: cast[ptr NativeEnv](result).userInputs = userInputs.int
 
 proc pw_create_observation_inputs_v*(seed, maxTicks, obsVersion, userInputs: int32): pointer {.exportc, cdecl, dynlib.} =
-  ## pw_create_observation_inputs with the base contract named: obsVersion must be 201
-  ## (teams.view.1; the only contract with user inputs). nil otherwise.
-  if obsVersion != ocTeamsView1.int32: return nil
-  pw_create_observation_inputs(seed, maxTicks, userInputs)
+  ## pw_create_observation_inputs with the base contract named: 201 = teams.view.1u<K> (as
+  ## pw_create_observation_inputs), 202 = ffa.view.1u<K>: every pw_observe row is the match's
+  ## ffa.view.1 floats (pw_observation_layout's sections, unchanged) followed by K user-input
+  ## floats, a policy seat's as its policy.bas set them, zeros for every other seat; K = 0 is
+  ## pw_create_observation(seed, max_ticks, 202). nil for another version, a bad K or max_ticks.
+  if obsVersion == ocTeamsView1.int32: return pw_create_observation_inputs(seed, maxTicks, userInputs)
+  if obsVersion != ocFfaView1.int32 or userInputs notin 0'i32..MaxUserInputs.int32: return nil
+  result = createEnv(seed, maxTicks, ocFfaView1)
+  if result != nil: cast[ptr NativeEnv](result).userInputs = userInputs.int
 
 proc pw_handle_user_inputs*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   ## The handle's K (0 unless created by pw_create_observation_inputs); -1 for nil.
@@ -629,8 +635,9 @@ proc pw_observation_layout*(handle: pointer, output: ptr UncheckedArray[int32]):
   ## agents the seat sees are valid, packed first), heart rows = control hearts, great rows 2;
   ## every row's valid flag is column 0 (neural_contract.encodeFfaView documents every column).
   ## Any other contract has no sections: [row floats, row floats, 0 ..., seats, control
-  ## hearts, 0, 0] with the offsets, counts and widths 0 and valid column -1. Fixed for the
-  ## match; a reset may change it (map, seats). 0, or -1 bad args.
+  ## hearts, 0, 0] with the offsets, counts and widths 0 and valid column -1. Row floats
+  ## include an ffa.view.1u<K> handle's K user inputs, the row's last K floats (the sections
+  ## are unchanged). Fixed for the match; a reset may change it (map, seats). 0, or -1 bad args.
   if handle == nil or output == nil: return -1
   let env = cast[ptr NativeEnv](handle)
   for i in 0..<ObservationLayoutWords: output[i] = 0
@@ -748,9 +755,15 @@ proc pw_user_inputs_contract_hash*(userInputs: int32, output: ptr UncheckedArray
 
 proc pw_user_inputs_contract_hash_v*(obsVersion, userInputs: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
-  ## pw_user_inputs_contract_hash with the base contract named: obsVersion must be 201.
-  if obsVersion != ocTeamsView1.int32: return -1
-  pw_user_inputs_contract_hash(userInputs, output, capacity)
+  ## pw_user_inputs_contract_hash with the base contract named: 201 = teams.view.1u<K>,
+  ## 202 = ffa.view.1u<K> ("paintbot-pw.ffa.view.1u<K>"). -1 for another version or bad args.
+  if obsVersion == ocTeamsView1.int32: return pw_user_inputs_contract_hash(userInputs, output, capacity)
+  if obsVersion != ocFfaView1.int32: return -1
+  if output == nil or capacity < 65 or userInputs notin 1'i32..MaxUserInputs.int32: return -1
+  let hash = userInputsContractHash(userInputs.int, ocFfaView1)
+  for i, c in hash: output[i] = c
+  output[hash.len] = '\0'
+  0
 
 proc pw_observation_contract_hash*(obsVersion: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
@@ -790,21 +803,21 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
 
 proc observeSeats(env: ptr NativeEnv, chosen: proc(slot: int): bool, observations, resets: FloatBuffer) =
   ## Encode the chosen seats' rows (row s at s * rowWidth) from each seat's SeatView of the
-  ## current world, leaving the others as they are. teams.view.1u<K>: the row, then the
-  ## seat's user inputs as its policy.bas left them (zeros for a seat without them).
+  ## current world, leaving the others as they are. teams.view.1u<K> / ffa.view.1u<K>: the
+  ## row, then the seat's user inputs as its policy.bas left them (zeros for a seat without them).
   let n = env.rowWidth
   beginViews(env.world)
   for slot in 0..<env.n:
     if not chosen(slot): continue
     let view = seatView(slot)
     template row: untyped = observations.toOpenArray(slot*n, (slot+1)*n-1)
+    var inputs = newSeq[int32](env.userInputs)
+    let bot = env.scriptBots[slot]
+    if env.userInputs > 0 and env.policy[slot] and bot != nil and bot.neural != nil:
+      for i in 0..<min(inputs.len, bot.neural.userInputs.len): inputs[i] = bot.neural.userInputs[i]
     if env.obsVersion == ocFfaView1:
-      encodeObservation(view, ocFfaView1, row, rows = ffaViewRows(view), mask = env.obsMask)
+      encodeObservation(view, ocFfaView1, row, inputs, rows = ffaViewRows(view), mask = env.obsMask)
     else:
-      var inputs = newSeq[int32](env.userInputs)
-      let bot = env.scriptBots[slot]
-      if env.policy[slot] and bot != nil and bot.neural != nil:
-        for i in 0..<min(inputs.len, bot.neural.userInputs.len): inputs[i] = bot.neural.userInputs[i]
       encodeObservation(view, ocTeamsView1, row, inputs)
     resets[slot] = env.resets[slot]
 
@@ -1339,8 +1352,8 @@ proc pw_set_seat_policy_script*(handle: pointer, seat: cint, source: ptr Uncheck
   ## stream seeded from the match seed and slot. There is no actor: run_neural_net yields
   ## the logits the trainer passes for the seat to pw_step_logits (pw_step returns -4 while
   ## any policy seat is installed). The manifest's observation_contract must be this
-  ## handle's (teams.view.1, teams.view.1u<K> from pw_create_observation_inputs, or
-  ## ffa.view.1). The seat is rebuilt on every pw_reset; length 0 removes it. Per-seat
+  ## handle's (teams.view.1, ffa.view.1, or either's u<K> from pw_create_observation_inputs /
+  ## _v). The seat is rebuilt on every pw_reset; length 0 removes it. Per-seat
   ## selection setters (pw_set_seat_sampling, ...) do not apply to a policy seat: its
   ## manifest governs. Returns 0 (running), 1 (compile
   ## failed), 2 (manifest rejected; the seat idles, as a hosted seat whose package fails),
@@ -1856,7 +1869,8 @@ proc pw_net_load_layout*(handle: pointer, data: pointer, length: int64, error: p
     capacity: cint): pointer {.exportc, cdecl, dynlib.} =
   ## pw_net_load for an ffa.view.1 handle's current match: the model's PWNET002 layout words
   ## (neural_actor.md) resolve against the handle's observation layout (pw_observation_layout)
-  ## and its action contract's heads, so one model.bin loads at every seat and heart count.
+  ## and its action contract's heads, so one model.bin loads at every seat and heart count
+  ## (an ffa.view.1u<K> handle: the input count is the layout's size + K).
   ## The budget is the hosted seat's for the handle's seat count (4,000,000 operations per
   ## seat per tick, times seats / 16 above 16 seats). NULL on rejection (a handle that is not
   ## ffa.view.1 included), with the reason in `error`, as pw_net_load.
@@ -1876,7 +1890,7 @@ proc pw_net_load_layout*(handle: pointer, data: pointer, length: int64, error: p
   try:
     let l = env.layoutOf
     let targets = pointerTargets(l)
-    let actor = loadActor(bytes, actorLayout(l, env.actionHeads, targets))
+    let actor = loadActor(bytes, actorLayout(l, env.actionHeads, targets, env.userInputs))
     let budget = neuralOperationBudget(env.n)
     if actor.operationCount > budget:
       raise newException(ValueError, "neural actor exceeds native operation budget: " &
