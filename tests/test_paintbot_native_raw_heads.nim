@@ -21,9 +21,10 @@ proc mapClamp(x, z: int): Point =
   Point(x: clamp(x, minX(), maxX()).int32, z: clamp(z, minZ(), maxZ()).int32)
 proc walkClamp(p: Point): Point =
   Point(x: clamp(p.x, (minX()+100).int32, (maxX()-100).int32), z: clamp(p.z, (minZ()+100).int32, (maxZ()-100).int32))
-proc tab(i, n: int, f: proc(x: float): float): int =
-  ## the decoder's table entry: round(10000 * f(2 pi i / n)) (Nim round: half away from zero)
-  int(round(10000.0 * f(2.0 * PI * float(i) / float(n))))
+proc tabCos(i, n: int): int =
+  ## the decoder's table entry: round(10000 * cos(2 pi i / n)) (Nim round: half away from zero)
+  int(round(10000.0 * cos(2.0 * PI * float(i) / float(n))))
+proc tabSin(i, n: int): int = int(round(10000.0 * sin(2.0 * PI * float(i) / float(n))))
 proc rnd10k(v: int): int =
   if v >= 0: (v + 5000) div 10000 else: -((-v + 5000) div 10000)
 
@@ -66,8 +67,8 @@ suite "Action contract teams.view.1 raw (16)":
     # the decoder's tables are the integer rounding of the same angles
     let decode = readFile(Root / "examples/paintbot/players/neural_decode.bas")
     for i in [0, 1, 37, 64, 129, 255]:
-      check ("    rwc(" & $i & ") = " & $tab(i, 256, cos)) in decode
-      check ("    rws(" & $i & ") = " & $tab(i, 256, sin)) in decode
+      check ("    rwc(" & $i & ") = " & $tabCos(i, 256)) in decode
+      check ("    rws(" & $i & ") = " & $tabSin(i, 256)) in decode
 
   test "grid walk: a compass step becomes self + flip * round(R * (cos, sin)(2 pi i / 256)), both teams":
     var r = initRand(3)
@@ -87,7 +88,7 @@ suite "Action contract teams.view.1 raw (16)":
         actions[slot*10+7] = int32(i)
         actions[slot*10+8] = int32(k)
         check step(h, actions) == 0
-        let want = mapClamp(p.x.int + flip * rnd10k(R * tab(i, 256, cos)), p.z.int + flip * rnd10k(R * tab(i, 256, sin)))
+        let want = mapClamp(p.x.int + flip * rnd10k(R * tabCos(i, 256)), p.z.int + flip * rnd10k(R * tabSin(i, 256)))
         check w[].cogs[slot].goal == walkClamp(want)
 
   test "fine look: a compass aim becomes self + flip * round(5000 * (cos, sin)(2 pi k / 128)); identity offsets 63 x 7 u":
@@ -104,8 +105,8 @@ suite "Action contract teams.view.1 raw (16)":
       actions[slot*10+1] = 17
       actions[slot*10+9] = int32(k)
       check step(h, actions) == 0
-      check w[].cogs[slot].aim == mapClamp(p.x.int + flip * rnd10k(5000 * tab(2*k, 256, cos)),
-                                           p.z.int + flip * rnd10k(5000 * tab(2*k, 256, sin)))
+      check w[].cogs[slot].aim == mapClamp(p.x.int + flip * rnd10k(5000 * tabCos(2*k, 256)),
+                                           p.z.int + flip * rnd10k(5000 * tabSin(2*k, 256)))
     # identity offsets: (b - 31) * 7 * flip on the chosen identity's position
     var tested = 0
     for slot in 0..<Seats:

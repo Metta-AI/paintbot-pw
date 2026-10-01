@@ -24,7 +24,8 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH,
                             RETIRED_OBSERVATION_CONTRACTS, RETIRED_ACTION_CONTRACTS, RETIRED_CONTRACT_HASHES,
                             RETIRED_DECODER_OPTIONS, ACTION_CONTRACT_TEAMS_VIEW_1_TARGET,
-                            ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH, pointer_k_ops)
+                            ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH, pointer_k_ops, ACTION_CONTRACT_TEAMS_VIEW_1_RAW,
+                            ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH)
 
 ROOT = Path(__file__).parents[2]
 TEAMS, FFA = OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH
@@ -177,7 +178,7 @@ class PackageTests(unittest.TestCase):
                                   ({"mode": "categorical", "temperature": 11}, "within"), ({"mode": "categorical", "temperature": "1"}, "number"),
                                   ({"mode": "categorical", "temperature": True}, "number"), ({"mode": "categorical", "heads": []}, "non-empty"),
                                   ({"mode": "categorical", "heads": [7]}, "heads 7 and 8 need action contract teams.view.1 movement-offset"),
-                                  ({"mode": "categorical", "heads": [9]}, r"indices 0 \.\. 8"), ({"mode": "categorical", "heads": [-1]}, "indices"),
+                                  ({"mode": "categorical", "heads": [10]}, r"indices 0 \.\. 9"), ({"mode": "categorical", "heads": [-1]}, "indices"),
                                   ({"mode": "categorical", "heads": [1, 1]}, "repeats"),
                                   ({"mode": "categorical", "heads": "all"}, "non-empty"), ({"mode": "categorical", "heads": [True]}, "indices"),
                                   ({"mode": "categorical", "seed": 1}, "unknown decoder.sampling field"), (True, "must be a dict"), ([], "must be a dict")):
@@ -353,8 +354,8 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "heads 7 and 8 need action contract teams.view.1 movement-offset"):
             unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [7]}}},
                                    model=OFFSET_MODEL))
-        with self.assertRaisesRegex(ValueError, r"indices 0 \.\. 8"):
-            unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [9]}}},
+        with self.assertRaisesRegex(ValueError, r"indices 0 \.\. 9"):
+            unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [10]}}},
                                    model=OFFSET_MODEL))
         # The other selection options keep reading the five fixed heads under the aim-offset contract.
         _, _, manifest = unpack_package(package({**offset, "decoder": {"forbid_objectives": [9]}}, model=OFFSET_MODEL))
