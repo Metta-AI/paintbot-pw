@@ -102,6 +102,10 @@ int pw_set_seat_lives(void *handle, int seat, int32_t lives);
 int pw_set_seat_damage_taken(void *handle, int seat, int32_t permille);
 int pw_set_team_capture_ticks(void *handle, int side, int32_t ticks);
 int pw_set_seat_respawn_ticks(void *handle, int seat, int32_t ticks);
+/* pw_set_seat_starts_out (training library only): 1 = from the next pw_reset the seat begins every
+ * match already out (hp 0, no lives, never respawns); 0 = a normal start. The call that would put a
+ * side's (seat parity's) last seat out is refused. Kept across pw_reset. 0, -1 bad args / refused. */
+int pw_set_seat_starts_out(void *handle, int seat, int32_t starts_out);
 /* Action contracts. teams.view.1 (version 11, "paintbot-pw.teams.view.1.action.51-25-2-2-2"),
  * its aim-offset variant (13, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23": the five
  * heads, then two 23-bin heads x, z; the reference decode adds ((ix - 11) * 28, (iz - 11) * 28),

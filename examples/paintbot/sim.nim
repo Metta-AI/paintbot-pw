@@ -290,14 +290,15 @@ when defined(pwTraining):
   # 1000 leaves damage exactly as the rules deal it. A training curriculum knob only.
   var damageScale* {.threadvar.}: ptr array[MaxSeats, int32]
   # Training-only handicaps (native pw_set_seat_max_hp, pw_set_seat_lives,
-  # pw_set_seat_damage_taken, pw_set_team_capture_ticks, pw_set_seat_respawn_ticks),
-  # pointed at by the host for one reset or step; nil, 0 (and damageTaken 1000) leave the
-  # rules' values exactly. remOut / remIn carry the fractional damage of a scale between
+  # pw_set_seat_damage_taken, pw_set_team_capture_ticks, pw_set_seat_respawn_ticks,
+  # pw_set_seat_starts_out), pointed at by the host for one reset or step; nil, 0 / false
+  # (and damageTaken 1000) leave the rules' values exactly. remOut / remIn carry the fractional damage of a scale between
   # hits (per attacker / per victim, match-scoped). A training curriculum knob only.
   type Handicap* = object
     maxHp*, lives*, respawnTicks*, damageTaken*: array[MaxSeats, int32]
     captureTicks*: array[2, int32]
     remOut*, remIn*: array[MaxSeats, int32]
+    startsOut*: array[MaxSeats, bool] # the seat begins the match already out (hp 0, no lives)
   var handicap* {.threadvar.}: ptr Handicap
   # FFA-kin pair counters (native pw_pair_stats): the host points this at a proc for one
   # step and damage() reports every damage event past the shield and life checks, with the
