@@ -2,7 +2,7 @@
 ## token, out[offset + n*K + k] += V[k] . z_n + c[k] over the source's valid tokens. Row k of a POINTER_K is
 ## exactly a POINTER with v = V[k], c = c[k] (same float32 terms in the same order); its published cost; its
 ## rejections; and a hosted contract-15 actor (818 logits) that loads, plays and draws no offset without a target.
-import std/[unittest, random, os]
+import std/[unittest, random, os, strutils]
 import ../examples/paintbot/[sim, bots, neural_contract, neural_actor]
 from ../examples/paintbot/neural_host import loadNeuralSeat
 import paintbot_pwnet2_fixture
