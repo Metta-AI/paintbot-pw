@@ -7,7 +7,7 @@ const
     "id", "team", "x", "y", "hp", "carrying", "homeX", "homeY",
     "heartX", "heartY", "tick", "ownHeartX", "ownHeartY",
     "ownHeartStolen", "hasGrenade", "hasSpray", "armorHp",
-    "livesLeft", "grenadeCharge", "trenchId"
+    "livesLeft", "grenadeCharge", "trenchId", "seats"
   ]
   AgentFields = ["visible", "x", "y", "hp", "team", "carrying"]
 
@@ -48,9 +48,12 @@ proc loadField(slot, field: int, values: ArrayView) =
 
 proc fieldLoader(runtime: Runtime, slot, field: int): ArrayLoader =
   ## Captures one field independently from the binding loop.
+  # The runtime owns this loader, so borrow it to avoid an ARC reference cycle.
+  let borrowed = cast[pointer](runtime)
   result = proc(values: ArrayView) =
     ## Charges and refreshes one fog-gated column on first access.
-    runtime.chargeWork(int64(values.len) * 4)
+    let owner {.cursor.} = cast[Runtime](borrowed)
+    owner.chargeWork(int64(values.len) * 4)
     loadField(slot, field, values)
 
 proc bindObservations*(

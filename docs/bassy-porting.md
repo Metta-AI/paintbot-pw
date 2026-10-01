@@ -25,7 +25,7 @@ For example, an observation loop can use the fields directly:
 
 ```basic
 i = 0
-while i < 16
+while i < me.seats
   if i <> me.id and agents(i).visible then
     dx = agents(i).x - me.x
     dy = agents(i).y - me.y
@@ -43,7 +43,7 @@ TYPE MotionMemory
   y AS INTEGER
   seen AS INTEGER
 END TYPE
-DIM motion(16) AS MotionMemory
+DIM motion(255) AS MotionMemory
 
 i = me.id
 motion(i).x = agents(i).x
@@ -54,7 +54,9 @@ motion(i).seen = me.tick
 Record memory persists between decisions. Observation fields refresh each
 active decision. Writing an observation field changes only the policy's local
 copy; actions still use `walkTo`, `lookAt`, `shootAt`, and `chargeGrenade`.
-`DIM motion(16)` retains the inclusive upper bound of the old BASIC arrays.
+`DIM motion(255)` has an inclusive upper bound and covers all 256 supported
+seats. `me.seats` gives the current roster size; `agents(i)` requires an index
+from 0 through `me.seats - 1`.
 
 Review arithmetic as part of the port. `/` now performs fixed-point division,
 so `3 / 2` is 1.5. Use `\` for integer division, as in `3 \ 2`, which is 1.

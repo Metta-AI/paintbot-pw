@@ -119,8 +119,9 @@ Every Paintbot script receives two record declarations before its source:
 
 - `me`: `id`, `team`, `x`, `y`, `hp`, `carrying`, `homeX`, `homeY`, `heartX`,
   `heartY`, `tick`, `ownHeartX`, `ownHeartY`, `ownHeartStolen`, `hasGrenade`,
-  `hasSpray`, `armorHp`, `livesLeft`, `grenadeCharge`, and `trenchId`.
+  `hasSpray`, `armorHp`, `livesLeft`, `grenadeCharge`, `trenchId`, and `seats`.
 - `agents(i)`: `visible`, `x`, `y`, `hp`, `team`, and `carrying`, for every seat.
+  Valid indices run from 0 through `me.seats - 1`.
   Each field follows the corresponding SeatView query's fog and disguise rules.
   Roster columns load only when accessed and refresh each decision, charging four
   work units per seat per loaded column.
@@ -136,7 +137,7 @@ accessor examples, numeric changes, and the host-side binding API.
 BASIC read-only data: `selfId`, `selfTeam`, `selfX`, `selfY`, `selfHp`, `carrying`,
 `homeX`, `homeY`, `heartX`, `heartY`, `ownHeartX`, `ownHeartY`, `ownHeartStolen`,
 `worldTick`, `hasGrenade`, `hasSpray`, `armorHp`, `livesLeft`, `grenadeCharge`,
-`trenchId` (-1 outside).
+`trenchId` (-1 outside), `worldSeats` (the current roster size).
 
 Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `playerCarrying(slot)`, `pickupCount()`, `pickupVisible(id)`, `pickupX(id)`,

@@ -10,16 +10,19 @@ shows medians of six runs per engine. Decision time excludes world simulation.
 
 | Policy | Old decisions (ms) | JIT decisions (ms) | Speedup |
 | --- | ---: | ---: | ---: |
-| base | 2240.8 | 2135.7 | 1.049x |
-| jev | 2379.5 | 2161.7 | 1.101x |
+| base | 2255.2 | 2054.5 | 1.098x |
+| jev | 5452.0 | 4760.3 | 1.145x |
 
 All 24 runs reached state hash `2770947189`. End-to-end decision plus
-simulation
-speedups were base: 1.043x, jev: 1.092x.
+simulation speedups were base: 1.089x, jev: 1.139x.
 One-time startup includes compilation and is slower with the JIT:
-base: 7.7 ms old, 35.8 ms new, jev: 30.6 ms old, 120.1 ms new.
-Individual timings vary with other work on this computer. Every sample is saved
-in `bassy-benchmarks.json`.
+base: 9.2 ms old, 36.6 ms new, jev: 66.7 ms old, 257.5 ms new.
+This final run includes the roster and loader ownership fixes. Its samples
+contain substantial wall-clock variation: base decisions span 2.16-7.32 seconds
+old and 2.04-3.23 seconds new, while Jev spans 2.28-6.99 seconds old and
+2.08-5.59 seconds new. These are local median comparisons, not portable latency
+guarantees. Every sample, including the slower runs, is saved in
+`bassy-benchmarks.json`.
 
 Run the same comparison from the repository root:
 

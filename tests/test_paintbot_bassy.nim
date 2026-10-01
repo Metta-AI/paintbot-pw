@@ -15,6 +15,7 @@ previous = memory.previous
 memory.previous = me.x
 x = me.x
 hp = me.hp
+seats = me.seats
 legacyX = selfX
 legacyTick = worldTick
 sub accumulate()
@@ -47,6 +48,7 @@ block:
     let view = seatView(0)
     doAssert bot.runtime.getGlobal("x") == view.selfX
     doAssert bot.runtime.getGlobal("hp") == view.selfHp
+    doAssert bot.runtime.getGlobal("seats") == Seats
     doAssert bot.runtime.getGlobal("legacyX") == view.selfX
     doAssert bot.runtime.getGlobal("legacyTick") == view.worldTick
     doAssert bot.runtime.getGlobal("legacySum") == view.selfHp * int32(i + 1)

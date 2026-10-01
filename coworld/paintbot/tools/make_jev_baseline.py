@@ -74,6 +74,8 @@ def record_syntax(source: str) -> str:
     pieces = re.split(r'("[^"\n]*"|\'[^\n]*)', source)
     for i in range(0, len(pieces), 2):
         code = pieces[i].replace("/", "\\")
+        code = re.sub(r"\bwhile (i|e|cO|sgO) < 16\b",
+                      r"while \1 < rosterLimit", code)
         for name, field in columns.items():
             code = re.sub(r"\b" + name + r"\(([^()]*)\)",
                           lambda match: field.format(match[1]), code)

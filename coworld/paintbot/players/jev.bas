@@ -223,7 +223,7 @@ sub heartFacts(j, kind)
   ' Did an enemy we saw in the last five seconds stand closer to it than we do?
   fCloser = 0
   e = 1 - me.team
-  while e < 16
+  while e < rosterLimit
     if motion(e).seen > 0 then
       if me.tick - motion(e).seen < 120 then
         ex = motion(e).x - controlX(j)
@@ -280,7 +280,7 @@ sub terrainFacts(j)
   tFoesNear = 0
   tFoesTrenched = 0
   e = 1 - me.team
-  while e < 16
+  while e < rosterLimit
     if agents(e).visible then
       ex = agents(e).x - hx
       ey = agents(e).y - hy
@@ -396,6 +396,10 @@ end sub
 
 if started = 0 then
   started = 1
+  rosterLimit = 16
+  if me.seats < rosterLimit then
+    rosterLimit = me.seats
+  end if
   ' Detour offsets beside a wet route, as tenths of the route's length (see Dry route below).
   drF(0) = -10
   drF(1) = -6
@@ -449,7 +453,7 @@ foeSumX = 0
 foeSumY = 0
 foesSeen = 0
 i = 0
-while i < 16
+while i < rosterLimit
   if i <> me.id and agents(i).visible then
     dx = agents(i).x - me.x
     dy = agents(i).y - me.y
@@ -487,12 +491,12 @@ wend
 ' ---- How the enemy stands: share of visible enemies with another within 3 m. ----
 if (kLeadSpread > 0 or kSpreadBall or kWantGrenade = 2) and foesSeen > 1 and me.tick mod 6 = 0 then
   i = 1 - me.team
-  while i < 16
+  while i < rosterLimit
     if agents(i).visible then
       clD = clD + 1
       e = 1 - me.team
       clHit = 0
-      while e < 16
+      while e < rosterLimit
         if e <> i and agents(e).visible then
           dx = agents(e).x - agents(i).x
           dy = agents(e).y - agents(i).y
@@ -524,7 +528,7 @@ if useFocus and foesSeen > 0 then
   fcY = me.y
   fcN = 1
   i = me.team
-  while i < 16
+  while i < rosterLimit
     if i <> me.id and agents(i).visible then
       dx = agents(i).x - me.x
       dy = agents(i).y - me.y
@@ -541,7 +545,7 @@ if useFocus and foesSeen > 0 then
   fcBest = -1
   fcCost = 2147483647
   i = 1 - me.team
-  while i < 16
+  while i < rosterLimit
     if agents(i).visible then
       dx = agents(i).x - me.x
       dy = agents(i).y - me.y
@@ -756,7 +760,7 @@ mySeat = ((me.id \ 2) mod 8) mod 4
 nearSeat = -1
 nearD2 = 2147483647
 i = 1 - me.team
-while i < 16
+while i < rosterLimit
   if agents(i).visible then
     cx = (agents(i).x + 800) \ 500
     cy = (agents(i).y + 400) \ 500
@@ -791,7 +795,7 @@ if useTerrain or useSmartGrenade or useSpray then
   clusterSize = 0
   clusterSlot = -1
   i = 1 - me.team
-  while i < 16
+  while i < rosterLimit
     if agents(i).visible then
       if trenchAt(agents(i).x, agents(i).y) >= 0 then
         dx = agents(i).x - me.x
@@ -803,7 +807,7 @@ if useTerrain or useSmartGrenade or useSpray then
       end if
       cNear = 0
       cO = 1 - me.team
-      while cO < 16
+      while cO < rosterLimit
         if agents(cO).visible then
           cfx = agents(cO).x - agents(i).x
           cfy = agents(cO).y - agents(i).y
@@ -1527,7 +1531,7 @@ if useTight and best >= 0 and (me.carrying = 0) then
   tgY = me.y
   tgN = 1
   i = me.team
-  while i < 16
+  while i < rosterLimit
     if i <> me.id and agents(i).visible then
       dx = agents(i).x - me.x
       dy = agents(i).y - me.y
@@ -1559,7 +1563,7 @@ if useRegroup and (me.carrying = 0) then
   rgBest = 2147483647
   rgMate = -1
   i = me.team
-  while i < 16
+  while i < rosterLimit
     if i <> me.id and agents(i).visible then
       dx = agents(i).x - me.x
       dy = agents(i).y - me.y
@@ -1572,7 +1576,7 @@ if useRegroup and (me.carrying = 0) then
   wend
   rgDanger = 0
   e = 1 - me.team
-  while e < 16
+  while e < rosterLimit
     if motion(e).seen > 0 then
       if me.tick - motion(e).seen < 48 then
         rgDanger = 1
@@ -1616,7 +1620,7 @@ ktOn = 0
 if useKite and (me.carrying = 0) and foesSeen > 0 then
   ktFoes = 0
   e = 1 - me.team
-  while e < 16
+  while e < rosterLimit
     if agents(e).visible then
       dx = agents(e).x - me.x
       dy = agents(e).y - me.y
@@ -1628,7 +1632,7 @@ if useKite and (me.carrying = 0) and foesSeen > 0 then
   wend
   ktMates = 1
   i = me.team
-  while i < 16
+  while i < rosterLimit
     if i <> me.id and agents(i).visible then
       dx = agents(i).x - me.x
       dy = agents(i).y - me.y
@@ -1721,7 +1725,7 @@ if useRush and me.hasGrenade and (me.carrying = 0) and foesSeen > 1 then
   ruBest = 0
   ruD2 = 2147483647
   i = 1 - me.team
-  while i < 16
+  while i < rosterLimit
     if agents(i).visible then
       dx = agents(i).x - me.x
       dy = agents(i).y - me.y
@@ -1729,7 +1733,7 @@ if useRush and me.hasGrenade and (me.carrying = 0) and foesSeen > 1 then
       if d2 <= kRushR2 then
         ruN = 0
         e = 1 - me.team
-        while e < 16
+        while e < rosterLimit
           if agents(e).visible then
             cfx = agents(e).x - agents(i).x
             cfy = agents(e).y - agents(i).y
@@ -2052,7 +2056,7 @@ if wantSelf then
   end if
   viewCount = 0
   i = 1 - me.team
-  while i < 16
+  while i < rosterLimit
     if agents(i).visible then
       if viewCount < 3 then
         enemyFacts(i, viewCount)
@@ -2112,7 +2116,7 @@ end if
   mate = -1
   mateD2 = 2147483647
   i = me.team
-  while i < 16
+  while i < rosterLimit
     if i <> me.id and agents(i).visible then
       dx = agents(i).x - me.x
       dy = agents(i).y - me.y
@@ -2407,7 +2411,7 @@ if best >= 0 then
   reach = root
   if reach > 0 then
     i = 0
-    while i < 16
+    while i < rosterLimit
       if i <> me.id and i mod 2 = me.team and agents(i).visible then
         ox = agents(i).x - me.x
         oy = agents(i).y - me.y
@@ -2442,7 +2446,7 @@ if best >= 0 then
 end if
 
 i = 0
-while i < 16
+while i < rosterLimit
   if agents(i).visible then
     oldX2(i) = motion(i).x
     oldY2(i) = motion(i).y
@@ -2463,7 +2467,7 @@ if me.hasGrenade and best >= 0 then
   d2 = dx * dx + dy * dy
   safe = 1
   i = 0
-  while i < 16
+  while i < rosterLimit
     if i mod 2 = me.team and agents(i).visible then
       fx = agents(i).x - nx
       fy = agents(i).y - ny
@@ -2496,7 +2500,7 @@ if useSmartGrenade and me.hasGrenade and (me.carrying = 0) then
   if me.grenadeCharge = 0 then
     sgScore = 0
     i = 1 - me.team
-    while i < 16
+    while i < rosterLimit
       spLen(i) = -2
       if agents(i).visible then
         spLen(i) = trenchAt(agents(i).x, agents(i).y)
@@ -2504,7 +2508,7 @@ if useSmartGrenade and me.hasGrenade and (me.carrying = 0) then
       i = i + 2
     wend
     i = 1 - me.team
-    while i < 16
+    while i < rosterLimit
       if agents(i).visible then
         sgLx = agents(i).x
         sgLy = agents(i).y
@@ -2515,7 +2519,7 @@ if useSmartGrenade and me.hasGrenade and (me.carrying = 0) then
           sgLt = spLen(i)
           sgS = 0
           sgO = 1 - me.team
-          while sgO < 16
+          while sgO < rosterLimit
             if agents(sgO).visible then
               cfx = agents(sgO).x - sgLx
               cfy = agents(sgO).y - sgLy
@@ -2536,7 +2540,7 @@ if useSmartGrenade and me.hasGrenade and (me.carrying = 0) then
           wend
           ' Never onto a teammate, with the baseline's own margin.
           sgO = me.team
-          while sgO < 16
+          while sgO < rosterLimit
             if sgO <> me.id and agents(sgO).visible then
               cfx = agents(sgO).x - sgLx
               cfy = agents(sgO).y - sgLy
@@ -2577,7 +2581,7 @@ end if
 ' line with the most enemies in it one burst can drop several. The baseline aims at its gun target.
 if useSpray and me.hasSpray and (me.carrying = 0) then
   i = 1 - me.team
-  while i < 16
+  while i < rosterLimit
     spLen(i) = 0
     if agents(i).visible then
       dx = agents(i).x - me.x
@@ -2592,13 +2596,13 @@ if useSpray and me.hasSpray and (me.carrying = 0) then
   wend
   spBest = 0
   i = 1 - me.team
-  while i < 16
+  while i < rosterLimit
     if spLen(i) > 0 then
       spAx = agents(i).x - me.x
       spAy = agents(i).y - me.y
       spN = 0
       sgO = 1 - me.team
-      while sgO < 16
+      while sgO < rosterLimit
         if spLen(sgO) > 0 then
           spDot = spAx * (agents(sgO).x - me.x) + spAy * (agents(sgO).y - me.y)
           ' cos 31 degrees is 0.857: inside the cone when the angle between them is smaller.

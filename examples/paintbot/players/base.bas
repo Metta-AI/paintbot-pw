@@ -103,6 +103,10 @@ end sub
 
 if started = 0 then
   started = 1
+  rosterLimit = 16
+  if me.seats < rosterLimit then
+    rosterLimit = me.seats
+  end if
   ' Detour offsets beside a wet route, as tenths of the route's length (see Dry route below).
   drF(0) = -10
   drF(1) = -6
@@ -156,7 +160,7 @@ foeSumX = 0
 foeSumY = 0
 foesSeen = 0
 i = 0
-while i < 16
+while i < rosterLimit
   if i <> me.id and agents(i).visible then
     dx = agents(i).x - me.x
     dy = agents(i).y - me.y
@@ -594,7 +598,7 @@ if best >= 0 then
   reach = root
   if reach > 0 then
     i = 0
-    while i < 16
+    while i < rosterLimit
       if i <> me.id and i mod 2 = me.team and agents(i).visible then
         ox = agents(i).x - me.x
         oy = agents(i).y - me.y
@@ -629,7 +633,7 @@ if best >= 0 then
 end if
 
 i = 0
-while i < 16
+while i < rosterLimit
   if agents(i).visible then
     motion(i).x = agents(i).x
     motion(i).y = agents(i).y
@@ -647,7 +651,7 @@ if me.hasGrenade and best >= 0 then
   d2 = dx * dx + dy * dy
   safe = 1
   i = 0
-  while i < 16
+  while i < rosterLimit
     if i mod 2 = me.team and agents(i).visible then
       fx = agents(i).x - nx
       fy = agents(i).y - ny
