@@ -107,6 +107,7 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_move_offset
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_target_offset.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_raw_heads.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_h.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_shadow.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_mixed_contracts.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_parity.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
