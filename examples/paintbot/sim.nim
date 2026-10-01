@@ -306,6 +306,15 @@ when defined(pwTraining):
   type DamageObserver* = proc(w: World, victim, attacker: int, removed: int32,
     killed: bool) {.nimcall, gcsafe.}
   var damageObserver* {.threadvar.}: DamageObserver
+  # Hit attribution (native pw_set_hit_log / pw_hit_events): the host points this at its
+  # per-step list and damage() appends every damage event past the shield and life checks.
+  # Telemetry only; never part of World, its hash or any decision.
+  type HitEvent* = object
+    attacker*, victim*: int32  # attacker -1 = the map
+    health*, armor*: int32     # health removed (after armor), armor absorbed
+    weapon*: int32             # ord(DamageWeapon): 0 other, 1 gun, 2 grenade, 3 spray
+    killed*, final*: int32     # the victim died; and it was its last life (out of the match)
+  var hitLog* {.threadvar.}: ptr seq[HitEvent]
 else:
   var visionRulesVersion* = LiveRules
   var gameMode* = gmTeams

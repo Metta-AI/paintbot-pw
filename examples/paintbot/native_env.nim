@@ -49,6 +49,8 @@ type
     # it is asked; nothing about apparent identities is cached here.
     resets: seq[float32]
     stats: CombatTelemetry # Cumulative since the last create/reset; see pw_seat_stats.
+    hitLogOn: bool          # pw_set_hit_log: record the step's damage events (default off)
+    hitEvents: seq[HitEvent] # the last pw_step's damage events (pw_hit_events)
     # BASIC seats: the production interpreter, host functions, limits and per-decision
     # budget from bots.nim drive these slots instead of the caller's actions.
     scripts: seq[string]
@@ -252,6 +254,7 @@ proc resetDecoders(env: ptr NativeEnv) =
 proc resetStats(env: ptr NativeEnv) =
   for slot in 0..<env.n:
     env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
+  env.hitEvents.setLen(0)
 proc recent(now, then: int32): bool =
   ## "In the last KinWindow ticks", exclusive: then happened within the 72 ticks before now,
   ## now's own tick included (now - then in 0 ..< KinWindow).
@@ -1036,8 +1039,11 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     combatTelemetry = addr env.stats
     damageScale = addr env.damagePermille
     handicap = addr env.handicapKnobs
+    env.hitEvents.setLen(0)
+    if env.hitLogOn: hitLog = addr env.hitEvents
     try: env.world.step(commands)
     finally:
+      hitLog = nil
       combatTelemetry = nil
       damageScale = nil
       handicap = nil
@@ -1922,6 +1928,33 @@ proc pw_seat_damage_taken_stats*(handle: pointer, seat: cint, output: ptr Unchec
     output[2*k] = s.takenHits[k]
     output[2*k+1] = s.takenHealth[k]
   0
+
+proc pw_set_hit_log*(handle: pointer, enabled: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Hit attribution (training library only): 1 = from the next pw_step on, every step records
+  ## its damage events for pw_hit_events; 0 = off (the default). Kept across pw_reset. Pure
+  ## telemetry: the world, its hash and every decision are the same either way. 0, -1 bad args.
+  if handle == nil or enabled notin 0..1: return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).hitLogOn = enabled == 1
+  0
+
+proc pw_hit_events*(handle: pointer, output: ptr UncheckedArray[int32], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The last pw_step's damage events (pw_set_hit_log on; none after a reset), in the order the
+  ## engine dealt them, PW_HIT_EVENT_INTS = 7 int32 each: {attacker (-1 = the map), victim,
+  ## health removed (after armor), armor absorbed, weapon (0 other, 1 gun, 2 grenade, 3 spray),
+  ## killed (the victim died), final (that death was its last life: out of the match)}. An event
+  ## is a damage event past the shield and life checks, pw_seat_stats' hit rule, so a match's
+  ## events by victim sum to pw_seat_damage_taken_stats (hits, health) and pw_seat_stats
+  ## (hits_taken, deaths). Writes min(count, capacity) events (output may be NULL when capacity
+  ## is 0) and returns the count; -1 bad args. Pure read.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  for i in 0..<min(env.hitEvents.len, capacity.int):
+    let e = env.hitEvents[i]
+    for k, v in [e.attacker, e.victim, e.health, e.armor, e.weapon, e.killed, e.final]:
+      output[i*7+k] = v
+  cint(env.hitEvents.len)
 
 proc pw_seat_equip_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## Equipment and disguise telemetry for one seat (training library only), eight int32,
