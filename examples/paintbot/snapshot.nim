@@ -47,7 +47,11 @@ proc put*[T](w: var SnapWriter, x: T) =
   elif T is bool:
     w.putU64(uint64(ord(x)))
   elif T is enum:
-    w.putU64(cast[uint64](int64(ord(x))))
+    # raw bits: a zero-initialized field of an enum whose values start above 0 holds a value outside the enum, and
+    # a snapshot reproduces it as it is
+    var raw = 0'u64
+    copyMem(addr raw, unsafeAddr x, sizeof(T))
+    w.putU64(raw)
   elif T is char:
     w.putU64(uint64(ord(x)))
   elif T is SomeSignedInt:
@@ -90,9 +94,8 @@ proc get*[T](r: var SnapReader, x: var T) =
   elif T is bool:
     x = r.getU64() != 0
   elif T is enum:
-    let v = cast[int64](r.getU64())
-    if v < ord(low(T)) or v > ord(high(T)): r.fail("enum " & $T & " out of range")
-    x = T(v)
+    var raw = r.getU64()
+    copyMem(addr x, addr raw, sizeof(T))
   elif T is char:
     x = char(r.getU64() and 0xff)
   elif T is SomeSignedInt:
