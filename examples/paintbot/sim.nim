@@ -261,6 +261,11 @@ when defined(pwTraining):
       gunKills*, grenadeKills*, weaponSprayKills*: int32
       hitsFromWater*, hitsFromHigh*, hitsFromTrench*: int32
       hitsToWater*, hitsToHigh*, hitsToTrench*: int32
+      # Pickup and speech counters (pw_seat_pickup_stats, pw_seat_shout_stats): pickups the
+      # seat took, by kind; shouts its BASIC runtime emitted (accepted by shout(), at most 4
+      # a tick), their total length in bytes, and messages the seat heard (deliverSpeech).
+      pickups*: array[PickupKind, int32]
+      shouts*, shoutBytes*, shoutsHeard*: int32
     CombatTelemetry* = array[MaxSeats, SeatStats] # one entry per seat the training library plays
   const HighGroundHeight* = 216 # pw_seat_weapon_stats' "high": terrainHeight >= this
   type DamageWeapon* = enum
@@ -285,6 +290,7 @@ when defined(pwTraining):
   type Handicap* = object
     maxHp*, lives*, respawnTicks*, damageTaken*: array[MaxSeats, int32]
     captureTicks*: array[2, int32]
+    seatCaptureTicks*: array[MaxSeats, int32] # FFA-kin control hearts, per capturing seat
     remOut*, remIn*: array[MaxSeats, int32]
   var handicap* {.threadvar.}: ptr Handicap
   # FFA-kin pair counters (native pw_pair_stats): the host points this at a proc for one
@@ -328,6 +334,12 @@ proc teamCaptureTicks*(side: int): int32 =
   ## training handicap.
   when defined(pwTraining):
     if handicap != nil and side in 0..1 and handicap.captureTicks[side] > 0: return handicap.captureTicks[side]
+  HeartCaptureTicks.int32
+proc seatCaptureTicks*(slot: int): int32 =
+  ## FFA-kin: ticks this seat holds a control heart alone to capture it: HeartCaptureTicks,
+  ## or a training handicap. Great hearts keep their shared GreatHeartCaptureTicks.
+  when defined(pwTraining):
+    if handicap != nil and handicap.seatCaptureTicks[slot] > 0: return handicap.seatCaptureTicks[slot]
   HeartCaptureTicks.int32
 proc apparentTeam*(w: World, slot: int): int =
   ## Uniforms change appearance only; ownership always uses team(slot).

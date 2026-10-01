@@ -481,7 +481,11 @@ proc scriptDecide(env: ptr NativeEnv) =
   ## per world tick, inline from pw_step or ahead of it from pw_script_decide.
   heard = env.scriptHeard
   let decided = decide(env.scriptBots, env.world)
+  for slot in 0..<min(env.n, shouts.len):
+    env.stats[slot].shouts += shouts[slot].len.int32
+    for message in shouts[slot]: env.stats[slot].shoutBytes += message.len.int32
   deliverSpeech(env.world)
+  for slot in 0..<min(env.n, heard.len): env.stats[slot].shoutsHeard += heard[slot].len.int32
   env.scriptHeard = heard
   for slot in 0..<env.n:
     if env.scripts[slot].len == 0: continue
@@ -1617,9 +1621,11 @@ proc pw_set_seat_damage_scale*(handle: pointer, seat: cint, permille: int32): ci
 
 proc pw_set_seat_max_hp*(handle: pointer, seat: cint, hp: int32): cint {.exportc, cdecl, dynlib.} =
   ## Curriculum handicap: the HP this seat spawns and respawns with and a medkit restores,
-  ## 1 .. 6; 0 restores the rules' maxHp() (3 in teams). The initial spawn takes it at the
-  ## next pw_reset. Kept across pw_reset.
-  if handle == nil or seat notin 0..<seatsOf(handle) or hp notin 0'i32..6'i32: return -1
+  ## 1 .. 30 (FFA-kin's rules value is 10, so FFA needs room above it); 0 restores the rules'
+  ## maxHp() (3 in teams, 10 in FFA-kin). The initial spawn takes it at the next pw_reset.
+  ## Kept across pw_reset. Observations still normalise hp by the rules' maxHp(), so a seat
+  ## above it reads selfHp/maxHp > 1.
+  if handle == nil or seat notin 0..<seatsOf(handle) or hp notin 0'i32..30'i32: return -1
   ready(handle)
   cast[ptr NativeEnv](handle).handicapKnobs.maxHp[seat] = hp
   0
@@ -1651,6 +1657,17 @@ proc pw_set_team_capture_ticks*(handle: pointer, side: cint, ticks: int32): cint
   if handle == nil or side notin 0..1 or (ticks != 0 and ticks notin 36'i32..144'i32): return -1
   ready(handle)
   cast[ptr NativeEnv](handle).handicapKnobs.captureTicks[side] = ticks
+  0
+
+proc pw_set_seat_capture_ticks*(handle: pointer, seat: cint, ticks: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Curriculum handicap, FFA-kin: the ticks this seat must hold a control heart alone to
+  ## capture it, 1 .. 1440 (below 72 = faster); 0 restores HeartCaptureTicks (72). Applies
+  ## from the next step (a capture in progress compares its count against the new value).
+  ## Great hearts are a shared quorum charge (GreatHeartCaptureTicks) and are not scaled;
+  ## the teams game uses pw_set_team_capture_ticks. Kept across pw_reset.
+  if handle == nil or seat notin 0..<seatsOf(handle) or ticks notin 0'i32..1440'i32: return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).handicapKnobs.seatCaptureTicks[seat] = ticks
   0
 
 proc pw_set_seat_respawn_ticks*(handle: pointer, seat: cint, ticks: int32): cint {.exportc, cdecl, dynlib.} =
@@ -1761,6 +1778,33 @@ proc pw_seat_spray_stats*(handle: pointer, seat: cint, output: ptr UncheckedArra
   output[1] = s.sprayDamageTeam
   output[2] = s.sprayKillsEnemy
   output[3] = s.sprayKillsTeam
+  0
+
+proc pw_seat_pickup_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Pickups the seat took since the last create/reset (training library only), five int32
+  ## in PickupKind order: [grenade, spray, medkit, armor, uniform]. A pickup counts when the
+  ## seat actually takes it (a full-health seat walking over a medkit takes nothing). Pure
+  ## telemetry. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let s = cast[ptr NativeEnv](handle).stats[seat]
+  for kind in PickupKind: output[kind.ord] = s.pickups[kind]
+  0
+
+proc pw_seat_shout_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Speech counters since the last create/reset (training library only), three int32:
+  ## [shouts, shout bytes, messages heard]. Shouts are the ones the seat's BASIC runtime
+  ## emitted and shout() accepted (at most 4 a tick, each truncated to 256 bytes; untyped
+  ## free text, so there is no per-word split); bytes is their total length; heard is the
+  ## messages delivered to the seat (deliverSpeech). Only the production decision counts
+  ## (scripted and policy seats); decoder seats never shout. Pure telemetry. Returns 0, -1
+  ## for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let s = cast[ptr NativeEnv](handle).stats[seat]
+  output[0] = s.shouts
+  output[1] = s.shoutBytes
+  output[2] = s.shoutsHeard
   0
 
 proc pw_seat_privileged_labels*(handle: pointer, seat: cint, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
