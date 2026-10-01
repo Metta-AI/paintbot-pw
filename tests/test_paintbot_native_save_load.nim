@@ -22,7 +22,11 @@ proc save(h: pointer): seq[byte] =
   doAssert pw_world_save(h, cast[ptr UncheckedArray[byte]](addr result[0]), n) == n
 
 proc load(h: pointer, b: seq[byte]): cint =
-  pw_world_load(h, cast[ptr UncheckedArray[byte]](unsafeAddr b[0]), b.len.int64)
+  result = pw_world_load(h, cast[ptr UncheckedArray[byte]](unsafeAddr b[0]), b.len.int64)
+  if result != 0:
+    var msg: array[512, char]
+    discard pw_world_load_error(cast[ptr UncheckedArray[char]](addr msg[0]), 512)
+    echo "pw_world_load ", result, ": ", $cast[cstring](addr msg[0])
 
 type Kind = enum kScripted, kCaller, kPolicy
 

@@ -2095,6 +2095,8 @@ const
     staticRead("training_labels.nim") & staticRead("snapshot.nim") & staticRead("../../src/polyworld/basic.nim") &
     staticRead("../../src/polyworld/rngs.nim"))
 
+var snapLastError {.threadvar.}: string  # pw_world_load_error: why the calling thread's last load was refused
+
 proc saveBot(w: var SnapWriter, b: Bot) =
   w.put(not b.isNil)
   if b.isNil: return
@@ -2143,7 +2145,9 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
   ## the blob's observation version and seat count. Returns 0; -1 bad arguments; -2 another format / build / handle
   ## shape; -3 a corrupt or truncated blob. On any refusal the handle is unchanged (the blob is decoded and its bots
   ## rebuilt on a copy, which replaces the handle only when everything succeeded).
-  if handle == nil or data == nil or length <= 0: return -1
+  snapLastError = ""
+  if handle == nil or data == nil or length <= 0:
+    snapLastError = "bad arguments"; return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   var r = SnapReader(data: newSeq[byte](length.int))
@@ -2151,14 +2155,18 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
   try:
     var magic, build: string
     r.get(magic)
-    if magic != SnapMagic: return -2
-    if r.getU64() != SnapFormat: return -2
+    if magic != SnapMagic:
+      snapLastError = "not a world snapshot"; return -2
+    if r.getU64() != SnapFormat:
+      snapLastError = "another snapshot format"; return -2
     r.get(build)
-    if build != SnapBuildId: return -2
+    if build != SnapBuildId:
+      snapLastError = "written by another build"; return -2
     var obs: ObservationContractVersion
     var n: int
     r.get(obs); r.get(n)
-    if obs != env.obsVersion or n != env.n: return -2
+    if obs != env.obsVersion or n != env.n:
+      snapLastError = "observation version / seat count differ from the handle's"; return -2
     var tmp = env[]
     var botBlobs: array[2, seq[(int, seq[byte])]]
     for name, f in fieldPairs(tmp):
@@ -2198,6 +2206,17 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
       br.loadBot(b)
     env[] = tmp
   except SnapError, ValueError:
+    snapLastError = getCurrentExceptionMsg()
     return -3
   ready(handle)
   0
+
+proc pw_world_load_error*(output: ptr UncheckedArray[char], capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Why the calling thread's last pw_world_load was refused ("" after a success), NUL-terminated and truncated to
+  ## capacity. Returns the full message length; -1 for bad arguments.
+  if output == nil or capacity <= 0: return -1
+  let m = snapLastError
+  let k = min(m.len, capacity.int - 1)
+  for i in 0..<k: output[i] = m[i]
+  output[k] = '\0'
+  m.len.cint

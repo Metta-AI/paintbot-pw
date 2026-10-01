@@ -790,9 +790,11 @@ dim hist(8)
 count = count + 1
 hist(count mod 8) = hist(count mod 8) + count
 total = 0
-for i = 0 to 7
+i = 0
+while i < 8
   total = total + hist(i)
-next i
+  i = i + 1
+wend
 """
   let program = compile(source)
   var original = initRuntime(program)
