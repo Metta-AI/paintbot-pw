@@ -155,21 +155,25 @@ suite "World snapshots":
 
   for kind in Kind:
     for at in At:
+      # Caller seats press uniformly random heads and never pick up and throw a grenade (no flight in 2000
+      # ticks); every other mode has base.bas seats that do.
+      if kind == kCaller and at == atGrenade: continue
       test "save " & $at & ", load into a fresh handle: the next " & $K & " ticks are identical (" & $kind & ")":
         let a = setup(kind, 51, 2400)
         defer: pw_destroy(a)
         let t = a.runTo(kind, at)
-        require t > 0
-        let blob = save(a)
-        check save(a) == blob                       # deterministic, and a save is a pure read
-        echo "  BLOBSHA ", kind, " ", at, " t=", t, " ", sha(blob)
-        let expected = a.play(kind, K, 99)
-        let b = setup(kCaller, 52, 2400)            # another seed, no scripts: the blob brings everything
-        defer: pw_destroy(b)
-        if kind.isPolicy: check pw_set_action_contract(b, kind.contractOf) == 0
-        check load(b, blob) == 0
-        check save(b) == blob                       # save -> load -> save
-        check b.play(kind, K, 99) == expected
+        check t > 0
+        if t > 0:
+          let blob = save(a)
+          check save(a) == blob                       # deterministic, and a save is a pure read
+          echo "  BLOBSHA ", kind, " ", at, " t=", t, " ", sha(blob)
+          let expected = a.play(kind, K, 99)
+          let b = setup(kCaller, 52, 2400)            # another seed, no scripts: the blob brings everything
+          defer: pw_destroy(b)
+          if kind.isPolicy: check pw_set_action_contract(b, kind.contractOf) == 0
+          check load(b, blob) == 0
+          check save(b) == blob                       # save -> load -> save
+          check b.play(kind, K, 99) == expected
 
   test "FFA-kin on a generated map (ffa.bas seats, ffa.view.1): save mid-match, load, identical continuation":
     let ffaSrc = readFile(Root / "coworld/paintbot/players/ffa.bas")
