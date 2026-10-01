@@ -204,10 +204,11 @@ proc policyGame(salt: int64, call: SaltCall, seed = 77'i32, ticks = 300): Record
   defer: pw_destroy(h)
   if call == scBeforeInstall: doAssert pw_set_sampling_salt(h, salt) == 0
   let base = readFile(Base)
+  let (source, manifest) = (PolicySource, PolicyManifest)
   for s in 0..<Seats:
     if s mod 2 == 0:
-      doAssert pw_set_seat_policy_script(h, s.cint, cbuf(PolicySource), PolicySource.len.int32,
-        cbuf(PolicyManifest), PolicyManifest.len.int32) == 0
+      doAssert pw_set_seat_policy_script(h, s.cint, cbuf(source), source.len.int32,
+        cbuf(manifest), manifest.len.int32) == 0
     else:
       doAssert pw_set_seat_script(h, s.cint, cbuf(base), base.len.int32) == 0
   if call == scAfterInstall:
