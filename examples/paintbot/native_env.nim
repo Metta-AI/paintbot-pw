@@ -8,6 +8,7 @@ import sim, kinship, neural_contract, bots, neural_actor, match_config, training
 from neural_host import MaxNeuralOperations, neuralOperationBudget, setConditionals
 import polyworld/rngs
 import polyworld/basic
+import snapshot, contract_hash
 
 when not defined(pwTraining): {.error: "native_env requires -d:pwTraining".}
 
@@ -2076,4 +2077,127 @@ proc pw_net_infer*(net: pointer, observation, state, logits: ptr UncheckedArray[
     return -2
   for i in 0..<n.state.len: state[i] = n.state[i]
   for i in 0..<n.logits.len: logits[i] = n.logits[i]
+  0
+
+
+# ---- World snapshots (pw_world_save / pw_world_load; training library only, default-off) ----
+# A blob = header (magic, format, build id, observation version, seats) + every NativeEnv field in declaration order
+# through snapshot.nim's codec, the world included, except the BASIC bots: per slot, a scripted or decoder bot is
+# saved as its runtime and string-pool state (polyworld basic saveState), its failure flags, its neural seat and its
+# rnd stream, and on load is rebuilt from the blob's own script / manifest (installScript, decoderFor) before that
+# state is restored. Nothing here runs unless the caller saves or loads.
+const
+  SnapMagic = "PWSAVE01"
+  SnapFormat = 1'u64
+  # Any change to a source that defines a snapshotted type changes the id: a blob loads only into the build that wrote it.
+  SnapBuildId = sha256Hex(staticRead("sim.nim") & staticRead("mechanics.nim") & staticRead("native_env.nim") &
+    staticRead("neural_host.nim") & staticRead("bots.nim") & staticRead("kinship.nim") &
+    staticRead("training_labels.nim") & staticRead("snapshot.nim") & staticRead("../../src/polyworld/basic.nim") &
+    staticRead("../../src/polyworld/rngs.nim"))
+
+proc saveBot(w: var SnapWriter, b: Bot) =
+  w.put(not b.isNil)
+  if b.isNil: return
+  w.putBytes(b.runtime.saveState())
+  w.put(not b.strings.isNil)
+  if not b.strings.isNil: w.putBytes(b.strings.saveState())
+  w.put(b.failed); w.put(b.error)
+  w.put(b.neural)
+  w.put(b.rnd)
+
+proc loadBot(r: var SnapReader, b: Bot) =
+  ## Restores a saveBot record into a bot freshly built from the same script.
+  b.runtime.restoreState(r.getBytes())
+  var hasStrings: bool
+  r.get(hasStrings)
+  if hasStrings:
+    if b.strings.isNil: r.fail("string pool missing on the rebuilt bot")
+    b.strings.restoreState(r.getBytes())
+  r.get(b.failed); r.get(b.error)
+  r.get(b.neural)
+  r.get(b.rnd)
+
+proc pw_world_save*(handle: pointer, output: ptr UncheckedArray[byte], capacity: int64): int64 {.exportc, cdecl, dynlib.} =
+  ## The handle's whole match state as one versioned, deterministic blob (training library only): the world, every
+  ## per-seat setting and stream, the BASIC seats' runtime state, the decoders, telemetry. Returns its size in bytes
+  ## and writes it only when capacity >= size (capacity 0 sizes it). A pure read: the world and its hash are
+  ## unchanged. -1 for bad arguments. A policy seat's network recurrent state is the caller's (not in the blob).
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  var w: SnapWriter
+  w.put(SnapMagic); w.putU64(SnapFormat); w.put(SnapBuildId)
+  w.put(env.obsVersion); w.put(env.n)
+  for name, f in fieldPairs(env[]):
+    when name == "scriptBots" or name == "decoders":
+      w.putU64(f.len.uint64)
+      for b in f: w.saveBot(b)
+    else:
+      w.put(f)
+  if capacity >= w.data.len and w.data.len > 0:
+    copyMem(output, unsafeAddr w.data[0], w.data.len)
+  w.data.len.int64
+
+proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int64): cint {.exportc, cdecl, dynlib.} =
+  ## Replaces the handle's whole match state with a pw_world_save blob (training library only). The handle must have
+  ## the blob's observation version and seat count. Returns 0; -1 bad arguments; -2 another format / build / handle
+  ## shape; -3 a corrupt or truncated blob. On any refusal the handle is unchanged (the blob is decoded and its bots
+  ## rebuilt on a copy, which replaces the handle only when everything succeeded).
+  if handle == nil or data == nil or length <= 0: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  var r = SnapReader(data: newSeq[byte](length.int))
+  copyMem(addr r.data[0], data, length.int)
+  try:
+    var magic, build: string
+    r.get(magic)
+    if magic != SnapMagic: return -2
+    if r.getU64() != SnapFormat: return -2
+    r.get(build)
+    if build != SnapBuildId: return -2
+    var obs: ObservationContractVersion
+    var n: int
+    r.get(obs); r.get(n)
+    if obs != env.obsVersion or n != env.n: return -2
+    var tmp = env[]
+    var botBlobs: array[2, seq[(int, seq[byte])]]
+    for name, f in fieldPairs(tmp):
+      when name == "scriptBots" or name == "decoders":
+        let k = when name == "scriptBots": 0 else: 1
+        let count = r.getU64()
+        if count != uint64(n): r.fail("bot count")
+        f = newSeq[Bot](n)
+        for slot in 0..<n:
+          var present: bool
+          r.get(present)
+          if present:
+            let start = r.at
+            discard r.getBytes()                       # runtime
+            var hasStrings: bool
+            r.get(hasStrings)
+            if hasStrings: discard r.getBytes()
+            var failed: bool
+            var error: string
+            r.get(failed); r.get(error)
+            var neural: NeuralSeat
+            var rnd: RndStream
+            r.get(neural); r.get(rnd)
+            botBlobs[k].add (slot, r.data[start ..< r.at])
+      else:
+        r.get(f)
+    if r.at != r.data.len: r.fail("trailing bytes")
+    # Rebuild the bots on the copy from its own scripts and decoder contract, then restore their state.
+    for (slot, blob) in botBlobs[0]:
+      installScript(addr tmp, slot)
+      if tmp.scriptBots[slot].isNil: r.fail("script for slot " & $slot & " did not build")
+      var br = SnapReader(data: blob)
+      br.loadBot(tmp.scriptBots[slot])
+    for (slot, blob) in botBlobs[1]:
+      let b = decoderFor(addr tmp, slot)
+      var br = SnapReader(data: blob)
+      br.loadBot(b)
+    env[] = tmp
+  except SnapError, ValueError:
+    return -3
+  ready(handle)
   0
