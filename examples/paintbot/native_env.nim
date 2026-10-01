@@ -63,6 +63,7 @@ type
     firePeriod: seq[int32]
     lastHonouredShot: seq[int32]
     damagePermille: array[MaxSeats,int32] # damageScale points here
+    handicapKnobs: Handicap # sim.handicap points here for a reset or a step
     # Caller-driven seats (no script, no raw command, or a script under an override mask):
     # pw_step's head choices for them are decoded by the reference decoder script
     # (players/neural_decode.bas, or neural_decode_ffa.bas on an ffa.view.1 handle) running
@@ -195,6 +196,8 @@ proc allocSeats(env: ptr NativeEnv, n: int) =
   env.firePeriod = newSeq[int32](n)
   env.lastHonouredShot = newSeq[int32](n)
   for slot in 0..<MaxSeats: env.damagePermille[slot] = 0
+  env.handicapKnobs = Handicap()
+  for slot in 0..<MaxSeats: env.handicapKnobs.damageTaken[slot] = 1000
   env.overrideMask = newSeq[int32](n)
   env.sampling = newSeq[SamplingOptions](n)
   env.sampleRng = newSeq[Rng](n)
@@ -281,9 +284,14 @@ proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
     elif env.kinLayout >= 0: some(kinshipFor(KinLayout(env.kinLayout), seed))
     else: none(Kinship)
   spawnGroupingOverride = if seats == LegacySeats: env.spawnGrouping else: none(array[LegacySeats, int8])
+  # The handicaps' fractional damage belongs to the match; the knobs persist.
+  for slot in 0..<MaxSeats:
+    env.handicapKnobs.remOut[slot] = 0; env.handicapKnobs.remIn[slot] = 0
+  handicap = addr env.handicapKnobs
   try:
     env.world = newWorld(seed, maxTicks)
   finally:
+    handicap = nil
     kinshipOverride = savedKinship
     spawnGroupingOverride = none(array[LegacySeats, int8])
   env.mapSlot = env.nextMapSlot
@@ -973,10 +981,12 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     env.labelMemory.recordLabelMemory(env.world)
     combatTelemetry = addr env.stats
     damageScale = addr env.damagePermille
+    handicap = addr env.handicapKnobs
     try: env.world.step(commands)
     finally:
       combatTelemetry = nil
       damageScale = nil
+      handicap = nil
       damageObserver = nil
       kinEnv = nil
     let done = env.world.winner != -1 or env.world.tick >= env.world.endTick
@@ -1595,14 +1605,60 @@ proc pw_set_seat_fire_period*(handle: pointer, seat: cint, period: int32): cint 
   0
 
 proc pw_set_seat_damage_scale*(handle: pointer, seat: cint, permille: int32): cint {.exportc, cdecl, dynlib.} =
-  ## Curriculum: damage dealt BY this seat is scaled by permille/1000 (floor: with
-  ## 1-point gun hits, anything below 1000 means no damage; grenade 2/6 and spray 3
-  ## scale in steps). Hits still land (shield, cooldown relief, telemetry, glory as
-  ## before). 1000 restores exact behaviour. Kept across pw_reset.
+  ## Curriculum: damage dealt BY this seat is scaled by permille/1000, the fraction
+  ## carried to the seat's next hit (500 = every other 1-point gun hit lands; 0 = no
+  ## damage). Hits still land (shield, cooldown relief, telemetry, glory as before). 1000
+  ## restores exact behaviour. Kept across pw_reset (the carried fraction is not).
   if handle == nil or seat notin 0..<seatsOf(handle) or permille < 0: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   env.damagePermille[seat] = permille
+  0
+
+proc pw_set_seat_max_hp*(handle: pointer, seat: cint, hp: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Curriculum handicap: the HP this seat spawns and respawns with and a medkit restores,
+  ## 1 .. 6; 0 restores the rules' maxHp() (3 in teams). The initial spawn takes it at the
+  ## next pw_reset. Kept across pw_reset.
+  if handle == nil or seat notin 0..<seatsOf(handle) or hp notin 0'i32..6'i32: return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).handicapKnobs.maxHp[seat] = hp
+  0
+
+proc pw_set_seat_lives*(handle: pointer, seat: cint, lives: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Curriculum handicap: the lives this seat starts a match with, 1 .. 8 (a seat is out after
+  ## that many deaths); 0 restores the rules' (4 in teams from rules 19). Applies at the next
+  ## pw_reset. Kept across pw_reset.
+  if handle == nil or seat notin 0..<seatsOf(handle) or lives notin 0'i32..8'i32: return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).handicapKnobs.lives[seat] = lives
+  0
+
+proc pw_set_seat_damage_taken*(handle: pointer, seat: cint, permille: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Curriculum handicap: damage dealt TO this seat is scaled by permille/1000, its fraction
+  ## carried to the next hit (500 = every other 1-point hit lands); applies with
+  ## pw_set_seat_damage_scale's attacker scale, whose fraction now carries the same way.
+  ## 0 .. 10000; 1000 restores exact behaviour. Kept across pw_reset (the carried fractions
+  ## are not).
+  if handle == nil or seat notin 0..<seatsOf(handle) or permille notin 0'i32..10000'i32: return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).handicapKnobs.damageTaken[seat] = permille
+  0
+
+proc pw_set_team_capture_ticks*(handle: pointer, side: cint, ticks: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Curriculum handicap: the ticks team `side` (0 or 1) must hold a control heart alone to
+  ## capture it in the teams game, 36 .. 144; 0 restores HeartCaptureTicks (72). Kept across
+  ## pw_reset.
+  if handle == nil or side notin 0..1 or (ticks != 0 and ticks notin 36'i32..144'i32): return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).handicapKnobs.captureTicks[side] = ticks
+  0
+
+proc pw_set_seat_respawn_ticks*(handle: pointer, seat: cint, ticks: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Curriculum handicap: the ticks this seat waits to respawn after a death, 1 .. 1440; 0
+  ## restores RespawnTicks (72). Kept across pw_reset.
+  if handle == nil or seat notin 0..<seatsOf(handle) or ticks notin 0'i32..1440'i32: return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).handicapKnobs.respawnTicks[seat] = ticks
   0
 
 proc pw_set_seat_sampling*(handle: pointer, seat: cint, temperaturePermille, headMask: int32): cint {.exportc, cdecl, dynlib.} =
