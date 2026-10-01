@@ -757,7 +757,7 @@ replay of an advised match verifies like any other. Without an oracle, as in cer
 with no network, every ask returns 0 and matches behave exactly as before.
 
 In hosted Softmax episodes the game pod holds no provider key, so `COGAME_ORACLE_URL` is not used
-there. The host finds the platform's LLM sidecar at `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` and posts
+there. The host finds the platform's LLM sidecar at `COWORLD_LLM_ENDPOINT` and posts
 to its `/v1/systemone` route, which forwards to Jev (`typesafe/jev-1.13`) on OpenRouter. Each ask
 names the asking seat, so its cost counts against that seat's per-episode LLM spend limit for the
 league and its requests against that seat's System One bucket: 120 a minute, twice what the
