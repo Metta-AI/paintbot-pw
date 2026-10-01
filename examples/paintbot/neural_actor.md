@@ -85,7 +85,7 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 | magic | ASCII `PWNET002` |
 | version | 2 |
 | I | input count, 1..4096 (the observation contract's width: 512 for teams.view.1, 512 + K for teams.view.1u<K>; ffa.view.1: the match's width, usually the layout word `0xFFFEE000`) |
-| O | output count, 2..1024 (the logits; no value row: 82, or 128 for the aim-offset variant; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
+| O | output count, 2..1024 (the logits; no value row: 82, or 128 for the aim-offset variant, 174 for movement-offset; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
 | head count | 1..32 |
 | head sizes | one uint32 per head, each 2..1024, summing to O (layout words allowed) |
 | observation contract | 64 lowercase hex bytes (as PWNET001) |
@@ -436,6 +436,7 @@ gun cooldown, windup, spray cooldown, shield, respawn, the seat's current aim, h
 |---|---|---|---|
 | teams.view.1 | `paintbot-pw.teams.view.1.action.51-25-2-2-2` | 51, 25, 2, 2, 2 | 11 |
 | teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 | 13 |
+| teams.view.1 movement-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23` | 51, 25, 2, 2, 2, 23, 23, 23, 23 | 14 |
 | ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 | 12 |
 
 An action contract names head sizes; what each index means is the `policy.bas`'s business. The
@@ -446,7 +447,8 @@ reference reading (`players/neural_decode.bas`, the training library's decoder):
 | 0 movement / objective | 0 stay; 1..10 control heart m-1; 11..42 pickup m-11 when visible; 43..50 compass `pos + 200*d` (mirrored for team 1) | 0 stay; 1..8 compass; 9 + k control heart row k; 9 + H + g great heart row g |
 | 1 aim | 0 keep; 1..16 identity a-1 when visible (its current position); 17..24 compass `pos + 5000*d` | 0 keep; 1..8 compass; 9 + k cog row k (`neuralRow(0, k)`) |
 | 2, 3, 4 | fire, charge grenade, sneak | the same |
-| 5, 6 (aim-offset) | `((ix - 11) * 28, (iz - 11) * 28)`, mirrored for team 1, added to an identity aim | |
+| 5, 6 (aim-offset, movement-offset) | `((ix - 11) * 28, (iz - 11) * 28)`, mirrored for team 1, added to an identity aim | |
+| 7, 8 (movement-offset) | `(moveOffset(dx), moveOffset(dz))`: bin 11 = 0, bin 11 ± j = ±(16, 28, 48, 84, 146, 253, 439, 763, 1326, 2303, 4000)[j-1] u, mirrored for team 1, added to head 0's goal (self for stay or an unseen pickup), clamped to the map | |
 
 with d = (1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1). "Keep" re-issues the aim the
 script last left the seat with. There is no native lead: the retired contract v2 and ffa.v2
@@ -475,8 +477,9 @@ plain argmax). `pw_set_seat_forbid_objectives(handle, seat, int32 indices[], cou
 movement-head candidates out of `pw_sample_actions` and makes `pw_step` return -3 (nothing
 stepped) when the caller hands a live caller-driven seat a forbidden one;
 `pw_seat_forbidden_objectives(handle, seat, int32 out[51])` returns the mask.
-`pw_set_action_contract(handle, 11|13)` (201 handles; 12 on 202) selects the action contract
-the caller's heads are read under (seven per seat under 13; `pw_action_layout_ext`).
+`pw_set_action_contract(handle, 11|13|14)` (201 handles; 12 on 202) selects the action contract
+the caller's heads are read under (seven per seat under 13, `pw_action_layout_ext`; nine under 14,
+`pw_action_layout_ext2`).
 
 `pw_seat_stats(handle, int32 out[16*8])` fills, per seat in seat order,
 `{damage_dealt_enemy, damage_dealt_team, hits_enemy, hits_taken, kills, deaths,

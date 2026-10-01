@@ -14,6 +14,12 @@
 ' Its aim-offset variant (heads 51, 25, 2, 2, 2, 23, 23; neuralLayout(21) = 23) adds
 '   ((ix - 11) * 28, (iz - 11) * 28), mirrored for team 1, to an identity aim point, ix and iz
 '   the choices of heads 5 and 6: an offset the network chooses, no lead computed here.
+' Its movement-offset variant (heads 51, 25, 2, 2, 2, 23, 23, 23, 23; neuralLayout(23) = 23)
+'   also adds (moveOffset(dx), moveOffset(dz)), mirrored for team 1, to the movement goal
+'   above (self for stay or an unseen pickup) and clamps it to the map, dx and dz the choices
+'   of heads 7 and 8: a destination the network chooses, no goal computed here. moveOffset is
+'   symmetric and log-spaced: bin 11 = 0, bin 11 +- j = +-(16, 28, 48, 84, 146, 253, 439, 763,
+'   1326, 2303, 4000)(j), so one head covers short corrections and far destinations.
 ' fire, grenade and sneak: 1 = on. "Keep" re-issues the aim this script last left the seat
 ' with (its last order, or its walking goal when it gave none), known from the second tick of
 ' a life on; with none known the seat is given no aim and a shot waits for one.
@@ -53,6 +59,50 @@ sub clampToMap(px, py)
   end if
 end sub
 
+sub moveOffset(b)
+  mvj = b - 11
+  mvs = 1
+  if mvj < 0 then
+    mvs = -1
+    mvj = 0 - mvj
+  end if
+  mo = 0
+  if mvj = 1 then
+    mo = 16
+  end if
+  if mvj = 2 then
+    mo = 28
+  end if
+  if mvj = 3 then
+    mo = 48
+  end if
+  if mvj = 4 then
+    mo = 84
+  end if
+  if mvj = 5 then
+    mo = 146
+  end if
+  if mvj = 6 then
+    mo = 253
+  end if
+  if mvj = 7 then
+    mo = 439
+  end if
+  if mvj = 8 then
+    mo = 763
+  end if
+  if mvj = 9 then
+    mo = 1326
+  end if
+  if mvj = 10 then
+    mo = 2303
+  end if
+  if mvj = 11 then
+    mo = 4000
+  end if
+  mo = mo * mvs
+end sub
+
 if lastTick <> worldTick - 1 then
   aimKnown = 0
 end if
@@ -79,6 +129,14 @@ if m >= 11 and m <= 42 then
 end if
 if m >= 43 then
   clampToMap(selfX + flip * cdx(m - 43) * 200, selfY + flip * cdz(m - 43) * 200)
+  gx = cx
+  gy = cy
+end if
+if neuralLayout(23) = 23 then
+  moveOffset(neuralChoice(7))
+  mox = mo
+  moveOffset(neuralChoice(8))
+  clampToMap(gx + mox * flip, gy + mo * flip)
   gx = cx
   gy = cy
 end if

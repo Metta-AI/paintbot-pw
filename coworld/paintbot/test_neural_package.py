@@ -14,7 +14,8 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS, USER_INPUT_LIMIT,
                             validate_pwnet2, attention_ops, MAX_NEURAL_OPERATIONS, PWNET2_LIMITS,
                             USER_INPUTS_CONTRACT_HASHES, segment_near_ops, neural_budget, attn_pool_ops,
-                            LAYOUT_WORD_PREFIX, TEAMS_VIEW_1_SIZE, ACTION_SIZES, ACTION_SIZES_OFFSET,
+                            LAYOUT_WORD_PREFIX, TEAMS_VIEW_1_SIZE, ACTION_SIZES, ACTION_SIZES_OFFSET, ACTION_SIZES_MOVE,
+                            ACTION_CONTRACT_TEAMS_VIEW_1_MOVE, ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH,
                             OBSERVATION_CONTRACT_TEAMS_VIEW_1, OBSERVATION_CONTRACT_FFA_VIEW_1,
                             ACTION_CONTRACT_TEAMS_VIEW_1, ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET,
                             ACTION_CONTRACT_FFA_VIEW_1_POINTER, OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH,
@@ -51,6 +52,8 @@ def actor_bytes(inputs, observation_hash, hidden=64, heads=ACTION_SIZES, action_
 
 TEAMS_MODEL = actor_bytes(TEAMS_VIEW_1_SIZE, TEAMS)
 OFFSET_MODEL = actor_bytes(TEAMS_VIEW_1_SIZE, TEAMS, heads=ACTION_SIZES_OFFSET, action_hash=OFFSET)
+MOVE = ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH
+MOVE_MODEL = actor_bytes(TEAMS_VIEW_1_SIZE, TEAMS, heads=ACTION_SIZES_MOVE, action_hash=MOVE)
 
 
 def package(overrides=None, extra=None, model=TEAMS_MODEL):
@@ -166,7 +169,8 @@ class PackageTests(unittest.TestCase):
         for sampling, message in (({}, "mode"), ({"mode": "argmax"}, "mode"), ({"mode": "categorical", "temperature": 0}, "within"),
                                   ({"mode": "categorical", "temperature": 11}, "within"), ({"mode": "categorical", "temperature": "1"}, "number"),
                                   ({"mode": "categorical", "temperature": True}, "number"), ({"mode": "categorical", "heads": []}, "non-empty"),
-                                  ({"mode": "categorical", "heads": [7]}, r"indices 0 \.\. 6"), ({"mode": "categorical", "heads": [-1]}, "indices"),
+                                  ({"mode": "categorical", "heads": [7]}, "heads 7 and 8 need action contract teams.view.1 movement-offset"),
+                                  ({"mode": "categorical", "heads": [9]}, r"indices 0 \.\. 8"), ({"mode": "categorical", "heads": [-1]}, "indices"),
                                   ({"mode": "categorical", "heads": [1, 1]}, "repeats"),
                                   ({"mode": "categorical", "heads": "all"}, "non-empty"), ({"mode": "categorical", "heads": [True]}, "indices"),
                                   ({"mode": "categorical", "seed": 1}, "unknown decoder.sampling field"), (True, "must be a dict"), ([], "must be a dict")):
@@ -337,8 +341,11 @@ class ContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "heads 5 and 6 need action contract teams.view.1 aim-offset"):
                 unpack_package(package({**SCHEMA2, "observation_contract": FFA, "action_contract": POINTER,
                                         "decoder": {"sampling": sampling}}, model=FFA_MODEL))
-        with self.assertRaisesRegex(ValueError, r"indices 0 \.\. 6"):
+        with self.assertRaisesRegex(ValueError, "heads 7 and 8 need action contract teams.view.1 movement-offset"):
             unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [7]}}},
+                                   model=OFFSET_MODEL))
+        with self.assertRaisesRegex(ValueError, r"indices 0 \.\. 8"):
+            unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [9]}}},
                                    model=OFFSET_MODEL))
         # The other selection options keep reading the five fixed heads under the aim-offset contract.
         _, _, manifest = unpack_package(package({**offset, "decoder": {"forbid_objectives": [9]}}, model=OFFSET_MODEL))
@@ -346,6 +353,31 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "head index 0 .. 4"):
             unpack_package(package({**offset, "decoder": {"joint_sampling": {"when": {"head": 5, "value": 1}, "head": 0,
                                                                              "offsets": [0] * 51}}}, model=OFFSET_MODEL))
+
+    def test_movement_offset_contract(self):
+        """Action contract teams.view.1 movement-offset (14): nine heads; sampling heads 5 .. 8; the engine's id."""
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        ids = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        self.assertEqual(ids["ActionContractTeamsView1Move"], ACTION_CONTRACT_TEAMS_VIEW_1_MOVE)
+        self.assertEqual(sha(ACTION_CONTRACT_TEAMS_VIEW_1_MOVE), MOVE)
+        self.assertRegex(source, r"(?m)^  ActionContractTeamsView1MoveHash\* = sha256Hex\(ActionContractTeamsView1Move\)$")
+        self.assertEqual(ACTION_SIZES_MOVE, ACTION_SIZES_OFFSET + (23, 23))
+        self.assertRegex(source, r"(?m)^  ActionSizesMove\* = \[51, 25, 2, 2, 2, AimOffsetBins, AimOffsetBins, "
+                                 r"MoveOffsetBins, MoveOffsetBins\]$")
+        self.assertEqual(len({ACT, OFFSET, MOVE, POINTER}), 4)
+        move = {**SCHEMA2, "action_contract": MOVE}
+        _, _, manifest = unpack_package(package(move, model=MOVE_MODEL))
+        self.assertEqual(manifest["action_contract"], MOVE)
+        for heads in ([7], [8], [5, 7], [0, 1, 2, 3, 4, 5, 6, 7, 8]):
+            sampling = {"mode": "categorical", "heads": heads}
+            _, _, manifest = unpack_package(package({**move, "decoder": {"sampling": sampling}}, model=MOVE_MODEL))
+            self.assertEqual(manifest["decoder"]["sampling"]["heads"], heads)
+        with self.assertRaisesRegex(ValueError, "observation contract teams.view.1 goes with"):
+            unpack_package(package({**SCHEMA2, "observation_contract": FFA, "action_contract": MOVE}, model=MOVE_MODEL))
+        # The fixed-head selection options still read heads 0 .. 4.
+        with self.assertRaisesRegex(ValueError, "head index 0 .. 4"):
+            unpack_package(package({**move, "decoder": {"joint_sampling": {"when": {"head": 7, "value": 1}, "head": 0,
+                                                                           "offsets": [0] * 51}}}, model=MOVE_MODEL))
 
     def test_ffa_view_1_pointer_takes_sampling_only(self):
         ffa = {**SCHEMA2, "observation_contract": FFA, "action_contract": POINTER}

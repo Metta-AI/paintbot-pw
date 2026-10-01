@@ -22,6 +22,7 @@ OBSERVATION_CONTRACT_TEAMS_VIEW_1 = "paintbot-pw.teams.view.1"
 OBSERVATION_CONTRACT_FFA_VIEW_1 = "paintbot-pw.ffa.view.1"
 ACTION_CONTRACT_TEAMS_VIEW_1 = "paintbot-pw.teams.view.1.action.51-25-2-2-2"
 ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23"
+ACTION_CONTRACT_TEAMS_VIEW_1_MOVE = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23"
 ACTION_CONTRACT_FFA_VIEW_1_POINTER = "paintbot-pw.ffa.view.1.action.pointer"
 
 
@@ -33,10 +34,14 @@ OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH = contract_hash(OBSERVATION_CONTRACT_TEAM
 OBSERVATION_CONTRACT_FFA_VIEW_1_HASH = contract_hash(OBSERVATION_CONTRACT_FFA_VIEW_1)
 ACTION_CONTRACT_TEAMS_VIEW_1_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1)
 ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET)
+ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_MOVE)
 ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH = contract_hash(ACTION_CONTRACT_FFA_VIEW_1_POINTER)
 TEAMS_VIEW_1_SIZE = 512
 ACTION_SIZES = (51, 25, 2, 2, 2)  # action contract teams.view.1
 ACTION_SIZES_OFFSET = (51, 25, 2, 2, 2, 23, 23)  # its aim-offset variant
+ACTION_SIZES_MOVE = (51, 25, 2, 2, 2, 23, 23, 23, 23)  # its movement-offset variant
+# Heads after the five main ones, per teams action contract: aim offsets 5-6, then movement offsets 7-8.
+EXTRA_HEADS = {ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH: 2, ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH: 4}
 # Contracts retired for BASIC parity: their observations read state a BASIC seat cannot (cooldowns,
 # shield, aim, heart meters, the end tick, cover probes), or their actions were decoded natively.
 RETIRED_OBSERVATION_CONTRACTS = ("paintbot-pw.rules37.obs.v1.float448", "paintbot-pw.rules37.obs.v2.float506",
@@ -167,7 +172,9 @@ def validate_joint_sampling(value):
 
 def validate_sampling(value, offset_heads=False):
     """decoder.sampling: {"mode": "categorical", "temperature": t, "heads": [i, ...]}; heads 5 and 6 only
-    under action contract teams.view.1 aim-offset (offset_heads)."""
+    under action contract teams.view.1 aim-offset or movement-offset, heads 7 and 8 only under movement-offset.
+    offset_heads: the contract's extra heads (0, 2 or 4; True = 2, the aim-offset contract)."""
+    extra = 2 if offset_heads is True else int(offset_heads)
     if not isinstance(value, dict):
         raise ValueError("decoder.sampling must be an object")
     if value.get("mode") != "categorical":
@@ -184,13 +191,15 @@ def validate_sampling(value, offset_heads=False):
             if not isinstance(field, list) or not field:
                 raise ValueError("decoder.sampling.heads must be a non-empty array")
             for item in field:
-                if isinstance(item, bool) or not isinstance(item, int) or not 0 <= item < len(ACTION_SIZES_OFFSET):
+                if isinstance(item, bool) or not isinstance(item, int) or not 0 <= item < len(ACTION_SIZES_MOVE):
                     raise ValueError("decoder.sampling.heads entries must be head indices 0 .. %d"
-                                     % (len(ACTION_SIZES_OFFSET) - 1))
+                                     % (len(ACTION_SIZES_MOVE) - 1))
             if len(set(field)) != len(field):
                 raise ValueError("decoder.sampling.heads repeats a head")
-            if not offset_heads and any(item >= SAMPLING_HEADS for item in field):
+            if extra < 2 and any(SAMPLING_HEADS <= item < SAMPLING_HEADS + 2 for item in field):
                 raise ValueError("decoder.sampling.heads 5 and 6 need action contract teams.view.1 aim-offset")
+            if extra < 4 and any(item >= SAMPLING_HEADS + 2 for item in field):
+                raise ValueError("decoder.sampling.heads 7 and 8 need action contract teams.view.1 movement-offset")
         else:
             raise ValueError("unknown decoder.sampling field: " + str(key))
 
@@ -733,12 +742,12 @@ def unpack_package(data, seats=16):
     if not teams and observation_contract != OBSERVATION_CONTRACT_FFA_VIEW_1_HASH:
         raise ValueError("unknown neural observation contract")
     if action_contract not in (ACTION_CONTRACT_TEAMS_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH,
-                               ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
+                               ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
         raise ValueError("unknown neural action contract")
     if teams != (action_contract != ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
         raise ValueError("observation contract teams.view.1 goes with action contract teams.view.1 (or its aim-offset "
                          "variant), ffa.view.1 with ffa.view.1 pointer")
-    offset = action_contract == ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH
+    offset = EXTRA_HEADS.get(action_contract, 0)
     if "decoder" in manifest:
         if manifest.get("schema") != "paintbot-neural-basic/2":
             raise ValueError("decoder options need package schema 2")

@@ -58,11 +58,16 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
 - Action contracts `paintbot-pw.teams.view.1.action.51-25-2-2-2`, its aim-offset variant
   `...51-25-2-2-2-23-23` (heads 5 and 6, `neuralChoice(5/6)`: the reference decode adds
   `((ix - 11) * 28, (iz - 11) * 28)`, mirrored for team 1, to an identity aim; the offset is
-  the network's choice, nothing native computes a lead) and `paintbot-pw.ffa.view.1.action.pointer`.
+  the network's choice, nothing native computes a lead), its movement-offset variant
+  `...51-25-2-2-2-23-23-23-23` (also heads 7 and 8, `neuralChoice(7/8)`: the reference decode adds
+  `(moveOffset(dx), moveOffset(dz))`, symmetric log-spaced bins from 16 u to 4000 u
+  (`MoveOffsetTable`), mirrored for team 1, to the movement goal and clamps it to
+  the map; the destination is the network's choice, nothing native computes a goal) and
+  `paintbot-pw.ffa.view.1.action.pointer`.
 - Heads become orders only in BASIC: `players/neural_decode.bas` and `neural_decode_ffa.bas`
   are the reference decode, run by `players/neural_policy.bas` and by the training library for
   every caller-driven seat (`pw_step`). `pw_set_action_contract` chooses only between
-  teams.view.1 (11) and its aim-offset variant (13) on a teams handle.
+  teams.view.1 (11) and its aim-offset (13) and movement-offset (14) variants on a teams handle.
 - The retired contracts and decoder options are refused by name at staging
   (`neural_package.py`) and at load (`neural_host.nim`, `neural_contract.retiredContract`).
 - Training-only supervision: `pw_seat_privileged_labels` (21 floats: the retired world fields,

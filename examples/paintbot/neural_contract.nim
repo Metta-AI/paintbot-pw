@@ -27,6 +27,21 @@ const
   AimOffsetHeads* = 2
   ActionSizesOffset* = [51, 25, 2, 2, 2, AimOffsetBins, AimOffsetBins]
   LogitSizeOffset* = LogitSize + 2*AimOffsetBins
+  ## Its movement-offset variant: the aim-offset contract's seven heads, then two 23-bin
+  ## heads (dx, dz) the policy.bas reads as neuralChoice(7) / neuralChoice(8); the reference
+  ## decode adds (moveOffset(dx), moveOffset(dz)), mirrored for team 1, to the movement head's
+  ## goal and clamps it to the map. moveOffset is symmetric and log-spaced: bin 11 = 0, bin
+  ## 11 ± j = ±MoveOffsetTable[j-1] (16 u .. 4000 u, ratio 250^(1/10)), so one head reaches both
+  ## short corrections and far destinations. The destination offset is purely the network's
+  ## choice: nothing native computes a goal.
+  ActionContractTeamsView1Move* = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23"
+  MoveOffsetBins* = 23
+  MoveOffsetCentre* = 11
+  MoveOffsetTable* = [16, 28, 48, 84, 146, 253, 439, 763, 1326, 2303, 4000]
+  MoveOffsetHeads* = 2
+  ExtraHeadsMax* = AimOffsetHeads + MoveOffsetHeads
+  ActionSizesMove* = [51, 25, 2, 2, 2, AimOffsetBins, AimOffsetBins, MoveOffsetBins, MoveOffsetBins]
+  LogitSizeMove* = LogitSizeOffset + 2*MoveOffsetBins
   ## Observation contract ffa.view.1 (FFA-kin at any seat count; its width follows the match,
   ## ffaViewLayout) and its action contract, whose heads are sized by the same layout and
   ## point at the observation's rows of the same tick.
@@ -74,7 +89,7 @@ type
     ## Version numbers are the native ABI's (pw_create_observation).
     ocTeamsView1 = 201, ocFfaView1 = 202
   ActionContractVersion* = enum
-    acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13
+    acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13, acTeamsView1Move = 14
 
 const
   ObservationContractTeamsView1Hash* = sha256Hex(ObservationContractTeamsView1)
@@ -82,6 +97,7 @@ const
   ActionContractTeamsView1Hash* = sha256Hex(ActionContractTeamsView1)
   ActionContractFfaView1PointerHash* = sha256Hex(ActionContractFfaView1Pointer)
   ActionContractTeamsView1OffsetHash* = sha256Hex(ActionContractTeamsView1Offset)
+  ActionContractTeamsView1MoveHash* = sha256Hex(ActionContractTeamsView1Move)
 
 const
   ## Contracts retired for BASIC parity (docs/neural/seat-view.md): their observations read
@@ -132,16 +148,19 @@ proc actionContractHash*(version: ActionContractVersion): string =
   of acTeamsView1: ActionContractTeamsView1Hash
   of acFfaView1Pointer: ActionContractFfaView1PointerHash
   of acTeamsView1Offset: ActionContractTeamsView1OffsetHash
+  of acTeamsView1Move: ActionContractTeamsView1MoveHash
 proc actionContractId*(version: ActionContractVersion): string =
   case version
   of acTeamsView1: ActionContractTeamsView1
   of acFfaView1Pointer: ActionContractFfaView1Pointer
   of acTeamsView1Offset: ActionContractTeamsView1Offset
+  of acTeamsView1Move: ActionContractTeamsView1Move
 proc actionContractVersion*(hash: string): ActionContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ActionContractTeamsView1Hash: acTeamsView1
   elif hash == ActionContractFfaView1PointerHash: acFfaView1Pointer
   elif hash == ActionContractTeamsView1OffsetHash: acTeamsView1Offset
+  elif hash == ActionContractTeamsView1MoveHash: acTeamsView1Move
   elif retiredContract(hash): raise newException(ValueError, "neural action contract " & RetiredMessage)
   else: raise newException(ValueError, "unknown neural action contract")
 
@@ -170,14 +189,28 @@ proc pairedAction*(version: ObservationContractVersion): ActionContractVersion =
   if version == ocTeamsView1: acTeamsView1 else: acFfaView1Pointer
 proc pairs*(observation: ObservationContractVersion, action: ActionContractVersion): bool =
   ## Whether the two contracts go together: teams.view.1 with its five-head action contract
-  ## or its aim-offset variant, ffa.view.1 with its pointer contract.
-  if observation == ocTeamsView1: action in {acTeamsView1, acTeamsView1Offset}
+  ## or its aim-offset / movement-offset variants, ffa.view.1 with its pointer contract.
+  if observation == ocTeamsView1: action in {acTeamsView1, acTeamsView1Offset, acTeamsView1Move}
   else: action == acFfaView1Pointer
+proc moveOffset*(bin: int): int =
+  ## The movement offset (world units, before the team-1 mirror) of a movement-offset bin 0 .. 22:
+  ## 0 at the centre bin 11, else ±MoveOffsetTable[|bin - 11| - 1]. players/neural_decode.bas holds
+  ## the same table.
+  let j = bin - MoveOffsetCentre
+  if j == 0: 0 elif j > 0: MoveOffsetTable[j-1] else: -MoveOffsetTable[-j-1]
+proc extraHeads*(action: ActionContractVersion): int =
+  ## The heads after the five main ones: 2 (aim offsets) under teams.view.1 aim-offset, 4 (aim
+  ## then movement offsets) under movement-offset, 0 otherwise.
+  case action
+  of acTeamsView1Offset: AimOffsetHeads
+  of acTeamsView1Move: AimOffsetHeads + MoveOffsetHeads
+  else: 0
 proc actionHeadSizes*(action: ActionContractVersion): seq[int] =
   ## The head sizes of a fixed-size action contract (ffa.view.1 pointer: see pointerHeads).
   case action
   of acTeamsView1: @ActionSizes
   of acTeamsView1Offset: @ActionSizesOffset
+  of acTeamsView1Move: @ActionSizesMove
   of acFfaView1Pointer: raise newException(ValueError, "action contract ffa.view.1 pointer is sized by the match (pointerHeads)")
 
 proc mapFlip*(slot: int): int =
@@ -568,10 +601,13 @@ type
     enabled*: bool
     temperature*: float32      # > 0; 1.0 = the training-time distribution
     heads*: array[ActionSizes.len, bool]  # which heads are sampled; the rest take argmax
-    ## The aim-offset heads 5 and 6 (action contract teams.view.1 aim-offset only): sampled
-    ## when listed in decoder.sampling.heads, or when heads is absent (every head).
-    offsetHeads*: array[AimOffsetHeads, bool]
+    ## The extra heads after the five main ones: the aim-offset heads 5 and 6 (action
+    ## contracts teams.view.1 aim-offset and movement-offset) and the movement-offset heads 7
+    ## and 8 (movement-offset only): sampled when listed in decoder.sampling.heads, or when
+    ## heads is absent (every head).
+    offsetHeads*: array[ExtraHeadsMax, bool]
     offsetListed*: bool  # heads named 5 or 6 explicitly
+    moveListed*: bool    # heads named 7 or 8 explicitly
 
 const
   SamplingSalt* = 0x53414d504c450000'u64  # "SAMPLE" in the high bytes, slot below it
