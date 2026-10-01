@@ -384,9 +384,9 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
   seat.heads = case extra
     of 0: @ActionSizes
     of AimOffsetHeads: @ActionSizesOffset
-    else: @ActionSizesMove
+    else: (if target: @ActionSizesMode else: @ActionSizesMove)   # contract 16 = target rows + 4 extra heads
   seat.targetRows = target
-  seat.logits = newSeq[float32](if target: LogitSizeTarget
+  seat.logits = newSeq[float32](if target: (if extra > AimOffsetHeads: LogitSizeMode else: LogitSizeTarget)
     else: (case extra
       of 0: LogitSize
       of AimOffsetHeads: LogitSizeOffset
@@ -685,20 +685,32 @@ proc selectOffsets(seat: NeuralSeat) =
     if temperatures[e] > 0: anyDraw = true
   if seat.targetRows:
     # Contract 15: each offset head draws from the chosen identity's row; with keep or a compass aim there is no
-    # target, so no draw and the centre bin (its applied temperature reads 0).
+    # target, so no draw and the centre bin (its applied temperature reads 0). Contract 16's heads 7 and 8 (movement
+    # mode, aim target) follow as plain heads from their own logits after the rows (LogitSizeTarget ..).
     let a = seat.selected[1]
     let j = a - 1
-    var rows = newSeq[float32](n*AimOffsetBins)
+    let nOff = min(n, AimOffsetHeads)
+    var rowsLen = nOff*AimOffsetBins
+    for e in nOff..<n: rowsLen += sizes[e]
+    var rows = newSeq[float32](rowsLen)
     if j in 0'i32..<TargetRows.int32:
-      for e in 0..<n:
+      for e in 0..<nOff:
         let base = LogitSize + e*TargetRows*AimOffsetBins + j.int*AimOffsetBins
         for b in 0..<AimOffsetBins: rows[e*AimOffsetBins+b] = seat.logits[base+b]
     else:
-      anyDraw = false
-      for e in 0..<n:
+      for e in 0..<nOff:
         temperatures[e] = 0'f32
         seat.appliedOffsetTemperatures[e] = 0'i32
         rows[e*AimOffsetBins+AimOffsetCentre] = 1'f32   # argmax = the centre bin
+      anyDraw = false
+      for e in nOff..<n:
+        if temperatures[e] > 0: anyDraw = true
+    var at = nOff*AimOffsetBins
+    var src = LogitSizeTarget
+    for e in nOff..<n:
+      for b in 0..<sizes[e]: rows[at+b] = seat.logits[src+b]
+      at += sizes[e]
+      src += sizes[e]
     if anyDraw: seat.seedStream()
     var draws = 0
     let picked = pointerSelect(rows, sizes, temperatures, seat.sampleRng, draws)

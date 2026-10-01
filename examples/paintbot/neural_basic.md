@@ -28,6 +28,7 @@ Schema 2 may also carry `decoder` and `user_inputs` (below).
 | teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 |
 | teams.view.1 movement-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23` | 51, 25, 2, 2, 2, 23, 23, 23, 23 |
 | teams.view.1 target-conditioned aim offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16` | 51, 25, 2, 2, 2, 23, 23 (choices; 818 logits: heads 5 and 6 are drawn from the chosen identity's row of 16, no draw and the centre bin for keep or a compass aim) |
+| teams.view.1 mode | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16-5-12` | 51, 25, 2, 2, 2, 23, 23, 5, 12 (835 logits: contract 15's, then head 7 = movement mode {head 0, keep goal, keep leg, strafe +, strafe -} and head 8 = aim target {head 1, visible-enemy centroid, control heart 0..9}, read by the reference decoder) |
 | ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 |
 
 teams.view.1 (and u<K>) pairs with the teams.view.1 action contract or its aim-offset or movement-offset variant

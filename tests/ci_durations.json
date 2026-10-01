@@ -101,6 +101,7 @@
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_aim_offset.nim": 27.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_move_offset.nim": 30.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_target_offset.nim": 30.0,
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_mode_heads.nim": 30.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_mixed_contracts.nim": 30.0
   }
 }

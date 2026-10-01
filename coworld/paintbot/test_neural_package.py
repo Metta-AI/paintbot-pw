@@ -24,7 +24,8 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH,
                             RETIRED_OBSERVATION_CONTRACTS, RETIRED_ACTION_CONTRACTS, RETIRED_CONTRACT_HASHES,
                             RETIRED_DECODER_OPTIONS, ACTION_CONTRACT_TEAMS_VIEW_1_TARGET,
-                            ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH, pointer_k_ops)
+                            ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH, pointer_k_ops,
+                            ACTION_CONTRACT_TEAMS_VIEW_1_MODE, ACTION_CONTRACT_TEAMS_VIEW_1_MODE_HASH)
 
 ROOT = Path(__file__).parents[2]
 TEAMS, FFA = OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH
@@ -693,6 +694,21 @@ class Pwnet2Tests(unittest.TestCase):
         self.assertEqual(manifest["action_contract"], ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH)
         with self.assertRaisesRegex(ValueError, "heads 7 and 8 need"):
             unpack_package(package({**target, "decoder": {"sampling": {"mode": "categorical", "heads": [7]}}}, model=model))
+
+    def test_mode_contract(self):
+        """Action contract 16 (mode): contract 15 + movement mode (5) + aim target (12); sampling heads 7 / 8 allowed."""
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        ids = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        self.assertEqual(ids["ActionContractTeamsView1Mode"], ACTION_CONTRACT_TEAMS_VIEW_1_MODE)
+        self.assertEqual(sha(ACTION_CONTRACT_TEAMS_VIEW_1_MODE), ACTION_CONTRACT_TEAMS_VIEW_1_MODE_HASH)
+        mode = {**SCHEMA2, "action_contract": ACTION_CONTRACT_TEAMS_VIEW_1_MODE_HASH}
+        model = pwnet2(TEAMS_VIEW_1_SIZE, [51, 25, 2, 2, 2, 368, 368, 5, 12],
+                       [(1, [TEAMS_VIEW_1_SIZE, 835, 1, 0], [], TEAMS_VIEW_1_SIZE * 835 + 835)],
+                       act=ACTION_CONTRACT_TEAMS_VIEW_1_MODE_HASH)
+        for heads in ([7], [8], [0, 1, 2, 3, 4, 7, 8]):
+            _, _, manifest = unpack_package(package({**mode, "decoder": {"sampling": {"mode": "categorical",
+                                                                                     "heads": heads}}}, model=model))
+            self.assertEqual(manifest["decoder"]["sampling"]["heads"], heads)
 
     def test_token_layer_norm_cost_and_structure(self):
         # Params 6 = norm (0 or 1) and 7 = eps (FP32 bits) of TOKEN_MLP and TOKEN_MIX: a LayerNorm (gain, shift)

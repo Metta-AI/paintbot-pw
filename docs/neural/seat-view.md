@@ -69,10 +69,14 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
 - Heads become orders only in BASIC: `players/neural_decode.bas` and `neural_decode_ffa.bas`
   are the reference decode, run by `players/neural_policy.bas` and by the training library for
   every caller-driven seat (`pw_step`). `pw_set_action_contract` chooses only between
-  teams.view.1 (11) and its aim-offset (13), movement-offset (14) and target-conditioned aim-offset (15)
+  teams.view.1 (11) and its aim-offset (13), movement-offset (14), target-conditioned aim-offset (15) and mode (16)
   variants on a teams handle. Contract 15 keeps contract 13's choices and decode (the policy.bas is the same); its
   heads 5 and 6 are drawn from the 23-logit row of the identity the aim head chose, so the network's offset can
-  depend on that target. Nothing native computes a lead.
+  depend on that target. Nothing native computes a lead. Contract 16 adds two parameterisation heads the reference
+  decoder reads: head 7, the movement mode (head 0 as usual, keep the last goal, keep the last leg's vector, a
+  compass-length step perpendicular to head 1's identity either way), and head 8, the aim target (head 1 as usual,
+  the visible enemies' integer centroid, control heart k). Every value is computed from SeatView in BASIC; no script
+  constant is built in.
 - The retired contracts and decoder options are refused by name at staging
   (`neural_package.py`) and at load (`neural_host.nim`, `neural_contract.retiredContract`).
 - Training-only supervision: `pw_seat_privileged_labels` (21 floats: the retired world fields,

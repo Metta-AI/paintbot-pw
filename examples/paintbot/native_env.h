@@ -117,9 +117,11 @@ int pw_set_seat_starts_out(void *handle, int seat, int32_t starts_out);
  * variant (15, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16": contract 13's seven heads
  * and decode, but heads 5 and 6 carry one 23-logit row per identity, 818 logits per seat, and are
  * drawn from the row of the identity the aim head chose; no draw, the centre bin, for keep or a
- * compass aim) and ffa.view.1 pointer (12,
+ * compass aim), its mode variant (16, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16-5-12":
+ * contract 15's heads, then a 5-way movement mode and a 12-way aim target the reference decoder reads,
+ * 835 logits per seat) and ffa.view.1 pointer (12,
  * "paintbot-pw.ffa.view.1.action.pointer"). pw_set_action_contract selects the contract
- * pw_step reads the caller's heads under: 11 (default), 13, 14 or 15 on a 201 handle, 12 only on a
+ * pw_step reads the caller's heads under: 11 (default), 13, 14, 15 or 16 on a 201 handle, 12 only on a
  * 202 handle; kept across pw_reset; 0, or -1 bad args. Under 13 a seat's action row is seven
  * int32 and pw_action_layout returns -1: use pw_action_layout_ext (int32[10] = {heads, seven
  * head-size slots, logits per seat, 0}). Under 14 it is nine int32 and pw_action_layout_ext

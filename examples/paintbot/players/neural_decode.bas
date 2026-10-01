@@ -20,6 +20,18 @@
 '   of heads 7 and 8: a destination the network chooses, no goal computed here. moveOffset is
 '   symmetric and log-spaced: bin 11 = 0, bin 11 +- j = +-(16, 28, 48, 84, 146, 253, 439, 763,
 '   1326, 2303, 4000)(j), so one head covers short corrections and far destinations.
+'   Its target-conditioned variant (15) decodes as the aim-offset variant (heads 5 / 6 are drawn
+'   from the chosen identity's row; the decode is the same).
+' Its mode variant (16; neuralLayout(23) = 5, neuralLayout(24) = 12) adds two parameterisation
+'   heads after contract 15's: head 7, the movement mode: 0 head 0 as above; 1 keep goal (the
+'   goal this decoder issued last tick); 2 keep leg (that goal's vector from the seat's position
+'   then, from where it is now, clamped); 3 / 4 strafe + / -: a 200-unit step (the compass step's
+'   length) perpendicular to the identity head 1 chose, + = (-dz, dx), - = (dz, -dx), integer
+'   math (isqrt); a mode that has nothing to act on (no goal known yet, head 1 not a visible
+'   identity) stays. Head 8, the aim target: 0 head 1 as above (offsets included); 1 the visible
+'   enemies' integer centroid; 2 + k control heart k; with none (no visible enemy, k >=
+'   heartCount()) head 1's aim stands. Nothing here is a script constant: keep or switch is the
+'   network's choice every tick.
 ' fire, grenade and sneak: 1 = on. "Keep" re-issues the aim this script last left the seat
 ' with (its last order, or its walking goal when it gave none), known from the second tick of
 ' a life on; with none known the seat is given no aim and a shot waits for one.
@@ -56,6 +68,20 @@ sub clampToMap(px, py)
   end if
   if cy > mapMaxY() then
     cy = mapMaxY()
+  end if
+end sub
+
+sub isqrt(v)
+  ' floor(sqrt(v)) for v >= 0 (Newton on integers); 0 for v <= 0
+  iq = 0
+  if v > 0 then
+    iqx = v
+    iqy = (iqx + 1) / 2
+    while iqy < iqx
+      iqx = iqy
+      iqy = (iqx + v / iqx) / 2
+    wend
+    iq = iqx
   end if
 end sub
 
@@ -105,6 +131,7 @@ end sub
 
 if lastTick <> worldTick - 1 then
   aimKnown = 0
+  goalKnown = 0
 end if
 lastTick = worldTick
 flip = 1
@@ -140,6 +167,46 @@ if neuralLayout(23) = 23 then
   gx = cx
   gy = cy
 end if
+if neuralLayout(23) = 5 then
+  mm = neuralChoice(7)
+  if mm >= 1 then
+    gx = selfX
+    gy = selfY
+  end if
+  if mm = 1 and goalKnown = 1 then
+    gx = lastGX
+    gy = lastGY
+  end if
+  if mm = 2 and goalKnown = 1 then
+    clampToMap(selfX + lastGX - lastPX, selfY + lastGY - lastPY)
+    gx = cx
+    gy = cy
+  end if
+  if mm >= 3 then
+    sj = neuralChoice(1) - 1
+    if sj >= 0 and sj <= 15 then
+      if visible(sj) then
+        sdx = playerX(sj) - selfX
+        sdz = playerY(sj) - selfY
+        isqrt(sdx * sdx + sdz * sdz)
+        if iq > 0 then
+          ss = 1
+          if mm = 4 then
+            ss = -1
+          end if
+          clampToMap(selfX + ss * (0 - sdz) * 200 / iq, selfY + ss * sdx * 200 / iq)
+          gx = cx
+          gy = cy
+        end if
+      end if
+    end if
+  end if
+  lastGX = gx
+  lastGY = gy
+  lastPX = selfX
+  lastPY = selfY
+  goalKnown = 1
+end if
 walkTo(gx, gy)
 
 a = neuralChoice(1)
@@ -160,6 +227,37 @@ if a >= 17 then
   ax = cx
   ay = cy
   have = 1
+end if
+if neuralLayout(24) = 12 then
+  tg = neuralChoice(8)
+  if tg = 1 then
+    cn = 0
+    csx = 0
+    csy = 0
+    cj = 0
+    while cj < 16
+      if cj mod 2 <> selfTeam then
+        if visible(cj) then
+          cn = cn + 1
+          csx = csx + playerX(cj)
+          csy = csy + playerY(cj)
+        end if
+      end if
+      cj = cj + 1
+    wend
+    if cn > 0 then
+      ax = csx / cn
+      ay = csy / cn
+      have = 1
+    end if
+  end if
+  if tg >= 2 then
+    if tg - 2 < heartCount() then
+      ax = controlX(tg - 2)
+      ay = controlY(tg - 2)
+      have = 1
+    end if
+  end if
 end if
 if have = 0 and aimKnown = 1 then
   ax = keptX

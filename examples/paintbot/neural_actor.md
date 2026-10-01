@@ -447,6 +447,7 @@ gun cooldown, windup, spray cooldown, shield, respawn, the seat's current aim, h
 | teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 | 13 |
 | teams.view.1 movement-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23` | 51, 25, 2, 2, 2, 23, 23, 23, 23 | 14 |
 | teams.view.1 target-conditioned aim offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16` | 51, 25, 2, 2, 2, 368, 368 (logits; heads 5 and 6 are 16 identity rows of 23, drawn from the row of the identity the aim head chose) | 15 |
+| teams.view.1 mode | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16-5-12` | 51, 25, 2, 2, 2, 368, 368, 5, 12 (logits; contract 15's, then the movement-mode and aim-target heads, plain, after the identity rows) | 16 |
 | ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 | 12 |
 
 An action contract names head sizes; what each index means is the `policy.bas`'s business. The
