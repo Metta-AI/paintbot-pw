@@ -55,6 +55,11 @@ type
     scriptStatus: seq[int32] # 0 none, 1 running, 2 compile failed, 3 disabled at runtime
     scriptErrors: seq[string]
     scriptHeard: seq[seq[HeardMessage]] # Speech carried from the previous decision.
+    # What each seat said on the last decision (pw_seat_shouts): a scripted seat's script
+    # (scriptShouts, set with its orders), a caller-driven seat's reference decoder
+    # (decoderShouts; under ffa.view.1 pointer shout only). Never part of the world.
+    scriptShouts: seq[seq[string]]
+    decoderShouts: seq[seq[string]]
     scriptOrders: seq[Command] # What each scripted seat ordered on the last step.
     scriptCount: int
     # Curriculum knobs, kept across resets like scripts. A fire period above 1 lets a
@@ -79,7 +84,8 @@ type
     # Mapping-ceiling diagnostics (pw-bc): a scripted seat with a non-zero override mask
     # still runs its script every step (its orders are reported by pw_seat_orders) but
     # executes the caller's decoded action for the masked heads: 1 walk/goal/direct,
-    # 2 aim, 4 shoot, 8 grenade, 16 sneak. pw_script_decide runs the scripts' decision
+    # 2 aim, 4 shoot, 8 grenade, 16 sneak, 32 shout (what it says is its decoder's, not
+    # its script's). pw_script_decide runs the scripts' decision
     # for the current tick ahead of pw_step so the caller can read the orders, map them
     # and hand the mapped action to the same step.
     overrideMask: seq[int32]
@@ -108,8 +114,11 @@ type
     decidedTick: int32
     decidedValid: bool
     # Observation contract the handle encodes (chosen at create, kept across resets):
-    # teams.view.1 (pw_create) or ffa.view.1. The world never reads it.
+    # teams.view.1 (pw_create) or ffa.view.1. The world never reads it. heard: ffa.view.1h
+    # (native version 203): every row also carries the heard-speech rows (encodeFfaHeard)
+    # after the ffa.view.1 floats; speech is then delivered every step (scriptHeard).
     obsVersion: ObservationContractVersion
+    heard: bool
     # Neural BASIC I/O. userInputs: the K of observation contract teams.view.1u<K> or
     # ffa.view.1u<K> (pw_create_observation_inputs / _v; 0 otherwise): every pw_observe row is
     # the base contract's floats + K, the last K a policy seat's user inputs (zeros for any
@@ -190,6 +199,8 @@ proc allocSeats(env: ptr NativeEnv, n: int) =
   env.scriptStatus = newSeq[int32](n)
   env.scriptErrors = newSeq[string](n)
   env.scriptHeard = newSeq[seq[HeardMessage]](n)
+  env.scriptShouts = newSeq[seq[string]](n)
+  env.decoderShouts = newSeq[seq[string]](n)
   env.scriptOrders = newSeq[Command](n)
   env.scriptCount = 0
   env.firePeriod = newSeq[int32](n)
@@ -432,8 +443,10 @@ proc gateFire(env: ptr NativeEnv, slot: int, command: var Command) =
   else:
     command.shoot = false
 proc observationHash(env: ptr NativeEnv): string =
-  ## The observation contract hash this handle encodes (teams.view.1 or ffa.view.1, or either's u<K>).
-  if env.userInputs > 0: userInputsContractHash(env.userInputs, env.obsVersion)
+  ## The observation contract hash this handle encodes (teams.view.1 or ffa.view.1, or either's
+  ## u<K>; ffa.view.1h or ffa.view.1hu<K>).
+  if env.heard: heardContractHash(env.userInputs)
+  elif env.userInputs > 0: userInputsContractHash(env.userInputs, env.obsVersion)
   else: observationContractHash(env.obsVersion)
 proc installScript(env: ptr NativeEnv, slot: int) =
   ## A fresh runtime for the seat's source, as a new match loads its bots. A policy seat
@@ -464,6 +477,8 @@ proc resetScripts(env: ptr NativeEnv) =
   env.scriptCount = 0
   env.decidedValid = false
   env.scriptHeard = newSeq[seq[HeardMessage]](env.n)
+  env.scriptShouts = newSeq[seq[string]](env.n)
+  env.decoderShouts = newSeq[seq[string]](env.n)
   for slot in 0..<env.n:
     env.installScript(slot)
     if env.scripts[slot].len > 0: inc env.scriptCount
@@ -473,6 +488,8 @@ proc scriptDecide(env: ptr NativeEnv) =
   ## per world tick, inline from pw_step or ahead of it from pw_script_decide.
   heard = env.scriptHeard
   let decided = decide(env.scriptBots, env.world)
+  env.scriptShouts = shouts
+  env.scriptShouts.setLen(env.n)
   deliverSpeech(env.world)
   env.scriptHeard = heard
   for slot in 0..<env.n:
@@ -485,6 +502,33 @@ proc scriptDecide(env: ptr NativeEnv) =
   for slot in 0..<env.n: env.decided[slot] = decided[slot]
   env.decidedTick = env.world.tick
   env.decidedValid = true
+proc deliverDecoderSpeech(env: ptr NativeEnv, decoders: openArray[Bot], decoderSpoke: bool) =
+  ## The tick's speech with the caller-driven seats' in it (pw_step, after every seat
+  ## decided on the pre-step world): what the scripts said (scriptShouts, delivered already by
+  ## scriptDecide), with each caller-driven seat's decoder speech in place of its own: an
+  ## unscripted seat's always, a scripted seat's under override bit 32. Delivered again for
+  ## next tick on the same pre-step world, as scriptDecide delivers. Only when a decoder spoke,
+  ## a seat masks its shout, or speech an unscripted handle carried must be cleared: otherwise
+  ## nothing changes (no reference decode shouts outside ffa.view.1 pointer shout), so every
+  ## other contract is byte-identical.
+  var masked = false
+  for slot in 0..<env.n:
+    if decoders[slot] != nil and env.scripts[slot].len > 0 and (env.overrideMask[slot] and 32) != 0: masked = true
+  var stale = false
+  if env.scriptCount == 0:
+    env.sizeHeard()
+    for messages in env.scriptHeard:
+      if messages.len > 0: stale = true
+  if not (decoderSpoke or masked or stale): return
+  var said = newSeq[seq[string]](Seats)
+  if env.scriptCount > 0:
+    for slot in 0..<min(env.n, env.scriptShouts.len): said[slot] = env.scriptShouts[slot]
+  for slot in 0..<env.n:
+    if decoders[slot] == nil: continue
+    if env.scripts[slot].len == 0 or (env.overrideMask[slot] and 32) != 0: said[slot] = env.decoderShouts[slot]
+  shouts = said
+  deliverSpeech(env.world)
+  env.scriptHeard = heard
 const
   DecoderSource = staticRead("players/neural_decode.bas")
   DecoderSourceFfa = staticRead("players/neural_decode_ffa.bas")
@@ -507,9 +551,10 @@ proc pw_env_version*(): cint {.exportc, cdecl, dynlib.} = 1
 proc pw_observation_size*(): cint {.exportc, cdecl, dynlib.} = TeamsViewSize
 proc pw_action_count*(): cint {.exportc, cdecl, dynlib.} = ActionSizes.len
 
-const NativeObservationVersions = [ocTeamsView1.int32, ocFfaView1.int32]
+const NativeObservationVersions = [ocTeamsView1.int32, ocFfaView1.int32, NativeObservationFfaHeard.int32]
 proc obsContract(version: int32): ObservationContractVersion =
-  ## A native observation version already checked to be 201 or 202.
+  ## A native observation version already checked to be 201, 202 or 203 (ffa.view.1h: the
+  ## ffa.view.1 encoder plus the heard rows).
   if version == ocTeamsView1.int32: ocTeamsView1 else: ocFfaView1
 proc layoutOf(env: ptr NativeEnv): FfaViewLayout =
   ## The ffa.view.1 layout of the handle's current world.
@@ -517,22 +562,24 @@ proc layoutOf(env: ptr NativeEnv): FfaViewLayout =
 proc rowWidth(env: ptr NativeEnv): int =
   ## Floats per seat this handle's pw_observe writes: the contract's width (ffa.view.1: the
   ## current world's layout) plus the user inputs.
-  if env.obsVersion == ocFfaView1: env.layoutOf.size + env.userInputs
+  if env.obsVersion == ocFfaView1: env.layoutOf.size + (if env.heard: FfaHeardSize else: 0) + env.userInputs
   else: TeamsViewSize + env.userInputs
 proc actionHeads(env: ptr NativeEnv): seq[int] =
   ## The head sizes of the handle's action contract (teams.view.1: ActionSizes; ffa.view.1
-  ## pointer: the current world's layout).
-  if env.obsVersion == ocFfaView1: pointerHeads(env.layoutOf) else: actionHeadSizes(env.actionContract)
+  ## pointer: the current world's layout; its shout variant: those five, then the shout head).
+  if env.obsVersion == ocFfaView1: pointerHeads(env.layoutOf, env.actionContract)
+  else: actionHeadSizes(env.actionContract)
 proc logitWidth(env: ptr NativeEnv): int =
   ## Logits per seat under the handle's action contract (pw_step_logits' row stride).
   for h in env.actionHeads: result += h
 
-proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): pointer =
+proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion, heard = false): pointer =
   ready()
   if maxTicks < 0 or maxTicks > HeartMeterMatchTicks: return nil
   let env = cast[ptr NativeEnv](allocShared0(sizeof(NativeEnv)))
   try:
     env.obsVersion = obsVersion
+    env.heard = heard
     env.actionContract = pairedAction(obsVersion)
     env.kinLayout = -1
     env.glory = DefaultGloryConfig
@@ -558,21 +605,25 @@ proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.export
   ## pw_create with the observation contract chosen: 201 = teams.view.1 (identical to
   ## pw_create; the teams game only: pw_set_game_mode refuses FFA-kin on the handle),
   ## 202 = ffa.view.1 (any seat count, pw_set_seats; the width follows the match:
-  ## pw_handle_observation_size, pw_observation_layout). nil for any other version (the
-  ## contracts before teams.view.1 were retired for BASIC parity) or a bad max_ticks.
+  ## pw_handle_observation_size, pw_observation_layout), 203 = ffa.view.1h (opt-in: 202's
+  ## floats, then FfaHeardRows x FfaHeardWidth heard-speech floats, neural_contract
+  ## encodeFfaHeard: what the seat's BASIC heard* builtins read this tick). nil for any other
+  ## version (the contracts before teams.view.1 were retired for BASIC parity) or a bad
+  ## max_ticks.
   if obsVersion notin NativeObservationVersions: return nil
-  createEnv(seed, maxTicks, obsContract(obsVersion))
+  createEnv(seed, maxTicks, obsContract(obsVersion), heard = obsVersion == NativeObservationFfaHeard)
 
 proc pw_observation_size_for*(obsVersion: int32): cint {.exportc, cdecl, dynlib.} =
-  ## Floats per seat under observation contract `obsVersion`; -1 if unknown, and for 202
-  ## (ffa.view.1), whose width follows the match (pw_handle_observation_size).
+  ## Floats per seat under observation contract `obsVersion`; -1 if unknown, and for 202 / 203
+  ## (ffa.view.1 / ffa.view.1h), whose width follows the match (pw_handle_observation_size).
   if obsVersion != ocTeamsView1.int32: return -1
   TeamsViewSize.cint
 
 proc pw_observation_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
-  ## The handle's observation contract version (201 or 202); -1 for a nil handle.
+  ## The handle's observation contract version (201, 202 or 203); -1 for a nil handle.
   if handle == nil: return -1
-  cast[ptr NativeEnv](handle).obsVersion.cint
+  let env = cast[ptr NativeEnv](handle)
+  if env.heard: NativeObservationFfaHeard.cint else: env.obsVersion.cint
 
 proc pw_handle_observation_size*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   ## Floats per seat this handle's pw_observe writes (the row stride; ffa.view.1: the current
@@ -594,10 +645,13 @@ proc pw_create_observation_inputs_v*(seed, maxTicks, obsVersion, userInputs: int
   ## pw_create_observation_inputs), 202 = ffa.view.1u<K>: every pw_observe row is the match's
   ## ffa.view.1 floats (pw_observation_layout's sections, unchanged) followed by K user-input
   ## floats, a policy seat's as its policy.bas set them, zeros for every other seat; K = 0 is
-  ## pw_create_observation(seed, max_ticks, 202). nil for another version, a bad K or max_ticks.
+  ## pw_create_observation(seed, max_ticks, 202). 203 = ffa.view.1hu<K>: ffa.view.1h's floats
+  ## (the heard rows included), then the K user inputs. nil for another version, a bad K or
+  ## max_ticks.
   if obsVersion == ocTeamsView1.int32: return pw_create_observation_inputs(seed, maxTicks, userInputs)
-  if obsVersion != ocFfaView1.int32 or userInputs notin 0'i32..MaxUserInputs.int32: return nil
-  result = createEnv(seed, maxTicks, ocFfaView1)
+  if obsVersion notin [ocFfaView1.int32, NativeObservationFfaHeard.int32] or
+      userInputs notin 0'i32..MaxUserInputs.int32: return nil
+  result = createEnv(seed, maxTicks, ocFfaView1, heard = obsVersion == NativeObservationFfaHeard)
   if result != nil: cast[ptr NativeEnv](result).userInputs = userInputs.int
 
 proc pw_handle_user_inputs*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
@@ -637,7 +691,10 @@ proc pw_observation_layout*(handle: pointer, output: ptr UncheckedArray[int32]):
   ## Any other contract has no sections: [row floats, row floats, 0 ..., seats, control
   ## hearts, 0, 0] with the offsets, counts and widths 0 and valid column -1. Row floats
   ## include an ffa.view.1u<K> handle's K user inputs, the row's last K floats (the sections
-  ## are unchanged). Fixed for the match; a reset may change it (map, seats). 0, or -1 bad args.
+  ## are unchanged). An ffa.view.1h handle (203) also sets words 14 and 15: the heard-speech
+  ## rows' offset (the ffa.view.1 size: they follow the great heart rows) and their count
+  ## (FfaHeardRows, FfaHeardWidth floats each); any user inputs follow them. Fixed for the
+  ## match; a reset may change it (map, seats). 0, or -1 bad args.
   if handle == nil or output == nil: return -1
   let env = cast[ptr NativeEnv](handle)
   for i in 0..<ObservationLayoutWords: output[i] = 0
@@ -655,6 +712,9 @@ proc pw_observation_layout*(handle: pointer, output: ptr UncheckedArray[int32]):
   output[5] = l.heartOffset.int32; output[6] = l.heartRows.int32; output[7] = FfaHeartWidth
   output[8] = l.greatOffset.int32; output[9] = l.greatRows.int32; output[10] = FfaGreatWidth
   output[11] = FfaValidColumn
+  if env.heard:
+    output[14] = l.size.int32
+    output[15] = FfaHeardRows
   0
 
 proc pw_observation_rows*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32],
@@ -696,9 +756,10 @@ proc pw_action_layout*(handle: pointer, output: ptr UncheckedArray[int32]): cint
   0
 
 proc pw_action_layout_ext*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
-  ## The handle's action heads, 10 int32: [heads (5 or 7), the head sizes (7 slots, 0 past
+  ## The handle's action heads, 10 int32: [heads (5, 6 or 7), the head sizes (7 slots, 0 past
   ## the last head), logits per seat, 0]. teams.view.1 aim-offset: [7, 51, 25, 2, 2, 2, 23,
-  ## 23, 128, 0]. 0, or -1 bad args (and -1 under the nine-head movement-offset contract: use
+  ## 23, 128, 0]; ffa.view.1 pointer shout: [6, the five pointer heads, 3, 0, total, 0]. 0, or
+  ## -1 bad args (and -1 under the nine-head movement-offset contract: use
   ## pw_action_layout_ext2).
   if handle == nil or output == nil: return -1
   let env = cast[ptr NativeEnv](handle)
@@ -729,13 +790,16 @@ proc pw_set_action_contract*(handle: pointer, version: int32): cint {.exportc, c
   ## (teams.view.1, five heads per seat; the default) or 13 (teams.view.1 aim-offset, seven
   ## heads per seat: the five, then two 23-bin aim offsets the reference decoder adds to an
   ## identity aim) or 14 (teams.view.1 movement-offset, nine heads per seat: those seven, then
-  ## two 23-bin offsets the reference decoder adds to the movement goal); on a 202 handle 12
-  ## only. Kept across pw_reset; every decoder seat starts over. 0, or -1 bad args.
+  ## two 23-bin offsets the reference decoder adds to the movement goal); on a 202 / 203 handle
+  ## 12 (ffa.view.1 pointer, the default) or 15 (ffa.view.1 pointer shout: the five pointer
+  ## heads, then a 3-class shout head the reference decoder turns into BASIC shout(): 0
+  ## nothing, 1 "hurt", 2 "at"). Kept across pw_reset; every decoder seat starts over. 0, or -1
+  ## bad args.
   if handle == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32,
-      acTeamsView1Move.int32]: return -1
+      acTeamsView1Move.int32, acFfaView1PointerShout.int32]: return -1
   let contract = ActionContractVersion(version)
   if not pairs(env.obsVersion, contract): return -1
   env.actionContract = contract
@@ -756,11 +820,13 @@ proc pw_user_inputs_contract_hash*(userInputs: int32, output: ptr UncheckedArray
 proc pw_user_inputs_contract_hash_v*(obsVersion, userInputs: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## pw_user_inputs_contract_hash with the base contract named: 201 = teams.view.1u<K>,
-  ## 202 = ffa.view.1u<K> ("paintbot-pw.ffa.view.1u<K>"). -1 for another version or bad args.
+  ## 202 = ffa.view.1u<K> ("paintbot-pw.ffa.view.1u<K>"), 203 = ffa.view.1hu<K>
+  ## ("paintbot-pw.ffa.view.1hu<K>"). -1 for another version or bad args.
   if obsVersion == ocTeamsView1.int32: return pw_user_inputs_contract_hash(userInputs, output, capacity)
-  if obsVersion != ocFfaView1.int32: return -1
+  if obsVersion notin [ocFfaView1.int32, NativeObservationFfaHeard.int32]: return -1
   if output == nil or capacity < 65 or userInputs notin 1'i32..MaxUserInputs.int32: return -1
-  let hash = userInputsContractHash(userInputs.int, ocFfaView1)
+  let hash = if obsVersion == ocFfaView1.int32: userInputsContractHash(userInputs.int, ocFfaView1)
+             else: heardContractHash(userInputs.int)
   for i, c in hash: output[i] = c
   output[hash.len] = '\0'
   0
@@ -770,7 +836,8 @@ proc pw_observation_contract_hash*(obsVersion: int32, output: ptr UncheckedArray
   ## The 64-hex SHA-256 an actor and manifest carry for observation contract
   ## `obsVersion`, NUL-terminated; capacity must be >= 65. 0, or -1 bad args.
   if output == nil or capacity < 65 or obsVersion notin NativeObservationVersions: return -1
-  let hash = observationContractHash(obsContract(obsVersion))
+  let hash = if obsVersion == NativeObservationFfaHeard: heardContractHash(0)
+             else: observationContractHash(obsContract(obsVersion))
   for i, c in hash: output[i] = c
   output[hash.len] = '\0'
   0
@@ -805,8 +872,13 @@ proc observeSeats(env: ptr NativeEnv, chosen: proc(slot: int): bool, observation
   ## Encode the chosen seats' rows (row s at s * rowWidth) from each seat's SeatView of the
   ## current world, leaving the others as they are. teams.view.1u<K> / ffa.view.1u<K>: the
   ## row, then the seat's user inputs as its policy.bas left them (zeros for a seat without them).
+  ## ffa.view.1h: the heard-speech rows (after the ffa.view.1 floats) read the speech the last
+  ## step delivered (scriptHeard), what the seat's BASIC heard* builtins read this tick.
   let n = env.rowWidth
   beginViews(env.world)
+  if env.heard:
+    env.sizeHeard()
+    heard = env.scriptHeard
   for slot in 0..<env.n:
     if not chosen(slot): continue
     let view = seatView(slot)
@@ -816,7 +888,8 @@ proc observeSeats(env: ptr NativeEnv, chosen: proc(slot: int): bool, observation
     if env.userInputs > 0 and env.policy[slot] and bot != nil and bot.neural != nil:
       for i in 0..<min(inputs.len, bot.neural.userInputs.len): inputs[i] = bot.neural.userInputs[i]
     if env.obsVersion == ocFfaView1:
-      encodeObservation(view, ocFfaView1, row, inputs, rows = ffaViewRows(view), mask = env.obsMask)
+      encodeObservation(view, ocFfaView1, row, inputs, rows = ffaViewRows(view), mask = env.obsMask,
+        heard = env.heard)
     else:
       encodeObservation(view, ocTeamsView1, row, inputs)
     resets[slot] = env.resets[slot]
@@ -887,7 +960,7 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
   if env.world.winner != -1 or env.world.tick >= env.world.endTick: return -2
   let heads = env.actionHeads
   for slot in 0..<env.n:
-    if env.contract == acFfaView1Pointer: break  # forbid masks name the teams contract's movement indices
+    if env.obsVersion == ocFfaView1: break  # forbid masks name the teams contract's movement indices
     if not env.forbidAny[slot] or env.world.cogs[slot].hp <= 0 or env.commandPending[slot] or
         (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
     let movement = actions[slot*heads.len]
@@ -908,8 +981,16 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       bot.neural.choicesFed = true
       decoders[slot] = bot
     let decoded = decideSeats(decoders, env.world)
+    var decoderSpoke = false
     for slot in 0..<env.n:
-      if decoders[slot] != nil: commands[slot] = decoded[slot]
+      if decoders[slot] != nil:
+        commands[slot] = decoded[slot]
+        # What its decoder said (ffa.view.1 pointer shout's head 5; nothing under any other
+        # contract, whose reference decode never shouts).
+        env.decoderShouts[slot] = shouts[slot]
+        if shouts[slot].len > 0: decoderSpoke = true
+      else:
+        env.decoderShouts[slot].setLen(0)
     if env.scriptCount > 0:
       # The production tick: every BASIC seat decides on the pre-step world (hearing
       # what was shouted last tick), shouts are delivered for next tick, then the world
@@ -946,6 +1027,7 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
           if (mask and 8) != 0: cmd.chargeGrenade = caller.chargeGrenade
           if (mask and 16) != 0: cmd.sneak = caller.sneak
           commands[slot] = cmd
+    env.deliverDecoderSpeech(decoders, decoderSpoke)
     for slot in 0..<env.n:
       if env.commandPending[slot]:
         # The raw command replaces whatever the seat would have executed (a scripted
@@ -1492,6 +1574,30 @@ proc pw_seat_policy_extra_choices*(handle: pointer, seat: cint, output: ptr Unch
     output[2*ExtraHeadsMax+e] = n.appliedOffsetTemperatures[e]
   0
 
+proc pw_seat_shouts*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## What the seat said on the last decision, as shout-head labels (action contract ffa.view.1
+  ## pointer shout), four int32: [class, vocabulary mask, shouts, other shouts]. class is the
+  ## head class of its first shout() whose text is in the vocabulary (neural_contract
+  ## shoutClass: 1 "hurt", 2 "at"; 0 none), the behaviour-cloning label of the tick; bit c - 1
+  ## of the mask is set for every class it said (a seat may say several phrases in a tick: one
+  ## head class carries the first); shouts counts its shout() calls kept (at most 4 a tick) and
+  ## other shouts those whose text no class says. A scripted seat reports its script's speech
+  ## (with pw_seat_orders' timing: after pw_script_decide, the coming step's), a caller-driven
+  ## seat its reference decoder's. Zeros for a seat that said nothing. 0, or -1 bad args.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  for i in 0..<4: output[i] = 0
+  let said = if env.scripts[seat].len > 0: env.scriptShouts[seat] else: env.decoderShouts[seat]
+  for text in said:
+    let class = shoutClass(text)
+    if class == 0: inc output[3]
+    else:
+      if output[0] == 0: output[0] = class.int32
+      output[1] = output[1] or (1'i32 shl (class - 1))
+    inc output[2]
+  0
+
 proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## The command a scripted seat issued on the last pw_step, ten int32:
   ## [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct, scripted].
@@ -1535,8 +1641,9 @@ proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[
   0
 
 proc pw_action_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
-  ## The handle's action contract version: 11 (teams.view.1), 12 (ffa.view.1 pointer) or 13
-  ## (teams.view.1 aim-offset); -1 for a bad handle.
+  ## The handle's action contract version: 11 (teams.view.1), 12 (ffa.view.1 pointer), 13
+  ## (teams.view.1 aim-offset), 14 (teams.view.1 movement-offset) or 15 (ffa.view.1 pointer
+  ## shout); -1 for a bad handle.
   if handle == nil: return -1
   ready(handle)
   cint(cast[ptr NativeEnv](handle).contract)
@@ -1544,10 +1651,10 @@ proc pw_action_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
 proc pw_action_contract_hash*(version: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The 64-hex SHA-256 contract hash an actor and its manifest carry for action contract
-  ## `version` (11, 12, 13 or 14), NUL-terminated into output (capacity >= 65). Returns 0, -1
+  ## `version` (11, 12, 13, 14 or 15), NUL-terminated into output (capacity >= 65). Returns 0, -1
   ## for a bad version (the contracts before these were retired for BASIC parity) or buffer.
   if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32,
-      acTeamsView1Move.int32] or
+      acTeamsView1Move.int32, acFfaView1PointerShout.int32] or
       output == nil or capacity < 65: return -1
   let hash = actionContractHash(ActionContractVersion(version))
   copyMem(output, unsafeAddr hash[0], hash.len)
@@ -1573,8 +1680,10 @@ proc pw_set_seat_override*(handle: pointer, seat: cint, mask: int32): cint {.exp
   ## Diagnostic: heads of a scripted seat taken from the caller's action (decoded by the
   ## reference decoder script, as pw_step decodes a caller-driven seat) instead
   ## of the script's order (bits: 1 walk/goal/direct, 2 aim, 4 shoot, 8 grenade, 16
-  ## sneak; 0 = exact script play). Kept across pw_reset like the curriculum knobs.
-  if handle == nil or seat notin 0..<seatsOf(handle) or mask < 0 or mask > 31: return -1
+  ## sneak, 32 shout: what the seat says is its decoder's, under ffa.view.1 pointer shout,
+  ## instead of its script's; 0 = exact script play). Kept across pw_reset like the
+  ## curriculum knobs.
+  if handle == nil or seat notin 0..<seatsOf(handle) or mask < 0 or mask > 63: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   env.overrideMask[seat] = mask
@@ -1637,7 +1746,7 @@ proc pw_sample_actions*(handle: pointer, seat: cint, logits: FloatBuffer, action
   if handle == nil or seat notin 0..<seatsOf(handle) or logits == nil or actions == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
-  if env.contract == acFfaView1Pointer: return -1
+  if env.obsVersion == ocFfaView1: return -1
   try:
     var input: array[LogitSize, float32]
     for i in 0..<LogitSize: input[i] = logits[i]
@@ -1890,7 +1999,7 @@ proc pw_net_load_layout*(handle: pointer, data: pointer, length: int64, error: p
   try:
     let l = env.layoutOf
     let targets = pointerTargets(l)
-    let actor = loadActor(bytes, actorLayout(l, env.actionHeads, targets, env.userInputs))
+    let actor = loadActor(bytes, actorLayout(l, env.actionHeads, targets, env.userInputs, env.heard))
     let budget = neuralOperationBudget(env.n)
     if actor.operationCount > budget:
       raise newException(ValueError, "neural actor exceeds native operation budget: " &

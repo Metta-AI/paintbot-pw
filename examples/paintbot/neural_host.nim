@@ -93,9 +93,12 @@ type
     appliedMasks*: HeadMasks
     appliedTemperatures*: array[ActionSizes.len, int32]
     # Action contract ffa.view.1 pointer (observation contract ffa.view.1): the match layout
-    # the seat was loaded for, its heads' sizes (teams.view.1: ActionSizes) and the tick's
-    # row -> entity map (the observation's, which neuralRow reads back).
+    # the seat was loaded for, its heads' sizes (teams.view.1: ActionSizes; the shout variant:
+    # the five, then the shout head, held as extra head 0) and the tick's row -> entity map
+    # (the observation's, which neuralRow reads back). heard: observation contract
+    # ffa.view.1h / ffa.view.1hu<K> (the heard-speech rows follow the ffa.view.1 floats).
     pointer*: bool
+    heard*: bool
     layout*: FfaViewLayout
     heads*: seq[int]
     rows: FfaViewRows
@@ -309,7 +312,8 @@ const RetiredDecoderOptions* = ["fire_hold_teammates", "strafe_legs", "aim_snap"
   ## Native decoder rules retired for BASIC parity (docs/neural/seat-view.md): a manifest
   ## naming one is refused; write the rule in policy.bas instead.
 
-proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointer = false, extra = 0) =
+proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointer = false, extra = 0,
+    heard = false) =
   ## The manifest's selection options and user inputs onto the seat (nil manifest = none).
   ## `userInputs` is the K the actor's (or handle's) observation contract names.
   var sampling: SamplingOptions
@@ -329,7 +333,12 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
         case key
         of "sampling":
           sampling = parseSamplingOptions(value)
-          if sampling.offsetListed and extra < AimOffsetHeads:
+          if pointer and extra > 0 and (sampling.offsetListed or sampling.moveListed):
+            # The shout variant: head 5 is the shout head; there is no head 6 .. 8.
+            for e in extra..<ExtraHeadsMax:
+              if sampling.offsetHeads[e]:
+                raise newException(ValueError, "decoder.sampling.heads 6, 7 and 8 do not exist under action contract ffa.view.1 pointer shout")
+          elif sampling.offsetListed and extra < AimOffsetHeads:
             raise newException(ValueError, "decoder.sampling.heads 5 and 6 need action contract teams.view.1 aim-offset")
           if sampling.moveListed and extra < AimOffsetHeads + MoveOffsetHeads:
             raise newException(ValueError, "decoder.sampling.heads 7 and 8 need action contract teams.view.1 movement-offset")
@@ -350,8 +359,9 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
         raise newException(ValueError, "user_inputs need package schema 2")
       init = parseUserInputs(manifest["user_inputs"])
       sawInputs = true
-  # The user-input family of the seat's base contract (pointer: ffa.view.1, else teams.view.1).
-  let family = if pointer: "ffa.view.1u" else: "teams.view.1u"
+  # The user-input family of the seat's base contract (pointer: ffa.view.1 or ffa.view.1h,
+  # else teams.view.1).
+  let family = if heard: "ffa.view.1hu" elif pointer: "ffa.view.1u" else: "teams.view.1u"
   if sawInputs and userInputs == 0:
     raise newException(ValueError, "user_inputs need observation contract " & family & "<K>")
   if userInputs > 0 and not sawInputs:
@@ -366,6 +376,7 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
   seat.userInputs = init
   seat.userInputView = init
   seat.pointer = pointer
+  seat.heard = heard
   seat.offsetHeads = extra > 0
   seat.extraHeads = extra
   seat.heads = case extra
@@ -377,13 +388,16 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
     of AimOffsetHeads: LogitSizeOffset
     else: LogitSizeMove)
 
-proc observationFor(hash: string): (ObservationContractVersion, int) =
-  ## The encoder and user-input count an observation contract hash names: teams.view.1,
-  ## teams.view.1u<K> (= teams.view.1 + K), ffa.view.1 or ffa.view.1u<K> (= ffa.view.1 + K);
-  ## ValueError for anything else (a retired contract says so).
+proc observationFor(hash: string): (ObservationContractVersion, int, bool) =
+  ## The encoder, user-input count and heard-speech flag an observation contract hash names:
+  ## teams.view.1, teams.view.1u<K> (= teams.view.1 + K), ffa.view.1, ffa.view.1u<K>
+  ## (= ffa.view.1 + K), ffa.view.1h (ffa.view.1 + the heard rows) or ffa.view.1hu<K>
+  ## (ffa.view.1h + K); ValueError for anything else (a retired contract says so).
   let (base, k) = userInputsContract(hash)
-  if k > 0: return (base, k)
-  (observationContractVersion(hash), 0)
+  if k > 0: return (base, k, false)
+  let heardInputs = heardContractFromHash(hash)
+  if heardInputs >= 0: return (ocFfaView1, heardInputs, true)
+  (observationContractVersion(hash), 0, false)
 
 proc requireMode(observationContract: ObservationContractVersion) =
   ## teams.view.1 is the teams game's 16-seat contract, ffa.view.1 FFA-kin's.
@@ -396,8 +410,8 @@ proc requireMode(observationContract: ObservationContractVersion) =
     raise newException(ValueError, "observation contract ffa.view.1 is for FFA-kin only")
 
 proc requirePairing(observationContract: ObservationContractVersion, contract: ActionContractVersion) =
-  ## teams.view.1 goes with its five-head action contract or the aim-offset variant,
-  ## ffa.view.1 with its pointer contract.
+  ## teams.view.1 goes with its five-head action contract or the aim-offset / movement-offset
+  ## variants, ffa.view.1 with its pointer contract or the pointer contract's shout variant.
   if not pairs(observationContract, contract):
     raise newException(ValueError, "observation contract " & observationContractId(observationContract) &
       " cannot be played under action contract " & actionContractId(contract))
@@ -406,10 +420,11 @@ proc matchLayout*(): FfaViewLayout =
   ## The ffa.view.1 layout of the match about to be played: its seats and control hearts.
   ffaViewLayout(Seats, controlHeartCount())
 
-proc pointerSetup(seat: NeuralSeat, layout: FfaViewLayout) =
-  ## A pointer seat's heads and logits for the match layout.
+proc pointerSetup(seat: NeuralSeat, layout: FfaViewLayout, contract: ActionContractVersion) =
+  ## A pointer seat's heads and logits for the match layout (the shout variant: the five, then
+  ## the shout head).
   seat.layout = layout
-  seat.heads = pointerHeads(layout)
+  seat.heads = pointerHeads(layout, contract)
   var total = 0
   for h in seat.heads: total += h
   seat.logits = newSeq[float32](total)
@@ -440,28 +455,31 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   if not fileExists(modelPath): return
   let data = readActorFile(modelPath)
   let (peekObservation, peekAction) = peekContracts(data)
-  let (observationContract, userInputs) = observationFor(peekObservation)
+  let (observationContract, userInputs, heard) = observationFor(peekObservation)
   let contract = actionContractVersion(peekAction)
   requirePairing(observationContract, contract)
   requireMode(observationContract)
   if observationContract == ocFfaView1:
     let layout = matchLayout()
-    let heads = pointerHeads(layout)
+    let heads = pointerHeads(layout, contract)
     var total = 0
     for h in heads: total += h
-    let actor = loadActor(data, actorLayout(layout, heads, pointerTargets(layout), userInputs))
-    if actor.inputSize != layout.size + userInputs or actor.outputSize != total or actor.headSizes != heads:
-      raise newException(ValueError, "neural actor dimensions do not match this match's ffa.view.1 layout (" &
+    let width = layout.size + (if heard: FfaHeardSize else: 0) + userInputs
+    let actor = loadActor(data, actorLayout(layout, heads, pointerTargets(layout), userInputs, heard))
+    if actor.inputSize != width or actor.outputSize != total or actor.headSizes != heads:
+      raise newException(ValueError, "neural actor dimensions do not match this match's ffa.view.1" &
+        (if heard: "h" else: "") & " layout (" &
         $layout.seats & " seats, " & $layout.hearts & " control hearts" &
         (if userInputs > 0: ", " & $userInputs & " user inputs" else: "") & ")")
     budgetCheck(actor)
-    result.configureSeat(readManifest(sourcePath, actor), userInputs, pointer = true)
-    result.pointerSetup(layout)
+    result.configureSeat(readManifest(sourcePath, actor), userInputs, pointer = true, extra = extraHeads(contract),
+      heard = heard)
+    result.pointerSetup(layout, contract)
     result.setConditionals(actor.conditionals)
     result.actor = actor
     result.contract = contract
     result.observationContract = observationContract
-    result.observation = newSeq[float32](layout.size + userInputs)
+    result.observation = newSeq[float32](width)
     result.state = newSeq[float32](actor.stateSize)
     return
   let actor = loadActor(data)
@@ -493,17 +511,17 @@ proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string)
     raise newException(ValueError, "unsupported neural package schema")
   if manifest{"observation_contract"}.getStr != observationHash:
     raise newException(ValueError, "manifest observation contract does not match the handle's")
-  let (observationContract, userInputs) = observationFor(observationHash)
+  let (observationContract, userInputs, heard) = observationFor(observationHash)
   let contract = actionContractVersion(manifest{"action_contract"}.getStr)
   requirePairing(observationContract, contract)
   requireMode(observationContract)
-  let pointer = contract == acFfaView1Pointer
-  result.configureSeat(manifest, userInputs, pointer, extra = extraHeads(contract))
+  let pointer = observationContract == ocFfaView1
+  result.configureSeat(manifest, userInputs, pointer, extra = extraHeads(contract), heard = heard)
   result.contract = contract
   result.observationContract = observationContract
   if pointer:
-    result.pointerSetup(matchLayout())
-    result.observation = newSeq[float32](result.layout.size + userInputs)
+    result.pointerSetup(matchLayout(), contract)
+    result.observation = newSeq[float32](result.layout.size + (if heard: FfaHeardSize else: 0) + userInputs)
     result.fedLogits = newSeq[float32](result.logits.len)
     return
   result.observation = newSeq[float32](TeamsViewSize + userInputs)
@@ -515,14 +533,14 @@ proc decoderNeuralSeat*(slot: int, observationHash: string, contract: ActionCont
   ## selection, and neuralChoice / neuralRow / neuralLayout read them for the seat's decoder
   ## script. ValueError for an observation contract this match cannot play.
   result = NeuralSeat(slot: slot, previousTick: -1, external: true)
-  let (observationContract, _) = observationFor(observationHash)
+  let (observationContract, _, heard) = observationFor(observationHash)
   requireMode(observationContract)
   requirePairing(observationContract, contract)
   let pointer = observationContract == ocFfaView1
-  result.configureSeat(nil, 0, pointer, extra = extraHeads(contract))
+  result.configureSeat(nil, 0, pointer, extra = extraHeads(contract), heard = heard)
   result.contract = contract
   result.observationContract = observationContract
-  if pointer: result.pointerSetup(matchLayout())
+  if pointer: result.pointerSetup(matchLayout(), contract)
 
 proc beginTick*(seat: NeuralSeat, view: SeatView, matchSeed: int32) =
   ## The seat's tick starts on `view` (the pre-step world's): the recurrent state resets at
@@ -594,7 +612,8 @@ proc ensureObservation(seat: NeuralSeat) =
   if seat.observationContract == ocFfaView1:
     if ffaViewLayout(seat.view) != seat.layout:
       raise newException(ValueError, "the match's ffa.view.1 layout differs from the one the seat was loaded for")
-    encodeObservation(seat.view, ocFfaView1, seat.observation, seat.userInputView, rows = seat.rowsFor())
+    encodeObservation(seat.view, ocFfaView1, seat.observation, seat.userInputView, rows = seat.rowsFor(),
+      heard = seat.heard)
   else:
     encodeObservation(seat.view, ocTeamsView1, seat.observation, seat.userInputView)
   seat.observationFresh = true
@@ -625,10 +644,13 @@ proc selectConditionals(seat: NeuralSeat, actions: var array[ActionSizes.len, in
       else: reselectHead(seat.logits, offset, size, offsets, default(array[0, bool]), t, seat.sampleRng)
     if t > 0: inc seat.conditionalDraws
 
+proc selectOffsets(seat: NeuralSeat)
 proc pointerSample(seat: NeuralSeat) =
   ## Selection under action contract ffa.view.1 pointer: per head argmax (first maximum), or with
   ## decoder.sampling / neuralTemperature a categorical draw from softmax(logits / T) on the
-  ## seat's stream (pointerSelect). No masks (neuralMask is refused for pointer seats).
+  ## seat's stream (pointerSelect). No masks (neuralMask is refused for pointer seats). The shout
+  ## variant's head 5 is selected after the five heads and COND_HEAD, by the same rule, as the
+  ## teams contracts select their extra heads (selectOffsets).
   var temperatures = newSeq[float32](ActionSizes.len)
   for head in 0..<ActionSizes.len:
     temperatures[head] =
@@ -642,19 +664,24 @@ proc pointerSample(seat: NeuralSeat) =
     if t > 0: anyDraw = true
   if anyDraw: seat.seedStream()
   var draws = 0
-  let picked = pointerSelect(seat.logits, seat.heads, temperatures, seat.sampleRng, draws)
+  var mainLogits = 0
+  for head in 0..<ActionSizes.len: mainLogits += seat.heads[head]
+  let picked = pointerSelect(seat.logits.toOpenArray(0, mainLogits-1), seat.heads.toOpenArray(0, ActionSizes.len-1),
+    temperatures, seat.sampleRng, draws)
   if draws > 0: inc seat.sampleDraws
   for head in 0..<ActionSizes.len: seat.selected[head] = picked[head]
   seat.selectConditionals(seat.selected, temperatures, default(HeadMasks), masked = false)
   seat.appliedMasks = default(HeadMasks)
   seat.choices = seat.selected
+  if seat.offsetHeads: seat.selectOffsets()
   seat.sampled = true
 
 proc selectOffsets(seat: NeuralSeat) =
   ## The extra heads after the five main heads (aim offsets 5 and 6; under movement-offset
-  ## also 7 and 8): argmax (first maximum) or, with a temperature (neuralTemperature(h / -1),
-  ## else decoder.sampling), one draw each from the seat's stream (pointerSelect's rule), in
-  ## head order. With two extra heads this is exactly the aim-offset selection.
+  ## also 7 and 8; under ffa.view.1 pointer shout the shout head 5): argmax (first maximum) or,
+  ## with a temperature (neuralTemperature(h / -1), else decoder.sampling), one draw each from
+  ## the seat's stream (pointerSelect's rule), in head order. With two extra heads this is
+  ## exactly the aim-offset selection.
   let n = seat.extraHeads
   var temperatures = newSeq[float32](n)
   var sizes = newSeq[int](n)
@@ -670,7 +697,9 @@ proc selectOffsets(seat: NeuralSeat) =
     if temperatures[e] > 0: anyDraw = true
   if anyDraw: seat.seedStream()
   var draws = 0
-  let picked = pointerSelect(seat.logits.toOpenArray(LogitSize, seat.logits.len-1), sizes,
+  var mainLogits = 0  # LogitSize under the teams contracts
+  for head in 0..<ActionSizes.len: mainLogits += seat.heads[head]
+  let picked = pointerSelect(seat.logits.toOpenArray(mainLogits, seat.logits.len-1), sizes,
     temperatures, seat.sampleRng, draws)
   for e in 0..<n:
     seat.offsetSelected[e] = picked[e]
@@ -759,6 +788,9 @@ proc neuralLayoutWords(seat: NeuralSeat): array[16, int32] =
   result[8] = l.greatOffset.int32; result[9] = l.greatRows.int32; result[10] = FfaGreatWidth
   result[11] = FfaValidColumn
   result[13] = l.hearts.int32
+  if seat.heard:
+    result[14] = l.size.int32
+    result[15] = FfaHeardRows
 
 proc addNeuralFunctions*(h: var Host, seat: NeuralSeat) =
   ## The neural builtins. Each returns a number (a handle, an observation value, a logit, a

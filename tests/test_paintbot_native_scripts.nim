@@ -133,7 +133,7 @@ suite "Native BASIC seats":
         for slot in 0..<Seats:
           check setScript(handle, slot, baseSource) == 0
           check pw_set_seat_override(handle, slot.cint, 0) == 0
-        check pw_set_seat_override(handle, 0, 32) == -1
+        check pw_set_seat_override(handle, 0, 64) == -1
         var actions: array[LegacySeats*ActionSizes.len, int32]
         var rewards, terminals: array[LegacySeats, float32]
         var orders: array[10, int32]

@@ -105,7 +105,7 @@ class UserInputsMirrorTest(unittest.TestCase):
             self.assertEqual(self.hash_of(lib.pw_user_inputs_contract_hash_v, 201, k), teams[k])
             self.assertEqual(self.hash_of(lib.pw_user_inputs_contract_hash_v, 202, k), ffa[k])
         out = ctypes.create_string_buffer(65)
-        for version, k in ((202, 0), (202, MAX_USER_INPUTS + 1), (203, 1)):
+        for version, k in ((202, 0), (202, MAX_USER_INPUTS + 1), (204, 1)):
             self.assertEqual(lib.pw_user_inputs_contract_hash_v(version, k, out, 65), -1)
 
     def heartland(self, user_inputs):

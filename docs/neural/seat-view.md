@@ -53,7 +53,9 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
 
 - Observation contracts `paintbot-pw.teams.view.1` (512 floats; `teams.view.1u<K>` appends K
   user inputs) and `paintbot-pw.ffa.view.1` (width per match; `ffa.view.1u<K>` appends K user
-  inputs). User inputs are written only by the seat's policy.bas (`neuralInput`), so they add no
+  inputs; the opt-in `ffa.view.1h` appends 16 heard-speech rows built from the view's `heardText`
+  / `heardSlot` / `heardX` / `heardY` and `kin`, and `ffa.view.1hu<K>` K user inputs after them).
+  User inputs are written only by the seat's policy.bas (`neuralInput`), so they add no
   information the boundary does not already give BASIC. `encodeTeamsView` /
   `encodeFfaView` take a `SeatView`; `tests/test_paintbot_seat_view_parity.nim` re-derives
   every column from the view procs.
@@ -64,12 +66,16 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
   `...51-25-2-2-2-23-23-23-23` (also heads 7 and 8, `neuralChoice(7/8)`: the reference decode adds
   `(moveOffset(dx), moveOffset(dz))`, symmetric log-spaced bins from 16 u to 4000 u
   (`MoveOffsetTable`), mirrored for team 1, to the movement goal and clamps it to
-  the map; the destination is the network's choice, nothing native computes a goal) and
-  `paintbot-pw.ffa.view.1.action.pointer`.
+  the map; the destination is the network's choice, nothing native computes a goal),
+  `paintbot-pw.ffa.view.1.action.pointer` and its opt-in shout variant
+  `...pointer.shout-hurt-at` (head 5: 0 nothing, 1 / 2 the reference decode calls BASIC
+  `shout("hurt")` / `shout("at")`, the FFA-kin baseline's whole vocabulary; nothing native
+  speaks).
 - Heads become orders only in BASIC: `players/neural_decode.bas` and `neural_decode_ffa.bas`
   are the reference decode, run by `players/neural_policy.bas` and by the training library for
   every caller-driven seat (`pw_step`). `pw_set_action_contract` chooses only between
-  teams.view.1 (11) and its aim-offset (13) and movement-offset (14) variants on a teams handle.
+  teams.view.1 (11) and its aim-offset (13) and movement-offset (14) variants on a teams handle,
+  and between ffa.view.1 pointer (12) and its shout variant (15) on an ffa handle.
 - The retired contracts and decoder options are refused by name at staging
   (`neural_package.py`) and at load (`neural_host.nim`, `neural_contract.retiredContract`).
 - Training-only supervision: `pw_seat_privileged_labels` (21 floats: the retired world fields,

@@ -97,7 +97,8 @@ A PWNET002 actor may name any observation contract the host knows, including tea
 and ffa.view.1u<K> (`neural_basic.md`, manifest `user_inputs`): its input count is then 512 + K
 (ffa.view.1u<K>: the layout's size + K, which the input-count layout word `0xFFFEE000` resolves to),
 the K user inputs are ordinary input columns 512.. (ffa.view.1u<K>: the layout's size.., layout
-word section 2 offset + 24) (DENSE, CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP and SEGMENT_NEAR slices may read them), and the operation
+word section 2 offset + 24; under ffa.view.1h / ffa.view.1hu<K> the 128 heard-speech columns come
+first there and any user inputs follow them, so the input count is the layout's size + 128 + K) (DENSE, CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP and SEGMENT_NEAR slices may read them), and the operation
 count includes them like any other input. Staging reads the input count and contract from the PWNET002
 header. The file length must be exact: no trailing bytes. The package manifest binds the SHA-256
 of the whole file, as for PWNET001. Every weight must be finite; every unused `param` word
@@ -419,6 +420,8 @@ SHA-256 (the hash of the id string).
 | teams.view.1u<K> | `paintbot-pw.teams.view.1u<K>`, K = 1..256 | 512 + K | 201 + `pw_create_observation_inputs` |
 | ffa.view.1 | `paintbot-pw.ffa.view.1` | per match (`ffaViewLayout`) | 202 |
 | ffa.view.1u<K> | `paintbot-pw.ffa.view.1u<K>`, K = 1..256 | per match + K | 202 + `pw_create_observation_inputs_v` |
+| ffa.view.1h | `paintbot-pw.ffa.view.1h` | per match + 128 | 203 |
+| ffa.view.1hu<K> | `paintbot-pw.ffa.view.1hu<K>`, K = 1..256 | per match + 128 + K | 203 + `pw_create_observation_inputs_v` |
 
 `neural_contract.encodeTeamsView` and `encodeFfaView` document every column. teams.view.1 (the
 teams game, 16 seats): self and scoreboard (0..24), ten heart rows of 10 (25..124), sixteen
@@ -427,6 +430,9 @@ of 5 (445..484), nine terrain probes of 3 (485..511: in bounds, `waterAt`, `terr
 Team 1's positions and compass probes are mirrored. ffa.view.1 (FFA-kin): a 24-float header, then
 `min(seats - 1, 64)` cog rows of 44 in `nearAgents(20000)` order, one 12-float row per control
 heart and two great heart rows, nearest first; column 0 of every row is its valid flag.
+ffa.view.1h (opt-in) appends 16 heard-speech rows of 8 (`encodeFfaHeard`): valid, said "hurt",
+said "at", said other text, dx, dz, `kin(heardSlot)/100`, `heardSlot/255`, one row per message
+BASIC's `heardText(i)` reads this tick (the first 16), zero rows after them.
 
 Retired for BASIC parity (refused by the host and by staging): v1 (`...obs.v1.float448`), v2
 (`...obs.v2.float506`), v3 (`...obs.v3.float514`), v2u<K>, v3u<K>, ffa.v1 and ffa.v2. They read
@@ -441,6 +447,7 @@ gun cooldown, windup, spray cooldown, shield, respawn, the seat's current aim, h
 | teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 | 13 |
 | teams.view.1 movement-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23` | 51, 25, 2, 2, 2, 23, 23, 23, 23 | 14 |
 | ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 | 12 |
+| ffa.view.1 pointer shout | `paintbot-pw.ffa.view.1.action.pointer.shout-hurt-at` | 11 + H, 9 + C, 2, 2, 2, 3 | 15 |
 
 An action contract names head sizes; what each index means is the `policy.bas`'s business. The
 reference reading (`players/neural_decode.bas`, the training library's decoder):
@@ -452,6 +459,7 @@ reference reading (`players/neural_decode.bas`, the training library's decoder):
 | 2, 3, 4 | fire, charge grenade, sneak | the same |
 | 5, 6 (aim-offset, movement-offset) | `((ix - 11) * 28, (iz - 11) * 28)`, mirrored for team 1, added to an identity aim | |
 | 7, 8 (movement-offset) | `(moveOffset(dx), moveOffset(dz))`: bin 11 = 0, bin 11 ± j = ±(16, 28, 48, 84, 146, 253, 439, 763, 1326, 2303, 4000)[j-1] u, mirrored for team 1, added to head 0's goal (self for stay or an unseen pickup), clamped to the map | |
+| 5 (pointer shout) | | 0 nothing; 1 `shout("hurt")`; 2 `shout("at")` (ffa.bas's vocabulary, through BASIC `shout()`) |
 
 with d = (1,0), (1,1), (0,1), (-1,1), (-1,0), (-1,-1), (0,-1), (1,-1). "Keep" re-issues the aim the
 script last left the seat with. There is no native lead: the retired contract v2 and ffa.v2

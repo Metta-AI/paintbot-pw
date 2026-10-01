@@ -281,7 +281,9 @@ when defined(pwTraining):
   proc decideSeats*(bots:openArray[Bot],w:World):seq[Command] =
     ## Training: the non-nil seats of `bots` decide on `w` apart from `decide`'s tick (no
     ## speech delivered, no oracle tick started): the native host's decoder seats, which
-    ## neither shout nor ask. `decide`'s commands for the tick are left as they were.
+    ## never ask. What each says is left in shouts[slot] (emptied first) for the native host
+    ## to deliver (only the ffa.view.1 pointer shout decode shouts). `decide`'s commands for
+    ## the tick are left as they were.
     let saved = commands
     if shouts.len != Seats: shouts = newSeq[seq[string]](Seats)
     if heard.len != Seats: heard.setLen(Seats)
@@ -290,6 +292,7 @@ when defined(pwTraining):
     for slot in 0..<Seats:
       let b=(if slot < bots.len: bots[slot] else: nil)
       if b.isNil: continue
+      shouts[slot].setLen(0)
       runSeat(b, slot, w)
     result = commands
     commands = saved

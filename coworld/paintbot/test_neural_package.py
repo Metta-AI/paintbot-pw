@@ -23,7 +23,10 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             OBSERVATION_CONTRACT_FFA_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_HASH,
                             ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH,
                             RETIRED_OBSERVATION_CONTRACTS, RETIRED_ACTION_CONTRACTS, RETIRED_CONTRACT_HASHES,
-                            RETIRED_DECODER_OPTIONS)
+                            RETIRED_DECODER_OPTIONS, ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT,
+                            ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HEARD,
+                            FFA_HEARD_CONTRACT_HASHES, FFA_HEARD_ROWS, FFA_HEARD_WIDTH, SHOUT_VOCABULARY,
+                            SHOUT_CLASSES, heard_contract_id, shout_class, shout_labels)
 
 ROOT = Path(__file__).parents[2]
 TEAMS, FFA = OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH
@@ -1011,6 +1014,90 @@ class FfaUserInputTests(unittest.TestCase):
         # A teams.view.1u<K> hash under the pointer contract is still refused.
         with self.assertRaisesRegex(ValueError, "goes with"):
             unpack_package(self.ffa_package(5, observation=tv1u_hash(5)))
+
+
+class FfaSpeechTests(unittest.TestCase):
+    """Action contract ffa.view.1 pointer shout (five pointer heads + a 3-class shout head) and observation contract
+    ffa.view.1h / ffa.view.1hu<K> (ffa.view.1 + 16 heard-speech rows of 8, then K user inputs)."""
+    SHOUT = ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT_HASH
+    HEADS = [21, 24, 2, 2, 2, SHOUT_CLASSES]
+
+    def speech_package(self, observation=FFA, action=None, decoder=None, user_inputs=None):
+        action = action or self.SHOUT
+        heads = self.HEADS if action == self.SHOUT else [21, 24, 2, 2, 2]
+        model = pwnet2(40, heads, [(1, [40, sum(heads)], [], 40 * sum(heads))], obs=observation, act=action)
+        overrides = {**SCHEMA2, "observation_contract": observation, "action_contract": action}
+        if decoder is not None:
+            overrides["decoder"] = decoder
+        if user_inputs is not None:
+            overrides["user_inputs"] = user_inputs
+        return package(overrides, model=model)
+
+    def test_ids_hashes_and_vocabulary_match_the_engine(self):
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        ids = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        self.assertEqual(ids["ActionContractFfaView1PointerShout"], ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT)
+        self.assertEqual(ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT, "paintbot-pw.ffa.view.1.action.pointer.shout-hurt-at")
+        self.assertEqual(self.SHOUT, sha(ACTION_CONTRACT_FFA_VIEW_1_POINTER_SHOUT))
+        self.assertEqual(ids["ObservationContractFfaView1Heard"], OBSERVATION_CONTRACT_FFA_VIEW_1_HEARD)
+        self.assertEqual(OBSERVATION_CONTRACT_FFA_VIEW_1_HEARD, "paintbot-pw.ffa.view.1h")
+        self.assertIn('ShoutVocabulary* = ["hurt", "at"]', source)
+        self.assertEqual(SHOUT_VOCABULARY, ("hurt", "at"))
+        self.assertEqual(SHOUT_CLASSES, 3)
+        self.assertRegex(source, r"(?m)^  FfaHeardRows\* = %d$" % FFA_HEARD_ROWS)
+        self.assertRegex(source, r"(?m)^  FfaHeardWidth\* = %d$" % FFA_HEARD_WIDTH)
+        self.assertEqual(heard_contract_id(0), "paintbot-pw.ffa.view.1h")
+        self.assertEqual(heard_contract_id(7), "paintbot-pw.ffa.view.1hu7")
+        self.assertEqual(FFA_HEARD_CONTRACT_HASHES, {sha(heard_contract_id(k)): k for k in range(0, MAX_USER_INPUTS + 1)})
+        others = (set(USER_INPUTS_CONTRACT_HASHES) | set(FFA_USER_INPUTS_CONTRACT_HASHES) | RETIRED_CONTRACT_HASHES
+                  | {TEAMS, FFA, ACT, OFFSET, POINTER, self.SHOUT})
+        self.assertFalse(set(FFA_HEARD_CONTRACT_HASHES) & others)
+        # The vocabulary is exactly the FFA-kin baseline's shout() texts.
+        said = re.findall(r'shout\(strNew\("([^"]*)"\)\)', (ROOT / "coworld/heartland/players/ffa.bas").read_text())
+        self.assertEqual(sorted(set(said)), sorted(SHOUT_VOCABULARY))
+        # The reference decode says exactly those through BASIC shout().
+        decode = (ROOT / "examples/paintbot/players/neural_decode_ffa.bas").read_text()
+        for c, text in enumerate(SHOUT_VOCABULARY, 1):
+            self.assertIn('if said = %d then\n    shout(strNew("%s"))' % (c, text), decode)
+
+    def test_shout_class_and_replay_labels(self):
+        self.assertEqual([shout_class(t) for t in ("hurt", "at", "", "Hurt", "at ", "Grenade out!")], [1, 2, 0, 0, 0, 0])
+        speech = [{"tick": 1, "slot": 0, "text": "hurt"}, {"tick": 1, "slot": 0, "text": "at"},
+                  {"tick": 3, "slot": 2, "text": "at"}, {"tick": 3, "slot": 1, "text": "Contact! Cover this lane."},
+                  {"tick": 9, "slot": 0, "text": "hurt"}]
+        labels = shout_labels(speech, ticks=4, seats=3)
+        self.assertEqual(labels, [[1, 0, 0], [0, 0, 0], [0, 0, 2], [0, 0, 0]])
+
+    def test_staged_pairings(self):
+        for observation in (FFA, fv1u_hash(3), sha(heard_contract_id(0)), sha(heard_contract_id(3))):
+            for action in (POINTER, self.SHOUT):
+                k = FFA_USER_INPUTS_CONTRACT_HASHES.get(observation) or FFA_HEARD_CONTRACT_HASHES.get(observation, 0)
+                inputs = {"count": k, "init": [0] * k} if k else None
+                _, _, manifest = unpack_package(self.speech_package(observation, action, user_inputs=inputs))
+                self.assertEqual(manifest["action_contract"], action)
+        with self.assertRaisesRegex(ValueError, "goes with"):
+            unpack_package(self.speech_package(TEAMS))
+        with self.assertRaisesRegex(ValueError, "goes with"):
+            unpack_package(self.speech_package(sha(heard_contract_id(0)), ACT))
+        with self.assertRaisesRegex(ValueError, "ffa.view.1hu3 needs manifest user_inputs"):
+            unpack_package(self.speech_package(sha(heard_contract_id(3))))
+        with self.assertRaisesRegex(ValueError, "user_inputs need observation contract ffa.view.1hu<K>"):
+            unpack_package(self.speech_package(sha(heard_contract_id(0)), user_inputs={"count": 1, "init": [0]}))
+
+    def test_sampling_heads(self):
+        for heads in ([5], [0, 5], [0, 1, 2, 3, 4, 5]):
+            _, _, manifest = unpack_package(self.speech_package(decoder={"sampling": {"mode": "categorical",
+                                                                                       "heads": heads}}))
+            self.assertEqual(manifest["decoder"]["sampling"]["heads"], heads)
+        for heads in ([6], [5, 7], [8]):
+            with self.assertRaisesRegex(ValueError, "heads 6, 7 and 8 do not exist"):
+                unpack_package(self.speech_package(decoder={"sampling": {"mode": "categorical", "heads": heads}}))
+        # Under the plain pointer contract head 5 is still refused, with the same message as before.
+        with self.assertRaisesRegex(ValueError, "heads 5 and 6 need action contract teams.view.1 aim-offset"):
+            unpack_package(self.speech_package(action=POINTER, decoder={"sampling": {"mode": "categorical",
+                                                                                     "heads": [5]}}))
+        with self.assertRaisesRegex(ValueError, "not available under action contract ffa.view.1 pointer"):
+            unpack_package(self.speech_package(decoder={"forbid_objectives": [9]}))
 
 
 if __name__ == "__main__":

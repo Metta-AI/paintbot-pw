@@ -12,6 +12,9 @@
 ' fire, grenade and sneak: 1 = on. "Keep" re-issues the aim this script last left the seat
 ' with (its last order, or its walking goal when it gave none), known from the second tick of
 ' a life on; with none known the seat is given no aim and a shot waits for one.
+' Its shout variant ffa.view.1 pointer shout (heads 11+H, 9+C, 2, 2, 2, 3; neuralLayout(21) = 3)
+' adds head 5: 0 says nothing, 1 shout("hurt"), 2 shout("at"), the FFA-kin baseline's
+' (ffa.bas) whole vocabulary, said through the same BASIC verb.
 dim cdx(8)
 dim cdz(8)
 cdx(0) = 1
@@ -115,3 +118,12 @@ else
 end if
 chargeGrenade(neuralChoice(3))
 sneak(neuralChoice(4))
+if neuralLayout(21) = 3 then
+  said = neuralChoice(5)
+  if said = 1 then
+    shout(strNew("hurt"))
+  end if
+  if said = 2 then
+    shout(strNew("at"))
+  end if
+end if
