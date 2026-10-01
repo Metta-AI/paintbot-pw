@@ -900,3 +900,33 @@ See [package and host API](../../examples/paintbot/neural_basic.md) and
 weight layout, reset semantics, and local validation commands. These interfaces
 require a game version containing the neural runtime; older game versions accept
 only their previously supported policy formats.
+
+
+## Private replay annotations
+
+Hosted policies can record intent separately from PRINT logs and the replay:
+
+```basic
+code = ANNOTATE(worldTick, strNew("intent"), strNew("selectTarget"), strNew("{""target"":7}"))
+```
+
+The three text arguments are Paintbot string-pool handles; use `strNew` as with other
+string-taking host functions. `worldTick` supplies the replay's simulation tick.
+No VM changes or public speech are involved.
+
+`ANNOTATE` returns 0 when buffered, 1 without a destination, 2 for invalid arguments
+or JSON, 3 for a record over 2 KiB, 4 after 1,000 records or 2 MiB per seat per
+episode, and 5 for a write failure. Rejected calls do not disable the policy;
+normal instruction and work budgets still apply (1,024 work units per call).
+The JSON arguments must be an object. Limits include the serialized envelope and
+newline. Earlier accepted records remain in order when a later call is rejected.
+
+The host binds each seat's optional `annotations_uri`, opens a private JSONL file
+on its first valid event, and flushes/closes it with existing player outputs before
+publishing results. No calls means no file. Local hosts without a destination
+return 1. Writes use the same synchronous buffering model as PRINT; storage can
+block and a crash before flushing can lose buffered events.
+
+The platform collects the file privately. Owners can download it with
+`coworld episode-annotations EPISODE_REQUEST_ID POLICY_VERSION_ID --output annotations.jsonl`.
+The replay viewer does not display annotations yet.

@@ -1,7 +1,7 @@
 import
   std/[os, posix, strutils, times, uri],
   jsony, mummy,
-  basic, cli
+  basic, cli, annotations
 
 const
   PlayerLogLimit* = 10 * 1024 * 1024
@@ -26,7 +26,7 @@ type
     slot*: int
     fileUri*, contentHash*: string
     sizeBytes*: int64
-    logUri*, artifactUri*: string
+    logUri*, artifactUri*, annotationsUri*: string
   CoworldSeats* = object
     schema*: string
     seats*: seq[CoworldSeat]
@@ -64,6 +64,7 @@ var
   seats*: CoworldSeats
   config*: CoworldConfig
   logs: seq[PlayerLog]
+  annotationSinks: seq[AnnotationSink]
   server: Server
   serverThread: Thread[ServerAddress]
   resultsPath, replayPath, failurePath: string
@@ -184,8 +185,17 @@ proc playerError*(slot: int, message: string) =
   logs[slot].failed = true
   playerLog(slot, "\nBASIC error: " & message & "\n")
 
-proc closePlayerLogs*() =
-  ## Flushes and closes all seat logs before publishing episode completion.
+proc playerAnnotations*(slot: int): AnnotationSink =
+  ## Schema/local hosts have no destination, including before options are loaded.
+  if slot >= 0 and slot < annotationSinks.len:
+    result = annotationSinks[slot]
+
+proc closePlayerOutputs*() =
+  ## Flushes and closes private outputs before publishing episode completion.
+  for slot, sink in annotationSinks:
+    if sink.close() == AnnotationWriteFailed:
+      playerLog(slot, "\n[Annotations: " & AnnotationWriteFailed.annotationMessage & ".]\n")
+  annotationSinks.setLen(0)
   for log in logs.mitems:
     if log.file != nil:
       try:
@@ -224,7 +234,7 @@ proc compilePlayer*(
     result = compile(source, host, limits)
   except BasicError as error:
     playerError(slot, error.msg)
-    closePlayerLogs()
+    closePlayerOutputs()
     writePlayerStatus()
     writeAtomic(failurePath, PlayerFailure(
       message: "BASIC compilation failed for player slot " & $slot,
@@ -296,6 +306,10 @@ proc coworldOptions*(slotCount: int): GameOptions =
     windowWidth: 1920,
     windowHeight: 1080
   )
+  annotationSinks = newSeq[AnnotationSink](slotCount)
+  for slot, seat in seats.seats:
+    if seat.annotationsUri.len > 0:
+      annotationSinks[slot] = newAnnotationSink(localPath(seat.annotationsUri))
   logs.setLen(slotCount)
   for slot, seat in seats.seats:
     if seat.slot != slot:
@@ -308,7 +322,7 @@ proc coworldOptions*(slotCount: int): GameOptions =
       createDir(logPath.parentDir)
       logs[slot].file = open(logPath, fmWrite)
     except IOError, OSError:
-      closePlayerLogs()
+      closePlayerOutputs()
       raise newException(CoworldError,
         "Cannot open player files: " & getCurrentExceptionMsg())
     result.botGroups.add BotGroup(path: path, count: 1)
@@ -337,7 +351,7 @@ proc finishCoworld*(results: NumericCoworldResults) =
     raise newException(CoworldError, "Incomplete Coworld results or replay")
   for slot in 0 ..< logs.len:
     playerLog(slot, "\nPlayer slot " & $slot & " completed.\n")
-  closePlayerLogs()
+  closePlayerOutputs()
   writePlayerStatus()
   echo "Coworld episode completed after ", results.ticks, " ticks."
   try:
