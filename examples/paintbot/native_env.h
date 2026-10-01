@@ -189,6 +189,17 @@ int pw_seat_weapon_stats(void *handle, int seat, int32_t *stats);
 int pw_seat_grenade_stats(void *handle, int seat, int32_t *six);
 int pw_seat_equip_stats(void *handle, int seat, int32_t *eight);
 int pw_heart_terrain(void *handle, int32_t *output, int32_t capacity);
+/* World snapshots (training library only). pw_world_save: the handle's whole match state as one
+ * versioned, deterministic blob (world, per-seat settings and streams, BASIC seats' runtime state,
+ * decoders, telemetry; ends with a sha256 trailer); returns its size and writes it only when
+ * capacity >= size (capacity 0 sizes it); a pure read; -1 bad args. A policy network's recurrent
+ * state is the caller's. pw_world_load: replaces the handle's match state with a blob from the same
+ * build, observation version and seat count; 0, -1 bad args, -2 another format / build / handle
+ * shape, -3 corrupt or truncated; a refused load leaves the handle unchanged.
+ * pw_world_load_error: the calling thread's last refusal reason, NUL-terminated; returns its length. */
+int64_t pw_world_save(void *handle, void *output, int64_t capacity);
+int pw_world_load(void *handle, const void *data, int64_t length);
+int pw_world_load_error(char *output, int32_t capacity);
 /* pw_seat_privileged_labels (TRAINING-ONLY supervision labels; training_labels.nim): float[21]
  * for the seat on the current pre-step world = {gun cooldown, gun windup, spray cooldown,
  * shield, respawn (ticks), aim x, aim z, own heart meter, enemy heart meter (scoreTicks; 0 in

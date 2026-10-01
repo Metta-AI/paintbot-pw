@@ -3091,3 +3091,127 @@ proc addStringFunctions*(host: var Host, pool: StringPool) =
   let strTrimProc: HostProc = proc(arguments: openArray[int32]): int32 =
     pool.addChecked(pool.getString(arguments[0]).strip)
   discard host.addFunction("strTrim", 1, strTrimProc, linearCost)
+
+# ---- State snapshots (additive; nothing above reads or calls these) ----
+# saveState / restoreState capture a Runtime's or a StringPool's mutable state between runs as
+# bytes, for hosts that resume a match exactly (the paintbot training library's
+# pw_world_save / pw_world_load). The program, limits and host bindings are not part of the
+# state: a snapshot restores only into a runtime (pool) built from the same program, which
+# restoreState checks by the program's fingerprint. No existing proc or type is changed.
+
+proc snapPut(s: var seq[byte], v: int64) =
+  for i in 0..7: s.add byte((v shr (8*i)) and 0xff)
+
+proc snapPutInts(s: var seq[byte], xs: openArray[int32]) =
+  s.snapPut(xs.len.int64)
+  for x in xs: s.snapPut(x.int64)
+
+proc snapGet(s: openArray[byte], at: var int): int64 =
+  if at + 8 > s.len: raise newException(ValueError, "truncated BASIC state snapshot")
+  var u = 0'u64
+  for i in 0..7: u = u or (uint64(s[at+i]) shl (8*i))
+  at += 8
+  cast[int64](u)
+
+proc snapGetInts(s: openArray[byte], at: var int): seq[int32] =
+  let n = s.snapGet(at)
+  if n < 0 or n > (s.len - at) div 8: raise newException(ValueError, "corrupt BASIC state snapshot")
+  result = newSeq[int32](n)
+  for i in 0..<n.int: result[i] = s.snapGet(at).int32
+
+proc fingerprint*(program: Program): string =
+  ## Identifies a compiled program for state snapshots: code size, routine and global layout,
+  ## array cells and literals. Equal sources compile to equal fingerprints.
+  result = $program.code.len & "/" & $program.routines.len & "/" & $program.arrayCells & "/" &
+    $program.maxRegisters & "/" & $program.maxParameters
+  for name in program.globalNames: result.add "|" & name
+  for lit in program.literals: result.add "#" & $lit.len & ":" & lit
+
+proc saveState*(runtime: Runtime): seq[byte] =
+  ## The runtime's state between runs: globals, array memory, registers, arguments, call
+  ## frames, host data, the program counter and counters, and the budgets.
+  let fp = runtime.program.fingerprint
+  result.snapPut(fp.len.int64)
+  for c in fp: result.add byte(c)
+  result.snapPutInts(runtime.globals)
+  result.snapPutInts(runtime.memory)
+  result.snapPutInts(runtime.registers)
+  result.snapPutInts(runtime.arguments)
+  result.snapPut(runtime.frames.len.int64)
+  for f in runtime.frames:
+    result.snapPut(f.base.int64); result.snapPut(f.routine.int64); result.snapPut(f.returnPc.int64)
+  result.snapPutInts(runtime.hostData)
+  for v in [runtime.pc.int64, runtime.base.int64, runtime.routine.int64, runtime.depth.int64,
+      runtime.remainingInstructions, runtime.remainingWork, runtime.printedBytes,
+      runtime.printedEvents, runtime.allocatedBytes, runtime.finished.int64]:
+    result.snapPut(v)
+
+proc restoreState*(runtime: var Runtime, data: openArray[byte]) =
+  ## Restores a saveState snapshot into a runtime built from the same program; ValueError for a
+  ## different program or a malformed snapshot (the runtime is then unchanged).
+  var at = 0
+  let n = data.snapGet(at)
+  if n < 0 or n > data.len - at: raise newException(ValueError, "corrupt BASIC state snapshot")
+  var fp = newString(n.int)
+  for i in 0..<n.int: fp[i] = char(data[at+i])
+  at += n.int
+  if fp != runtime.program.fingerprint:
+    raise newException(ValueError, "BASIC state snapshot is from a different program")
+  let globals = data.snapGetInts(at)
+  let memory = data.snapGetInts(at)
+  let registers = data.snapGetInts(at)
+  let arguments = data.snapGetInts(at)
+  let nf = data.snapGet(at)
+  if nf < 0 or nf > (data.len - at) div 24: raise newException(ValueError, "corrupt BASIC state snapshot")
+  var frames = newSeq[Frame](nf)
+  for i in 0..<nf.int:
+    frames[i] = Frame(base: data.snapGet(at).int32, routine: data.snapGet(at).int32,
+      returnPc: data.snapGet(at).int32)
+  let hostData = data.snapGetInts(at)
+  var v: array[10, int64]
+  for i in 0..9: v[i] = data.snapGet(at)
+  if at != data.len: raise newException(ValueError, "corrupt BASIC state snapshot")
+  if hostData.len != runtime.hostData.len:
+    raise newException(ValueError, "BASIC state snapshot host data does not match the runtime")
+  runtime.globals = globals; runtime.memory = memory
+  runtime.registers = registers; runtime.arguments = arguments
+  runtime.frames = frames; runtime.hostData = hostData
+  runtime.pc = v[0].int32; runtime.base = v[1].int32; runtime.routine = v[2].int32
+  runtime.depth = v[3].int32; runtime.remainingInstructions = v[4]
+  runtime.remainingWork = v[5]; runtime.printedBytes = v[6]
+  runtime.printedEvents = v[7]; runtime.allocatedBytes = v[8]; runtime.finished = v[9] != 0
+
+proc saveState*(pool: StringPool): seq[byte] =
+  ## The string pool's state between runs: its arena, spans and literal handles.
+  let fp = if pool.program.isNil: "" else: pool.program.fingerprint
+  result.snapPut(fp.len.int64)
+  for c in fp: result.add byte(c)
+  result.snapPut(pool.arena.len.int64)
+  for c in pool.arena: result.add byte(c)
+  result.snapPut(pool.spans.len.int64)
+  for sp in pool.spans:
+    result.snapPut(sp.start.int64); result.snapPut(sp.length.int64)
+  result.snapPutInts(pool.literalHandles)
+
+proc restoreState*(pool: StringPool, data: openArray[byte]) =
+  ## Restores a StringPool saveState snapshot into a pool built for the same program.
+  var at = 0
+  let n = data.snapGet(at)
+  if n < 0 or n > data.len - at: raise newException(ValueError, "corrupt BASIC string snapshot")
+  var fp = newString(n.int)
+  for i in 0..<n.int: fp[i] = char(data[at+i])
+  at += n.int
+  if fp != (if pool.program.isNil: "" else: pool.program.fingerprint):
+    raise newException(ValueError, "BASIC string snapshot is from a different program")
+  let na = data.snapGet(at)
+  if na < 0 or na > data.len - at: raise newException(ValueError, "corrupt BASIC string snapshot")
+  var arena = newString(na.int)
+  for i in 0..<na.int: arena[i] = char(data[at+i])
+  at += na.int
+  let ns = data.snapGet(at)
+  if ns < 0 or ns > (data.len - at) div 16: raise newException(ValueError, "corrupt BASIC string snapshot")
+  var spans = newSeq[StringSpan](ns)
+  for i in 0..<ns.int: spans[i] = StringSpan(start: data.snapGet(at).int32, length: data.snapGet(at).int32)
+  let lits = data.snapGetInts(at)
+  if at != data.len: raise newException(ValueError, "corrupt BASIC string snapshot")
+  pool.arena = arena; pool.spans = spans; pool.literalHandles = lits
