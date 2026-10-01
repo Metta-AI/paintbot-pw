@@ -142,7 +142,7 @@ suite "Native policy-script seats":
     check pw_user_inputs_contract_hash(K, cast[ptr UncheckedArray[char]](addr hash[0]), 65) == 0
     check $cast[cstring](addr hash[0]) == contract
     check pw_user_inputs_contract_hash(0, cast[ptr UncheckedArray[char]](addr hash[0]), 65) == -1
-    check pw_user_inputs_contract_hash(129, cast[ptr UncheckedArray[char]](addr hash[0]), 65) == -1
+    check pw_user_inputs_contract_hash(257, cast[ptr UncheckedArray[char]](addr hash[0]), 65) == -1
     check pw_set_seat_policy_script(nil, 0, nil, 0, nil, 0) == -1
     check setPolicy(handle, 16, Policy, manifest) == -1
     var message: array[256, char]

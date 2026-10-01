@@ -476,7 +476,7 @@ class UserInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "within 1 .. 256"):
             unpack_package(self.inputs_package(256, user_inputs={"count": 257, "init": [0] * 257}))
         with self.assertRaisesRegex(ValueError, "unknown neural observation contract"):
-            unpack_package(self.inputs_package(128, observation=tv1u_hash(129)))
+            unpack_package(self.inputs_package(256, observation=tv1u_hash(257)))
 
     def test_packages_without_user_inputs_are_unaffected(self):
         _, model, manifest = unpack_package(package(SCHEMA2))

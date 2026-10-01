@@ -130,7 +130,7 @@ suite "Native training environment":
         (0.cint, userInputsContractHash(k.int))
       check userInputsContractHash(k.int) == sha256Hex("paintbot-pw.teams.view.1u" & $k)
       pw_destroy(a); pw_destroy(b)
-    for (v, k) in [(201'i32, 0'i32), (201'i32, 129'i32), (202'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32)]:
+    for (v, k) in [(201'i32, 0'i32), (201'i32, 257'i32), (202'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32)]:
       check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash_v(v, k, o, 65))[0] == -1
     check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash(3, o, 64))[0] == -1
     let zero = pw_create_observation_inputs(1, 100, 0)

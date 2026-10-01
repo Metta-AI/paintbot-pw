@@ -360,9 +360,9 @@ neuralInput(0, worldTick)
     for k in 1..MaxUserInputs:
       check userInputsFromHash(userInputsContractHash(k)) == k
       check userInputsContractHash(k) == sha256Hex(userInputsContractId(k))
-    # The cap is 128; the teams.view.1u<K> hashes are the SHA-256 of their ids (pinned from
+    # The cap is 256; the teams.view.1u<K> hashes are the SHA-256 of their ids (pinned from
     # an independent sha256 of "paintbot-pw.teams.view.1u<K>").
-    check MaxUserInputs == 128
+    check MaxUserInputs == 256
     check userInputsContractId(7) == "paintbot-pw.teams.view.1u7"
     check ObservationContractTeamsView1Hash == "8ee935f46326c0c513fac82c14634becf48199c364f4688553fa26aedbc1f08e"
     check userInputsContractHash(1) == "ebcc4b0e1b3542c99c04b7ec7466a0244c26b495b0b174b9c10791fd3cab9a60"
