@@ -130,6 +130,9 @@ commands still go through `walkTo`, `lookAt`, `shootAt`, and `chargeGrenade`.
 Scalar fields used by a script refresh each decision. Scripts can declare their
 own typed records for persistent memory, as `players/base.bas` does.
 
+See [Porting Paintbot BASIC to Bassy](../../docs/bassy-porting.md) for record
+accessor examples, numeric changes, and the host-side binding API.
+
 BASIC read-only data: `selfId`, `selfTeam`, `selfX`, `selfY`, `selfHp`, `carrying`,
 `homeX`, `homeY`, `heartX`, `heartY`, `ownHeartX`, `ownHeartY`, `ownHeartStolen`,
 `worldTick`, `hasGrenade`, `hasSpray`, `armorHp`, `livesLeft`, `grenadeCharge`,
