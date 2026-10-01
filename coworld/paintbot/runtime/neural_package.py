@@ -49,11 +49,12 @@ RETIRED_OBSERVATION_CONTRACTS = ("paintbot-pw.rules37.obs.v1.float448", "paintbo
                                  "paintbot-pw.rules48.obs.ffa.v2")
 RETIRED_ACTION_CONTRACTS = ("paintbot-pw.rules37.action.v1.51-25-2-2-2", "paintbot-pw.rules37.action.v2.51-25-2-2-2",
                             "paintbot-pw.rules48.action.ffa.v2.pointer")
-MAX_USER_INPUTS, USER_INPUT_LIMIT = 128, 1000000
+MAX_USER_INPUTS, USER_INPUT_LIMIT = 256, 1000000
+RETIRED_USER_INPUTS = 128  # the retired v2u<K> / v3u<K> families existed only up to the cap of their day
 RETIRED_CONTRACT_HASHES = (
     {contract_hash(c) for c in RETIRED_OBSERVATION_CONTRACTS + RETIRED_ACTION_CONTRACTS}
-    | {contract_hash("paintbot-pw.rules39.obs.v2u%d" % k) for k in range(1, MAX_USER_INPUTS + 1)}
-    | {contract_hash("paintbot-pw.rules43.obs.v3u%d" % k) for k in range(1, MAX_USER_INPUTS + 1)})
+    | {contract_hash("paintbot-pw.rules39.obs.v2u%d" % k) for k in range(1, RETIRED_USER_INPUTS + 1)}
+    | {contract_hash("paintbot-pw.rules43.obs.v3u%d" % k) for k in range(1, RETIRED_USER_INPUTS + 1)})
 RETIRED_MESSAGE = "was retired for BASIC parity (docs/neural/seat-view.md); retrain on teams.view.1 or ffa.view.1"
 # Schema-2 "decoder" options: selection only (the network's own distribution, reshaped). Every key must be
 # one the host knows, so a bundle asking for an option this release lacks is rejected at staging rather than
@@ -78,7 +79,7 @@ USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k)): k for 
 
 
 def validate_user_inputs(value):
-    """user_inputs: {"count": K, "init": [K ints]}, K within 1 .. 128, init values within +-1,000,000. Returns K."""
+    """user_inputs: {"count": K, "init": [K ints]}, K within 1 .. 256, init values within +-1,000,000. Returns K."""
     if not isinstance(value, dict):
         raise ValueError("user_inputs must be an object")
     for key in value:

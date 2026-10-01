@@ -414,7 +414,7 @@ SHA-256 (the hash of the id string).
 | contract | id | inputs | native version |
 |---|---|---|---|
 | teams.view.1 | `paintbot-pw.teams.view.1` | 512 | 201 (`pw_create`) |
-| teams.view.1u<K> | `paintbot-pw.teams.view.1u<K>`, K = 1..128 | 512 + K | 201 + `pw_create_observation_inputs` |
+| teams.view.1u<K> | `paintbot-pw.teams.view.1u<K>`, K = 1..256 | 512 + K | 201 + `pw_create_observation_inputs` |
 | ffa.view.1 | `paintbot-pw.ffa.view.1` | per match (`ffaViewLayout`) | 202 |
 
 `neural_contract.encodeTeamsView` and `encodeFfaView` document every column. teams.view.1 (the

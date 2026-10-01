@@ -108,7 +108,9 @@ const
     "paintbot-pw.rules40.obs.ffa.v1.float810", "paintbot-pw.rules48.obs.ffa.v2"]
   RetiredActionContractIds* = ["paintbot-pw.rules37.action.v1.51-25-2-2-2",
     "paintbot-pw.rules37.action.v2.51-25-2-2-2", "paintbot-pw.rules48.action.ffa.v2.pointer"]
-  MaxUserInputs* = 128
+  MaxUserInputs* = 256
+  ## The retired v2u<K> / v3u<K> families existed only up to the cap of their day (128).
+  RetiredUserInputsMax* = 128
   UserInputLimit* = 1_000_000'i32
 
 proc userInputsContractId*(k: int): string = ObservationContractTeamsView1 & "u" & $k
@@ -123,7 +125,7 @@ proc retiredContract*(hash: string): bool =
   if retiredHashes.len == 0:
     for id in RetiredObservationContractIds: retiredHashes.add sha256Hex(id)
     for id in RetiredActionContractIds: retiredHashes.add sha256Hex(id)
-    for k in 1..MaxUserInputs:
+    for k in 1..RetiredUserInputsMax:
       retiredHashes.add sha256Hex("paintbot-pw.rules39.obs.v2u" & $k)
       retiredHashes.add sha256Hex("paintbot-pw.rules43.obs.v3u" & $k)
   hash in retiredHashes
@@ -131,7 +133,7 @@ proc retiredContract*(hash: string): bool =
 const RetiredMessage* = "was retired for BASIC parity (docs/neural/seat-view.md); retrain on teams.view.1 or ffa.view.1"
 
 proc userInputsContractHash*(k: int): string =
-  ## The hash of observation contract teams.view.1u<K>, K = 1 .. 128.
+  ## The hash of observation contract teams.view.1u<K>, K = 1 .. 256.
   if k notin 1..MaxUserInputs: raise newException(ValueError, "no user-input observation contract for that count")
   if userInputHashes.len == 0:
     for i in 1..MaxUserInputs: userInputHashes.add sha256Hex(userInputsContractId(i))

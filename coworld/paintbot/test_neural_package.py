@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
 from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpack_package, MAX_MODEL_BYTES,
-                            validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS, USER_INPUT_LIMIT,
+                            validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS, USER_INPUT_LIMIT, RETIRED_USER_INPUTS,
                             validate_pwnet2, attention_ops, MAX_NEURAL_OPERATIONS, PWNET2_LIMITS,
                             USER_INPUTS_CONTRACT_HASHES, segment_near_ops, neural_budget, attn_pool_ops,
                             LAYOUT_WORD_PREFIX, TEAMS_VIEW_1_SIZE, ACTION_SIZES, ACTION_SIZES_OFFSET, ACTION_SIZES_MOVE,
@@ -251,14 +251,15 @@ class ContractTests(unittest.TestCase):
         source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
         self.assertIn('retiredHashes.add sha256Hex("paintbot-pw.rules39.obs.v2u" & $k)', source)
         self.assertIn('retiredHashes.add sha256Hex("paintbot-pw.rules43.obs.v3u" & $k)', source)
-        self.assertEqual(len(RETIRED_CONTRACT_HASHES), 5 + 3 + 2 * MAX_USER_INPUTS)
+        self.assertEqual(len(RETIRED_CONTRACT_HASHES), 5 + 3 + 2 * RETIRED_USER_INPUTS)
+        self.assertEqual(RETIRED_USER_INPUTS, 128)
         self.assertFalse(RETIRED_CONTRACT_HASHES & ({TEAMS, FFA, ACT, OFFSET, POINTER} | set(USER_INPUTS_CONTRACT_HASHES)))
 
     def test_each_retired_observation_contract_is_refused(self):
         # Refused by name before anything else is read (the model here is not even an actor).
         retired = [sha(c) for c in RETIRED_OBSERVATION_CONTRACTS]
-        retired += [sha("paintbot-pw.rules39.obs.v2u%d" % k) for k in range(1, MAX_USER_INPUTS + 1)]
-        retired += [sha("paintbot-pw.rules43.obs.v3u%d" % k) for k in range(1, MAX_USER_INPUTS + 1)]
+        retired += [sha("paintbot-pw.rules39.obs.v2u%d" % k) for k in range(1, RETIRED_USER_INPUTS + 1)]
+        retired += [sha("paintbot-pw.rules43.obs.v3u%d" % k) for k in range(1, RETIRED_USER_INPUTS + 1)]
         self.assertEqual(sha("paintbot-pw.rules37.obs.v2.float506"), retired[1])
         self.assertEqual(sha("paintbot-pw.rules39.obs.v2u1"), "bd80f4d35088c1f5e673e9b91d16df826e1cfb0e590185dbf4d8bf59af0bdb04")
         self.assertEqual(sha("paintbot-pw.rules43.obs.v3u1"), "8086b6f36b9c2cf07e9e6586e97221e484f809e08669075663c5dcf9cb63ac36")
@@ -418,7 +419,7 @@ class UserInputTests(unittest.TestCase):
 
     def test_user_inputs_field_rules(self):
         for value, message in (([], "must be an object"), ({"init": []}, "count is required"),
-                               ({"count": 0, "init": []}, "within 1 .. 128"), ({"count": 129, "init": [0] * 129}, "within 1 .. 128"),
+                               ({"count": 0, "init": []}, "within 1 .. 256"), ({"count": 257, "init": [0] * 257}, "within 1 .. 256"),
                                ({"count": 2.0, "init": [0, 0]}, "must be an integer"), ({"count": True, "init": [0]}, "integer"),
                                ({"count": 2}, "init is required"), ({"count": 2, "init": 5}, "init must be an array"),
                                ({"count": 2, "init": [0]}, "count entries"), ({"count": 1, "init": [1000001]}, "within -1000000"),
@@ -464,17 +465,18 @@ class UserInputTests(unittest.TestCase):
         consts = {name: int(value.replace("_", "")) for name, value in
                   re.findall(r"^  (\w+)\* = ([0-9_]+)(?:'i32)?$", source, re.M)}
         self.assertEqual((MAX_USER_INPUTS, USER_INPUT_LIMIT), (consts["MaxUserInputs"], consts["UserInputLimit"]))
-        self.assertEqual(MAX_USER_INPUTS, 128)
-        self.assertEqual(USER_INPUTS_CONTRACT_HASHES, {tv1u_hash(k): k for k in range(1, 129)})
-        self.assertNotIn(tv1u_hash(129), USER_INPUTS_CONTRACT_HASHES)
-        # teams.view.1u129 is no contract (refused before the manifest's count is read); a count of 129 is refused
+        self.assertEqual(RETIRED_USER_INPUTS, consts["RetiredUserInputsMax"])
+        self.assertEqual(MAX_USER_INPUTS, 256)
+        self.assertEqual(USER_INPUTS_CONTRACT_HASHES, {tv1u_hash(k): k for k in range(1, 257)})
+        self.assertNotIn(tv1u_hash(257), USER_INPUTS_CONTRACT_HASHES)
+        # teams.view.1u257 is no contract (refused before the manifest's count is read); a count of 257 is refused
         # under any contract.
         with self.assertRaisesRegex(ValueError, "unknown neural observation contract"):
-            unpack_package(self.inputs_package(129))
-        with self.assertRaisesRegex(ValueError, "within 1 .. 128"):
-            unpack_package(self.inputs_package(128, user_inputs={"count": 129, "init": [0] * 129}))
+            unpack_package(self.inputs_package(257))
+        with self.assertRaisesRegex(ValueError, "within 1 .. 256"):
+            unpack_package(self.inputs_package(256, user_inputs={"count": 257, "init": [0] * 257}))
         with self.assertRaisesRegex(ValueError, "unknown neural observation contract"):
-            unpack_package(self.inputs_package(128, observation=tv1u_hash(129)))
+            unpack_package(self.inputs_package(256, observation=tv1u_hash(257)))
 
     def test_packages_without_user_inputs_are_unaffected(self):
         _, model, manifest = unpack_package(package(SCHEMA2))

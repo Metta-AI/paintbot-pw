@@ -216,7 +216,7 @@ int pw_observation_contract(void *handle);
 int pw_observation_contract_hash(int32_t obs_version, char *sixty_five_bytes, int32_t capacity);
 /* Neural BASIC I/O, training side.
  * pw_create_observation_inputs: observation contract teams.view.1u<K>
- * "paintbot-pw.teams.view.1u<K>" (K = user_inputs, 1..128; 0 = pw_create): every pw_observe
+ * "paintbot-pw.teams.view.1u<K>" (K = user_inputs, 1..256; 0 = pw_create): every pw_observe
  * row is teams.view.1's 512 floats followed by K floats, a policy seat's user inputs as its
  * policy.bas left them (float32(v) / 1000: what its next decision's observation reads),
  * zeros for every other seat. pw_handle_user_inputs = the handle's K;

@@ -311,8 +311,8 @@ neuralInput(1, -99)
 """ & Act, userInputs = 2)
     check readBack.play(31, 100).len == 100
 
-  test "user-input actors above the old 32 and 64 caps: K = 33 .. 128 load and play, K = 129 is rejected":
-    for k in [33, 34, 64, 65, 66, 128]:
+  test "user-input actors above the old 32, 64 and 128 caps: K = 33 .. 256 load and play, K = 257 is rejected":
+    for k in [33, 34, 64, 65, 66, 128, 129, 133, 256]:
       checkpoint "K = " & $k
       # The last input is written and read back through the observation tail.
       let players = bundle("""
@@ -325,14 +325,15 @@ neuralInput(0, worldTick)
       check not players[0].failed
       check players[0].neural.userInputs.len == k
       check players.play(31, 100).len == 100
-    let k128 = userInputsContractHash(128)
+    let k256 = userInputsContractHash(256)
     var zeros: seq[string]
-    for i in 0..<129: zeros.add "0"
-    check bundle(Act, userInputs = 128, manifest = manifestFor(k128, userInputs =
-      "{\"count\": 129, \"init\": [" & zeros.join(", ") & "]}"))[0].failed
-    for bad in ["neuralInput(128, 1)\n", "neuralObs(" & $(TeamsViewSize + 128) & ")\n"]:
+    for i in 0..<257: zeros.add "0"
+    check bundle(Act, userInputs = 256, manifest = manifestFor(k256, userInputs =
+      "{\"count\": 257, \"init\": [" & zeros.join(", ") & "]}"))[0].failed
+    expect ValueError: discard userInputsContractHash(257)
+    for bad in ["neuralInput(256, 1)\n", "neuralObs(" & $(TeamsViewSize + 256) & ")\n"]:
       checkpoint bad
-      let outOfRange = bundle(bad & Act, userInputs = 128)
+      let outOfRange = bundle(bad & Act, userInputs = 256)
       discard outOfRange.decide(newWorld(3))
       check outOfRange[0].failed
 
@@ -359,20 +360,21 @@ neuralInput(0, worldTick)
     for k in 1..MaxUserInputs:
       check userInputsFromHash(userInputsContractHash(k)) == k
       check userInputsContractHash(k) == sha256Hex(userInputsContractId(k))
-    # The cap is 128; the teams.view.1u<K> hashes are the SHA-256 of their ids (pinned from
+    # The cap is 256; the teams.view.1u<K> hashes are the SHA-256 of their ids (pinned from
     # an independent sha256 of "paintbot-pw.teams.view.1u<K>").
-    check MaxUserInputs == 128
+    check MaxUserInputs == 256
     check userInputsContractId(7) == "paintbot-pw.teams.view.1u7"
     check ObservationContractTeamsView1Hash == "8ee935f46326c0c513fac82c14634becf48199c364f4688553fa26aedbc1f08e"
     check userInputsContractHash(1) == "ebcc4b0e1b3542c99c04b7ec7466a0244c26b495b0b174b9c10791fd3cab9a60"
     check userInputsContractHash(32) == "1006d74e5bd17d8d7e1d45ac98dcf8d884b45548a698333a98166bf0047cb900"
     check userInputsContractHash(64) == "10d64eb9a884839996372c62fb3373a8b11bc51b9b7281166d6311043eb0ffcf"
     check userInputsContractHash(128) == "40f2dd5ee2a19d984849e2db01ac42be57ef0a4b05fa86c6fd3eb184e57f2bca"
-    var zeros129: seq[string]
-    for i in 0..<129: zeros129.add "0"
-    expect ValueError: discard parseUserInputs(parseJson("{\"count\": 129, \"init\": [" & zeros129.join(", ") & "]}"))
+    check userInputsContractHash(256) == "92f6de3c188ea128c81aa83b12fb137366cde77c532980b3867e196b7584f1b0"
+    var zeros257: seq[string]
+    for i in 0..<257: zeros257.add "0"
+    expect ValueError: discard parseUserInputs(parseJson("{\"count\": 257, \"init\": [" & zeros257.join(", ") & "]}"))
     expect ValueError: discard userInputsContractHash(0)
-    expect ValueError: discard userInputsContractHash(129)
+    expect ValueError: discard userInputsContractHash(257)
     check userInputsFromHash(ObservationContractTeamsView1Hash) == 0
     # The retired v2u<K> / v3u<K> families are not user-input contracts any more: a bundle
     # naming one is refused.
