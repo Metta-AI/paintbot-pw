@@ -48,6 +48,7 @@ type
     # ffa.view.1 handles lay out every seat's row from its SeatView (ffaViewRows) each time
     # it is asked; nothing about apparent identities is cached here.
     resets: seq[float32]
+    histories: seq[TeamsHistory]   # teams.view.1h: each seat's motion history (encodeTeamsViewH), reset by pw_reset
     stats: CombatTelemetry # Cumulative since the last create/reset; see pw_seat_stats.
     # BASIC seats: the production interpreter, host functions, limits and per-decision
     # budget from bots.nim drive these slots instead of the caller's actions.
@@ -192,6 +193,8 @@ proc allocSeats(env: ptr NativeEnv, n: int) =
   ## seat count, call it; a reset that keeps the count keeps every setting.
   env.n = n
   env.resets = newSeq[float32](n)
+  env.histories = newSeq[TeamsHistory](n)
+  for h in env.histories.mitems: h.resetHistory()
   env.decoders = newSeq[Bot](n)
   env.scripts = newSeq[string](n)
   env.scriptBots = newSeq[Bot](n)
@@ -535,10 +538,10 @@ proc pw_env_version*(): cint {.exportc, cdecl, dynlib.} = 1
 proc pw_observation_size*(): cint {.exportc, cdecl, dynlib.} = TeamsViewSize
 proc pw_action_count*(): cint {.exportc, cdecl, dynlib.} = ActionSizes.len
 
-const NativeObservationVersions = [ocTeamsView1.int32, ocFfaView1.int32]
+const NativeObservationVersions = [ocTeamsView1.int32, ocFfaView1.int32, ocTeamsView1h.int32]
 proc obsContract(version: int32): ObservationContractVersion =
-  ## A native observation version already checked to be 201 or 202.
-  if version == ocTeamsView1.int32: ocTeamsView1 else: ocFfaView1
+  ## A native observation version already checked to be 201, 202 or 203.
+  if version == ocTeamsView1.int32: ocTeamsView1 elif version == ocTeamsView1h.int32: ocTeamsView1h else: ocFfaView1
 proc layoutOf(env: ptr NativeEnv): FfaViewLayout =
   ## The ffa.view.1 layout of the handle's current world.
   ffaViewLayout(env.n, env.world.controlHearts.len)
@@ -546,6 +549,7 @@ proc rowWidth(env: ptr NativeEnv): int =
   ## Floats per seat this handle's pw_observe writes: the contract's width (ffa.view.1: the
   ## current world's layout) plus the user inputs.
   if env.obsVersion == ocFfaView1: env.layoutOf.size + env.userInputs
+  elif env.obsVersion == ocTeamsView1h: TeamsViewHSize + env.userInputs
   else: TeamsViewSize + env.userInputs
 proc actionHeads(env: ptr NativeEnv): seq[int] =
   ## The head sizes of the handle's action contract (teams.view.1: ActionSizes; ffa.view.1
@@ -571,6 +575,7 @@ proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): p
     env.allocSeats(LegacySeats)
     env.newEnvWorld(seed, maxTicks)
     for i in 0..<env.n: env.resets[i] = 1
+    for h in env.histories.mitems: h.resetHistory()
     env.resetStats()
     env.initCurriculum()
     env.resetDecoders()
@@ -589,7 +594,8 @@ proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.export
   ## pw_create with the observation contract chosen: 201 = teams.view.1 (identical to
   ## pw_create; the teams game only: pw_set_game_mode refuses FFA-kin on the handle),
   ## 202 = ffa.view.1 (any seat count, pw_set_seats; the width follows the match:
-  ## pw_handle_observation_size, pw_observation_layout). nil for any other version (the
+  ## pw_handle_observation_size, pw_observation_layout), 203 = teams.view.1h (teams.view.1 + the 100-float
+  ## motion-history block, 612 floats; the teams game only). nil for any other version (the
   ## contracts before teams.view.1 were retired for BASIC parity) or a bad max_ticks.
   if obsVersion notin NativeObservationVersions: return nil
   createEnv(seed, maxTicks, obsContract(obsVersion))
@@ -597,6 +603,7 @@ proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.export
 proc pw_observation_size_for*(obsVersion: int32): cint {.exportc, cdecl, dynlib.} =
   ## Floats per seat under observation contract `obsVersion`; -1 if unknown, and for 202
   ## (ffa.view.1), whose width follows the match (pw_handle_observation_size).
+  if obsVersion == ocTeamsView1h.int32: return TeamsViewHSize.cint
   if obsVersion != ocTeamsView1.int32: return -1
   TeamsViewSize.cint
 
@@ -627,8 +634,8 @@ proc pw_create_observation_inputs_v*(seed, maxTicks, obsVersion, userInputs: int
   ## floats, a policy seat's as its policy.bas set them, zeros for every other seat; K = 0 is
   ## pw_create_observation(seed, max_ticks, 202). nil for another version, a bad K or max_ticks.
   if obsVersion == ocTeamsView1.int32: return pw_create_observation_inputs(seed, maxTicks, userInputs)
-  if obsVersion != ocFfaView1.int32 or userInputs notin 0'i32..MaxUserInputs.int32: return nil
-  result = createEnv(seed, maxTicks, ocFfaView1)
+  if obsVersion notin [ocFfaView1.int32, ocTeamsView1h.int32] or userInputs notin 0'i32..MaxUserInputs.int32: return nil
+  result = createEnv(seed, maxTicks, obsContract(obsVersion))
   if result != nil: cast[ptr NativeEnv](result).userInputs = userInputs.int
 
 proc pw_handle_user_inputs*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
@@ -805,9 +812,9 @@ proc pw_user_inputs_contract_hash_v*(obsVersion, userInputs: int32, output: ptr 
   ## pw_user_inputs_contract_hash with the base contract named: 201 = teams.view.1u<K>,
   ## 202 = ffa.view.1u<K> ("paintbot-pw.ffa.view.1u<K>"). -1 for another version or bad args.
   if obsVersion == ocTeamsView1.int32: return pw_user_inputs_contract_hash(userInputs, output, capacity)
-  if obsVersion != ocFfaView1.int32: return -1
+  if obsVersion notin [ocFfaView1.int32, ocTeamsView1h.int32]: return -1
   if output == nil or capacity < 65 or userInputs notin 1'i32..MaxUserInputs.int32: return -1
-  let hash = userInputsContractHash(userInputs.int, ocFfaView1)
+  let hash = userInputsContractHash(userInputs.int, obsContract(obsVersion))
   for i, c in hash: output[i] = c
   output[hash.len] = '\0'
   0
@@ -836,6 +843,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
   try:
     env.newEnvWorld(seed, maxTicks)
     for i in 0..<env.n: env.resets[i] = 1
+    for h in env.histories.mitems: h.resetHistory()
     env.resetStats()
     env.resetScripts()
     env.resetCurriculum()
@@ -868,6 +876,8 @@ proc observeSeats(env: ptr NativeEnv, chosen: proc(slot: int): bool, observation
       for i in 0..<min(inputs.len, bot.neural.userInputs.len): inputs[i] = bot.neural.userInputs[i]
     if env.obsVersion == ocFfaView1:
       encodeObservation(view, ocFfaView1, row, inputs, rows = ffaViewRows(view), mask = env.obsMask)
+    elif env.obsVersion == ocTeamsView1h:
+      encodeObservation(view, ocTeamsView1h, row, inputs, history = addr env.histories[slot])
     else:
       encodeObservation(view, ocTeamsView1, row, inputs)
     resets[slot] = env.resets[slot]
@@ -1144,7 +1154,7 @@ proc pw_set_game_mode*(handle: pointer, mode: int32): cint {.exportc, cdecl, dyn
   ## pw_reset (the current world keeps its mode). 0, or -1 bad args (FFA-kin on an
   ## observation contract teams.view.1 handle included: teams.view.1 is the teams game's).
   if handle == nil or mode notin 0'i32..1'i32: return -1
-  if mode == 1 and cast[ptr NativeEnv](handle).obsVersion == ocTeamsView1: return -1
+  if mode == 1 and cast[ptr NativeEnv](handle).obsVersion in {ocTeamsView1, ocTeamsView1h}: return -1
   cast[ptr NativeEnv](handle).nextMode = GameMode(mode)
   0
 
@@ -1221,7 +1231,7 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
       writeMessage(error, capacity, e.msg)
       return -2
   let env = cast[ptr NativeEnv](handle)
-  if config.mode == gmFfaKin and env.obsVersion == ocTeamsView1:
+  if config.mode == gmFfaKin and env.obsVersion in {ocTeamsView1, ocTeamsView1h}:
     # Observation contract teams.view.1 is the teams game's, as pw_set_game_mode refuses it too.
     writeMessage(error, capacity, "observation contract teams.view.1 is for the teams game only")
     return -2
@@ -2356,6 +2366,8 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
       var br = SnapReader(data: blob)
       br.loadBot(b)
     env[] = tmp
+    # teams.view.1h: a loaded world starts its seats' motion histories over (the snapshot holds no history)
+    for h in env.histories.mitems: h.resetHistory()
   except SnapError, ValueError:
     snapLastError = getCurrentExceptionMsg()
     ready(handle)

@@ -265,11 +265,16 @@ int pw_elevation(void *handle, int32_t x, int32_t z);
  * contract chosen, kept across pw_reset: 201 = teams.view.1 "paintbot-pw.teams.view.1"
  * (identical to pw_create; 512 floats; the teams game only: pw_set_game_mode refuses FFA-kin
  * on the handle), 202 = ffa.view.1 "paintbot-pw.ffa.view.1" (FFA-kin at any seat count; see
- * below). neural_contract.nim encodeTeamsView / encodeFfaView document every column; each
+ * below), 203 = teams.view.1h "paintbot-pw.teams.view.1h" (teams.view.1's 512 floats, then a 100-float RAW
+ * motion-history block the engine keeps per seat: per identity t-1 / t-2 displacement relative to its current
+ * position in 28 u steps plus seen flags, then the seat's own t-1 / t-2 displacement; 612 floats; the teams game only;
+ * pw_create_observation_inputs_v(..., 203, K) adds K user inputs, "paintbot-pw.teams.view.1hu<K>"; pw_reset and
+ * pw_world_load start every history over). neural_contract.nim encodeTeamsView / encodeTeamsViewH / encodeFfaView
+ * document every column; each
  * is computed from the seat's SeatView. NULL for any other version (1, 2, 3, 101 and 102
  * were retired for BASIC parity) or a bad max_ticks. pw_observe / pw_observe_seats rows are
  * then that many floats apart. pw_observation_size() = 512; pw_observation_size_for(201) =
- * 512 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
+ * 512, (203) = 612 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
  * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
  * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
  * 0, or -1 bad args). */

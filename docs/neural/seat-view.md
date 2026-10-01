@@ -76,6 +76,12 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
   adds walk direction (256) x walk distance (8) and look direction (128) heads, which the reference decoder reads in
   place of the compass step and the compass aim: fixed grid points relative to the seat, nothing computed for the
   network.
+- Observation contract teams.view.1h (203, `paintbot-pw.teams.view.1h`, and its `...1hu<K>` user-input variants) is
+  teams.view.1 plus a 100-float motion-history block the engine keeps per seat (`encodeTeamsViewH`): per identity
+  its t-1 and t-2 positions relative to its current one in 28 u steps, with seen flags, and the seat's own t-1 / t-2
+  displacement. Positions come from `playerX` / `playerY` / `selfX` / `selfY` at those ticks, so a BASIC seat could
+  keep the same record; it is engine-computed so that seats whose script does not write it (a caller-driven training
+  seat, a teacher shadow) still see it.
 - The retired contracts and decoder options are refused by name at staging
   (`neural_package.py`) and at load (`neural_host.nim`, `neural_contract.retiredContract`).
 - Training-only supervision: `pw_seat_privileged_labels` (21 floats: the retired world fields,
