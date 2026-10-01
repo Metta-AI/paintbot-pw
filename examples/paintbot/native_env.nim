@@ -2097,6 +2097,12 @@ const
 
 var snapLastError {.threadvar.}: string  # pw_world_load_error: why the calling thread's last load was refused
 
+proc snapChecksum(data: openArray[byte], n: int): string =
+  ## sha256 (hex) of the blob's first n bytes: the trailer that makes any corruption a refusal.
+  var s = newString(n)
+  if n > 0: copyMem(addr s[0], unsafeAddr data[0], n)
+  sha256Hex(s)
+
 proc saveBot(w: var SnapWriter, b: Bot) =
   w.put(not b.isNil)
   if b.isNil: return
@@ -2124,6 +2130,7 @@ proc pw_world_save*(handle: pointer, output: ptr UncheckedArray[byte], capacity:
   ## per-seat setting and stream, the BASIC seats' runtime state, the decoders, telemetry. Returns its size in bytes
   ## and writes it only when capacity >= size (capacity 0 sizes it). A pure read: the world and its hash are
   ## unchanged. -1 for bad arguments. A policy seat's network recurrent state is the caller's (not in the blob).
+  ## The blob ends with a sha256 of everything before it, so a corrupted blob is refused, never half-read.
   if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
@@ -2136,6 +2143,7 @@ proc pw_world_save*(handle: pointer, output: ptr UncheckedArray[byte], capacity:
       for b in f: w.saveBot(b)
     else:
       w.put(f)
+  w.put(snapChecksum(w.data, w.data.len))
   if capacity >= w.data.len and w.data.len > 0:
     copyMem(output, unsafeAddr w.data[0], w.data.len)
   w.data.len.int64
@@ -2167,6 +2175,14 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
     r.get(obs); r.get(n)
     if obs != env.obsVersion or n != env.n:
       snapLastError = "observation version / seat count differ from the handle's"; return -2
+    # The trailer: an 8-byte length and the 64-hex sha256 of everything before it.
+    let body = r.data.len - 72
+    if body < r.at: r.fail("truncated")
+    var tail = SnapReader(data: r.data, at: body)
+    var sum: string
+    tail.get(sum)
+    if tail.at != r.data.len or sum != snapChecksum(r.data, body): r.fail("checksum mismatch")
+    r.data.setLen(body)
     var tmp = env[]
     var botBlobs: array[2, seq[(int, seq[byte])]]
     for name, f in fieldPairs(tmp):
@@ -2194,10 +2210,16 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
       else:
         r.get(f)
     if r.at != r.data.len: r.fail("trailing bytes")
-    # Rebuild the bots on the copy from its own scripts and decoder contract, then restore their state.
+    # Rebuild the bots on the copy from its own scripts and decoder contract, then restore their state. Scripts
+    # compile against the blob's game mode, kinship, rules and map (FFA-kin host functions), so the copy's are
+    # installed first; a refusal below re-installs the handle's.
+    ready(addr tmp)
     for (slot, blob) in botBlobs[0]:
+      # installScript resets the seat's status, error and last orders, which the blob already restored
+      let (status, error, orders) = (tmp.scriptStatus[slot], tmp.scriptErrors[slot], tmp.scriptOrders[slot])
       installScript(addr tmp, slot)
       if tmp.scriptBots[slot].isNil: r.fail("script for slot " & $slot & " did not build")
+      tmp.scriptStatus[slot] = status; tmp.scriptErrors[slot] = error; tmp.scriptOrders[slot] = orders
       var br = SnapReader(data: blob)
       br.loadBot(tmp.scriptBots[slot])
     for (slot, blob) in botBlobs[1]:
@@ -2207,6 +2229,7 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
     env[] = tmp
   except SnapError, ValueError:
     snapLastError = getCurrentExceptionMsg()
+    ready(handle)
     return -3
   ready(handle)
   0
