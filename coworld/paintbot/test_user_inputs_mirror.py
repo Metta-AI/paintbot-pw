@@ -22,7 +22,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).parent / "runtime"))
 from neural_package import (FFA_USER_INPUTS_CONTRACT_HASHES, USER_INPUTS_CONTRACT_HASHES,  # noqa: E402
                             OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH,
-                            ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH, MAX_USER_INPUTS, user_inputs_row)
+                            ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH, MAX_USER_INPUTS, user_inputs_row,
+                            OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH, TEAMS_H_USER_INPUTS_CONTRACT_HASHES)
 
 KS = (5, 16)
 TICKS = 80
@@ -104,8 +105,12 @@ class UserInputsMirrorTest(unittest.TestCase):
         for k in range(1, MAX_USER_INPUTS + 1):
             self.assertEqual(self.hash_of(lib.pw_user_inputs_contract_hash_v, 201, k), teams[k])
             self.assertEqual(self.hash_of(lib.pw_user_inputs_contract_hash_v, 202, k), ffa[k])
+        self.assertEqual(self.hash_of(lib.pw_observation_contract_hash, 203), OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH)
+        teams_h = {v: k for k, v in TEAMS_H_USER_INPUTS_CONTRACT_HASHES.items()}
+        for k in range(1, MAX_USER_INPUTS + 1):
+            self.assertEqual(self.hash_of(lib.pw_user_inputs_contract_hash_v, 203, k), teams_h[k])
         out = ctypes.create_string_buffer(65)
-        for version, k in ((202, 0), (202, MAX_USER_INPUTS + 1), (203, 1)):
+        for version, k in ((202, 0), (202, MAX_USER_INPUTS + 1), (203, 0), (203, MAX_USER_INPUTS + 1), (204, 1)):
             self.assertEqual(lib.pw_user_inputs_contract_hash_v(version, k, out, 65), -1)
 
     def heartland(self, user_inputs):
