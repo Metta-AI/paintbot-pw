@@ -369,11 +369,12 @@ neuralInput(0, worldTick)
     check userInputsContractHash(32) == "1006d74e5bd17d8d7e1d45ac98dcf8d884b45548a698333a98166bf0047cb900"
     check userInputsContractHash(64) == "10d64eb9a884839996372c62fb3373a8b11bc51b9b7281166d6311043eb0ffcf"
     check userInputsContractHash(128) == "40f2dd5ee2a19d984849e2db01ac42be57ef0a4b05fa86c6fd3eb184e57f2bca"
-    var zeros129: seq[string]
-    for i in 0..<129: zeros129.add "0"
-    expect ValueError: discard parseUserInputs(parseJson("{\"count\": 129, \"init\": [" & zeros129.join(", ") & "]}"))
+    check userInputsContractHash(256) == "92f6de3c188ea128c81aa83b12fb137366cde77c532980b3867e196b7584f1b0"
+    var zeros257: seq[string]
+    for i in 0..<257: zeros257.add "0"
+    expect ValueError: discard parseUserInputs(parseJson("{\"count\": 257, \"init\": [" & zeros257.join(", ") & "]}"))
     expect ValueError: discard userInputsContractHash(0)
-    expect ValueError: discard userInputsContractHash(129)
+    expect ValueError: discard userInputsContractHash(257)
     check userInputsFromHash(ObservationContractTeamsView1Hash) == 0
     # The retired v2u<K> / v3u<K> families are not user-input contracts any more: a bundle
     # naming one is refused.
