@@ -18,7 +18,7 @@ Schema 2 may also carry `decoder` and `user_inputs` (below).
 | observation contract | id | inputs |
 |---|---|---|
 | teams.view.1 | `paintbot-pw.teams.view.1` | 512 |
-| teams.view.1u<K> | `paintbot-pw.teams.view.1u<K>`, K = 1..128 | 512 + K |
+| teams.view.1u<K> | `paintbot-pw.teams.view.1u<K>`, K = 1..256 | 512 + K |
 | ffa.view.1 | `paintbot-pw.ffa.view.1` | per match (`ffaViewLayout`) |
 
 | action contract | id | heads |
@@ -151,7 +151,7 @@ refused too: their bit masks cover the teams heads).
 ## User inputs (BASIC -> net)
 
 A schema-2 manifest may carry `"user_inputs": {"count": K, "init": [K integers]}`, K within
-1..128, each value within -1,000,000..1,000,000. The observation contract is then
+1..256, each value within -1,000,000..1,000,000. The observation contract is then
 `paintbot-pw.teams.view.1u<K>`: teams.view.1's 512 floats followed by K user floats. Manifest,
 actor hash and input count must agree. `neuralInput(i, v)` sets input i to v clamped to
 +-1,000,000; the net reads `float32(v) / 1000`. Values persist across ticks and deaths within a

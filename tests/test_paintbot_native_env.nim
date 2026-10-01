@@ -112,8 +112,8 @@ suite "Native training environment":
     pw_destroy(plain); pw_destroy(teams); pw_destroy(ffa)
 
   test "teams.view.1u<K> handles and hashes":
-    check pw_create_observation_inputs(1, 100, -1) == nil and pw_create_observation_inputs(1, 100, 129) == nil
-    for (v, k) in [(202'i32, 3'i32), (1'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32), (201'i32, 129'i32), (201'i32, -1'i32)]:
+    check pw_create_observation_inputs(1, 100, -1) == nil and pw_create_observation_inputs(1, 100, 257) == nil
+    for (v, k) in [(202'i32, 3'i32), (1'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32), (201'i32, 257'i32), (201'i32, -1'i32)]:
       check pw_create_observation_inputs_v(1, 100, v, k) == nil
     check pw_create_observation_inputs_v(1, HeartMeterMatchTicks+1, 201, 3) == nil
     for k in [1'i32, 3, 32, 64, 65, 128]:

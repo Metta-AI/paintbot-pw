@@ -275,7 +275,7 @@ proc parseForbidObjectives*(value: JsonNode): ObjectiveMask =
 
 
 proc parseUserInputs*(value: JsonNode): seq[int32] =
-  ## Manifest "user_inputs": {"count": K, "init": [K integers]}, K within 1 .. 128, every
+  ## Manifest "user_inputs": {"count": K, "init": [K integers]}, K within 1 .. 256, every
   ## init value within -1,000,000 .. 1,000,000; both fields required; anything else
   ## rejects the bundle. Returns the init values (K = their count).
   if value.kind != JObject: raise newException(ValueError, "user_inputs must be an object")

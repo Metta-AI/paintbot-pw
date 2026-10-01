@@ -580,7 +580,7 @@ proc pw_handle_observation_size*(handle: pointer): cint {.exportc, cdecl, dynlib
   cint(cast[ptr NativeEnv](handle).rowWidth)
 
 proc pw_create_observation_inputs*(seed, maxTicks, userInputs: int32): pointer {.exportc, cdecl, dynlib.} =
-  ## Observation contract teams.view.1u<K>, K = userInputs within 1 .. 128: every pw_observe
+  ## Observation contract teams.view.1u<K>, K = userInputs within 1 .. 256: every pw_observe
   ## row is teams.view.1's 512 floats followed by K user-input floats, a policy seat's
   ## (pw_set_seat_policy_script) as its policy.bas set them, zeros for every other seat.
   ## K = 0 is pw_create. nil for a bad K or max_ticks.
@@ -737,7 +737,7 @@ proc pw_set_action_contract*(handle: pointer, version: int32): cint {.exportc, c
 
 proc pw_user_inputs_contract_hash*(userInputs: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
-  ## The 64-hex SHA-256 of observation contract teams.view.1u<K> (K = userInputs, 1 .. 128),
+  ## The 64-hex SHA-256 of observation contract teams.view.1u<K> (K = userInputs, 1 .. 256),
   ## the hash an actor and manifest with K user inputs carry, NUL-terminated (capacity >= 65).
   ## 0, or -1 bad args.
   if output == nil or capacity < 65 or userInputs notin 1'i32..MaxUserInputs.int32: return -1

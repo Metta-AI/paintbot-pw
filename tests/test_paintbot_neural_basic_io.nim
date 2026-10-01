@@ -311,8 +311,8 @@ neuralInput(1, -99)
 """ & Act, userInputs = 2)
     check readBack.play(31, 100).len == 100
 
-  test "user-input actors above the old 32 and 64 caps: K = 33 .. 128 load and play, K = 129 is rejected":
-    for k in [33, 34, 64, 65, 66, 128]:
+  test "user-input actors above the old 32, 64 and 128 caps: K = 33 .. 256 load and play, K = 257 is rejected":
+    for k in [33, 34, 64, 65, 66, 128, 129, 133, 256]:
       checkpoint "K = " & $k
       # The last input is written and read back through the observation tail.
       let players = bundle("""
@@ -325,14 +325,15 @@ neuralInput(0, worldTick)
       check not players[0].failed
       check players[0].neural.userInputs.len == k
       check players.play(31, 100).len == 100
-    let k128 = userInputsContractHash(128)
+    let k256 = userInputsContractHash(256)
     var zeros: seq[string]
-    for i in 0..<129: zeros.add "0"
-    check bundle(Act, userInputs = 128, manifest = manifestFor(k128, userInputs =
-      "{\"count\": 129, \"init\": [" & zeros.join(", ") & "]}"))[0].failed
-    for bad in ["neuralInput(128, 1)\n", "neuralObs(" & $(TeamsViewSize + 128) & ")\n"]:
+    for i in 0..<257: zeros.add "0"
+    check bundle(Act, userInputs = 256, manifest = manifestFor(k256, userInputs =
+      "{\"count\": 257, \"init\": [" & zeros.join(", ") & "]}"))[0].failed
+    expect ValueError: discard userInputsContractHash(257)
+    for bad in ["neuralInput(256, 1)\n", "neuralObs(" & $(TeamsViewSize + 256) & ")\n"]:
       checkpoint bad
-      let outOfRange = bundle(bad & Act, userInputs = 128)
+      let outOfRange = bundle(bad & Act, userInputs = 256)
       discard outOfRange.decide(newWorld(3))
       check outOfRange[0].failed
 

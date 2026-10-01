@@ -120,9 +120,9 @@ suite "Native policy-script seats":
 
   test "arguments, contracts, status codes and the pw_step guard":
     check pw_create_observation_inputs(1, 100, -1) == nil
-    check pw_create_observation_inputs(1, 100, 129) == nil
-    for k in [33'i32, 34, 64, 65, 66, 128]:
-      # The cap is 128: teams.view.1u33 .. u128 handles are 512 + K wide and name their own contract.
+    check pw_create_observation_inputs(1, 100, 257) == nil
+    for k in [33'i32, 34, 64, 65, 66, 128, 129, 133, 256]:
+      # The cap is 256: teams.view.1u33 .. u256 handles are 512 + K wide and name their own contract.
       let wide = pw_create_observation_inputs(1, 100, k)
       require wide != nil
       check pw_handle_observation_size(wide) == TeamsViewSize + k and pw_handle_user_inputs(wide) == k
