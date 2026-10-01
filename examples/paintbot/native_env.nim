@@ -291,6 +291,16 @@ proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
   handicap = addr env.handicapKnobs
   try:
     env.world = newWorld(seed, maxTicks)
+    # pw_set_seat_starts_out: the seat begins as a cog that has lost its last life (damage's own end state:
+    # hp 0, bare equipment with no lives, no respawn pending).
+    for slot in 0..<min(env.world.cogs.len, MaxSeats):
+      if env.handicapKnobs.startsOut[slot]:
+        env.world.cogs[slot].hp = 0
+        env.world.cogs[slot].respawn = 0
+        env.world.cogs[slot].cooldown = 0
+        env.world.cogs[slot].carrying = false
+        env.world.equipment[slot] = Equipment(lives: 0)
+        env.world.uniforms[slot] = false
   finally:
     handicap = nil
     kinshipOverride = savedKinship
@@ -1663,6 +1673,23 @@ proc pw_set_seat_respawn_ticks*(handle: pointer, seat: cint, ticks: int32): cint
   if handle == nil or seat notin 0..<seatsOf(handle) or ticks notin 0'i32..1440'i32: return -1
   ready(handle)
   cast[ptr NativeEnv](handle).handicapKnobs.respawnTicks[seat] = ticks
+  0
+
+proc pw_set_seat_starts_out*(handle: pointer, seat: cint, startsOut: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Curriculum handicap: 1 = from the next pw_reset this seat begins every match already out
+  ## (hp 0, no lives left, never respawns: the state of a cog that lost its last life); 0
+  ## restores a normal start. A side (seats of one parity, the teams game's teams) must keep
+  ## at least one seat in: the call that would put its last seat out is refused. Kept across
+  ## pw_reset. Returns 0, -1 for bad arguments or that refusal.
+  if handle == nil or seat notin 0..<seatsOf(handle) or startsOut notin 0'i32..1'i32: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if startsOut == 1:
+    var others = 0
+    for slot in 0..<seatsOf(handle):
+      if slot != seat and slot mod 2 == seat mod 2 and not env.handicapKnobs.startsOut[slot]: inc others
+    if others == 0: return -1
+  env.handicapKnobs.startsOut[seat] = startsOut == 1
   0
 
 proc pw_set_seat_sampling*(handle: pointer, seat: cint, temperaturePermille, headMask: int32): cint {.exportc, cdecl, dynlib.} =
