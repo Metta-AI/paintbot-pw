@@ -352,6 +352,8 @@ proc updateTerritory*(w:var World) =
         for i,c in w.cogs:
           if team(i)==owner.int and c.hp>0 and distance2(c.pos,heart.pos)<=140*140 and w.traversable(c.pos,heart.pos):
             inc w.cogs[i].captures
+            when defined(pwTraining):
+              if combatTelemetry != nil and w.uniforms[i]: inc combatTelemetry[i].disguisedKillsCaptures
             break
         heart.owner=owner
   w.captures=[0'i32,0'i32]
@@ -407,14 +409,20 @@ proc damage*(w: var World, victim, attacker, amount: int) =
       let killed = w.cogs[victim].hp == 0
       inc t[victim].hitsTaken
       if killed: inc t[victim].deaths
+      t[victim].armorAbsorbed += absorbed
       if attacker >= 0 and attacker != victim:
         if team(attacker) == team(victim):
           t[attacker].damageDealtTeam += removed
           if t[attacker].firstFriendlyFireTick < 0: t[attacker].firstFriendlyFireTick = w.tick
+          if damageWeapon == dwGrenade:
+            inc t[attacker].grenadeHitsTeam; t[attacker].grenadeDamageTeam += removed
         else:
           t[attacker].damageDealtEnemy += removed
           inc t[attacker].hitsEnemy
           if killed: inc t[attacker].kills
+          if killed and w.uniforms[attacker]: inc t[attacker].disguisedKillsCaptures
+          if damageWeapon == dwGrenade:
+            inc t[attacker].grenadeHitsEnemy; t[attacker].grenadeDamageEnemy += removed
           # Weapon kills and hit locations (pw_seat_weapon_stats), enemy victims only.
           if killed:
             case damageWeapon
@@ -569,6 +577,15 @@ proc pickupEquipment(w: var World, attacked: openArray[bool]) =
       of armorPickup:
         if w.equipment[i].armor < 3: w.equipment[i].armor = 3; taken = true
       if taken:
+        when defined(pwTraining):
+          if combatTelemetry != nil:
+            let t = combatTelemetry
+            case w.pickups[k].kind
+            of armorPickup: inc t[i].armorPickups
+            of uniformPickup: inc t[i].uniformPickups
+            of medkitPickup: inc t[i].medkitPickups
+            of grenadePickup: inc t[i].grenadePickups
+            of sprayPickup: inc t[i].sprayPickups
         w.lastSupplyTick[team(i)] = w.tick
         w.pickups[k].readyAt = w.tick+(if w.pickups[k].kind ==
             grenadePickup: 120 else: 720)
@@ -684,6 +701,8 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
         w.grenades.add Lob(start: w.cogs[i].pos, target: w.grenadeTarget(i),
             owner: i.int32, releasedAt: w.tick,
             landsAt: w.tick+GrenadeFlightTicks)
+        when defined(pwTraining):
+          if combatTelemetry != nil: inc combatTelemetry[i].grenadeThrows
         w.equipment[i].grenade = false; w.equipment[i].charge = 0
     if w.equipment[i].sprayCan:
       if cmd.shoot and w.equipment[i].sprayCooldown == 0:

@@ -989,6 +989,9 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       handicap = nil
       damageObserver = nil
       kinEnv = nil
+    # pw_seat_equip_stats: ticks each seat ends disguised (telemetry only).
+    for slot in 0..<env.n:
+      if env.world.uniforms[slot]: inc env.stats[slot].disguisedTicks
     let done = env.world.winner != -1 or env.world.tick >= env.world.endTick
     if kinStep:
       # FFA-kin: the dense kin-weighted score reward, every seat, dead ones included.
@@ -1775,6 +1778,61 @@ proc pw_seat_privileged_labels*(handle: pointer, seat: cint, output: FloatBuffer
   let labels = privilegedLabels(env.world, seat.int, env.labelMemory)
   for i, x in labels: output[i] = x
   0
+
+proc pw_seat_grenade_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Grenade telemetry for one seat (training library only), six int32, cumulative since
+  ## the last create/reset: [throws released, enemy hits, enemy kills, enemy health removed,
+  ## teammate hits, teammate health removed]. A hit is a blast damage event past the shield
+  ## and life checks (pw_seat_stats' rule), attributed to the thrower; kills equal
+  ## pw_seat_weapon_stats[1]. Pure telemetry. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let s = cast[ptr NativeEnv](handle).stats[seat]
+  for i, v in [s.grenadeThrows, s.grenadeHitsEnemy, s.grenadeKills, s.grenadeDamageEnemy, s.grenadeHitsTeam,
+      s.grenadeDamageTeam]:
+    output[i] = v
+  0
+
+proc pw_seat_equip_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Equipment and disguise telemetry for one seat (training library only), eight int32,
+  ## cumulative since the last create/reset: [armor pickups, uniform (disguise) pickups,
+  ## medkit pickups, grenade pickups, spray pickups, health its armor soaked (same units as
+  ## pw_seat_stats' damage), ticks it ended disguised, enemy kills plus heart captures it
+  ## made while disguised]. Pure telemetry. Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let s = cast[ptr NativeEnv](handle).stats[seat]
+  for i, v in [s.armorPickups, s.uniformPickups, s.medkitPickups, s.grenadePickups, s.sprayPickups,
+      s.armorAbsorbed, s.disguisedTicks, s.disguisedKillsCaptures]:
+    output[i] = v
+  0
+
+proc waterPoint(x, z: int): bool =
+  ## The river's water (rules >= 30; SeatView.waterAt's test), clamped to the map.
+  let cx = clamp(x, minX(), maxX()); let cz = clamp(z, minZ(), maxZ())
+  visionRulesVersion >= 30 and riverBlend(cx, cz) > 0 and terrainHeight(cx, cz) < RiverWaterHeight
+
+proc pw_heart_terrain*(handle: pointer, output: ptr UncheckedArray[int32], capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Static terrain of the current world's control hearts (training library only): one
+  ## int32 per heart slot, bit 0 (1) = the heart stands in water, bit 1 (2) = water within
+  ## one step of it (any of 16 samples at 50 and 100 units in the 8 compass directions).
+  ## Writes min(hearts, capacity) slots and returns the heart count (-1 for bad
+  ## arguments). Pure read.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let w = addr cast[ptr NativeEnv](handle).world
+  for k in 0..<min(w[].controlHearts.len, capacity.int):
+    let p = w[].controlHearts[k].pos
+    var bits = 0'i32
+    if waterPoint(p.x.int, p.z.int): bits = bits or 1
+    block near:
+      for r in [50, 100]:
+        for d in [(1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1), (1, -1)]:
+          if waterPoint(p.x.int + d[0]*r, p.z.int + d[1]*r):
+            bits = bits or 2
+            break near
+    output[k] = bits
+  w[].controlHearts.len.cint
 
 proc pw_seat_weapon_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## Per-weapon enemy kills and enemy-hit locations for one seat (training library only),

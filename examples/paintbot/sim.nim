@@ -261,6 +261,14 @@ when defined(pwTraining):
       gunKills*, grenadeKills*, weaponSprayKills*: int32
       hitsFromWater*, hitsFromHigh*, hitsFromTrench*: int32
       hitsToWater*, hitsToHigh*, hitsToTrench*: int32
+      # Grenades (pw_seat_grenade_stats): throws released, and the hits and health removed
+      # by this seat's grenade blasts on enemies and on teammates (kills: grenadeKills).
+      grenadeThrows*, grenadeHitsEnemy*, grenadeDamageEnemy*, grenadeHitsTeam*, grenadeDamageTeam*: int32
+      # Equipment and disguise (pw_seat_equip_stats): pickups taken by kind, health the
+      # seat's armor soaked, ticks it ended disguised, and enemy kills plus heart captures it
+      # made while disguised.
+      armorPickups*, uniformPickups*, medkitPickups*, grenadePickups*, sprayPickups*: int32
+      armorAbsorbed*, disguisedTicks*, disguisedKillsCaptures*: int32
     CombatTelemetry* = array[MaxSeats, SeatStats] # one entry per seat the training library plays
   const HighGroundHeight* = 216 # pw_seat_weapon_stats' "high": terrainHeight >= this
   type DamageWeapon* = enum

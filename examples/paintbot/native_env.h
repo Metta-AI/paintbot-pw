@@ -178,6 +178,17 @@ int pw_seat_spray_stats(void *handle, int seat, int32_t *stats);
  * slowdown), high = terrainHeight >= 216, trench = inside a trench; classes may overlap. Pure
  * telemetry, never part of the world or its hash; -1 bad args. */
 int pw_seat_weapon_stats(void *handle, int seat, int32_t *stats);
+/* Training telemetry (training library only; pure reads, cumulative since the last
+ * create/reset). pw_seat_grenade_stats: int32[6] = {throws released, enemy hits, enemy
+ * kills (= weapon_stats[1]), enemy health removed, teammate hits, teammate health removed}.
+ * pw_seat_equip_stats: int32[8] = {armor, uniform, medkit, grenade, spray pickups, health
+ * the seat's armor soaked, ticks ended disguised, enemy kills + heart captures made while
+ * disguised}. pw_heart_terrain: one int32 per control heart, bit 0 = in water, bit 1 =
+ * water within one step (16 samples at 50/100 units); writes min(hearts, capacity) and
+ * returns the heart count. Each: -1 bad args. */
+int pw_seat_grenade_stats(void *handle, int seat, int32_t *six);
+int pw_seat_equip_stats(void *handle, int seat, int32_t *eight);
+int pw_heart_terrain(void *handle, int32_t *output, int32_t capacity);
 /* pw_seat_privileged_labels (TRAINING-ONLY supervision labels; training_labels.nim): float[21]
  * for the seat on the current pre-step world = {gun cooldown, gun windup, spray cooldown,
  * shield, respawn (ticks), aim x, aim z, own heart meter, enemy heart meter (scoreTicks; 0 in

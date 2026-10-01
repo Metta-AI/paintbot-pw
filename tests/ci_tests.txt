@@ -92,6 +92,7 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_sampling.ni
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_river_strafe.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_spray.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_weapon_stats.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_training_telemetry.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_state.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
