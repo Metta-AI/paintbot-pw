@@ -351,35 +351,40 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
     output[o+8] = float32(v.waterAt(x.int, z.int))
     output[o+9] = dh(x, z)
   for j in 0..<LegacySeats:
-    if v.visible(j) == 0: continue
+    let r = v.identityRow(j)   # visible / playerX / playerY / playerTeam / playerHp / playerCarrying
+    if not r.visible: continue
     let o = TeamsIdentityOffset + j*TeamsIdentityWidth
-    let x = v.playerX(j)
-    let z = v.playerY(j)
+    let x = r.x
+    let z = r.z
     output[o] = 1
     output[o+1] = dx(x)
     output[o+2] = dz(z)
-    output[o+3] = relative(v.playerTeam(j).int, side)
-    output[o+4] = float32(v.playerHp(j)) / 3
-    output[o+5] = float32(v.playerCarrying(j))
+    output[o+3] = relative(r.team.int, side)
+    output[o+4] = float32(r.hp) / 3
+    output[o+5] = float32(r.carrying)
     output[o+6] = float32((j == v.selfId.int).int)
     output[o+7] = float32(j div 2) / 7
     output[o+8] = float32(v.waterAt(x.int, z.int))
     output[o+9] = dh(x, z)
-  for i in 0..<TeamsPickupRows:
-    if v.pickupVisible(i) == 0: continue
+  for i in 0..<min(TeamsPickupRows, v.pickupCount.int):   # pickupVisible is 0 past pickupCount
+    let p = v.pickupRow(i)   # pickupVisible / pickupX / pickupY / pickupKind
+    if not p.visible: continue
     let o = TeamsPickupOffset + i*TeamsPickupWidth
     output[o] = 1
-    output[o+1] = dx(v.pickupX(i))
-    output[o+2] = dz(v.pickupY(i))
-    output[o+3] = float32(v.pickupKind(i)) / 4
+    output[o+1] = dx(p.x)
+    output[o+2] = dz(p.z)
+    output[o+3] = float32(p.kind) / 4
     output[o+4] = float32(i) / 31
-  for i in 0..<min(TeamsSoundRows, v.soundCount.int):
+  var i = 0
+  for s in v.liveSounds:   # soundKind / soundDirection / soundDistance / soundAge (i), i < soundCount
+    if i >= TeamsSoundRows: break
     let o = TeamsSoundOffset + i*TeamsSoundWidth
     output[o] = 1
-    output[o+1] = float32(v.soundKind(i)) / 4
-    output[o+2] = float32((v.soundDirection(i).int + (if side == 0: 0 else: 4)) mod 8) / 7
-    output[o+3] = float32(v.soundDistance(i)) / 4
-    output[o+4] = float32(v.soundAge(i)) / SoundLifetime
+    output[o+1] = float32(s.kind) / 4
+    output[o+2] = float32((s.direction.int + (if side == 0: 0 else: 4)) mod 8) / 7
+    output[o+3] = float32(s.distance) / 4
+    output[o+4] = float32(s.age) / SoundLifetime
+    inc i
   for k in 0..<TeamsProbeRows:
     let delta = if k == 0: (0, 0) else: Directions[k-1]
     let px = sx.int + int(flip) * delta[0] * 200

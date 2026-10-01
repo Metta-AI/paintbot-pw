@@ -833,17 +833,21 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     return 0
   except CatchableError: return -1
 
+var observeInputs {.threadvar.}: seq[int32]   # observeSeats' user-input row, one per thread, zeroed per seat
+
 proc observeSeats(env: ptr NativeEnv, chosen: proc(slot: int): bool, observations, resets: FloatBuffer) =
   ## Encode the chosen seats' rows (row s at s * rowWidth) from each seat's SeatView of the
   ## current world, leaving the others as they are. teams.view.1u<K> / ffa.view.1u<K>: the
   ## row, then the seat's user inputs as its policy.bas left them (zeros for a seat without them).
   let n = env.rowWidth
   beginViews(env.world)
+  template inputs: untyped = observeInputs
+  inputs.setLen(env.userInputs)
   for slot in 0..<env.n:
     if not chosen(slot): continue
     let view = seatView(slot)
     template row: untyped = observations.toOpenArray(slot*n, (slot+1)*n-1)
-    var inputs = newSeq[int32](env.userInputs)
+    for i in 0..<inputs.len: inputs[i] = 0
     let bot = env.scriptBots[slot]
     if env.userInputs > 0 and env.policy[slot] and bot != nil and bot.neural != nil:
       for i in 0..<min(inputs.len, bot.neural.userInputs.len): inputs[i] = bot.neural.userInputs[i]

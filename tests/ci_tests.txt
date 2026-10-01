@@ -83,6 +83,8 @@ nim r -d:headless tests/test_paintbot_seat_view_parity.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim
 nim r tests/test_paintbot_geometry_cache.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_map_ray_bounds.nim
+nim r tests/test_paintbot_map_ray_bounds.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_seat_stats.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_scripts.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_command.nim
