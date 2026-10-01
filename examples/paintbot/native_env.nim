@@ -552,7 +552,9 @@ proc actionHeads(env: ptr NativeEnv): seq[int] =
   ## pointer: the current world's layout).
   if env.obsVersion == ocFfaView1: pointerHeads(env.layoutOf) else: actionHeadSizes(env.actionContract)
 proc logitWidth(env: ptr NativeEnv): int =
-  ## Logits per seat under the handle's action contract (pw_step_logits' row stride).
+  ## Logits per seat under the handle's action contract (pw_step_logits' row stride). Contract 15's offset heads
+  ## carry one row per identity, so its width is not the sum of its head sizes.
+  if env.obsVersion != ocFfaView1 and env.actionContract == acTeamsView1Target: return LogitSizeTarget
   for h in env.actionHeads: result += h
 
 proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): pointer =
@@ -757,13 +759,15 @@ proc pw_set_action_contract*(handle: pointer, version: int32): cint {.exportc, c
   ## (teams.view.1, five heads per seat; the default) or 13 (teams.view.1 aim-offset, seven
   ## heads per seat: the five, then two 23-bin aim offsets the reference decoder adds to an
   ## identity aim) or 14 (teams.view.1 movement-offset, nine heads per seat: those seven, then
-  ## two 23-bin offsets the reference decoder adds to the movement goal); on a 202 handle 12
-  ## only. Kept across pw_reset; every decoder seat starts over. 0, or -1 bad args.
+  ## two 23-bin offsets the reference decoder adds to the movement goal) or 15 (teams.view.1 target-conditioned
+  ## aim offset: contract 13's seven heads, heads 5 and 6 drawn from the chosen identity's row of 16 rows, 818
+  ## logits per seat); on a 202 handle 12 only. Kept across pw_reset; every decoder seat starts over. 0, or -1 bad
+  ## args.
   if handle == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32,
-      acTeamsView1Move.int32]: return -1
+      acTeamsView1Move.int32, acTeamsView1Target.int32]: return -1
   let contract = ActionContractVersion(version)
   if not pairs(env.obsVersion, contract): return -1
   env.actionContract = contract
@@ -956,9 +960,11 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
             # A seat's action contract is its manifest's. The teams contracts' layouts are prefixes of one
             # another (11: 82 logits, 13: 128, 14: 174), so a seat narrower than the handle's contract reads
             # the leading logits of its row: one world can seat contracts 11, 13 and 14 side by side on a
-            # handle set to the widest of them.
+            # handle set to the widest of them. Contract 15 (818: heads 5 and 6 as 16 identity rows) shares only
+            # the five main heads' 82 with them, so a contract-15 handle seats contract 15 and contract 11 only.
             let own = bot.neural.fedLogits.len
-            if own > stride or (own != stride and env.obsVersion == ocFfaView1):
+            if own > stride or (own != stride and env.obsVersion == ocFfaView1) or
+                (env.actionContract == acTeamsView1Target and own != stride and own != LogitSize):
               raise newException(ValueError, "policy seat logits do not match the handle's action layout")
             for i in 0..<own: bot.neural.fedLogits[i] = logits[slot*stride+i]
             bot.neural.logitsFed = true
@@ -1591,10 +1597,10 @@ proc pw_action_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
 proc pw_action_contract_hash*(version: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The 64-hex SHA-256 contract hash an actor and its manifest carry for action contract
-  ## `version` (11, 12, 13 or 14), NUL-terminated into output (capacity >= 65). Returns 0, -1
+  ## `version` (11, 12, 13, 14 or 15), NUL-terminated into output (capacity >= 65). Returns 0, -1
   ## for a bad version (the contracts before these were retired for BASIC parity) or buffer.
   if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32,
-      acTeamsView1Move.int32] or
+      acTeamsView1Move.int32, acTeamsView1Target.int32] or
       output == nil or capacity < 65: return -1
   let hash = actionContractHash(ActionContractVersion(version))
   copyMem(output, unsafeAddr hash[0], hash.len)

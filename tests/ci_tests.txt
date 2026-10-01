@@ -102,6 +102,7 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa_v2.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_aim_offset.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_move_offset.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_target_offset.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_mixed_contracts.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_parity.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
@@ -114,6 +115,7 @@ nim r -d:headless tests/test_paintbot_neural_basic_io.nim "neuralMask forbids*" 
 nim r -d:headless tests/test_paintbot_neural_basic_io.nim "the heads are numbers*" "neuralLogit(i) reads*" "call-order and range errors*" "neuralObs reads*" "user inputs: init*" "a user-input actor reads*" "user-input actors above*" "user-input bundles*"
 nim r -d:headless tests/test_paintbot_neural_net2.nim
 nim r -d:headless tests/test_paintbot_neural_layers.nim
+nim r -d:headless tests/test_paintbot_neural_target_offset.nim
 nim r -d:headless tests/test_paintbot_neural_joint.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_cond_head.nim

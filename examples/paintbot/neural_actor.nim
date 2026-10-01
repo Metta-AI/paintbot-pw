@@ -7,7 +7,7 @@ type
     ## PWNET002 layer type codes (the u32 `type` of a layer record).
     lkDense = 1, lkRmsNorm = 2, lkMinGru = 3, lkResidual = 4, lkEntityAttn = 5, lkConcatInput = 6,
     lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9, lkSegmentNear = 10, lkAttnPool = 11,
-    lkPad = 12, lkCondHead = 13, lkTokenPair = 14
+    lkPad = 12, lkCondHead = 13, lkTokenPair = 14, lkPointerK = 15
   AttnGroup = object
     offset, stride, count, width, valid: int  # valid = -1: every token of the group is valid
     weight: int                               # E_g [d, width] then e_g [d], offsets into weights
@@ -240,6 +240,10 @@ proc tokenMixOps*(tokens, tokenIn, width, z: int): int64 =
 proc pointerOps*(tokens, z, width: int): int64 =
   ## POINTER's published cost: the copy, per token a dot product, its bias and the add.
   int64(width) + int64(tokens)*int64(2*z + 2)
+
+proc pointerKOps*(tokens, z, width, k: int): int64 =
+  ## POINTER_K's published cost: the copy, per token and row a dot product, its bias and the add.
+  int64(width) + int64(tokens)*int64(k)*int64(2*z + 2)
 
 proc tokenPairOps*(tokens, d, p, width: int): int64 =
   ## TOKEN_PAIR's published cost: the copy of x; per token A e and B e (no bias), its geometry and its row copy; per
@@ -620,6 +624,27 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       net.readWeights(data, p, src.tokenWidth + 1)
       layer.outWidth = width
       layer.operations = pointerOps(layer.tokens, src.tokenWidth, width)
+    of lkPointerK.uint32:
+      # POINTER generalised to K logits per token (action contract 15's per-identity offset rows):
+      # out[offset + n*K + k] += V[k] . z_n + c[k] for the source's valid tokens.
+      layer.kind = lkPointerK
+      layer.source = int(q[0])
+      layer.length = int(q[1])  # the logit offset of token 0's row
+      layer.heads = int(q[2])   # K, logits per token
+      unused(3)
+      if layer.source >= k or net.layers[layer.source].kind notin {lkTokenMix, lkTokenMlp, lkEntityAttn, lkTokenPair}:
+        net2Error(where & "POINTER_K source must name an earlier TOKEN_MIX, TOKEN_MLP, ENTITY_ATTN or TOKEN_PAIR layer")
+      if layer.heads < 1 or layer.heads > MaxNet2Width:
+        net2Error(where & "POINTER_K needs 1 .. " & $MaxNet2Width & " logits per token")
+      net.exposeTokens(layer.source, scratch)
+      let src = net.layers[layer.source]
+      layer.tokens = src.tokens
+      if layer.length > width or layer.tokens*layer.heads > width - layer.length:
+        net2Error(where & "POINTER_K offset + tokens * K exceeds width " & $width)
+      layer.weight = net.weights.len
+      net.readWeights(data, p, layer.heads*src.tokenWidth + layer.heads)
+      layer.outWidth = width
+      layer.operations = pointerKOps(layer.tokens, src.tokenWidth, width, layer.heads)
     of lkSegmentNear.uint32:
       layer.kind = lkSegmentNear
       let t = int(q[0])
@@ -738,7 +763,7 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       scratch += tokenSpace
     case layer.kind
     of lkTokenMlp: layer.validBuffer = layer.tokenBuffer + layer.tokens*layer.tokenWidth
-    of lkTokenMix, lkPointer, lkAttnPool, lkTokenPair: layer.validBuffer = net.layers[layer.source].validBuffer
+    of lkTokenMix, lkPointer, lkPointerK, lkAttnPool, lkTokenPair: layer.validBuffer = net.layers[layer.source].validBuffer
     else: discard
     layer.output = scratch
     scratch += layer.outWidth
@@ -1100,6 +1125,21 @@ proc pointerHead(layer: NetLayer, source: NetLayer, x, w, scratch, y: F32s) =
     for i in 0..<z: sum += buffer[n*z+i]*v[i]
     y[layer.length+n] = y[layer.length+n] + (sum + c)
 
+proc pointerKHead(layer: NetLayer, source: NetLayer, x, w, scratch, y: F32s) =
+  ## POINTER_K: y = x, then for each valid token n and row k, y[offset + n*K + k] += V[k] . z_n + c[k].
+  let z = source.tokenWidth
+  let kk = layer.heads
+  let buffer = scratch.at(source.tokenBuffer)
+  let valid = scratch.at(layer.validBuffer)
+  let v = w.at(layer.weight)
+  for i in 0..<layer.outWidth: y[i] = x[i]
+  for n in 0..<layer.tokens:
+    if valid[n] == 0'f32: continue
+    for r in 0..<kk:
+      var sum = 0'f32
+      for i in 0..<z: sum += buffer[n*z+i]*v[r*z+i]
+      y[layer.length+n*kk+r] = y[layer.length+n*kk+r] + (sum + v[kk*z+r])
+
 proc attnPool(layer: NetLayer, source: NetLayer, x, w, scratch, work, y: F32s) =
   ## Cross-attention pooling (neural_actor.md, ATTN_POOL): a query from the current vector,
   ## keys and values from the source's valid token rows, per head a softmax over the valid
@@ -1323,6 +1363,8 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
       tokenMix(layer[], net.layers[layer.source], x, w, scratch, scratch.at(net.work), y)
     of lkPointer:
       pointerHead(layer[], net.layers[layer.source], x, w, scratch, y)
+    of lkPointerK:
+      pointerKHead(layer[], net.layers[layer.source], x, w, scratch, y)
     of lkSegmentNear:
       segmentNear(layer[], input, y)
     of lkAttnPool:

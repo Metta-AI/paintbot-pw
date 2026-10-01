@@ -82,6 +82,9 @@ type
     # head order, and read back with neuralChoice(h). extraHeads = how many (0, 2 or 4).
     offsetHeads*: bool
     extraHeads*: int
+    # Action contract 15: heads 5 and 6 are drawn from the 23-logit row of the identity the aim head chose (rows at
+    # LogitSize + (head - 5) * TargetRows * 23 + j * 23); no draw (the centre bin) when it chose keep or a compass point.
+    targetRows*: bool
     offsetTemperatures: array[ExtraHeadsMax, float32]
     offsetTemperatureSet: array[ExtraHeadsMax, bool]
     offsetSelected*, offsetChoices*: array[ExtraHeadsMax, int32]
@@ -319,7 +322,7 @@ const RetiredDecoderOptions* = ["fire_hold_teammates", "strafe_legs", "aim_snap"
   ## Native decoder rules retired for BASIC parity (docs/neural/seat-view.md): a manifest
   ## naming one is refused; write the rule in policy.bas instead.
 
-proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointer = false, extra = 0) =
+proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointer = false, extra = 0, target = false) =
   ## The manifest's selection options and user inputs onto the seat (nil manifest = none).
   ## `userInputs` is the K the actor's (or handle's) observation contract names.
   var sampling: SamplingOptions
@@ -382,10 +385,12 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
     of 0: @ActionSizes
     of AimOffsetHeads: @ActionSizesOffset
     else: @ActionSizesMove
-  seat.logits = newSeq[float32](case extra
-    of 0: LogitSize
-    of AimOffsetHeads: LogitSizeOffset
-    else: LogitSizeMove)
+  seat.targetRows = target
+  seat.logits = newSeq[float32](if target: LogitSizeTarget
+    else: (case extra
+      of 0: LogitSize
+      of AimOffsetHeads: LogitSizeOffset
+      else: LogitSizeMove))
 
 proc observationFor(hash: string): (ObservationContractVersion, int) =
   ## The encoder and user-input count an observation contract hash names: teams.view.1,
@@ -475,13 +480,13 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
     result.state = newSeq[float32](actor.stateSize)
     return
   let actor = loadActor(data)
-  let heads = actionHeadSizes(contract)
-  var outputs = 0
-  for h in heads: outputs += h
-  if actor.inputSize != TeamsViewSize + userInputs or actor.outputSize != outputs or actor.headSizes != heads:
+  let heads = actionLogitHeads(contract)
+  if actor.inputSize != TeamsViewSize + userInputs or actor.outputSize != actionLogitSize(contract) or
+      actor.headSizes != heads:
     raise newException(ValueError, "neural actor dimensions do not match Paintbot contract")
   budgetCheck(actor)
-  result.configureSeat(readManifest(sourcePath, actor), userInputs, extra = extraHeads(contract))
+  result.configureSeat(readManifest(sourcePath, actor), userInputs, extra = extraHeads(contract),
+    target = targetRows(contract))
   result.setConditionals(actor.conditionals)
   result.actor = actor
   result.contract = contract
@@ -508,7 +513,7 @@ proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string)
   requirePairing(observationContract, contract)
   requireMode(observationContract)
   let pointer = contract == acFfaView1Pointer
-  result.configureSeat(manifest, userInputs, pointer, extra = extraHeads(contract))
+  result.configureSeat(manifest, userInputs, pointer, extra = extraHeads(contract), target = targetRows(contract))
   result.contract = contract
   result.observationContract = observationContract
   if pointer:
@@ -529,7 +534,7 @@ proc decoderNeuralSeat*(slot: int, observationHash: string, contract: ActionCont
   requireMode(observationContract)
   requirePairing(observationContract, contract)
   let pointer = observationContract == ocFfaView1
-  result.configureSeat(nil, 0, pointer, extra = extraHeads(contract))
+  result.configureSeat(nil, 0, pointer, extra = extraHeads(contract), target = targetRows(contract))
   result.contract = contract
   result.observationContract = observationContract
   if pointer: result.pointerSetup(matchLayout())
@@ -678,6 +683,29 @@ proc selectOffsets(seat: NeuralSeat) =
     seat.appliedOffsetTemperatures[e] =
       if temperatures[e] > 0: int32(round(float64(temperatures[e]) * 1000)) else: 0'i32
     if temperatures[e] > 0: anyDraw = true
+  if seat.targetRows:
+    # Contract 15: each offset head draws from the chosen identity's row; with keep or a compass aim there is no
+    # target, so no draw and the centre bin (its applied temperature reads 0).
+    let a = seat.selected[1]
+    let j = a - 1
+    var rows = newSeq[float32](n*AimOffsetBins)
+    if j in 0'i32..<TargetRows.int32:
+      for e in 0..<n:
+        let base = LogitSize + e*TargetRows*AimOffsetBins + j.int*AimOffsetBins
+        for b in 0..<AimOffsetBins: rows[e*AimOffsetBins+b] = seat.logits[base+b]
+    else:
+      anyDraw = false
+      for e in 0..<n:
+        temperatures[e] = 0'f32
+        seat.appliedOffsetTemperatures[e] = 0'i32
+        rows[e*AimOffsetBins+AimOffsetCentre] = 1'f32   # argmax = the centre bin
+    if anyDraw: seat.seedStream()
+    var draws = 0
+    let picked = pointerSelect(rows, sizes, temperatures, seat.sampleRng, draws)
+    for e in 0..<n:
+      seat.offsetSelected[e] = picked[e]
+      seat.offsetChoices[e] = picked[e]
+    return
   if anyDraw: seat.seedStream()
   var draws = 0
   let picked = pointerSelect(seat.logits.toOpenArray(LogitSize, seat.logits.len-1), sizes,
