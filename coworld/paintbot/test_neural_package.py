@@ -23,7 +23,8 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             OBSERVATION_CONTRACT_FFA_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_HASH,
                             ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH,
                             RETIRED_OBSERVATION_CONTRACTS, RETIRED_ACTION_CONTRACTS, RETIRED_CONTRACT_HASHES,
-                            RETIRED_DECODER_OPTIONS)
+                            RETIRED_DECODER_OPTIONS, ACTION_CONTRACT_TEAMS_VIEW_1_TARGET,
+                            ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH, pointer_k_ops)
 
 ROOT = Path(__file__).parents[2]
 TEAMS, FFA = OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH
@@ -663,6 +664,35 @@ class Pwnet2Tests(unittest.TestCase):
         wide = [self.token_mlp(1, [(0, 0, 200)] * 6, (0, 0), [4]), (1, [8, 9], [], 72)]
         with self.assertRaisesRegex(ValueError, "token input"):
             validate_pwnet2(pwnet2(200, heads, wide))
+
+    def test_pointer_k_and_the_target_offset_contract(self):
+        """POINTER_K (layer 15): K logits per token, its cost, its structure; action contract 15 (818 logits)."""
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        ids = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        self.assertEqual(ids["ActionContractTeamsView1Target"], ACTION_CONTRACT_TEAMS_VIEW_1_TARGET)
+        self.assertEqual(sha(ACTION_CONTRACT_TEAMS_VIEW_1_TARGET), ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH)
+        mlp = self.token_mlp(5, [(0, 8, 6), (50, 0, 3)], (0, 0), [8, 5])
+        mix = (8, [0, 4], [], 4 * 5 + 4 + 4 * 10)
+        good = [mlp, mix, (1, [18, 15, 1], [], 18 * 15 + 15), (15, [1, 0, 3], [], 3 * 4 + 3)]
+        info = validate_pwnet2(pwnet2(64, [7, 8], good))
+        base = validate_pwnet2(pwnet2(64, [7, 8], good[:3]))
+        self.assertEqual(info["operations"] - base["operations"], pointer_k_ops(5, 4, 15, 3))
+        self.assertEqual(pointer_k_ops(5, 4, 15, 3), 15 + 5 * 3 * 10)
+        cases = [([mlp, mix, (1, [18, 15, 1], [], 285), (15, [2, 0, 3], [], 15)], "POINTER_K source"),
+                 ([mlp, mix, (1, [18, 15, 1], [], 285), (15, [1, 0, 0], [], 0)], "logits per token"),
+                 ([mlp, mix, (1, [18, 15, 1], [], 285), (15, [1, 1, 3], [], 15)], "exceeds width"),
+                 ([mlp, mix, (1, [18, 15, 1], [], 285), (15, [1, 0, 3, 1], [], 15)], "unused")]
+        for layers, fragment in cases:
+            with self.assertRaisesRegex(ValueError, fragment):
+                validate_pwnet2(pwnet2(64, [7, 8], layers))
+        target = {**SCHEMA2, "action_contract": ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH}
+        model = pwnet2(TEAMS_VIEW_1_SIZE, [51, 25, 2, 2, 2, 368, 368], [(1, [TEAMS_VIEW_1_SIZE, 818, 1, 0], [], TEAMS_VIEW_1_SIZE * 818 + 818)],
+                       act=ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH)
+        _, _, manifest = unpack_package(package({**target, "decoder": {"sampling": {"mode": "categorical",
+                                                                                     "heads": [5, 6]}}}, model=model))
+        self.assertEqual(manifest["action_contract"], ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH)
+        with self.assertRaisesRegex(ValueError, "heads 7 and 8 need"):
+            unpack_package(package({**target, "decoder": {"sampling": {"mode": "categorical", "heads": [7]}}}, model=model))
 
     def test_token_layer_norm_cost_and_structure(self):
         # Params 6 = norm (0 or 1) and 7 = eps (FP32 bits) of TOKEN_MLP and TOKEN_MIX: a LayerNorm (gain, shift)
