@@ -85,7 +85,7 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 | magic | ASCII `PWNET002` |
 | version | 2 |
 | I | input count, 1..4096 (the observation contract's width: 512 for teams.view.1, 512 + K for teams.view.1u<K>; ffa.view.1: the match's width, usually the layout word `0xFFFEE000`) |
-| O | output count, 2..1024 (the logits; no value row: 82, or 128 for the aim-offset variant, 174 for movement-offset; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
+| O | output count, 2..4096 (the logits; no value row: 82, or 128 for the aim-offset variant, 174 for movement-offset, 818 for target-conditioned, 2490 for raw; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
 | head count | 1..32 |
 | head sizes | one uint32 per head, each 2..1024, summing to O (layout words allowed) |
 | observation contract | 64 lowercase hex bytes (as PWNET001) |
