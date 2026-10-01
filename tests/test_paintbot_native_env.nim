@@ -85,13 +85,13 @@ suite "Native training environment":
       check pw_reset(h, 6, 24) == 0 # kept across reset
       check pw_observation_contract(h) == 201 and pw_action_contract(h) == 11
     check pw_observation_contract(ffa) == 202 and pw_action_contract(ffa) == 12
-    # pw_set_action_contract selects between teams.view.1's three action contracts (the five
-    # heads, the aim-offset seven, or the movement-offset nine); ffa.view.1 has only its pointer
+    # pw_set_action_contract selects between teams.view.1's four action contracts (the five
+    # heads, the aim-offset seven, the movement-offset nine, or the target-conditioned seven); ffa.view.1 has only its pointer
     # contract; every retired or native-decoder contract is refused.
     var layout: array[10, int32]
     check pw_set_action_contract(nil, 11) == -1
-    for version in [0'i32, 1, 2, 3, 12, 15, 101]: check pw_set_action_contract(teams, version) == -1
-    for version in [0'i32, 1, 2, 11, 13, 14]: check pw_set_action_contract(ffa, version) == -1
+    for version in [0'i32, 1, 2, 3, 12, 16, 101]: check pw_set_action_contract(teams, version) == -1
+    for version in [0'i32, 1, 2, 11, 13, 14, 15]: check pw_set_action_contract(ffa, version) == -1
     check pw_set_action_contract(ffa, 12) == 0 and pw_action_contract(ffa) == 12
     check pw_action_layout(teams, ibuf(layout)) == 0 and layout[0..7] == @[5'i32, 51, 25, 2, 2, 2, 82, 0]
     check pw_action_layout_ext(teams, ibuf(layout)) == 0 and layout == [5'i32, 51, 25, 2, 2, 2, 0, 0, 82, 0]
@@ -99,6 +99,8 @@ suite "Native training environment":
     check pw_action_layout(teams, ibuf(layout)) == -1   # seven heads: the _ext form only
     check pw_action_layout_ext(teams, ibuf(layout)) == 0 and layout == [7'i32, 51, 25, 2, 2, 2, 23, 23, 128, 0]
     check pw_reset(teams, 7, 24) == 0 and pw_action_contract(teams) == 13   # kept across reset
+    check pw_set_action_contract(teams, 15) == 0 and pw_action_contract(teams) == 15   # target-conditioned offsets
+    check pw_action_layout_ext(teams, ibuf(layout)) == 0 and layout == [7'i32, 51, 25, 2, 2, 2, 23, 23, 818, 0]
     check pw_set_action_contract(teams, 11) == 0 and pw_action_contract(teams) == 11
     # teams.view.1 is the teams game's: FFA-kin (mode or config) and other seat counts are refused.
     check pw_set_game_mode(teams, 1) == -1

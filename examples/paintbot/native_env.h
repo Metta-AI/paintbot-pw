@@ -113,9 +113,13 @@ int pw_set_seat_starts_out(void *handle, int seat, int32_t starts_out);
  * "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23": those seven heads, then two 23-bin
  * heads dx, dz; the reference decode adds symmetric log-spaced offsets (bin 11 = 0, bin 11 +- j =
  * +-{16, 28, 48, 84, 146, 253, 439, 763, 1326, 2303, 4000}[j-1]), mirrored for
- * team 1, to the movement goal and clamps it to the map) and ffa.view.1 pointer (12,
+ * team 1, to the movement goal and clamps it to the map), its target-conditioned aim-offset
+ * variant (15, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16": contract 13's seven heads
+ * and decode, but heads 5 and 6 carry one 23-logit row per identity, 818 logits per seat, and are
+ * drawn from the row of the identity the aim head chose; no draw, the centre bin, for keep or a
+ * compass aim) and ffa.view.1 pointer (12,
  * "paintbot-pw.ffa.view.1.action.pointer"). pw_set_action_contract selects the contract
- * pw_step reads the caller's heads under: 11 (default), 13 or 14 on a 201 handle, 12 only on a
+ * pw_step reads the caller's heads under: 11 (default), 13, 14 or 15 on a 201 handle, 12 only on a
  * 202 handle; kept across pw_reset; 0, or -1 bad args. Under 13 a seat's action row is seven
  * int32 and pw_action_layout returns -1: use pw_action_layout_ext (int32[10] = {heads, seven
  * head-size slots, logits per seat, 0}). Under 14 it is nine int32 and pw_action_layout_ext
