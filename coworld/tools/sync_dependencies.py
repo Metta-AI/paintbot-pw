@@ -59,7 +59,7 @@ def main():
             resolved = list(pool.map(lambda entry: sync(entry, args.latest), entries))
     if args.latest:
         (ROOT / 'coworld/dependencies.lock').write_text('\n'.join(resolved) + '\n')
-        (ROOT / 'nimby.lock').write_text('\n'.join(e for e in resolved if not e.startswith('mummy ')) + '\n')
+        (ROOT / 'nimby.lock').write_text('\n'.join(resolved) + '\n')
     print('Dependencies ready in', ROOT / 'tmp/coworld/deps')
 
 
