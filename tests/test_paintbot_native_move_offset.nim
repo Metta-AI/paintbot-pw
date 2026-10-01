@@ -171,7 +171,7 @@ suite "Action contract teams.view.1 movement-offset":
     check draws[0] == draws[1]
     check draws[0].len == 100
 
-  test "a contract-13 seat reports heads 5 and 6 through both calls; a seven-head seat cannot step on a 14 handle":
+  test "a contract-13 seat reports heads 5 and 6 through both calls; it steps on a 14 handle, a nine-head seat not on a 13 handle":
     let h = pw_create(3, 600)
     require h != nil
     defer: pw_destroy(h)
@@ -194,7 +194,20 @@ suite "Action contract teams.view.1 movement-offset":
     defer: pw_destroy(h14)
     check pw_set_action_contract(h14, 14) == 0
     check pw_set_seat_policy_script(h14, 0, cbuf(policy), policy.len.int32, cbuf(manifest), manifest.len.int32) == 0
-    check pw_step_logits(h14, ibuf(actions), fbuf(logits), fbuf(rewards), fbuf(terminals)) == -1
+    # Mixed contracts (the training library): the seven-head seat reads the leading 128 logits of its row.
+    check pw_step_logits(h14, ibuf(actions), fbuf(logits), fbuf(rewards), fbuf(terminals)) == 0
+    check pw_seat_policy_extra_choices(h14, 0, ibuf(extra)) == 0
+    check extra[2] == 0 and extra[3] == 0 and extra[10] == 0 and extra[11] == 0   # it has no heads 7 / 8
+    # The other way round is still refused: a nine-head seat's 174 logits do not fit a contract-13 row.
+    let h13 = pw_create(3, 600)
+    require h13 != nil
+    defer: pw_destroy(h13)
+    check pw_set_action_contract(h13, 13) == 0
+    let manifest14 = manifestFor(ActionContractTeamsView1MoveHash)
+    check pw_set_seat_policy_script(h13, 0, cbuf(policy), policy.len.int32, cbuf(manifest14), manifest14.len.int32) == 0
+    var actions13 = newSeq[int32](Seats*7)
+    var logits13 = newSeq[cfloat](Seats*128)
+    check pw_step_logits(h13, ibuf(actions13), fbuf(logits13), fbuf(rewards), fbuf(terminals)) == -1
 
   test "decoder.sampling.heads 7 and 8 need the movement-offset contract":
     let h = pw_create(3, 600)
