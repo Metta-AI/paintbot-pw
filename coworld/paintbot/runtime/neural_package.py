@@ -26,6 +26,9 @@ ACTION_CONTRACT_TEAMS_VIEW_1_MOVE = "paintbot-pw.teams.view.1.action.51-25-2-2-2
 # Its target-conditioned aim-offset variant (15): contract 13's seven heads and decode, but heads 5 and 6 carry one
 # 23-logit row per identity (16 rows each, 818 logits per seat) and are drawn from the chosen identity's row.
 ACTION_CONTRACT_TEAMS_VIEW_1_TARGET = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16"
+# Its raw variant (16): 63 x 7 u per-identity offset rows, then walk direction (256), walk distance (8) and look
+# direction (128) heads the reference decoder reads; 2,490 logits per seat.
+ACTION_CONTRACT_TEAMS_VIEW_1_RAW = "paintbot-pw.teams.view.1.action.51-25-2-2-2-63x16-63x16-256-8-128"
 ACTION_CONTRACT_FFA_VIEW_1_POINTER = "paintbot-pw.ffa.view.1.action.pointer"
 
 
@@ -39,6 +42,7 @@ ACTION_CONTRACT_TEAMS_VIEW_1_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1)
 ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET)
 ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_MOVE)
 ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_TARGET)
+ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_RAW)
 ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH = contract_hash(ACTION_CONTRACT_FFA_VIEW_1_POINTER)
 TEAMS_VIEW_1_SIZE = 512
 ACTION_SIZES = (51, 25, 2, 2, 2)  # action contract teams.view.1
@@ -46,7 +50,7 @@ ACTION_SIZES_OFFSET = (51, 25, 2, 2, 2, 23, 23)  # its aim-offset variant
 ACTION_SIZES_MOVE = (51, 25, 2, 2, 2, 23, 23, 23, 23)  # its movement-offset variant
 # Heads after the five main ones, per teams action contract: aim offsets 5-6, then movement offsets 7-8.
 EXTRA_HEADS = {ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH: 2, ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH: 4,
-               ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH: 2}
+               ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH: 2, ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH: 5}
 # Contracts retired for BASIC parity: their observations read state a BASIC seat cannot (cooldowns,
 # shield, aim, heart meters, the end tick, cover probes), or their actions were decoded natively.
 RETIRED_OBSERVATION_CONTRACTS = ("paintbot-pw.rules37.obs.v1.float448", "paintbot-pw.rules37.obs.v2.float506",
@@ -215,15 +219,16 @@ def validate_sampling(value, offset_heads=False):
             if not isinstance(field, list) or not field:
                 raise ValueError("decoder.sampling.heads must be a non-empty array")
             for item in field:
-                if isinstance(item, bool) or not isinstance(item, int) or not 0 <= item < len(ACTION_SIZES_MOVE):
-                    raise ValueError("decoder.sampling.heads entries must be head indices 0 .. %d"
-                                     % (len(ACTION_SIZES_MOVE) - 1))
+                if isinstance(item, bool) or not isinstance(item, int) or not 0 <= item < SAMPLING_HEADS + 5:
+                    raise ValueError("decoder.sampling.heads entries must be head indices 0 .. %d" % (SAMPLING_HEADS + 4))
             if len(set(field)) != len(field):
                 raise ValueError("decoder.sampling.heads repeats a head")
             if extra < 2 and any(SAMPLING_HEADS <= item < SAMPLING_HEADS + 2 for item in field):
                 raise ValueError("decoder.sampling.heads 5 and 6 need action contract teams.view.1 aim-offset")
-            if extra < 4 and any(item >= SAMPLING_HEADS + 2 for item in field):
+            if extra < 4 and any(SAMPLING_HEADS + 2 <= item < SAMPLING_HEADS + 4 for item in field):
                 raise ValueError("decoder.sampling.heads 7 and 8 need action contract teams.view.1 movement-offset")
+            if extra < 5 and any(item >= SAMPLING_HEADS + 4 for item in field):
+                raise ValueError("decoder.sampling.heads 9 needs action contract teams.view.1 raw")
         else:
             raise ValueError("unknown decoder.sampling field: " + str(key))
 
@@ -788,7 +793,7 @@ def unpack_package(data, seats=16):
         raise ValueError("unknown neural observation contract")
     if action_contract not in (ACTION_CONTRACT_TEAMS_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH,
                                ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH,
-                               ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
+                               ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
         raise ValueError("unknown neural action contract")
     if teams != (action_contract != ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH):
         raise ValueError("observation contract teams.view.1 goes with action contract teams.view.1 (or its aim-offset "

@@ -694,6 +694,24 @@ class Pwnet2Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "heads 7 and 8 need"):
             unpack_package(package({**target, "decoder": {"sampling": {"mode": "categorical", "heads": [7]}}}, model=model))
 
+    def test_raw_contract(self):
+        """Action contract 16 (raw): 63 x 7 u identity rows, walk direction / distance, look direction; heads 7 .. 9."""
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        ids = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        self.assertEqual(ids["ActionContractTeamsView1Raw"], ACTION_CONTRACT_TEAMS_VIEW_1_RAW)
+        self.assertEqual(sha(ACTION_CONTRACT_TEAMS_VIEW_1_RAW), ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH)
+        raw = {**SCHEMA2, "action_contract": ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH}
+        model = pwnet2(TEAMS_VIEW_1_SIZE, [51, 25, 2, 2, 2, 1008, 1008, 256, 8, 128],
+                       [(1, [TEAMS_VIEW_1_SIZE, 2490, 1, 0], [], TEAMS_VIEW_1_SIZE * 2490 + 2490)],
+                       act=ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH)
+        for heads in ([9], [7, 8, 9], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]):
+            _, _, manifest = unpack_package(package({**raw, "decoder": {"sampling": {"mode": "categorical",
+                                                                                    "heads": heads}}}, model=model))
+            self.assertEqual(manifest["decoder"]["sampling"]["heads"], heads)
+        with self.assertRaisesRegex(ValueError, "heads 9 needs action contract teams.view.1 raw"):
+            unpack_package(package({**SCHEMA2, "action_contract": MOVE, "decoder": {"sampling": {
+                "mode": "categorical", "heads": [9]}}}, model=MOVE_MODEL))
+
     def test_token_layer_norm_cost_and_structure(self):
         # Params 6 = norm (0 or 1) and 7 = eps (FP32 bits) of TOKEN_MLP and TOKEN_MIX: a LayerNorm (gain, shift)
         # before the relu, T*(8*d + 32) operations per normalised width (neural_actor.layerNormOps).

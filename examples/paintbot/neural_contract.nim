@@ -39,7 +39,8 @@ const
   MoveOffsetCentre* = 11
   MoveOffsetTable* = [16, 28, 48, 84, 146, 253, 439, 763, 1326, 2303, 4000]
   MoveOffsetHeads* = 2
-  ExtraHeadsMax* = AimOffsetHeads + MoveOffsetHeads
+  ExtraHeadsMax* = AimOffsetHeads + 3   # contract 16's five extra heads (14 has four)
+  ExtraHeadsAbi4* = 4                   # pw_seat_policy_extra_choices' fixed width (heads 5 .. 8)
   ActionSizesMove* = [51, 25, 2, 2, 2, AimOffsetBins, AimOffsetBins, MoveOffsetBins, MoveOffsetBins]
   LogitSizeMove* = LogitSizeOffset + 2*MoveOffsetBins
   ## Its target-conditioned aim-offset variant: the aim-offset contract's seven heads (the same choices, the same
@@ -50,6 +51,24 @@ const
   ActionContractTeamsView1Target* = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16"
   TargetRows* = 16
   LogitSizeTarget* = LogitSize + AimOffsetHeads*TargetRows*AimOffsetBins
+  ## Its raw variant (16): contract 15's per-identity offset rows refined to 63 bins of 7 u (bin 31 = 0; offset =
+  ## (b - 31) * 7, mirrored for team 1), then three raw direction heads the reference decoder reads: walk direction
+  ## (256) and walk distance (8: 50, 100, 150, 250, 500, 1000, 2000, 4000 u) replace the movement head's compass
+  ## step (head 0 choices 43 .. 50), and look direction (128, 5000 u) replaces the aim head's compass aim (head 1
+  ## choices 17 .. 24). Direction i of N is the angle 2 pi i / N from +x toward +z in the team frame; the decoder
+  ## uses cos / sin x 10000 tables and rounds half away from zero. Nothing is computed for the network: every value
+  ## is a fixed grid point relative to the seat or the chosen identity.
+  ActionContractTeamsView1Raw* = "paintbot-pw.teams.view.1.action.51-25-2-2-2-63x16-63x16-256-8-128"
+  RawOffsetBins* = 63
+  RawOffsetCentre* = 31
+  RawOffsetStep* = 7
+  WalkDirections* = 256
+  WalkDistances* = [50, 100, 150, 250, 500, 1000, 2000, 4000]
+  LookDirections* = 128
+  LookDistance* = 5000
+  ActionSizesRaw* = [51, 25, 2, 2, 2, RawOffsetBins, RawOffsetBins, WalkDirections, WalkDistances.len, LookDirections]
+  LogitSizeRaw* = LogitSize + AimOffsetHeads*TargetRows*RawOffsetBins + WalkDirections + WalkDistances.len +
+    LookDirections
   ## Observation contract ffa.view.1 (FFA-kin at any seat count; its width follows the match,
   ## ffaViewLayout) and its action contract, whose heads are sized by the same layout and
   ## point at the observation's rows of the same tick.
@@ -97,7 +116,8 @@ type
     ## Version numbers are the native ABI's (pw_create_observation).
     ocTeamsView1 = 201, ocFfaView1 = 202
   ActionContractVersion* = enum
-    acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13, acTeamsView1Move = 14, acTeamsView1Target = 15
+    acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13, acTeamsView1Move = 14, acTeamsView1Target = 15,
+    acTeamsView1Raw = 16
 
 const
   ObservationContractTeamsView1Hash* = sha256Hex(ObservationContractTeamsView1)
@@ -107,6 +127,7 @@ const
   ActionContractTeamsView1OffsetHash* = sha256Hex(ActionContractTeamsView1Offset)
   ActionContractTeamsView1MoveHash* = sha256Hex(ActionContractTeamsView1Move)
   ActionContractTeamsView1TargetHash* = sha256Hex(ActionContractTeamsView1Target)
+  ActionContractTeamsView1RawHash* = sha256Hex(ActionContractTeamsView1Raw)
 
 const
   ## Contracts retired for BASIC parity (docs/neural/seat-view.md): their observations read
@@ -173,6 +194,7 @@ proc actionContractHash*(version: ActionContractVersion): string =
   of acTeamsView1Offset: ActionContractTeamsView1OffsetHash
   of acTeamsView1Move: ActionContractTeamsView1MoveHash
   of acTeamsView1Target: ActionContractTeamsView1TargetHash
+  of acTeamsView1Raw: ActionContractTeamsView1RawHash
 proc actionContractId*(version: ActionContractVersion): string =
   case version
   of acTeamsView1: ActionContractTeamsView1
@@ -180,6 +202,7 @@ proc actionContractId*(version: ActionContractVersion): string =
   of acTeamsView1Offset: ActionContractTeamsView1Offset
   of acTeamsView1Move: ActionContractTeamsView1Move
   of acTeamsView1Target: ActionContractTeamsView1Target
+  of acTeamsView1Raw: ActionContractTeamsView1Raw
 proc actionContractVersion*(hash: string): ActionContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ActionContractTeamsView1Hash: acTeamsView1
@@ -187,6 +210,7 @@ proc actionContractVersion*(hash: string): ActionContractVersion =
   elif hash == ActionContractTeamsView1OffsetHash: acTeamsView1Offset
   elif hash == ActionContractTeamsView1MoveHash: acTeamsView1Move
   elif hash == ActionContractTeamsView1TargetHash: acTeamsView1Target
+  elif hash == ActionContractTeamsView1RawHash: acTeamsView1Raw
   elif retiredContract(hash): raise newException(ValueError, "neural action contract " & RetiredMessage)
   else: raise newException(ValueError, "unknown neural action contract")
 
@@ -216,7 +240,8 @@ proc pairedAction*(version: ObservationContractVersion): ActionContractVersion =
 proc pairs*(observation: ObservationContractVersion, action: ActionContractVersion): bool =
   ## Whether the two contracts go together: teams.view.1 with its five-head action contract
   ## or its aim-offset / movement-offset variants, ffa.view.1 with its pointer contract.
-  if observation == ocTeamsView1: action in {acTeamsView1, acTeamsView1Offset, acTeamsView1Move, acTeamsView1Target}
+  if observation == ocTeamsView1: action in {acTeamsView1, acTeamsView1Offset, acTeamsView1Move, acTeamsView1Target,
+    acTeamsView1Raw}
   else: action == acFfaView1Pointer
 proc moveOffset*(bin: int): int =
   ## The movement offset (world units, before the team-1 mirror) of a movement-offset bin 0 .. 22:
@@ -230,6 +255,7 @@ proc extraHeads*(action: ActionContractVersion): int =
   case action
   of acTeamsView1Offset, acTeamsView1Target: AimOffsetHeads
   of acTeamsView1Move: AimOffsetHeads + MoveOffsetHeads
+  of acTeamsView1Raw: AimOffsetHeads + 3
   else: 0
 proc actionHeadSizes*(action: ActionContractVersion): seq[int] =
   ## The head sizes of a fixed-size action contract (ffa.view.1 pointer: see pointerHeads).
@@ -237,6 +263,7 @@ proc actionHeadSizes*(action: ActionContractVersion): seq[int] =
   of acTeamsView1: @ActionSizes
   of acTeamsView1Offset, acTeamsView1Target: @ActionSizesOffset
   of acTeamsView1Move: @ActionSizesMove
+  of acTeamsView1Raw: @ActionSizesRaw
   of acFfaView1Pointer: raise newException(ValueError, "action contract ffa.view.1 pointer is sized by the match (pointerHeads)")
 proc actionLogitSize*(action: ActionContractVersion): int =
   ## Logits per seat of a fixed-size action contract: the sum of its head sizes, except the target-conditioned
@@ -246,15 +273,18 @@ proc actionLogitSize*(action: ActionContractVersion): int =
   of acTeamsView1Offset: LogitSizeOffset
   of acTeamsView1Move: LogitSizeMove
   of acTeamsView1Target: LogitSizeTarget
+  of acTeamsView1Raw: LogitSizeRaw
   of acFfaView1Pointer: raise newException(ValueError, "action contract ffa.view.1 pointer is sized by the match (pointerHeads)")
 proc actionLogitHeads*(action: ActionContractVersion): seq[int] =
   ## The logit segments of a fixed-size action contract, in order, as a model's header lists its heads: the head
   ## sizes, except contract 15, whose heads 5 and 6 are TargetRows * 23 logits each (one 23-logit row per identity).
   if action == acTeamsView1Target: @[51, 25, 2, 2, 2, TargetRows*AimOffsetBins, TargetRows*AimOffsetBins]
+  elif action == acTeamsView1Raw: @[51, 25, 2, 2, 2, TargetRows*RawOffsetBins, TargetRows*RawOffsetBins, WalkDirections,
+    WalkDistances.len, LookDirections]
   else: actionHeadSizes(action)
 proc targetRows*(action: ActionContractVersion): bool =
   ## Whether the contract draws its aim offsets from the chosen identity's row (contract 15).
-  action == acTeamsView1Target
+  action in {acTeamsView1Target, acTeamsView1Raw}
 
 proc mapFlip*(slot: int): int =
   ## The teams game mirrors odd seats' observations and compass heads (team 1 plays from
