@@ -4,7 +4,7 @@
 ## layout calls, caller-driven decode (pw_step), the non-compass choices playing exactly as contract 15, a policy seat's
 ## draws (chosen 63-bin row, then the plain heads) and pw_seat_policy_extra_choices2. Build with --mm:arc --threads:on
 ## -d:pwTraining.
-import std/[unittest, os, random, math, importutils]
+import std/[unittest, os, random, math, importutils, strutils]
 import ../examples/paintbot/[sim, neural_contract, native_env, seat_view]
 
 when not defined(pwTraining): {.error: "the native ABI exists only under -d:pwTraining".}

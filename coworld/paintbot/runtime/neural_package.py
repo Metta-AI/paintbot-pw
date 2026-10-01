@@ -406,7 +406,7 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
         raise ValueError("invalid neural actor magic")
     pos = 8
     version, inputs, outputs, heads = u32(), word(), word(), u32()
-    if version != 2 or not 1 <= inputs <= 4096 or not 2 <= outputs <= 1024 or not 1 <= heads <= 32:
+    if version != 2 or not 1 <= inputs <= 4096 or not 2 <= outputs <= 4096 or not 1 <= heads <= 32:
         raise ValueError("unsupported neural actor dimensions/version")
     sizes = [word() for _ in range(heads)]
     if any(not 2 <= size <= 1024 for size in sizes):
