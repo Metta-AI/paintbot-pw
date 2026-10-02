@@ -754,14 +754,18 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
   for i in 0..<Seats:
     if w.cogs[i].hp <= 0: continue
     let cmd = commands[i]
+    when defined(pwTraining):
+      # The seat's uniform as this tick's orders find it: a grenade thrown and a shot ordered on the
+      # same tick are both ordered in disguise, though the first takes the uniform off.
+      let wore = w.uniforms[i]
     if w.equipment[i].grenade:
       if cmd.chargeGrenade: w.equipment[i].charge = min(
           GrenadeChargeTicks.int32, w.equipment[i].charge+1)
       elif w.equipment[i].charge > 0:
         when defined(pwTraining):
           if hitLatch != nil:   # the throw order: the uniform before it comes off
-            hitLatch.lobs.add LobLatch(owner: i.int32, landsAt: w.tick+GrenadeFlightTicks, disguised: w.uniforms[i])
-            inc hitLatch.orders[i][1]; hitLatch.ordersDisguised[i][1] += w.uniforms[i].int32
+            hitLatch.lobs.add LobLatch(owner: i.int32, landsAt: w.tick+GrenadeFlightTicks, disguised: wore)
+            inc hitLatch.orders[i][1]; hitLatch.ordersDisguised[i][1] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.grenades.add Lob(start: w.cogs[i].pos, target: w.grenadeTarget(i),
@@ -774,8 +778,8 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
       if cmd.shoot and w.equipment[i].sprayCooldown == 0:
         when defined(pwTraining):
           if hitLatch != nil:   # the trigger
-            hitLatch.spray[i] = w.uniforms[i]
-            inc hitLatch.orders[i][2]; hitLatch.ordersDisguised[i][2] += w.uniforms[i].int32
+            hitLatch.spray[i] = wore
+            inc hitLatch.orders[i][2]; hitLatch.ordersDisguised[i][2] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.emitSound(w.cogs[i].pos, 3, i, 1800)
@@ -829,8 +833,8 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
       elif cmd.shoot and w.cogs[i].cooldown == 0:
         when defined(pwTraining):
           if hitLatch != nil:   # the wind-up starts
-            hitLatch.gun[i] = w.uniforms[i]
-            inc hitLatch.orders[i][0]; hitLatch.ordersDisguised[i][0] += w.uniforms[i].int32
+            hitLatch.gun[i] = wore
+            inc hitLatch.orders[i][0]; hitLatch.ordersDisguised[i][0] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.equipment[i].windup = GunWindupTicks
