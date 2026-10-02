@@ -4,11 +4,12 @@
 ## source) and pw_seat_stats (hits_taken, deaths; kills by attacker), and every seat that ends the
 ## match out of lives has exactly one final event, its last.
 ## Build with --mm:arc --threads:on -d:pwTraining.
-import std/[unittest, os]
+import std/[unittest, os, importutils]
 import ../examples/paintbot/[sim, neural_contract, native_env]
 
 when not defined(pwTraining): {.error: "training telemetry exists only under -d:pwTraining".}
 
+privateAccess(NativeEnv)
 const Root = currentSourcePath().parentDir.parentDir
 const Base = Root / "coworld/paintbot/players/base.bas"
 const HitInts = 8
@@ -119,3 +120,64 @@ suite "Hit attribution":
           shots += six[0]+six[1]+six[2]
         pw_destroy(h)
     check matches == 6 and finals > 0 and shots > 0
+
+  test "disguised is the shooter's uniform at the order tick: gun wind-up, grenade in flight, spray burst":
+    # Seat 0 orders each weapon while wearing a uniform; the order takes it off, the hit lands later.
+    proc run(weapon: int): seq[array[HitInts, int32]] =
+      let h = pw_create(77, 2000)
+      doAssert pw_set_rules(h, 48) == 0 and pw_set_hit_log(h, 1) == 0 and pw_reset(h, 77, 2000) == 0
+      let env = cast[ptr NativeEnv](h)
+      for slot in 0..<Seats: env.world.cogs[slot].shield = 0
+      # The enemy stands still a short clear walk from the shooter.
+      let origin = env.world.cogs[0].pos
+      var spot = origin
+      for d in [(260, 0), (-260, 0), (0, 260), (0, -260)]:
+        let p = Point(x: origin.x+d[0].int32, z: origin.z+d[1].int32)
+        if not env.world.blocked(p) and env.world.lineClear(origin, p): spot = p; break
+      doAssert spot != origin
+      env.world.cogs[1].pos = spot; env.world.cogs[1].goal = spot
+      env.world.uniforms[0] = true
+      case weapon
+      of 2: env.world.equipment[0].grenade = true
+      of 3: env.world.equipment[0].sprayCan = true
+      else: discard
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var rewards, terminals: array[LegacySeats, float32]
+      var buffer: array[32*HitInts, int32]
+      var order = (if weapon == 2: 2 else: 0)   # the tick the shot is ordered
+      for tick in 0..<40:
+        # nine = walk, goal, shoot, aim, charge_grenade, sneak, direct
+        var cmd = [0'i32, 0, 0, 0, spot.x, spot.z, 0, 0, 0]
+        if weapon == 2:
+          if tick < 2: cmd[6] = 1            # charge two ticks, then release: the throw order
+          if tick == 2:
+            # the grenade lands where the charge reaches along the aim: put the enemy there
+            let target = env.world.grenadeTarget(0)
+            env.world.cogs[1].pos = target; env.world.cogs[1].goal = target
+            check env.world.uniforms[0]      # still disguised when it orders the throw
+            order = tick
+        elif tick == 0:
+          cmd[3] = 1                         # the gun's wind-up start / the spray's trigger
+          check env.world.uniforms[0]
+        doAssert pw_set_seat_command(h, 0, cast[ptr UncheckedArray[int32]](addr cmd[0])) == 0
+        doAssert pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+        if tick >= order: check not env.world.uniforms[0]   # the order took the uniform off
+        let count = pw_hit_events(h, ibuf(buffer), 32)
+        for i in 0..<count:
+          var e: array[HitInts, int32]
+          for k in 0..<HitInts: e[k] = buffer[i*HitInts+k]
+          if e[0] == 0: result.add e
+      var six: array[6, int32]
+      check pw_seat_shot_orders(h, 0, ibuf(six)) == 0
+      let slot = [0, 0, 1, 2][weapon]
+      check six[slot] == 1 and six[3+slot] == 1
+      pw_destroy(h)
+    for weapon in 1..3:
+      checkpoint "weapon " & $weapon
+      let events = run(weapon)
+      var hitEnemy = false
+      for e in events:
+        check e[4] == weapon.int32
+        check e[7] == 1     # disguised at the order, though the uniform was off when the hit landed
+        if e[1] == 1: hitEnemy = true
+      check hitEnemy
