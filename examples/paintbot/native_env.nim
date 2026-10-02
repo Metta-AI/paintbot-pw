@@ -566,6 +566,7 @@ proc shadowDecide(env: ptr NativeEnv) =
   ## The shadow scripts decide on the pre-step world, hearing what their seats hear this tick (scriptHeard). Nothing
   ## they do reaches the world: their orders are only recorded, their shouts are dropped (the shout lists are
   ## restored), and the seats' BASIC peak telemetry is restored.
+  for slot in 0..<env.shadowSet.len: env.shadowSet[slot] = false
   if env.shadowCount == 0: return
   env.sizeHeard()
   let savedHeard = heard
@@ -1029,10 +1030,10 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     var commands = newSeq[Command](env.n)
     var wasDead = newSeq[bool](env.n)
     var decoders = newSeq[Bot](env.n)
-    for slot in 0..<env.n:
-      env.lastDecidedSet[slot] = false
-      env.shadowSet[slot] = false
-    env.shadowDecide()
+    for slot in 0..<env.n: env.lastDecidedSet[slot] = false
+    # The shadows decide before the tick's speech is delivered. pw_script_decide already ran them (and delivered
+    # the speech) when it took this tick's decision ahead of the step.
+    if not (env.decidedValid and env.decidedTick == env.world.tick): env.shadowDecide()
     for slot in 0..<env.n:
       wasDead[slot] = env.world.cogs[slot].hp <= 0
       if env.commandPending[slot] or (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
@@ -1803,6 +1804,7 @@ proc pw_script_decide*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   if env.policyCount > 0: return -4   # a policy seat decides only with its logits (pw_step_logits)
   if env.scriptCount == 0 or env.world.winner != -1 or env.world.tick >= env.world.endTick: return 0
   if env.decidedValid and env.decidedTick == env.world.tick: return 0
+  env.shadowDecide()   # before scriptDecide delivers this tick's speech: the shadows hear what their seats hear
   env.scriptDecide()
   1
 

@@ -332,3 +332,69 @@ suite "Net-teacher shadow: pw_set_seat_command on a policy seat, pw_seat_decided
     require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
     check pw_seat_decided_orders(h, 0, ibuf(o)) == 0 and o[9] == 2 and o[1] == 1
     check pw_seat_shadow_status(h, 0) == 1
+
+  test "teacher-forced replay: a shadow decides exactly what the same script decides when seated; pw_script_decide changes nothing":
+    # The record: seat 0 plays the student's raw commands, the rest base.bas. Every replay forces every seat's
+    # recorded command (pw_set_seat_command) and must reproduce the record's world tick for tick; seat 0's teacher
+    # (base.bas) runs either as a shadow (ran = 2) or seated under the forced command (ran = 1). Without listeners
+    # nothing seat 0 hears depends on its own shouts, so shadow == seated exactly. With base.bas listeners (scripted
+    # but forced) the seated teacher's shouts reach them; the shadow's never do (documented); the shadow still
+    # decides identically whether or not pw_script_decide took the tick's decision ahead of the step.
+    const Ticks = 600
+    type Mode = enum mShadow, mSeated, mShadowListeners, mShadowListenersPre, mSeatedListeners
+    var differs = 0
+    for seed in [61'i32, 62]:
+      checkpoint "seed " & $seed
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var rewards, terminals: array[LegacySeats, float32]
+      var o: array[10, int32]
+      let rec = pw_create(seed, Ticks)
+      require rec != nil
+      for slot in 1..<Seats: require setScript(rec, slot, baseSource) == 0
+      var executed: seq[seq[array[9, int32]]]
+      var hashes: seq[uint32]
+      for t in 0..<Ticks:
+        let nine = student(t)
+        require pw_set_seat_command(rec, 0, ibuf(nine)) == 0
+        if pw_step(rec, ibuf(actions), fbuf(rewards), fbuf(terminals)) != 0: break
+        var row = newSeq[array[9, int32]](Seats)
+        for slot in 0..<Seats:
+          require pw_seat_orders(rec, slot.cint, ibuf(o)) == 0
+          for i in 0..8: row[slot][i] = o[i]
+        executed.add row
+        hashes.add pw_state_hash(rec)
+      pw_destroy(rec)
+      check hashes.len > 300
+      var decided: array[Mode, seq[array[10, int32]]]
+      for mode in Mode:
+        checkpoint "mode " & $mode
+        let h = pw_create(seed, Ticks)
+        require h != nil
+        let listeners = mode in {mShadowListeners, mShadowListenersPre, mSeatedListeners}
+        if listeners:
+          for slot in 1..<Seats: require setScript(h, slot, baseSource) == 0
+        if mode in {mSeated, mSeatedListeners}: require setScript(h, 0, baseSource) == 0
+        else: require pw_set_seat_shadow_script(h, 0, cbuf(baseSource), baseSource.len.int32) == 0
+        for t, row in executed:
+          for slot in 0..<Seats:
+            var cmd = row[slot]
+            require pw_set_seat_command(h, slot.cint, ibuf(cmd)) == 0
+          if mode == mShadowListenersPre: require pw_script_decide(h) == 1
+          require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+          require pw_state_hash(h) == hashes[t]                  # the forced replay is the record's world
+          require pw_seat_orders(h, 0, ibuf(o)) == 0
+          for i in 0..8: require o[i] == row[0][i]               # seat 0 executed the student's command
+          require pw_seat_decided_orders(h, 0, ibuf(o)) == 0
+          require o[9] == (if mode in {mSeated, mSeatedListeners}: 1'i32 else: 2'i32)
+          decided[mode].add o
+        if mode in {mShadow, mShadowListeners, mShadowListenersPre}: check pw_seat_shadow_status(h, 0) == 1
+        pw_destroy(h)
+      for t in 0..<executed.len:
+        check decided[mShadow][t][0..8] == decided[mSeated][t][0..8]
+        check decided[mShadowListeners][t] == decided[mShadowListenersPre][t]
+        if decided[mShadow][t][0..8] != executed[t][0][0..8]: inc differs
+      var listenerAgree = 0
+      for t in 0..<executed.len:
+        if decided[mShadowListeners][t][0..8] == decided[mSeatedListeners][t][0..8]: inc listenerAgree
+      echo "seed ", seed, ": shadow vs seated with listeners agree on ", listenerAgree, "/", executed.len, " ticks"
+    check differs > 300   # the teacher's order really differs from the forced one
