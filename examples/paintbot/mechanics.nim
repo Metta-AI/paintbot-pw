@@ -401,6 +401,17 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     let hpBefore = w.cogs[victim].hp
   w.cogs[victim].hp = max(0'i32, w.cogs[victim].hp-(amount.int32-absorbed))
   when defined(pwTraining):
+    # Hit attribution (telemetry only): this event; `final` is set below once the lives are known.
+    let hitIndex = if hitLog != nil: hitLog[].len else: -1
+    if hitLog != nil:
+      hitLog[].add HitEvent(attacker: attacker.int32, victim: victim.int32, health: hpBefore-w.cogs[victim].hp,
+        armor: absorbed, weapon: ord(damageWeapon).int32, killed: int32(w.cogs[victim].hp == 0),
+        disguised: int32(attacker >= 0 and hitLatch != nil and (case damageWeapon
+          of dwGun: hitLatch.gun[attacker]
+          of dwSpray: hitLatch.spray[attacker]
+          of dwGrenade: lobDisguised
+          of dwNone: false)))
+  when defined(pwTraining):
     if combatTelemetry != nil:
       # Telemetry only: a hit is a damage event past shield and life checks; damage is
       # the health it removed (armor absorbs first). Attacker -1 is the map itself.
@@ -468,6 +479,8 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     w.resetHeart(1-team(victim)); w.cogs[victim].carrying = false
   let lives = if visionRulesVersion in 13..18:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
   w.equipment[victim] = Equipment(lives: lives)
+  when defined(pwTraining):
+    if hitIndex >= 0: hitLog[][hitIndex].final = int32(lives <= 0)
   w.uniforms[victim] = false
   w.cogs[victim].respawn = seatRespawnTicks(victim)
   w.cogs[victim].cooldown = 0
@@ -547,6 +560,52 @@ proc waypointFor*(w: World, slot: int, start, goal: Point): Point =
   if visionRulesVersion >= 35 and team(slot) == 1:
     return mirrorPoint(w.waypoint(mirrorPoint(start), mirrorPoint(goal)))
   w.waypoint(start, goal)
+
+when defined(pwTraining):
+  # Training only (teacher class masks): waypointFor's own decision before its field search, so a
+  # caller can tell which goals it walks to straight and which it routes, and to which target cell,
+  # without running the search. Rules 38 on (the time-weighted routing); nothing here changes a route.
+  proc routeFrame(w: World, slot: int, p: Point): Point =
+    if visionRulesVersion >= 35 and team(slot) == 1: mirrorPoint(p) else: p
+  proc routePlanned*(): bool = visionRulesVersion >= 38
+  proc routePrepare*(w: World, slot: int, start: Point) =
+    ## Brings the path grid and lake up to date for `w` exactly as waypoint keeps them (it routes
+    ## the start to itself); routeStraight and routeTarget read them, so call this first (once per
+    ## world and map: nothing between may route on another).
+    let a = w.routeFrame(slot, start)
+    discard w.waypoint(a, a)
+  proc routeStraight*(w: World, slot: int, start, goal: Point): bool =
+    ## Whether waypointFor(slot, start, goal) returns `goal` itself: the walk is clear and, from dry
+    ## land, dry (rules 38 on). routePrepare first.
+    let a = w.routeFrame(slot, start)
+    let b = w.routeFrame(slot, goal)
+    let nx = (maxX()-minX()) div NavCell
+    let nz = (maxZ()-minZ()) div NavCell
+    let dryOnly = (let c = navCellOf(a, nx, nz); c < 0 or not nav.water[c])
+    w.walkClear(a, b) and (not dryOnly or navSegmentDry(a, b, nx, nz))
+  proc routeTargetIs*(w: World, slot: int, goal: Point, target: int): bool =
+    ## routeTarget(slot, _, goal) == target, without the goal memo: a goal whose own cell is
+    ## connected has that cell's centre within 71 units, so a farther target centre is not the
+    ## nearest connected one. routePrepare first.
+    let b = w.routeFrame(slot, goal)
+    let nx = (maxX()-minX()) div NavCell
+    let nz = (maxZ()-minZ()) div NavCell
+    let own = navCellOf(b, nx, nz)
+    if target >= 0 and own >= 0 and nav.edges[own].len > 0 and
+        distance2(b, navigationPoint(target, nx)) > 2*(NavCell div 2)*(NavCell div 2):
+      return false
+    nearestConnectedCell(b, nx, nz) == target
+  proc routeTarget*(w: World, slot: int, start, goal: Point): int =
+    ## The target cell waypointFor's field search routes `goal` to when it does not walk straight
+    ## (-1: none, and it returns start). Its answer depends only on this cell and the start.
+    ## routePrepare first.
+    let b = w.routeFrame(slot, goal)
+    let nx = (maxX()-minX()) div NavCell
+    let nz = (maxZ()-minZ()) div NavCell
+    if b in nav.targets: return nav.targets[b]
+    result = nearestConnectedCell(b, nx, nz)
+    if nav.targets.len >= NavTargetLimit: nav.targets.clear()
+    nav.targets[b] = result
 
 proc seatOrder*(w: World): seq[int] =
   ## The order seats act within a tick. Seats alternate teams, so acting in seat order every
@@ -695,10 +754,18 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
   for i in 0..<Seats:
     if w.cogs[i].hp <= 0: continue
     let cmd = commands[i]
+    when defined(pwTraining):
+      # The seat's uniform as this tick's orders find it: a grenade thrown and a shot ordered on the
+      # same tick are both ordered in disguise, though the first takes the uniform off.
+      let wore = w.uniforms[i]
     if w.equipment[i].grenade:
       if cmd.chargeGrenade: w.equipment[i].charge = min(
           GrenadeChargeTicks.int32, w.equipment[i].charge+1)
       elif w.equipment[i].charge > 0:
+        when defined(pwTraining):
+          if hitLatch != nil:   # the throw order: the uniform before it comes off
+            hitLatch.lobs.add LobLatch(owner: i.int32, landsAt: w.tick+GrenadeFlightTicks, disguised: wore)
+            inc hitLatch.orders[i][1]; hitLatch.ordersDisguised[i][1] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.grenades.add Lob(start: w.cogs[i].pos, target: w.grenadeTarget(i),
@@ -709,6 +776,10 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
         w.equipment[i].grenade = false; w.equipment[i].charge = 0
     if w.equipment[i].sprayCan:
       if cmd.shoot and w.equipment[i].sprayCooldown == 0:
+        when defined(pwTraining):
+          if hitLatch != nil:   # the trigger
+            hitLatch.spray[i] = wore
+            inc hitLatch.orders[i][2]; hitLatch.ordersDisguised[i][2] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.emitSound(w.cogs[i].pos, 3, i, 1800)
@@ -760,6 +831,10 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
           w.balls.add Paintball(pos: endPoint, velocity: Point(
               x: endPoint.x-origin.x, z: endPoint.z-origin.z), owner: i.int32, life: (if visionRulesVersion >= 9: 6 else: 2))
       elif cmd.shoot and w.cogs[i].cooldown == 0:
+        when defined(pwTraining):
+          if hitLatch != nil:   # the wind-up starts
+            hitLatch.gun[i] = wore
+            inc hitLatch.orders[i][0]; hitLatch.ordersDisguised[i][0] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.equipment[i].windup = GunWindupTicks
@@ -790,7 +865,17 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
   w.updateBarrage()
   var airborne: seq[Lob]
   for g in w.grenades:
-    if w.tick >= g.landsAt: w.explode(g.target, g.owner.int)
+    if w.tick >= g.landsAt:
+      when defined(pwTraining):
+        lobDisguised = false
+        if hitLatch != nil and g.owner >= 0:
+          for k in 0..<hitLatch.lobs.len:   # this owner's oldest throw: flights are equally long
+            if hitLatch.lobs[k].owner == g.owner:
+              lobDisguised = hitLatch.lobs[k].disguised
+              hitLatch.lobs.delete(k)
+              break
+      w.explode(g.target, g.owner.int)
+      when defined(pwTraining): lobDisguised = false
     else: airborne.add g
   w.grenades = airborne
   w.pickupEquipment(attacked)

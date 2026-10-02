@@ -24,7 +24,11 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH,
                             RETIRED_OBSERVATION_CONTRACTS, RETIRED_ACTION_CONTRACTS, RETIRED_CONTRACT_HASHES,
                             RETIRED_DECODER_OPTIONS, ACTION_CONTRACT_TEAMS_VIEW_1_TARGET,
-                            ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH, pointer_k_ops)
+                            ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH, pointer_k_ops, ACTION_CONTRACT_TEAMS_VIEW_1_RAW,
+                            ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH, OBSERVATION_CONTRACT_TEAMS_VIEW_1H,
+                            OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH, TEAMS_VIEW_1H_SIZE,
+                            OBSERVATION_CONTRACT_TEAMS_VIEW_1S, OBSERVATION_CONTRACT_TEAMS_VIEW_1S_HASH,
+                            TEAMS_VIEW_1S_SIZE)
 
 ROOT = Path(__file__).parents[2]
 TEAMS, FFA = OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH
@@ -177,7 +181,7 @@ class PackageTests(unittest.TestCase):
                                   ({"mode": "categorical", "temperature": 11}, "within"), ({"mode": "categorical", "temperature": "1"}, "number"),
                                   ({"mode": "categorical", "temperature": True}, "number"), ({"mode": "categorical", "heads": []}, "non-empty"),
                                   ({"mode": "categorical", "heads": [7]}, "heads 7 and 8 need action contract teams.view.1 movement-offset"),
-                                  ({"mode": "categorical", "heads": [9]}, r"indices 0 \.\. 8"), ({"mode": "categorical", "heads": [-1]}, "indices"),
+                                  ({"mode": "categorical", "heads": [10]}, r"indices 0 \.\. 9"), ({"mode": "categorical", "heads": [-1]}, "indices"),
                                   ({"mode": "categorical", "heads": [1, 1]}, "repeats"),
                                   ({"mode": "categorical", "heads": "all"}, "non-empty"), ({"mode": "categorical", "heads": [True]}, "indices"),
                                   ({"mode": "categorical", "seed": 1}, "unknown decoder.sampling field"), (True, "must be a dict"), ([], "must be a dict")):
@@ -353,8 +357,8 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "heads 7 and 8 need action contract teams.view.1 movement-offset"):
             unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [7]}}},
                                    model=OFFSET_MODEL))
-        with self.assertRaisesRegex(ValueError, r"indices 0 \.\. 8"):
-            unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [9]}}},
+        with self.assertRaisesRegex(ValueError, r"indices 0 \.\. 9"):
+            unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [10]}}},
                                    model=OFFSET_MODEL))
         # The other selection options keep reading the five fixed heads under the aim-offset contract.
         _, _, manifest = unpack_package(package({**offset, "decoder": {"forbid_objectives": [9]}}, model=OFFSET_MODEL))
@@ -448,6 +452,32 @@ class UserInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match observation contract teams.view.1u3"):
             unpack_package(self.inputs_package(3, user_inputs={"count": 2, "init": [0, 0]}))
 
+    def test_teams_view_1h_packages(self):
+        """teams.view.1h (203): 612 floats (teams.view.1 + 100 history), and its u<K> variants at 612 + K."""
+        self.assertEqual(TEAMS_VIEW_1H_SIZE, TEAMS_VIEW_1_SIZE + 100)
+        h = OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH
+        self.assertEqual(h, sha("paintbot-pw.teams.view.1h"))
+        unpack_package(self.inputs_package(observation=h, inputs=TEAMS_VIEW_1H_SIZE, user_inputs=None))
+        hu = sha(user_inputs_contract_id(244, OBSERVATION_CONTRACT_TEAMS_VIEW_1H))
+        unpack_package(self.inputs_package(244, observation=hu, inputs=TEAMS_VIEW_1H_SIZE + 244))
+        with self.assertRaisesRegex(ValueError, "input count must be 856 for observation contract teams.view.1hu244"):
+            unpack_package(self.inputs_package(244, observation=hu, inputs=TEAMS_VIEW_1_SIZE + 244))
+        with self.assertRaisesRegex(ValueError, "input count must be 612 for observation contract teams.view.1h"):
+            unpack_package(self.inputs_package(observation=h, inputs=TEAMS_VIEW_1_SIZE, user_inputs=None))
+
+    def test_teams_view_1s_packages(self):
+        """teams.view.1s (204): 740 floats (teams.view.1h + 128 stop clocks), and its u<K> variants at 740 + K."""
+        self.assertEqual(TEAMS_VIEW_1S_SIZE, TEAMS_VIEW_1H_SIZE + 128)
+        s = OBSERVATION_CONTRACT_TEAMS_VIEW_1S_HASH
+        self.assertEqual(s, sha("paintbot-pw.teams.view.1s"))
+        unpack_package(self.inputs_package(observation=s, inputs=TEAMS_VIEW_1S_SIZE, user_inputs=None))
+        su = sha(user_inputs_contract_id(109, OBSERVATION_CONTRACT_TEAMS_VIEW_1S))
+        unpack_package(self.inputs_package(109, observation=su, inputs=TEAMS_VIEW_1S_SIZE + 109))
+        with self.assertRaisesRegex(ValueError, "input count must be 849 for observation contract teams.view.1su109"):
+            unpack_package(self.inputs_package(109, observation=su, inputs=TEAMS_VIEW_1H_SIZE + 109))
+        with self.assertRaisesRegex(ValueError, "input count must be 740 for observation contract teams.view.1s"):
+            unpack_package(self.inputs_package(observation=s, inputs=TEAMS_VIEW_1H_SIZE, user_inputs=None))
+
     def test_user_inputs_check_the_actor_input_count_and_contract(self):
         with self.assertRaisesRegex(ValueError, "input count must be 515 for observation contract teams.view.1u3"):
             unpack_package(self.inputs_package(3, inputs=TEAMS_VIEW_1_SIZE))
@@ -469,10 +499,10 @@ class UserInputTests(unittest.TestCase):
     def test_user_inputs_contract_ids_match_the_engine(self):
         source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
         self.assertIn('proc userInputsContractId*(k: int, base = ocTeamsView1): string =', source)
-        self.assertIn('(if base == ocTeamsView1: ObservationContractTeamsView1 else: ObservationContractFfaView1) & "u" & $k',
-                      source)
+        self.assertIn('  observationContractId(base) & "u" & $k', source)
         self.assertEqual(user_inputs_contract_id(7), "paintbot-pw.teams.view.1u7")
         self.assertEqual(user_inputs_contract_id(5, OBSERVATION_CONTRACT_FFA_VIEW_1), "paintbot-pw.ffa.view.1u5")
+        self.assertEqual(user_inputs_contract_id(244, OBSERVATION_CONTRACT_TEAMS_VIEW_1H), "paintbot-pw.teams.view.1hu244")
         consts = {name: int(value.replace("_", "")) for name, value in
                   re.findall(r"^  (\w+)\* = ([0-9_]+)(?:'i32)?$", source, re.M)}
         self.assertEqual((MAX_USER_INPUTS, USER_INPUT_LIMIT), (consts["MaxUserInputs"], consts["UserInputLimit"]))
@@ -693,6 +723,24 @@ class Pwnet2Tests(unittest.TestCase):
         self.assertEqual(manifest["action_contract"], ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH)
         with self.assertRaisesRegex(ValueError, "heads 7 and 8 need"):
             unpack_package(package({**target, "decoder": {"sampling": {"mode": "categorical", "heads": [7]}}}, model=model))
+
+    def test_raw_contract(self):
+        """Action contract 16 (raw): 63 x 7 u identity rows, walk direction / distance, look direction; heads 7 .. 9."""
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        ids = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        self.assertEqual(ids["ActionContractTeamsView1Raw"], ACTION_CONTRACT_TEAMS_VIEW_1_RAW)
+        self.assertEqual(sha(ACTION_CONTRACT_TEAMS_VIEW_1_RAW), ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH)
+        raw = {**SCHEMA2, "action_contract": ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH}
+        model = pwnet2(TEAMS_VIEW_1_SIZE, [51, 25, 2, 2, 2, 1008, 1008, 256, 8, 128],
+                       [(1, [TEAMS_VIEW_1_SIZE, 2490, 1, 0], [], TEAMS_VIEW_1_SIZE * 2490 + 2490)],
+                       act=ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH)
+        for heads in ([9], [7, 8, 9], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]):
+            _, _, manifest = unpack_package(package({**raw, "decoder": {"sampling": {"mode": "categorical",
+                                                                                    "heads": heads}}}, model=model))
+            self.assertEqual(manifest["decoder"]["sampling"]["heads"], heads)
+        with self.assertRaisesRegex(ValueError, "heads 9 needs action contract teams.view.1 raw"):
+            unpack_package(package({**SCHEMA2, "action_contract": MOVE, "decoder": {"sampling": {
+                "mode": "categorical", "heads": [9]}}}, model=MOVE_MODEL))
 
     def test_token_layer_norm_cost_and_structure(self):
         # Params 6 = norm (0 or 1) and 7 = eps (FP32 bits) of TOKEN_MLP and TOKEN_MIX: a LayerNorm (gain, shift)

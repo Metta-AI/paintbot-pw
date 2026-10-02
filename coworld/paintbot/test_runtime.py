@@ -109,7 +109,7 @@ class OracleTests(unittest.TestCase):
         from oracle import Oracle
 
         # Hosted game pods hold no provider key: the platform's sidecar does, at this reserved variable.
-        oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://127.0.0.1:9100/"})
+        oracle = Oracle.from_env({"COWORLD_LLM_ENDPOINT": "http://127.0.0.1:9100/"})
         self.addCleanup(oracle.close)
         self.assertEqual(oracle.url, "http://127.0.0.1:9100/v1/systemone")
         self.assertIsNone(oracle.key)
@@ -119,7 +119,7 @@ class OracleTests(unittest.TestCase):
         self.assertTrue(oracle.sidecar)
 
         explicit = Oracle.from_env(
-            {"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://127.0.0.1:9100", "COGAME_ORACLE_URL": "https://example.test/o"}
+            {"COWORLD_LLM_ENDPOINT": "http://127.0.0.1:9100", "COGAME_ORACLE_URL": "https://example.test/o"}
         )
         self.addCleanup(explicit.close)
         self.assertEqual((explicit.url, explicit.model, explicit.min_interval), ("https://example.test/o", "jev-latest", 24))
@@ -127,7 +127,7 @@ class OracleTests(unittest.TestCase):
 
         tuned = Oracle.from_env(
             {
-                "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://127.0.0.1:9100",
+                "COWORLD_LLM_ENDPOINT": "http://127.0.0.1:9100",
                 "COGAME_ORACLE_MODEL": "typesafe/jev-2",
                 "COGAME_ORACLE_INTERVAL": "96",
             }
@@ -135,8 +135,8 @@ class OracleTests(unittest.TestCase):
         self.addCleanup(tuned.close)
         self.assertEqual((tuned.model, tuned.min_interval), ("typesafe/jev-2", 96))
 
-        self.assertIsNone(Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://127.0.0.1:9100", "COGAME_ORACLE": "off"}))
-        self.assertIsNone(Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "ftp://127.0.0.1"}))
+        self.assertIsNone(Oracle.from_env({"COWORLD_LLM_ENDPOINT": "http://127.0.0.1:9100", "COGAME_ORACLE": "off"}))
+        self.assertIsNone(Oracle.from_env({"COWORLD_LLM_ENDPOINT": "ftp://127.0.0.1"}))
         self.assertIsNone(Oracle.from_env({"COGAME_ORACLE_URL": "http://plain.test/o"}))
         self.assertIsNone(Oracle.from_env({}))
 
@@ -144,7 +144,7 @@ class OracleTests(unittest.TestCase):
         from oracle import Oracle
 
         url, seen = self._server()
-        oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
+        oracle = Oracle.from_env({"COWORLD_LLM_ENDPOINT": url})
         self.addCleanup(oracle.close)
         self.assertEqual(oracle.ask(5, 0, ORACLE_REQUEST), 1)
         self._settle(oracle)
@@ -170,7 +170,7 @@ class OracleTests(unittest.TestCase):
 
         # A sidecar that predates /v1/systemone answers 404. Asks already in flight finish; every later ask is refused.
         url, seen = self._server(status=404, body=b'{"message":"not found"}')
-        oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
+        oracle = Oracle.from_env({"COWORLD_LLM_ENDPOINT": url})
         self.addCleanup(oracle.close)
         self.assertEqual(oracle.ask(2, 0, ORACLE_REQUEST), 1)
         self._settle(oracle)
@@ -183,7 +183,7 @@ class OracleTests(unittest.TestCase):
         from oracle import Oracle
 
         url, seen = self._server(status=429, body=b'{"error":{"message":"spend limit","code":429}}')
-        oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
+        oracle = Oracle.from_env({"COWORLD_LLM_ENDPOINT": url})
         self.addCleanup(oracle.close)
         self.assertEqual(oracle.ask(2, 0, ORACLE_REQUEST), 1)
         self._settle(oracle)
@@ -225,7 +225,7 @@ class OracleTests(unittest.TestCase):
         for prefix in ("cut", "list", "text"):
             with self.subTest(prefix):
                 base = f"http://127.0.0.1:{server.server_address[1]}/{prefix}"
-                oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": base, "COGAME_ORACLE_DEADLINE": "1"})
+                oracle = Oracle.from_env({"COWORLD_LLM_ENDPOINT": base, "COGAME_ORACLE_DEADLINE": "1"})
                 self.addCleanup(oracle.close)
                 self.assertEqual(oracle.ask(4, 0, ORACLE_REQUEST), 1)
                 self._settle(oracle)
@@ -312,7 +312,7 @@ class OracleTests(unittest.TestCase):
         for status in (400, 403, 500, 502, 503):
             with self.subTest(status):
                 url, seen = self._server(status=status, body=b'{"error":{"message":"no","code":0}}')
-                oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
+                oracle = Oracle.from_env({"COWORLD_LLM_ENDPOINT": url})
                 self.addCleanup(oracle.close)
                 self.assertEqual(oracle.ask(2, 0, ORACLE_REQUEST), 1)
                 self._settle(oracle)
@@ -323,7 +323,7 @@ class OracleTests(unittest.TestCase):
         for status in (404, 405, 501):
             with self.subTest(status):
                 url, seen = self._server(status=status, body=b"{}")
-                oracle = Oracle.from_env({"AWS_ENDPOINT_URL_BEDROCK_RUNTIME": url})
+                oracle = Oracle.from_env({"COWORLD_LLM_ENDPOINT": url})
                 self.addCleanup(oracle.close)
                 oracle.ask(2, 0, ORACLE_REQUEST)
                 self._settle(oracle)
@@ -375,7 +375,7 @@ class OracleTests(unittest.TestCase):
         captured = io.StringIO()
         with contextlib.redirect_stderr(captured):
             self.assertIsNone(
-                Oracle.from_env({"COGAME_ORACLE_URL": "http://plain.test/o", "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://127.0.0.1:1"})
+                Oracle.from_env({"COGAME_ORACLE_URL": "http://plain.test/o", "COWORLD_LLM_ENDPOINT": "http://127.0.0.1:1"})
             )
         self.assertIn("COGAME_ORACLE_URL must be https", captured.getvalue())
 

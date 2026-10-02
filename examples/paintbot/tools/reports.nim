@@ -37,7 +37,7 @@ proc standings(panel, rows: JsonNode): string =
   ## Renders one escaped table of policy averages and displayed ranks.
   result = "<div class=rankings><table><thead><tr><th>Rank</th>" &
     "<th>Policy</th><th>Games</th><th>" &
-    (if panel["ladder"].getStr == "wins": "Win %" else: "Avg Glory") &
+    (if panel["ladder"].getStr == "wins": "Win %" else: "Avg Score") &
     "</th><th>Move</th></tr></thead><tbody>"
   for row in rows:
     let
@@ -151,7 +151,7 @@ proc render*(summary: JsonNode, dataRoot: string, siteRoot = ""): string =
       "saved while earlier games finish.</p>"
   if summary["error"].getStr.len > 0:
     body.add "<p class=error>" & escape(summary["error"].getStr) & "</p>"
-  body.add "<p class=note>Win rate counts team victories. Glory is Paintbot’s native score: winners keep their glory; losers and draws score zero. Each policy counts once per game, averaging its cog slots.</p></section><div class=facts>"
+  body.add "<p class=note>Win rate counts team victories. The match score is Paintbot’s native score: winners keep theirs; losers and draws score zero. Each policy counts once per game, averaging its cog slots.</p></section><div class=facts>"
   for (icon, value, label) in [
     ("champion", $summary["roster"].len, "Frozen policy versions"),
     ("stats", "4 leaderboards", "Two ladders per team format"),

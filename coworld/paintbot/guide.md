@@ -42,7 +42,7 @@ neutral gray. Toggle it off for an unobstructed terrain view. Heart locations an
 ownership are public. BASIC exposes `heartCount()`, `controlX(i)`, `controlY(i)`,
 and `controlOwner(i)` (-1 neutral, 0 red, 1 blue). Capture state is also public:
 `controlCaptureTeam(i)` (-1 idle), `controlCaptureTicks(i)` (0–71 of 72), and
-`controlContested(i)` (0 or 1). Invalid indices return -1. Glory is
+`controlContested(i)` (0 or 1). Invalid indices return -1. The match score is
 public too: `glory(team)` (-1 for an invalid team) (rules 37). In FFA-kin mode
 (Heartland, below) owners and capturers are seats instead of teams: `controlOwner(i)`,
 its FFA-only alias `heartOwner(i)` and `controlCaptureTeam(i)` return the seat (0-15) or -1.
@@ -62,13 +62,14 @@ with equal totals drawing. A team is eliminated when every cog is out with no
 respawns left; it loses immediately and the surviving team's meter fills (rules 34).
 If both teams are eliminated on the same tick, the match ends with no bonus and the
 higher meter wins; equal totals draw. There is no bombardment or overtime.
-The match score is **glory** (rules 37), a self-imposed handicap. Each team starts with the
-match length in seconds (600) and loses one glory per second. Every thirty seconds without
-collecting a supply adds 10, each glory heart picked up 20 (rules 38), and every five seconds
+The match **score** (formerly called glory; BASIC, config and replay names still say `glory`) is
+a self-imposed handicap (rules 37). Each team starts with the
+match length in seconds (600) and loses one point per second. Every thirty seconds without
+collecting a supply adds 10, each score heart picked up 20 (rules 38), and every five seconds
 a team behind in lives earns 1 per life it trails by (rules 39). Friendly fire taken in the
-opening thirty seconds paid 30 per hit in rules 37 and 38 only; nothing that makes a team more likely to win pays glory. When the match ends the loser's glory drops to zero
-and a draw pays nobody; the winner's glory is its score and the ladder input. The heart
-meter still decides who wins. See "Glory" below.
+opening thirty seconds paid 30 per hit in rules 37 and 38 only; nothing that makes a team more likely to win adds to the score. When the match ends the loser's score drops to zero
+and a draw pays nobody; the winner's score is the ladder input. The heart
+meter still decides who wins. See "Match score" below.
 Older replays retain their original capture-the-heart rules.
 
 ## Combat and equipment
@@ -118,10 +119,10 @@ Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `glory(team)` (rules 37), `gloryHeartCount()`, `gloryHeartX(id)`, `gloryHeartY(id)`,
 `gloryHeartTicksLeft(id)` (rules 38). The scoreboard the HUD shows: `teamLives(team)` (lives
 left summed over the team's cogs, the count the behind-in-lives award compares),
-`awardBehind()` (glory per life trailed) and `awardBehindSeconds()` (its period), and from rules 47
+`awardBehind()` (score per life trailed) and `awardBehindSeconds()` (its period), and from rules 47
 `teamCogsOut(team)` (the team's cogs out of the match: dead with no lives left),
-`awardBehindCogs()` (glory per extra cog out) and `awardBehindCogsSeconds()` (its period), from the
-match's glory config; -1 for an invalid team and in FFA-kin. Hidden player, pickup and glory-heart coordinates are
+`awardBehindCogs()` (score per extra cog out) and `awardBehindCogsSeconds()` (its period), from the
+match's `"glory"` config; -1 for an invalid team and in FFA-kin. Hidden player, pickup and score-heart coordinates are
 not disclosed (-1). Nearby agents: `nearAgents(radius)` lists the agents you can see within `radius`
 (clamped to 20000), nearest first, at most 64, and returns the count; `nearAgentId(k)`, `nearAgentX(k)`,
 `nearAgentY(k)`, `nearAgentHp(k)` and `nearAgentTeam(k)` read entry k (-1, or Hp 0, past the end).
@@ -181,15 +182,15 @@ measures nothing.
 
 Four things about reading the result:
 
-- **The gap between the two scores is one bit; the winner's glory is not.** The loser's glory
+- **The gap between the two scores is one bit; the winner's score is not.** The loser's score
   is zeroed at the final tick, so subtracting one side's score from the other only restates who
   won. The winner's number is a real measurement — roughly the match length in seconds minus
   the seconds it took, plus event awards — so it says how *fast* the win was. Which statistic
   to use follows from the matchup. Against an opponent an arm nearly always beats, compare the
-  arms' **mean winning glory**: win rate is saturated and carries nothing (two arms both went
-  20/20 against the plain BASIC baseline, but their winning glory, 676.7 +/- 83.7 against
+  arms' **mean winning score**: win rate is saturated and carries nothing (two arms both went
+  20/20 against the plain BASIC baseline, but their winning score, 676.7 +/- 83.7 against
   672.6 +/- 91.5 over 20 episodes each, is a comparison with real resolution). Between arms
-  that are close, use **win rate**: each arm only has a glory number for the games it won, so
+  that are close, use **win rate**: each arm only has a score for the games it won, so
   the means are computed over selected and non-comparable subsets.
 - **Split each arm into equal halves with the sides swapped.** Rules 35 mirrored the map and
   validated it at red 51.7% over 400 native seeds, so neither side is favoured — but 60
@@ -205,7 +206,7 @@ Four things about reading the result:
   `PW_BASIC_PEAKS=1` prints each seat's peak instructions, work units and string handles.
 - **Read the replay, not just the score.** `examples/paintbot/replay_stats.nim` re-simulates a
   replay and reports, per side, lives left, cogs standing, captures, heart-ticks held, ticks
-  spent ahead on heart count and every glory award by kind. Win rate alone hid the most
+  spent ahead on heart count and every score award by kind. Win rate alone hid the most
   important fact about this league: matches end by elimination at roughly a quarter of the
   clock, so the heart meter usually never decides anything. Hosted replays are gzipped —
   `curl -sS <replay_url> | gunzip -c > match.raw` first.
@@ -218,7 +219,7 @@ Assuming it turns a win into a loss in your table, silently.
 
 Measured on 0.3.36 over 420 hosted episodes, every arm 60 head-to-head against the shipped
 build with the sides swapped in equal halves (`coworld/paintbot/tools/jev_experiment.py`,
-scored by `jev_results.py`). Win rate with a 95% Wilson interval; the loser's glory is zeroed
+scored by `jev_results.py`). Win rate with a 95% Wilson interval; the loser's score is zeroed
 so the margin says nothing.
 
 | arm | switch | candidate even | candidate odd | pooled | 95% Wilson |
@@ -329,20 +330,20 @@ open (a full-health kill) and 2 to victims in other trenches; spray recovers in 
 instead of 20 and its cone is a third wider. Charge time (24 ticks) and spray reach (850)
 are unchanged so existing throw-distance math and neural decoders keep working.
 
-### Configurable glory awards (rules 43)
+### Configurable score awards (rules 43)
 
-Rules 43 move the glory awards into the game config, so a variant can retune glory without an
+Rules 43 move the score awards into the game config, so a variant can retune them without an
 engine change. The optional `"glory"` object (teams game only) overrides any of these keys;
-absent keys keep the defaults in the glory table below:
+absent keys keep the defaults in the match score table below:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `quiet_supplies` | 10 | glory for each quiet stretch with no supply collected |
+| `quiet_supplies` | 10 | score for each quiet stretch with no supply collected |
 | `quiet_supplies_seconds` | 30 | length of that stretch, in seconds |
-| `behind_lives` | 1 | glory per life a team trails the enemy by |
+| `behind_lives` | 1 | score per life a team trails the enemy by |
 | `behind_lives_seconds` | 5 | how often the behind-in-lives award pays, in seconds |
-| `heart` | 20 | glory for picking up a glory heart |
-| `behind_cogs` | 1 | rules 47: glory per cog a team has out of the match beyond the enemy's count |
+| `heart` | 20 | score for picking up a score heart |
+| `behind_cogs` | 1 | rules 47: score per cog a team has out of the match beyond the enemy's count |
 | `behind_cogs_seconds` | 5 | rules 47: how often the behind-in-cogs award pays, in seconds |
 
 Awards are 0 to 1000 and periods 1 to 600 seconds. Every teams variant sets
@@ -350,10 +351,10 @@ Awards are 0 to 1000 and periods 1 to 600 seconds. Every teams variant sets
 earns 5 per life it trails by, and a team with more cogs out earns 10 per extra cog out.
 Replays record the awards they were played with.
 
-### Glory for cogs out (rules 47)
+### Score for cogs out (rules 47)
 
 A cog is out of the match once it is dead with no lives left. From rules 47, every
-`behind_cogs_seconds` a team earns `behind_cogs` glory per cog it has out beyond the enemy's
+`behind_cogs_seconds` a team earns `behind_cogs` points per cog it has out beyond the enemy's
 count, on top of the behind-in-lives award (a cog that runs out still counts toward the lives
 deficit as well). The team with fewer cogs out earns nothing. Teams recordings at rules 46 and
 older never pay it and replay as before.
@@ -396,7 +397,7 @@ the shipped maps' territory per heart, about 730 m2 of land each, so the big map
 pairs, and extra neutral pairs spread by farthest-point sampling. Read the count from
 `heartCount()`. Supplies and trenches scale the same way (one rules-40 set per ten hearts:
 10x on `big-twin-mesas`, 13x on `big-deep-forest`), each extra copy in its kind's usual zone,
-and each glory-heart spawn places one mirrored pair per ten control hearts.
+and each score-heart spawn places one mirrored pair per ten control hearts.
 
 A map keeps the rules you already play under: 16 cogs, 10 control hearts on the shipped-size
 maps (two homes, then four neutral pairs), 4 grenades, 2 sprays, 2 armors, 4 medkits, 2 uniforms and 6 trenches.
@@ -448,8 +449,8 @@ players, but some are related, and a cog's score counts its relatives' points.
   200 units for 5 seconds (120 ticks) capture one; progress falls one tick per tick while
   fewer than three are present. A capture pays 60 points split equally among every cog in the
   zone, then the heart is dormant for 60 seconds.
-- **Match.** A fixed 6:00 (8,640 ticks), ending early when at most one cog is left. No glory,
-  no heart meter, no elimination victory; results report outcome `ended`.
+- **Match.** A fixed 6:00 (8,640 ticks), ending early when at most one cog is left. No teams-game
+  score countdown (the match score is R_i, below), no heart meter, no elimination victory; results report outcome `ended`.
 - **Score.** Raw score s_i is heart income plus great-heart shares, kept in tenths of a point.
   The match score is the kin-weighted R_i = sum over j of r_ij * s_j (in points). Helping a
   sibling earn a point is worth half a point of your own; killing one costs you.
@@ -614,44 +615,44 @@ Rules 45 apply the same routing to the teams game. In eight local teams matches 
 44 and never under rules 45, and lake-heart captures went from 9 to 29. Teams recordings at rules 44 and older, and FFA recordings at rules
 40-43, keep their routes and replay hash for hash.
 
-### Glory (rules 37)
+### Match score (rules 37)
 
 (There are no rules 36. Version 0.3.32 stamped its recordings 36 while the live engine still
 played rules 35, so a 36 header is read as rules 35 and those replays play back correctly.)
 
-The heart meter decides who wins; glory decides how much the win is worth. Every score the
-ladder sees is a winner's glory, so a fast win outranks a slow one, and a team that loses
-scores nothing however it played. Glory is a self-imposed handicap: it never pays for anything
+The heart meter decides who wins; the match score decides how much the win is worth. Every score the
+ladder sees is a winner's match score, so a fast win outranks a slow one, and a team that loses
+scores nothing however it played. The match score is a self-imposed handicap: it never pays for anything
 that makes a team more likely to win (captures, tags, meter points), only for restraint and
-for hardship a team takes on. Each team's glory starts at the match length in seconds (600 for
+for hardship a team takes on. Each team's score starts at the match length in seconds (600 for
 the ten-minute limit, `endTick div TickRate`) and loses one per second, so a five-minute win
 keeps about 300 before events. The events below list the engine defaults from `sim.nim`; from
 rules 43 a variant's `"glory"` config can change them (every teams variant pays 5 per life behind
 and 10 per cog out behind):
 
-| Event | Glory | Credited to |
+| Event | Score | Credited to |
 | --- | --- | --- |
 | Thirty seconds with no supply collected (`GloryQuietSupplies`, per team, repeating) | +10 | the abstaining team |
 | Friendly fire taken in the opening thirty seconds (`GloryFriendlyFire`, per hit; rules 37 and 38, removed in rules 39) | +30 | the team that took it |
-| Picking up a glory heart (`GloryHeartAward`, rules 38) | +20 | the team of the cog that touched it |
+| Picking up a score heart (`GloryHeartAward`, rules 38) | +20 | the team of the cog that touched it |
 | Every five seconds, per life fewer than the enemy (`GloryBehindLives`, rules 39; lives left summed over the team's cogs) | +1 | the team behind in lives |
 | Every five seconds, per cog out of the match beyond the enemy's count (`GloryBehindCogs`, rules 47; dead with no lives left) | +1 | the team with more cogs out |
 
 Spawn protection and self-damage never count; the supply
 clock restarts whenever a teammate collects a grenade, spray can, medkit, armor or uniform,
-and the countdown floors at zero. At the final tick the loser's glory is set to zero (a draw
-zeroes both), then glory is frozen: `scores()` reports each seat's team glory, so the winner's
-seats all carry the same number and the loser's carry zero. Glory, the supply clocks and the
+and the countdown floors at zero. At the final tick the loser's score is set to zero (a draw
+zeroes both), then the score is frozen: `scores()` reports each seat's team score, so the winner's
+seats all carry the same number and the loser's carry zero. The score, the supply clocks and the
 recent awards are part of the rules 37 world hash; older recordings ignore them.
 
 The engine keeps each award for four seconds (`gloryEvents`). The viewer shows recent awards
-at the very top of the page in the earning team's color ("Ember +10 glory · thirty seconds
-without supplies"), the header's big number is each team's glory with the heart-meter points
+at the very top of the page in the earning team's color ("Ember +10 score · thirty seconds
+without supplies"), the header's big number is each team's match score with the heart-meter points
 in small type beside it, and the scoreboard dialog repeats both. `tests/test_paintbot_glory.nim`
 covers the countdown, each event, the end-of-match settlement, the hash gate and a rules 37
 recording round trip.
 
-### Glory hearts (rules 38)
+### Score hearts (rules 38)
 
 Small spinning gold hearts appear on the field in mirrored pairs: the first pair at 0:20, then a
 new pair every 10-20 seconds (on a map with more than ten control hearts, one pair per ten hearts
@@ -659,7 +660,7 @@ each time) (`GloryHeartMinGap`..`GloryHeartMaxGap`, drawn from the match RNG).
 Each heart sits on a random open, dry spot and its mirror under the map's half turn, lasts thirty
 seconds (`GloryHeartTicks`; it blinks in its last five), then vanishes. The first living cog
 within 120 units (`GloryHeartReach`, seat order alternating each tick like other pickups) takes it
-and its team earns +20 glory. A glory heart is not a supply: it does not restart the
+and its team earns +20 score. A score heart is not a supply: it does not restart the
 thirty-seconds-without-supplies clock. It gives nothing that helps win; the detour to fetch one is
 the price. The viewer draws a "+20" rising over the cog that took it, and the top toast names
 the award. Hearts are fog-gated for policies like any pickup (`gloryHeartX/Y/TicksLeft(id)` read
@@ -667,7 +668,7 @@ the award. Hearts are fog-gated for policies like any pickup (`gloryHeartX/Y/Tic
 recent pickups (`gloryPickups`, kept four seconds for the viewer) are part of the rules 38 world
 hash; older recordings ignore them. `tests/test_paintbot_glory_hearts.nim` covers spawning,
 expiry, pickup, the hash gate and the BASIC queries. Training builds (`NativeRules`) play
-the current rules, so glory hearts are on the field there too. First live in 0.3.40.
+the current rules, so score hearts are on the field there too. First live in 0.3.40.
 
 ### A fair map: mirrored ground (rules 35)
 
@@ -757,7 +758,7 @@ replay of an advised match verifies like any other. Without an oracle, as in cer
 with no network, every ask returns 0 and matches behave exactly as before.
 
 In hosted Softmax episodes the game pod holds no provider key, so `COGAME_ORACLE_URL` is not used
-there. The host finds the platform's LLM sidecar at `AWS_ENDPOINT_URL_BEDROCK_RUNTIME` and posts
+there. The host finds the platform's LLM sidecar at `COWORLD_LLM_ENDPOINT` and posts
 to its `/v1/systemone` route, which forwards to Jev (`typesafe/jev-1.13`) on OpenRouter. Each ask
 names the asking seat, so its cost counts against that seat's per-episode LLM spend limit for the
 league and its requests against that seat's System One bucket: 120 a minute, twice what the

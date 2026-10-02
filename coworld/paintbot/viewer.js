@@ -1071,7 +1071,7 @@
   const GLORY_REASONS = {
     gloryQuietSupplies: "thirty seconds without supplies",
     gloryFriendlyFire: "friendly fire taken in the opening thirty seconds",
-    gloryHeart: "picked up a glory heart",
+    gloryHeart: "picked up a score heart",
     gloryBehindLives: "behind in lives",
     gloryBehindCogs: "behind in cogs",
   };
@@ -1087,7 +1087,7 @@
   // The scoreboard's list of glory events for rules 37 and later.
   function gloryEventsText(data, rules) {
     const g = gloryAwards(data);
-    return `${gloryPeriod(g.quietSupplySeconds)} without supplies adds ${g.quietSupplies}${rules >= 39 ? `, each glory heart picked up ${g.heart}, and every ${gloryPeriod(g.behindLivesSeconds)} a team behind in lives ${g.behindLives} per life it trails by${rules >= 47 ? `, and every ${gloryPeriod(g.behindCogsSeconds)} a team with more cogs out of lives ${g.behindCogs} per extra cog out` : ""}` : rules >= 38 ? ", friendly fire taken in the opening thirty seconds 30 per hit, and each glory heart picked up 20" : ", friendly fire taken in the opening thirty seconds 30 per hit"}`;
+    return `${gloryPeriod(g.quietSupplySeconds)} without supplies adds ${g.quietSupplies}${rules >= 39 ? `, each score heart picked up ${g.heart}, and every ${gloryPeriod(g.behindLivesSeconds)} a team behind in lives ${g.behindLives} per life it trails by${rules >= 47 ? `, and every ${gloryPeriod(g.behindCogsSeconds)} a team with more cogs out of lives ${g.behindCogs} per extra cog out` : ""}` : rules >= 38 ? ", friendly fire taken in the opening thirty seconds 30 per hit, and each score heart picked up 20" : ", friendly fire taken in the opening thirty seconds 30 per hit"}`;
   }
   // Rules 37: the engine keeps each glory award for a few seconds; show the recent ones,
   // in team color, at the very top. Same-tick awards of one kind merge into a line.
@@ -1106,7 +1106,7 @@
       lines.set(key, line);
     }
     toast.innerHTML = [...lines.values()].sort((a, b) => a.tick - b.tick).map(l =>
-      `<div class="${l.team ? "blue" : "red"}">${l.team ? "Azure" : "Ember"} <b>+${l.amount}</b> glory · ${gloryReason(l.kind) || escape(String(l.kind))}</div>`).join("");
+      `<div class="${l.team ? "blue" : "red"}">${l.team ? "Azure" : "Ember"} <b>+${l.amount}</b> score · ${gloryReason(l.kind) || escape(String(l.kind))}</div>`).join("");
   }
   // Rules 38: a "+20" rises over the cog that took a glory heart. Each pop is keyed by
   // tick and seat, starts its CSS animation already `age` ticks in (so seeking lands
@@ -1801,7 +1801,7 @@
     $("modehint").textContent = ffa
       ? "Every cog for itself · Score R = Σ r·s over kin · Great hearts need 3 cogs"
       : control
-      ? (data.rulesVersion >= 37 ? "Fill the heart meter or eliminate the enemy to win · Only the winner keeps its glory" : data.rulesVersion >= 34 ? "Fill the heart meter or eliminate the enemy to win · 900 points · 10-minute limit" : data.rulesVersion >= 28 ? "Fill the heart meter to win · 900 points · 10-minute limit" : data.rulesVersion >= 25 ? (w.bigHeart >= 0 ? `Big heart ${w.bigHeart + 1}: 5 points/s · ${30 - Math.floor(t / 24) % 30}s left` : w.bigHeartRound > 0 ? "All big hearts used · Normal hearts: 1 point/s" : "First big heart at 0:30 · Normal hearts: 1 point/s") : data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
+      ? (data.rulesVersion >= 37 ? "Fill the heart meter or eliminate the enemy to win · Only the winner keeps its score" : data.rulesVersion >= 34 ? "Fill the heart meter or eliminate the enemy to win · 900 points · 10-minute limit" : data.rulesVersion >= 28 ? "Fill the heart meter to win · 900 points · 10-minute limit" : data.rulesVersion >= 25 ? (w.bigHeart >= 0 ? `Big heart ${w.bigHeart + 1}: 5 points/s · ${30 - Math.floor(t / 24) % 30}s left` : w.bigHeartRound > 0 ? "All big hearts used · Normal hearts: 1 point/s" : "First big heart at 0:30 · Normal hearts: 1 point/s") : data.rulesVersion >= 23 ? "1 point per heart per second · All 10 eliminates the enemy" : "Territory control · Claim all 10 hearts")
       : "Capture the heart · Three lives";
     updatePovSignal();
     const playLabel = data.paused ? "Play" : "Pause";
@@ -1835,9 +1835,9 @@
       const scoreLine = $(`score${s}`).parentElement;
       const bigOwned = data.rulesVersion >= 25 && w.bigHeart >= 0 && w.controlHearts[w.bigHeart].owner === s;
       scoreLine.title = glory !== null
-        ? `Glory ${glory} · ${owned} hearts held. Glory is a self-imposed handicap: it starts at the match length in seconds and loses one per second; ${gloryEventsText(data, data.rulesVersion)}. Only the winner keeps it.`
+        ? `Match score ${glory} · ${owned} hearts held. The match score is a self-imposed handicap: it starts at the match length in seconds and loses one per second; ${gloryEventsText(data, data.rulesVersion)}. Only the winner keeps it.`
         : `${owned} hearts held${bigOwned ? " · Big heart: 5 points/s" : ""}`;
-      scoreLine.querySelector('small').textContent = glory !== null ? ` GLORY` : data.rulesVersion >= 28 ? ` / ${w.controlHearts.length * 90} · ${owned} ♥` : data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
+      scoreLine.querySelector('small').textContent = glory !== null ? ` SCORE` : data.rulesVersion >= 28 ? ` / ${w.controlHearts.length * 90} · ${owned} ♥` : data.rulesVersion >= 23 ? ` POINTS · ${owned} ♥` : ' HEARTS';
       w.cogs.forEach((c, i) => {
         if (team(i) !== s) return;
         const unlimited = data.rulesVersion >= 13 && data.rulesVersion < 19;
