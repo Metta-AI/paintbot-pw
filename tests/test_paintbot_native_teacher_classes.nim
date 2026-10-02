@@ -64,6 +64,42 @@ suite "Teacher class masks":
       pw_destroy(plain); pw_destroy(probed)
     check compared >= 4
 
+  test "in-step masks equal the call on the same pre-step world (shadow teachers, both walk modes)":
+    var compared = 0
+    let a = scripted(71, 4, source)
+    let b = scripted(71, 4, source)
+    for h in [a, b]:
+      for seat in [1'i32, 5, 9]:
+        doAssert pw_set_seat_shadow_script(h, seat.cint, cast[ptr UncheckedArray[char]](unsafeAddr source[0]),
+          source.len.int32) == 0
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
+    for tick in 0..<240:
+      let exact = if tick mod 60 == 59: 0x2'u32 else: 0'u32
+      check pw_set_teacher_classes(a, 0xAAAA'u32, exact) == 0
+      doAssert pw_script_decide(b) >= 0
+      var want: array[16, array[TeacherClassBytes, uint8]]
+      var have: array[16, bool]
+      for seat in countup(1, 15, 2):
+        var cmd: array[10, int32]
+        doAssert pw_seat_decided_orders(b, seat.cint, ibuf(cmd)) == 0
+        if cmd[9] != 2: doAssert pw_seat_orders(b, seat.cint, ibuf(cmd)) == 0
+        let r = if (exact and (1'u32 shl seat)) != 0: pw_teacher_classes_exact(b, seat.cint, ibuf(cmd), ubuf(want[seat]), TeacherClassBytes.cint)
+                else: pw_teacher_classes(b, seat.cint, ibuf(cmd), ubuf(want[seat]), TeacherClassBytes.cint)
+        have[seat] = r == TeacherClassBytes
+      doAssert pw_step(a, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+      doAssert pw_step(b, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+      check pw_state_hash(a) == pw_state_hash(b)
+      for seat in countup(1, 15, 2):
+        if not have[seat]: continue
+        var got: array[TeacherClassBytes, uint8]
+        check pw_teacher_classes_last(a, seat.cint, ubuf(got), TeacherClassBytes.cint) == TeacherClassBytes
+        check got == want[seat]
+        inc compared
+      if terminals[0] == 1: break
+    check compared > 100
+    pw_destroy(a); pw_destroy(b)
+
   test "arguments":
     let h = pw_create(1, 100)
     var cmd: array[10, int32]

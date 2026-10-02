@@ -283,6 +283,16 @@ int pw_hit_events(void *handle, int32_t *events, int32_t capacity);
 #define PW_TEACHER_CLASS_BYTES 8224
 int pw_teacher_classes(void *handle, int seat, const int32_t *command10, uint8_t *out, int32_t capacity);
 int pw_teacher_classes_info(void *handle, int seat, const int32_t *command10, int32_t *two);
+/* In-step teacher classes (training library only; default-off). pw_set_teacher_classes(h, seats, exact): from the
+ * next pw_step on, each live seat in `seats` (bits 0..31) gets pw_teacher_classes computed INSIDE the step for the
+ * order it decided that step (its shadow's, ran = 2, else its own program's, ran = 1), on the pre-step world after
+ * all decisions, with the keep its decoder held before deciding; seats also in `exact` use the exact walk class.
+ * Kept across steps and resets; (0, 0) = off. pw_teacher_classes_last(h, seat, out, cap): 8224, or 0 when none was
+ * computed for the seat on the last step. pw_teacher_classes_last_info(h, seat, int32[4]): {state 1 / 0 / -2 dead,
+ * mode 0 / 1 exact, teacher routed, teacher moves}. */
+int pw_set_teacher_classes(void *handle, uint32_t seats, uint32_t exact);
+int pw_teacher_classes_last(void *handle, int seat, uint8_t *out, int32_t capacity);
+int pw_teacher_classes_last_info(void *handle, int seat, int32_t *four);
 int pw_teacher_classes_exact(void *handle, int seat, const int32_t *command10, uint8_t *out, int32_t capacity);
 int pw_teacher_classes_reference(void *handle, int seat, const int32_t *command10, uint8_t *out, int32_t capacity,
                                  int exact);
