@@ -149,3 +149,7 @@ python coworld/paintbot/tools/make_jev_baseline.py --check
 # Original art geometry and the release provenance gate.
 nim r tests/test_paintbot_art.nim
 python tests/test_paintbot_art.py
+
+nim r tests/test_annotations.nim
+
+[posix-only] python coworld/paintbot/test_annotations.py

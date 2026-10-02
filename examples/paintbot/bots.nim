@@ -1,5 +1,5 @@
 ## Bounded, persistent BASIC players: every seat is a BASIC script with typed observations.
-import polyworld/[basic, cli, controllers, rngs]
+import polyworld/[basic, cli, controllers, rngs, annotations]
 import sim, oracle, neural_host, seat_view
 from neural_contract import ActionContractVersion
 export oracle, seat_view
@@ -52,6 +52,8 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat, rnd:RndStream): Host 
   proc view(): SeatView = seatView(slot)
   result.addNeuralFunctions(neural)
   result.addStringFunctions(strings)
+  when defined(coworld): result.addAnnotationFunctions(strings, playerAnnotations(slot))
+  else: result.addAnnotationFunctions(strings)
   result.addOracleFunctions(slot,strings)
   discard result.addFunction("shout",1,proc(a:openArray[int32]):int32 =
     if shouts[slot].len>=4:return 0
