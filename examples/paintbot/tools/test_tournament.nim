@@ -294,7 +294,7 @@ block:
   doAssert html.count("<article class=\"panel ladder\"") == 4
   doAssert "setInterval" notin html
   doAssert "Match history" notin html
-  doAssert "Avg Glory" in html
+  doAssert "Avg Score" in html
   doAssert "text-overflow:ellipsis" in html
   doAssert "Streak:" in html and " player swaps" in html
   doAssert "data-status=\"completed\"" in html
