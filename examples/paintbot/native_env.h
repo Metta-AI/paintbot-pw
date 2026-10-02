@@ -117,14 +117,19 @@ int pw_set_seat_starts_out(void *handle, int seat, int32_t starts_out);
  * variant (15, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16": contract 13's seven heads
  * and decode, but heads 5 and 6 carry one 23-logit row per identity, 818 logits per seat, and are
  * drawn from the row of the identity the aim head chose; no draw, the centre bin, for keep or a
- * compass aim) and ffa.view.1 pointer (12,
+ * compass aim), its raw variant (16, "paintbot-pw.teams.view.1.action.51-25-2-2-2-63x16-63x16-256-8-128":
+ * 63 x 7 u identity offset rows, then walk direction 256, walk distance 8 and look direction 128 heads the
+ * reference decoder reads in place of the compass step and the compass aim; 2490 logits per seat) and ffa.view.1
+ * pointer (12,
  * "paintbot-pw.ffa.view.1.action.pointer"). pw_set_action_contract selects the contract
- * pw_step reads the caller's heads under: 11 (default), 13, 14 or 15 on a 201 handle, 12 only on a
+ * pw_step reads the caller's heads under: 11 (default), 13, 14, 15 or 16 on a 201 handle, 12 only on a
  * 202 handle; kept across pw_reset; 0, or -1 bad args. Under 13 a seat's action row is seven
  * int32 and pw_action_layout returns -1: use pw_action_layout_ext (int32[10] = {heads, seven
  * head-size slots, logits per seat, 0}). Under 14 it is nine int32 and pw_action_layout_ext
  * returns -1 too: use pw_action_layout_ext2 (int32[12] = {heads, nine head-size slots, logits
- * per seat, 0}). pw_action_contract returns the handle's;
+ * per seat, 0}). Under 16 it is ten int32 and pw_action_layout_ext2 returns -1 too: use
+ * pw_action_layout_ext3 (int32[13] = {heads, ten head-size slots, logits per seat, 0}). pw_action_contract returns
+ * the handle's;
  * pw_action_contract_hash writes the 64-hex SHA-256 an actor and manifest carry
  * (NUL-terminated, capacity >= 65; -1 for another version). What each head index means is
  * the seat's policy.bas's to decide; pw_step decodes a caller-driven seat's heads with the
@@ -133,6 +138,7 @@ int pw_set_seat_starts_out(void *handle, int seat, int32_t starts_out);
 int pw_set_action_contract(void *handle, int32_t version);
 int pw_action_layout_ext(void *handle, int32_t *ten);
 int pw_action_layout_ext2(void *handle, int32_t *twelve);
+int pw_action_layout_ext3(void *handle, int32_t *thirteen);
 int pw_action_contract(void *handle);
 int pw_action_contract_hash(int32_t version, char *sixty_five_bytes, int32_t capacity);
 /* Mapping-ceiling diagnostics (pw-bc). pw_script_decide runs the scripted seats'
@@ -335,6 +341,9 @@ int pw_seat_policy_choices(void *handle, int seat, int32_t *twenty_two);
  * decoder.joint_sampling). */
 int pw_seat_policy_offset_choices(void *handle, int seat, int32_t *six);
 int pw_seat_policy_extra_choices(void *handle, int seat, int32_t *twelve);
+/* pw_seat_policy_extra_choices2: the same for up to five extra heads (heads 5 .. 9, action contract 16 raw), fifteen
+ * int32 {selected5..9, final5..9, temperature_milli5..9}; pw_seat_policy_extra_choices returns -1 for such a seat. */
+int pw_seat_policy_extra_choices2(void *handle, int seat, int32_t *fifteen);
 int pw_set_seat_conditionals(void *handle, int seat, int32_t count, const int32_t *heads,
                              const float *weights, int32_t weight_count);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */

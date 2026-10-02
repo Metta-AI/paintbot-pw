@@ -24,7 +24,8 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH, ACTION_CONTRACT_FFA_VIEW_1_POINTER_HASH,
                             RETIRED_OBSERVATION_CONTRACTS, RETIRED_ACTION_CONTRACTS, RETIRED_CONTRACT_HASHES,
                             RETIRED_DECODER_OPTIONS, ACTION_CONTRACT_TEAMS_VIEW_1_TARGET,
-                            ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH, pointer_k_ops)
+                            ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH, pointer_k_ops, ACTION_CONTRACT_TEAMS_VIEW_1_RAW,
+                            ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH)
 
 ROOT = Path(__file__).parents[2]
 TEAMS, FFA = OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH
@@ -177,7 +178,7 @@ class PackageTests(unittest.TestCase):
                                   ({"mode": "categorical", "temperature": 11}, "within"), ({"mode": "categorical", "temperature": "1"}, "number"),
                                   ({"mode": "categorical", "temperature": True}, "number"), ({"mode": "categorical", "heads": []}, "non-empty"),
                                   ({"mode": "categorical", "heads": [7]}, "heads 7 and 8 need action contract teams.view.1 movement-offset"),
-                                  ({"mode": "categorical", "heads": [9]}, r"indices 0 \.\. 8"), ({"mode": "categorical", "heads": [-1]}, "indices"),
+                                  ({"mode": "categorical", "heads": [10]}, r"indices 0 \.\. 9"), ({"mode": "categorical", "heads": [-1]}, "indices"),
                                   ({"mode": "categorical", "heads": [1, 1]}, "repeats"),
                                   ({"mode": "categorical", "heads": "all"}, "non-empty"), ({"mode": "categorical", "heads": [True]}, "indices"),
                                   ({"mode": "categorical", "seed": 1}, "unknown decoder.sampling field"), (True, "must be a dict"), ([], "must be a dict")):
@@ -353,8 +354,8 @@ class ContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "heads 7 and 8 need action contract teams.view.1 movement-offset"):
             unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [7]}}},
                                    model=OFFSET_MODEL))
-        with self.assertRaisesRegex(ValueError, r"indices 0 \.\. 8"):
-            unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [9]}}},
+        with self.assertRaisesRegex(ValueError, r"indices 0 \.\. 9"):
+            unpack_package(package({**offset, "decoder": {"sampling": {"mode": "categorical", "heads": [10]}}},
                                    model=OFFSET_MODEL))
         # The other selection options keep reading the five fixed heads under the aim-offset contract.
         _, _, manifest = unpack_package(package({**offset, "decoder": {"forbid_objectives": [9]}}, model=OFFSET_MODEL))
@@ -693,6 +694,24 @@ class Pwnet2Tests(unittest.TestCase):
         self.assertEqual(manifest["action_contract"], ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH)
         with self.assertRaisesRegex(ValueError, "heads 7 and 8 need"):
             unpack_package(package({**target, "decoder": {"sampling": {"mode": "categorical", "heads": [7]}}}, model=model))
+
+    def test_raw_contract(self):
+        """Action contract 16 (raw): 63 x 7 u identity rows, walk direction / distance, look direction; heads 7 .. 9."""
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        ids = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        self.assertEqual(ids["ActionContractTeamsView1Raw"], ACTION_CONTRACT_TEAMS_VIEW_1_RAW)
+        self.assertEqual(sha(ACTION_CONTRACT_TEAMS_VIEW_1_RAW), ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH)
+        raw = {**SCHEMA2, "action_contract": ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH}
+        model = pwnet2(TEAMS_VIEW_1_SIZE, [51, 25, 2, 2, 2, 1008, 1008, 256, 8, 128],
+                       [(1, [TEAMS_VIEW_1_SIZE, 2490, 1, 0], [], TEAMS_VIEW_1_SIZE * 2490 + 2490)],
+                       act=ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH)
+        for heads in ([9], [7, 8, 9], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]):
+            _, _, manifest = unpack_package(package({**raw, "decoder": {"sampling": {"mode": "categorical",
+                                                                                    "heads": heads}}}, model=model))
+            self.assertEqual(manifest["decoder"]["sampling"]["heads"], heads)
+        with self.assertRaisesRegex(ValueError, "heads 9 needs action contract teams.view.1 raw"):
+            unpack_package(package({**SCHEMA2, "action_contract": MOVE, "decoder": {"sampling": {
+                "mode": "categorical", "heads": [9]}}}, model=MOVE_MODEL))
 
     def test_token_layer_norm_cost_and_structure(self):
         # Params 6 = norm (0 or 1) and 7 = eps (FP32 bits) of TOKEN_MLP and TOKEN_MIX: a LayerNorm (gain, shift)

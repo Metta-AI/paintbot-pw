@@ -377,7 +377,8 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
   let inputs = int(word("header: "))
   let outputs = int(word("header: "))
   let heads = int(readU32(data, p))
-  if version != 2 or inputs notin 1..4096 or outputs notin 2..1024 or heads notin 1..32:
+  # outputs up to 4096 (MaxNet2Width): action contract 16's 2490 logits
+  if version != 2 or inputs notin 1..4096 or outputs notin 2..4096 or heads notin 1..32:
     raise newException(ValueError, "unsupported neural actor dimensions/version")
   new(result)
   result.inputSize = inputs; result.outputSize = outputs

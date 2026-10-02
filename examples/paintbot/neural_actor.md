@@ -85,7 +85,7 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 | magic | ASCII `PWNET002` |
 | version | 2 |
 | I | input count, 1..4096 (the observation contract's width: 512 for teams.view.1, 512 + K for teams.view.1u<K>; ffa.view.1: the match's width, usually the layout word `0xFFFEE000`) |
-| O | output count, 2..1024 (the logits; no value row: 82, or 128 for the aim-offset variant, 174 for movement-offset; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
+| O | output count, 2..4096 (the logits; no value row: 82, or 128 for the aim-offset variant, 174 for movement-offset, 818 for target-conditioned, 2490 for raw; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
 | head count | 1..32 |
 | head sizes | one uint32 per head, each 2..1024, summing to O (layout words allowed) |
 | observation contract | 64 lowercase hex bytes (as PWNET001) |
@@ -447,6 +447,7 @@ gun cooldown, windup, spray cooldown, shield, respawn, the seat's current aim, h
 | teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 | 13 |
 | teams.view.1 movement-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23` | 51, 25, 2, 2, 2, 23, 23, 23, 23 | 14 |
 | teams.view.1 target-conditioned aim offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16` | 51, 25, 2, 2, 2, 368, 368 (logits; heads 5 and 6 are 16 identity rows of 23, drawn from the row of the identity the aim head chose) | 15 |
+| teams.view.1 raw | `paintbot-pw.teams.view.1.action.51-25-2-2-2-63x16-63x16-256-8-128` | 51, 25, 2, 2, 2, 1008, 1008, 256, 8, 128 (logits; 63-bin identity rows, then the walk direction, walk distance and look direction heads) | 16 |
 | ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 | 12 |
 
 An action contract names head sizes; what each index means is the `policy.bas`'s business. The
