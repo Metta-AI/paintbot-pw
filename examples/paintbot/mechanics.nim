@@ -405,7 +405,12 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     let hitIndex = if hitLog != nil: hitLog[].len else: -1
     if hitLog != nil:
       hitLog[].add HitEvent(attacker: attacker.int32, victim: victim.int32, health: hpBefore-w.cogs[victim].hp,
-        armor: absorbed, weapon: ord(damageWeapon).int32, killed: int32(w.cogs[victim].hp == 0))
+        armor: absorbed, weapon: ord(damageWeapon).int32, killed: int32(w.cogs[victim].hp == 0),
+        disguised: int32(attacker >= 0 and hitLatch != nil and (case damageWeapon
+          of dwGun: hitLatch.gun[attacker]
+          of dwSpray: hitLatch.spray[attacker]
+          of dwGrenade: lobDisguised
+          of dwNone: false)))
   when defined(pwTraining):
     if combatTelemetry != nil:
       # Telemetry only: a hit is a damage event past shield and life checks; damage is
@@ -749,10 +754,18 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
   for i in 0..<Seats:
     if w.cogs[i].hp <= 0: continue
     let cmd = commands[i]
+    when defined(pwTraining):
+      # The seat's uniform as this tick's orders find it: a grenade thrown and a shot ordered on the
+      # same tick are both ordered in disguise, though the first takes the uniform off.
+      let wore = w.uniforms[i]
     if w.equipment[i].grenade:
       if cmd.chargeGrenade: w.equipment[i].charge = min(
           GrenadeChargeTicks.int32, w.equipment[i].charge+1)
       elif w.equipment[i].charge > 0:
+        when defined(pwTraining):
+          if hitLatch != nil:   # the throw order: the uniform before it comes off
+            hitLatch.lobs.add LobLatch(owner: i.int32, landsAt: w.tick+GrenadeFlightTicks, disguised: wore)
+            inc hitLatch.orders[i][1]; hitLatch.ordersDisguised[i][1] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.grenades.add Lob(start: w.cogs[i].pos, target: w.grenadeTarget(i),
@@ -763,6 +776,10 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
         w.equipment[i].grenade = false; w.equipment[i].charge = 0
     if w.equipment[i].sprayCan:
       if cmd.shoot and w.equipment[i].sprayCooldown == 0:
+        when defined(pwTraining):
+          if hitLatch != nil:   # the trigger
+            hitLatch.spray[i] = wore
+            inc hitLatch.orders[i][2]; hitLatch.ordersDisguised[i][2] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.emitSound(w.cogs[i].pos, 3, i, 1800)
@@ -814,6 +831,10 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
           w.balls.add Paintball(pos: endPoint, velocity: Point(
               x: endPoint.x-origin.x, z: endPoint.z-origin.z), owner: i.int32, life: (if visionRulesVersion >= 9: 6 else: 2))
       elif cmd.shoot and w.cogs[i].cooldown == 0:
+        when defined(pwTraining):
+          if hitLatch != nil:   # the wind-up starts
+            hitLatch.gun[i] = wore
+            inc hitLatch.orders[i][0]; hitLatch.ordersDisguised[i][0] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.equipment[i].windup = GunWindupTicks
@@ -844,7 +865,17 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
   w.updateBarrage()
   var airborne: seq[Lob]
   for g in w.grenades:
-    if w.tick >= g.landsAt: w.explode(g.target, g.owner.int)
+    if w.tick >= g.landsAt:
+      when defined(pwTraining):
+        lobDisguised = false
+        if hitLatch != nil and g.owner >= 0:
+          for k in 0..<hitLatch.lobs.len:   # this owner's oldest throw: flights are equally long
+            if hitLatch.lobs[k].owner == g.owner:
+              lobDisguised = hitLatch.lobs[k].disguised
+              hitLatch.lobs.delete(k)
+              break
+      w.explode(g.target, g.owner.int)
+      when defined(pwTraining): lobDisguised = false
     else: airborne.add g
   w.grenades = airborne
   w.pickupEquipment(attacked)

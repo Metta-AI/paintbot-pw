@@ -53,6 +53,7 @@ type
     stats: CombatTelemetry # Cumulative since the last create/reset; see pw_seat_stats.
     hitLogOn: bool          # pw_set_hit_log: record the step's damage events (default off)
     hitEvents: seq[HitEvent] # the last pw_step's damage events (pw_hit_events)
+    hitLatch: HitLatch       # each shot's order-tick uniform, kept until it lands (always tracked; saved with the world)
     # BASIC seats: the production interpreter, host functions, limits and per-decision
     # budget from bots.nim drive these slots instead of the caller's actions.
     scripts: seq[string]
@@ -294,6 +295,7 @@ proc resetStats(env: ptr NativeEnv) =
   for slot in 0..<env.n:
     env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
   env.hitEvents.setLen(0)
+  env.hitLatch = HitLatch()
 proc recent(now, then: int32): bool =
   ## "In the last KinWindow ticks", exclusive: then happened within the 72 ticks before now,
   ## now's own tick included (now - then in 0 ..< KinWindow).
@@ -1162,9 +1164,11 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     handicap = addr env.handicapKnobs
     env.hitEvents.setLen(0)
     if env.hitLogOn: hitLog = addr env.hitEvents
+    hitLatch = addr env.hitLatch
     try: env.world.step(commands)
     finally:
       hitLog = nil
+      hitLatch = nil
       combatTelemetry = nil
       damageScale = nil
       handicap = nil
@@ -2296,9 +2300,12 @@ proc pw_set_hit_log*(handle: pointer, enabled: cint): cint {.exportc, cdecl, dyn
 
 proc pw_hit_events*(handle: pointer, output: ptr UncheckedArray[int32], capacity: cint): cint {.exportc, cdecl, dynlib.} =
   ## The last pw_step's damage events (pw_set_hit_log on; none after a reset), in the order the
-  ## engine dealt them, PW_HIT_EVENT_INTS = 7 int32 each: {attacker (-1 = the map), victim,
+  ## engine dealt them, PW_HIT_EVENT_INTS = 8 int32 each: {attacker (-1 = the map), victim,
   ## health removed (after armor), armor absorbed, weapon (0 other, 1 gun, 2 grenade, 3 spray),
-  ## killed (the victim died), final (that death was its last life: out of the match)}. An event
+  ## killed (the victim died), final (that death was its last life: out of the match), disguised
+  ## (the attacker wore a uniform at the tick it ORDERED the shot: the gun's wind-up start, the
+  ## grenade's throw, the spray's trigger; firing takes the uniform off at once, so it is off by
+  ## the hit; 0 for the map and for weapon 0)}. An event
   ## is a damage event past the shield and life checks, pw_seat_stats' hit rule, so a match's
   ## events by victim sum to pw_seat_damage_taken_stats (hits, health) and pw_seat_stats
   ## (hits_taken, deaths). Writes min(count, capacity) events (output may be NULL when capacity
@@ -2308,9 +2315,23 @@ proc pw_hit_events*(handle: pointer, output: ptr UncheckedArray[int32], capacity
   let env = cast[ptr NativeEnv](handle)
   for i in 0..<min(env.hitEvents.len, capacity.int):
     let e = env.hitEvents[i]
-    for k, v in [e.attacker, e.victim, e.health, e.armor, e.weapon, e.killed, e.final]:
-      output[i*7+k] = v
+    for k, v in [e.attacker, e.victim, e.health, e.armor, e.weapon, e.killed, e.final, e.disguised]:
+      output[i*8+k] = v
   cint(env.hitEvents.len)
+
+proc pw_seat_shot_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Shots the seat ORDERED since the last create/reset (training library only), six int32: [gun
+  ## wind-ups started, grenades thrown, sprays triggered, and each of the three counted only when
+  ## the seat wore a uniform at that tick] (the uniform comes off with the order). Hits or not:
+  ## pw_hit_events' disguised flag is the same latch for the shots that hit. Pure telemetry.
+  ## Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  for k in 0..2:
+    output[k] = env.hitLatch.orders[seat][k]
+    output[3+k] = env.hitLatch.ordersDisguised[seat][k]
+  0
 
 proc pw_seat_equip_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## Equipment and disguise telemetry for one seat (training library only), eight int32,
