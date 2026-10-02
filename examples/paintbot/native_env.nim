@@ -9,6 +9,7 @@ from neural_host import MaxNeuralOperations, neuralOperationBudget, setCondition
 import polyworld/rngs
 import polyworld/basic
 import snapshot, contract_hash
+import teacher_classes
 
 when not defined(pwTraining): {.error: "native_env requires -d:pwTraining".}
 
@@ -135,6 +136,13 @@ type
     shadowOrders: seq[Command]
     shadowSet: seq[bool]
     shadowCount: int
+    # In-step teacher classes (pw_set_teacher_classes; default-off, masks 0): for the masked live seats, every step
+    # computes pw_teacher_classes from the step's decided order (the shadow's, else the seat's own program's) on the
+    # pre-step world, with the keep its decoder held before the step; read with pw_teacher_classes_last.
+    tcSeats, tcExact: uint32
+    tcKeep: seq[KeepState]
+    tcOut: seq[ClassMasks]
+    tcInfo: seq[array[4, int32]]   # state (1 computed, 0 none, -2 dead), mode (0 default, 1 exact), routed, moves
     # Observation contract the handle encodes (chosen at create, kept across resets):
     # teams.view.1 (pw_create) or ffa.view.1. The world never reads it.
     obsVersion: ObservationContractVersion
@@ -246,6 +254,9 @@ proc allocSeats(env: ptr NativeEnv, n: int) =
   env.shadowOrders = newSeq[Command](n)
   env.shadowSet = newSeq[bool](n)
   env.shadowCount = 0
+  env.tcKeep = newSeq[KeepState](n)
+  env.tcOut = newSeq[ClassMasks](n)
+  env.tcInfo = newSeq[array[4, int32]](n)
   env.policy = newSeq[bool](n)
   env.policyManifests = newSeq[string](n)
   env.policyConditionals = newSeq[seq[Conditional]](n)
@@ -922,6 +933,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     for slot in 0..<env.n:
       env.commandPending[slot] = false
       env.commandShown[slot] = false
+      env.tcInfo[slot] = [0'i32, 0, 0, 0]
     return 0
   except CatchableError: return -1
 
@@ -977,6 +989,27 @@ proc pw_observe*(handle: pointer, observations, resets: FloatBuffer): cint {.exp
 
 proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: FloatBuffer,
     logits: FloatBuffer): cint
+proc keepFor(env: ptr NativeEnv, seat: int): KeepState
+proc toTeacher(c: Command): TeacherCommand =
+  TeacherCommand(walk: c.walk, goal: c.goal, shoot: c.shoot, aim: c.aim, grenade: c.chargeGrenade, sneak: c.sneak,
+    direct: c.direct)
+proc stepTeacherClasses(env: ptr NativeEnv) =
+  ## In-step teacher classes (pw_set_teacher_classes): after the step's decisions, on the still pre-step world, each
+  ## masked live seat's classes for the order it decided (its shadow's when it has one, else its own program's).
+  for slot in 0..<min(env.n, 32):
+    if (env.tcSeats and (1'u32 shl slot)) == 0: continue
+    if env.world.cogs[slot].hp <= 0:
+      env.tcInfo[slot] = [-2'i32, 0, 0, 0]
+      continue
+    let cmd = if env.shadowSet[slot]: env.shadowOrders[slot]
+              elif env.lastDecidedSet[slot]: env.lastDecided[slot]
+              else: continue
+    let mode = if (env.tcExact and (1'u32 shl slot)) != 0: wmExact else: wmRouted
+    let tc = toTeacher(cmd)
+    teacherClasses(env.world, slot, tc, env.tcKeep[slot], env.tcOut[slot], mode)
+    let j = walkJudge(env.world, slot, tc, wmRouted)
+    env.tcInfo[slot] = [1'i32, int32(mode == wmExact), int32(j.teacherRouted), int32(j.want.moves)]
+
 proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
   ## Settled score reward only, normalized by 1000. Optional shaping belongs in
   ## the training adapter, never hidden in the game ABI. No implicit auto-reset.
@@ -1031,6 +1064,11 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     var wasDead = newSeq[bool](env.n)
     var decoders = newSeq[Bot](env.n)
     for slot in 0..<env.n: env.lastDecidedSet[slot] = false
+    if env.tcSeats != 0:
+      # In-step teacher classes: nothing from an earlier step survives; keep as each decoder holds it before deciding.
+      for slot in 0..<env.n:
+        env.tcInfo[slot] = [0'i32, 0, 0, 0]
+        if slot < 32 and (env.tcSeats and (1'u32 shl slot)) != 0: env.tcKeep[slot] = env.keepFor(slot)
     # The shadows decide before the tick's speech is delivered. pw_script_decide already ran them (and delivered
     # the speech) when it took this tick's decision ahead of the step.
     if not (env.decidedValid and env.decidedTick == env.world.tick): env.shadowDecide()
@@ -1104,6 +1142,7 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       elif env.commandShown[slot]:
         env.scriptOrders[slot] = Command()
         env.commandShown[slot] = false
+    if env.tcSeats != 0: env.stepTeacherClasses()
     for slot in 0..<env.n: env.gateFire(slot, commands[slot])
     let kinStep = env.mode == gmFfaKin
     var preScore, preGreat: seq[int32]
@@ -1679,6 +1718,186 @@ proc pw_seat_policy_extra_choices2*(handle: pointer, seat: cint, output: ptr Unc
     output[ExtraHeadsMax+e] = n.offsetChoices[e]
     output[2*ExtraHeadsMax+e] = n.appliedOffsetTemperatures[e]
   0
+
+# ---------------------------------------------------------------------------------------
+# Teacher class masks (action contract 16 raw bins; teacher_classes.nim has the definitions).
+proc teacherCommand(command: ptr UncheckedArray[int32]): TeacherCommand =
+  TeacherCommand(walk: command[0] != 0, goal: Point(x: command[1], z: command[2]), shoot: command[3] != 0,
+    aim: Point(x: command[4], z: command[5]), grenade: command[6] != 0, sneak: command[7] != 0,
+    direct: command[8] != 0)
+
+proc keepFor(env: ptr NativeEnv, seat: int): KeepState =
+  ## The seat's decoder's keep: read from its own BASIC program (the reference decoder's globals
+  ## aimKnown / lastTick / keptX / keptY, as a policy.bas built on it carries them) when it has
+  ## them: known when it last ran on the previous tick and had something to keep. A seat without
+  ## such a program keeps nothing.
+  let bot = env.scriptBots[seat]
+  if bot == nil: return KeepState()
+  try:
+    let known = bot.runtime.getGlobal("aimKnown") == 1 and bot.runtime.getGlobal("lastTick") == env.world.tick-1
+    if known: return KeepState(known: true, point: Point(x: bot.runtime.getGlobal("keptX"), z: bot.runtime.getGlobal("keptY")))
+  except CatchableError: discard
+  KeepState()
+
+proc teacherClassesReference(env: ptr NativeEnv, s: int, cmd: TeacherCommand, keep: KeepState, m: var ClassMasks,
+    mode: WalkMode) =
+  ## The gate's reference: every bin decoded by the reference decoder script itself (a contract-16
+  ## decoder seat, its keep state cleared before each decode), every predicate evaluated bin by
+  ## bin, nothing shared with the fast masks but the predicates (teacher_classes' walk judge, cone,
+  ## SD test).
+  for i in 0..<m.len: m[i] = 0
+  let w = env.world
+  let bot = loadDecoderBot(DecoderSource, s, env.observationHash, acTeamsView1Raw)
+  var bots = newSeq[Bot](env.n)
+  bots[s] = bot
+  proc decode(c: array[ActionSizesRaw.len, int]): Command =
+    bot.runtime.setGlobal("aimKnown", 0)
+    for h in 0..<ActionSizesRaw.len:
+      if h < ActionSizes.len: bot.neural.fedChoices[h] = c[h].int32
+      else: bot.neural.fedOffsetChoices[h-ActionSizes.len] = c[h].int32
+    bot.neural.choicesFed = true
+    result = decideSeats(bots, w)[s]
+    doAssert not bot.failed, "reference decoder failed: " & bot.error
+  let pos = w.cogs[s].pos
+  let judge = walkJudge(w, s, cmd, mode)
+  proc walkIn(c: Command): bool = c.walk and not c.direct and judge.inClass(c.goal)
+  template setb(at, i: int) = m[at + (i shr 3)] = m[at + (i shr 3)] or uint8(1 shl (i and 7))
+  for b in 0..42:
+    if walkIn(decode([b, 0, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, 0, 0, 0])): setb(TcHead0At, b)
+  var grid = false
+  for dir in 0..<WalkDirections:
+    for dist in 0..<WalkDistances.len:
+      if walkIn(decode([43, 0, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, dir, dist, 0])):
+        setb(TcWalkAt, dir*WalkDistances.len + dist); grid = true
+  if grid:
+    for b in 43..50: setb(TcHead0At, b)
+  let order = cmd.shoot and w.cogs[s].cooldown == 0 and w.equipment[s].windup == 0 and not w.equipment[s].sprayCan
+  let sd = if order: 26.5 / 5250.0 * max(w.gunSpreadPercent(pos, cmd.aim), 1).float / 100.0 else: 0.0
+  let mask = coneMask(w, s, cmd.aim)
+  proc aimIn(p: Point): bool = (if order: withinSd(pos, cmd.aim, p, sd) else: coneMask(w, s, p) == mask)
+  let noAim = cmd.aim == Point()
+  let keepIn = if noAim: true else: keep.known and aimIn(keep.point)
+  if keepIn: setb(TcHead1At, 0)
+  for j in 0..<TargetRows:
+    if decode([0, 1+j, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, 0, 0, 0]).aim == Point():
+      # Identity not visible: the decoder gives no aim, as keep does with nothing known.
+      if keepIn: setb(TcHead1At, 1+j)
+      continue
+    if noAim: continue
+    var any = false
+    for bx in 0..<RawOffsetBins:
+      for bz in 0..<RawOffsetBins:
+        if aimIn(decode([0, 1+j, 0, 0, 0, bx, bz, 0, 0, 0]).aim):
+          setb(TcOffsetAt, j*RawOffsetBins*RawOffsetBins + bx*RawOffsetBins + bz); any = true
+    if any: setb(TcHead1At, 1+j)
+  if not noAim:
+    var look = false
+    for k in 0..<LookDirections:
+      if aimIn(decode([0, 17, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, 0, 0, k]).aim):
+        setb(TcLookAt, k); look = true
+    if look:
+      for b in 17..24: setb(TcHead1At, b)
+  m[TcFireAt] = uint8(1 shl cmd.shoot.int)
+  m[TcGrenadeAt] = uint8(1 shl cmd.grenade.int)
+  m[TcSneakAt] = uint8(1 shl cmd.sneak.int)
+
+proc teacherClassesCall(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint, reference: bool, mode = wmRouted): cint =
+  if handle == nil or command == nil or output == nil or capacity < TeacherClassBytes: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if env.obsVersion == ocFfaView1 or seat notin 0..<env.n: return -1
+  if env.world.cogs[seat].hp <= 0: return -2
+  try:
+    let cmd = teacherCommand(command)
+    let keep = env.keepFor(seat.int)
+    var m: ClassMasks
+    if reference: env.teacherClassesReference(seat.int, cmd, keep, m, mode)
+    else: teacherClasses(env.world, seat.int, cmd, keep, m, mode)
+    copyMem(output, addr m[0], TeacherClassBytes)
+    TeacherClassBytes.cint
+  except CatchableError: -1
+
+proc pw_teacher_classes*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Teacher class masks (training library only; teams game): for a teacher's decided command for
+  ## `seat` (ten int32 as pw_seat_orders writes them: walk, goal_x, goal_z, shoot, aim_x, aim_z,
+  ## charge_grenade, sneak, direct, -), the action contract 16 (raw) bins that reproduce it on the
+  ## CURRENT world, so call it after the tick's decision and before pw_step. Layout and classes:
+  ## teacher_classes.nim (8224 bytes). "Keep" is judged from the seat's own decoder program
+  ## (aimKnown / lastTick / keptX / keptY) when it has one. Returns 8224; -1 bad args (capacity
+  ## below 8224, an ffa.view.1 handle); -2 the seat is dead. Pure read: the world, its hash and
+  ## every seat are unchanged.
+  teacherClassesCall(handle, seat, command, output, capacity, false)
+
+proc pw_teacher_classes_info*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Diagnostics for a teacher command (training library only): int32[2] = {the teacher's goal is
+  ## routed by the path search (1) or walked straight / direct (0), the teacher moves this tick}.
+  ## 0; -1 bad args; -2 dead seat. Pure read.
+  if handle == nil or command == nil or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if env.obsVersion == ocFfaView1 or seat notin 0..<env.n: return -1
+  if env.world.cogs[seat].hp <= 0: return -2
+  try:
+    let j = walkJudge(env.world, seat.int, teacherCommand(command), wmRouted)
+    output[0] = int32(j.teacherRouted)
+    output[1] = int32(j.want.moves)
+    0
+  except CatchableError: -1
+
+proc pw_set_teacher_classes*(handle: pointer, seats, exact: uint32): cint {.exportc, cdecl, dynlib.} =
+  ## In-step teacher classes (training library only; default-off): from the next pw_step on, for every live seat
+  ## whose bit is set in `seats` (seats 0..31), the step computes pw_teacher_classes for the order the seat decided
+  ## that step (its shadow script's when it has one, ran = 2, else its own program's, ran = 1), on the pre-step world
+  ## after all of the step's decisions, with the keep its decoder held before deciding; seats also in `exact` get
+  ## pw_teacher_classes_exact's walk class. Read with pw_teacher_classes_last / _last_info. Kept across steps and
+  ## pw_reset until called again; (0, 0) = off. Cheap (two words), safe every step: the last step's results stay
+  ## readable. Pure telemetry: the world and every decision are unchanged. 0, -1.
+  if handle == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if env.obsVersion == ocFfaView1 and seats != 0: return -1
+  env.tcSeats = seats
+  env.tcExact = exact and seats
+  0
+
+proc pw_teacher_classes_last*(handle: pointer, seat: cint, output: ptr UncheckedArray[uint8],
+    capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The masks pw_set_teacher_classes computed for `seat` on the last pw_step (8224 bytes, pw_teacher_classes'
+  ## layout): returns 8224; 0 when none was computed (seat not masked, dead, or without a decided order; output
+  ## untouched); -1 bad args.
+  if handle == nil or output == nil or capacity < TeacherClassBytes: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if seat notin 0..<env.n: return -1
+  if env.tcInfo[seat][0] != 1: return 0
+  copyMem(output, addr env.tcOut[seat][0], TeacherClassBytes)
+  TeacherClassBytes.cint
+
+proc pw_teacher_classes_last_info*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## int32[4] for `seat` on the last pw_step: {state (1 computed, 0 none, -2 dead), mode (0 pw_teacher_classes,
+  ## 1 exact), the teacher's goal is routed, the teacher moves}. 0, -1 bad args.
+  if handle == nil or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if seat notin 0..<env.n: return -1
+  for i in 0..3: output[i] = env.tcInfo[seat][i]
+  0
+
+proc pw_teacher_classes_exact*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## pw_teacher_classes with the exact walk class: waypointFor for every walk goal, so routed goals
+  ## that reproduce the teacher's step through another target cell are found too. Tens of ms per
+  ## call: for a sampled fraction of ticks. Everything else is pw_teacher_classes'.
+  teacherClassesCall(handle, seat, command, output, capacity, false, wmExact)
+
+proc pw_teacher_classes_reference*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint, exact: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The same masks the slow way, for gates: every bin decoded by the reference decoder script and
+  ## tested on its own; exact = 0 pw_teacher_classes' walk class, 1 pw_teacher_classes_exact's.
+  teacherClassesCall(handle, seat, command, output, capacity, true, (if exact != 0: wmExact else: wmRouted))
 
 proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## The command a scripted seat issued on the last pw_step, ten int32:
