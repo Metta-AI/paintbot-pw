@@ -263,8 +263,8 @@ suite "Net-teacher shadow: pw_set_seat_command on a policy seat, pw_seat_decided
     check differs > 300
 
   test "a shadow script's shouts are dropped; fresh globals per reset; caller-driven seat; status codes; save / load":
-    const Shouter = "dim c(1)\nc(0) = c(0) + 1\nshout(\"x\")\nwalkTo(c(0), 7)\n"
-    const Listener = "walkTo(heardCount(), 0)\n"
+    let Shouter = "dim c(1)\nc(0) = c(0) + 1\nshout(\"x\")\nwalkTo(c(0), 7)\n"
+    let Listener = "walkTo(heardCount(), 0)\n"
     var actions: array[LegacySeats*ActionSizes.len, int32]
     var rewards, terminals: array[LegacySeats, float32]
     var o: array[10, int32]
@@ -287,7 +287,8 @@ suite "Net-teacher shadow: pw_set_seat_command on a policy seat, pw_seat_decided
     require h != nil and twin != nil
     defer: pw_destroy(h); pw_destroy(twin)
     check pw_set_seat_shadow_script(h, Seats.cint, cbuf(Shouter), Shouter.len.int32) == -1
-    check pw_set_seat_shadow_script(h, 0, cbuf("walkTo("), 7) == 1
+    let broken = "walkTo("
+    check pw_set_seat_shadow_script(h, 0, cbuf(broken), broken.len.int32) == 1
     check pw_seat_shadow_status(h, 0) == 2
     require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
     require pw_step(twin, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0

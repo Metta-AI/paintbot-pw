@@ -499,9 +499,6 @@ proc installScript(env: ptr NativeEnv, slot: int) =
   env.scriptBots[slot] = nil
   env.scriptErrors[slot] = ""
   env.scriptOrders[slot] = Command()
-  if slot < env.lastDecidedSet.len:
-    env.lastDecided[slot] = Command()
-    env.lastDecidedSet[slot] = false
   if env.scripts[slot].len == 0:
     env.scriptStatus[slot] = 0
     return
@@ -1483,6 +1480,8 @@ proc pw_set_seat_script*(handle: pointer, seat: cint, source: ptr UncheckedArray
   if length > 0: copyMem(addr env.scripts[seat][0], source, length)
   env.sizeHeard()
   env.scriptHeard[seat] = @[]
+  env.lastDecided[seat] = Command()   # pw_seat_decided_orders: nothing decided by the new program yet
+  env.lastDecidedSet[seat] = false
   env.installScript(seat)
   if env.scripts[seat].len > 0: inc env.scriptCount
   if env.scriptStatus[seat] == 2: 1 else: 0
@@ -1528,6 +1527,8 @@ proc pw_set_seat_policy_script*(handle: pointer, seat: cint, source: ptr Uncheck
   if length > 0 and manifestLength > 0: copyMem(addr env.policyManifests[seat][0], manifest, manifestLength)
   env.sizeHeard()
   env.scriptHeard[seat] = @[]
+  env.lastDecided[seat] = Command()   # pw_seat_decided_orders: nothing decided by the new program yet
+  env.lastDecidedSet[seat] = false
   env.installScript(seat)
   if env.scripts[seat].len > 0:
     inc env.scriptCount
