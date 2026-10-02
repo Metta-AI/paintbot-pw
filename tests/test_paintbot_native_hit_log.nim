@@ -11,7 +11,7 @@ when not defined(pwTraining): {.error: "training telemetry exists only under -d:
 
 const Root = currentSourcePath().parentDir.parentDir
 const Base = Root / "coworld/paintbot/players/base.bas"
-const HitInts = 7
+const HitInts = 8
 type Buffer = ptr UncheckedArray[cfloat]
 template fbuf(a: untyped): Buffer = cast[Buffer](addr a[0])
 template ibuf(a: untyped): ptr UncheckedArray[int32] = cast[ptr UncheckedArray[int32]](addr a[0])
@@ -68,7 +68,7 @@ suite "Hit attribution":
       pw_destroy(on)
 
   test "full scripted matches: events sum to the damage-taken and seat stats; one final per seat out":
-    var finals, matches = 0
+    var finals, matches, shots = 0
     for rules in [0'i32, 48]:
       for seed in [41'i32, 42, 43]:
         checkpoint "rules " & $rules & " seed " & $seed
@@ -86,7 +86,8 @@ suite "Hit attribution":
         for i, e in events:
           let (attacker, victim) = (e[0].int, e[1].int)
           check victim in 0..<Seats and attacker in -1..<Seats
-          check e[2] >= 0 and e[3] >= 0 and e[4] in 0'i32..3 and e[5] in 0'i32..1 and e[6] in 0'i32..1
+          check e[2] >= 0 and e[3] >= 0 and e[4] in 0'i32..3 and e[5] in 0'i32..1 and e[6] in 0'i32..1 and e[7] in 0'i32..1
+          check e[7] == 0 or (attacker >= 0 and e[4] != 0)   # only a seat's weapon can be disguised
           check e[6] == 0 or e[5] == 1       # a final event is a death
           check finalIndex[victim] < 0       # nothing hits a seat after its final death
           let fromEnemy = attacker >= 0 and attacker != victim and team(attacker) != team(victim)
@@ -109,5 +110,12 @@ suite "Hit attribution":
           check final[slot] == (if gone: 1 else: 0)
           if final[slot] == 1: check finalIndex[slot] == lastIndex[slot]
           finals += final[slot]
+          var six: array[6, int32]
+          var grenade: array[6, int32]
+          check pw_seat_shot_orders(h, slot.cint, ibuf(six)) == 0
+          check pw_seat_grenade_stats(h, slot.cint, ibuf(grenade)) == 0
+          check six[1] == grenade[0]                                   # throws
+          for k in 0..2: check six[3+k] >= 0 and six[3+k] <= six[k]
+          shots += six[0]+six[1]+six[2]
         pw_destroy(h)
-    check matches == 6 and finals > 0
+    check matches == 6 and finals > 0 and shots > 0

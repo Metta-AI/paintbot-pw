@@ -258,13 +258,18 @@ int pw_seat_damage_taken_stats(void *handle, int seat, int32_t *eight);
  * pw_hit_events writes the last step's events, PW_HIT_EVENT_INTS int32 each, in the order the
  * engine dealt them: {attacker (-1 the map), victim, health removed (after armor), armor
  * absorbed, weapon (0 other, 1 gun, 2 grenade, 3 spray), killed, final (the victim's last life:
- * out of the match)}. It writes min(count, capacity) events and returns the count (output may
+ * out of the match), disguised (the attacker wore a uniform at the tick it ORDERED the shot: gun
+ * wind-up start, grenade throw, spray trigger; 0 for the map)}. It writes min(count, capacity) events and returns the count (output may
  * be NULL with capacity 0); none after a reset. Events count a damage event past the shield
  * and life checks, so a match's events by victim sum to pw_seat_damage_taken_stats and
  * pw_seat_stats' hits_taken / deaths. -1 bad args. */
-#define PW_HIT_EVENT_INTS 7
+#define PW_HIT_EVENT_INTS 8
 int pw_set_hit_log(void *handle, int enabled);
 int pw_hit_events(void *handle, int32_t *events, int32_t capacity);
+/* pw_seat_shot_orders (training library only; pure read, cumulative since create/reset): int32[6] =
+ * {gun wind-ups started, grenades thrown, sprays triggered, and the same three counted only when
+ * the seat wore a uniform at that tick}. Every shot ordered, whether or not it hits. -1 bad args. */
+int pw_seat_shot_orders(void *handle, int seat, int32_t *six);
 /* Teacher class masks (training library only; teams game; pure read). For a teacher's decided
  * command for `seat` (ten int32 in pw_seat_orders' layout), on the CURRENT (pre-step) world: the
  * action contract 16 (raw) bins whose reference decode reproduces it (walk: the same engine

@@ -314,7 +314,25 @@ when defined(pwTraining):
     health*, armor*: int32     # health removed (after armor), armor absorbed
     weapon*: int32             # ord(DamageWeapon): 0 other, 1 gun, 2 grenade, 3 spray
     killed*, final*: int32     # the victim died; and it was its last life (out of the match)
+    disguised*: int32          # the attacker wore a uniform when it ORDERED this shot (0 for the map)
   var hitLog* {.threadvar.}: ptr seq[HitEvent]
+  # The attacker's uniform at the tick it ordered the shot that later deals damage: firing takes the
+  # uniform off at once, so the state at the hit is always "off". Latched per seat at a gun's wind-up
+  # start and a spray's trigger (one of each at a time), and per grenade at its throw (in landing
+  # order per owner: flights are equally long). The host keeps it per handle and points this at it
+  # for a step. Telemetry only; never part of World, its hash or any decision.
+  type
+    LobLatch* = object
+      owner*, landsAt*: int32
+      disguised*: bool
+    HitLatch* = object
+      gun*, spray*: array[MaxSeats, bool]
+      lobs*: seq[LobLatch]
+      # Shots ordered per seat since the match began (pw_seat_shot_orders): gun wind-ups started,
+      # grenades thrown, sprays triggered; and how many of each while wearing a uniform.
+      orders*, ordersDisguised*: array[MaxSeats, array[3, int32]]
+  var hitLatch* {.threadvar.}: ptr HitLatch
+  var lobDisguised* {.threadvar.}: bool   # the exploding grenade's latch, for the blast's damage
 else:
   var visionRulesVersion* = LiveRules
   var gameMode* = gmTeams
