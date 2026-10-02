@@ -116,6 +116,46 @@ proc hostRun(model, manifest: string, seed: int32, ticks: int, shadow: bool, sha
     result.hashes.add w.stateHash()
     inc t
 
+
+type MultiRun = object
+  hashes: seq[uint32]
+  decided: seq[seq[Command]]         # [tick][seat]: each learner's policy.bas order (executed)
+  shadowDecided: seq[seq[Command]]   # [tick][seat]: each learner's shadow script order
+  inputs: seq[seq[seq[int32]]]       # [tick][seat]: each learner's user inputs after its decision
+  alive: seq[seq[bool]]              # [tick][seat]: alive on the pre-step world
+
+proc hostMulti(model, manifest: string, seed: int32, ticks: int, learners: seq[int], shadowSrc: string): MultiRun =
+  ## The game's own loop with a policy bundle on every learner seat and base.bas elsewhere; each learner's
+  ## reference shadow is its own bot deciding on the pre-step world before the tick's decide.
+  let path = getTempDir()/("paintbot-shadow-multi-" & $getCurrentProcessId() & ".bas")
+  writeFile(path, Policy)
+  writeFile(path & ".model.bin", model)
+  writeFile(path & ".neural.json", manifest)
+  defer:
+    for suffix in ["", ".model.bin", ".neural.json"]: removeFile(path & suffix)
+  resetOracle()
+  heard = @[]
+  var players = newSeq[Bot](Seats)
+  let neural = loadBots(@[BotGroup(path: path, count: Seats)])
+  let plain = loadBots(@[BotGroup(path: Base, count: Seats)])
+  for slot in 0..<Seats: players[slot] = if slot in learners: neural[slot] else: plain[slot]
+  var shadowBots = newSeq[Bot](Seats)
+  for slot in learners: shadowBots[slot] = loadScriptBot(shadowSrc, slot)
+  var w = newWorld(seed, ticks.int32)
+  while w.tick < ticks and w.winner == -1:
+    var alive = newSeq[bool](Seats)
+    for slot in 0..<Seats: alive[slot] = w.cogs[slot].hp > 0
+    result.alive.add alive
+    result.shadowDecided.add decideSeats(shadowBots, w)
+    let commands = players.decide(w)
+    deliverSpeech(w)
+    result.decided.add commands
+    var inputs = newSeq[seq[int32]](Seats)
+    for slot in learners: inputs[slot] = players[slot].neural.userInputs
+    result.inputs.add inputs
+    w.step(commands)
+    result.hashes.add w.stateHash()
+
 suite "Net-teacher shadow: pw_set_seat_command on a policy seat, pw_seat_decided_orders":
   configureRules(NativeRules)
   let baseSource = readFile(Base)
@@ -398,3 +438,78 @@ suite "Net-teacher shadow: pw_set_seat_command on a policy seat, pw_seat_decided
         if decided[mShadowListeners][t][0..8] == decided[mSeatedListeners][t][0..8]: inc listenerAgree
       echo "seed ", seed, ": shadow vs seated with listeners agree on ", listenerAgree, "/", executed.len, " ticks"
     check differs > 300   # the teacher's order really differs from the forced one
+
+  test "the TC worker's sequence: 8 learner policy seats with shadows, pw_reset between episodes, observe_seats / seat_state":
+    # pw-features' per-episode call order: pw_reset, install the seats, shadow script on each learner seat and
+    # NULL on the rest, pw_observe_seats + pw_seat_state; per tick: logits, pw_step_logits, pw_seat_policy_choices,
+    # pw_seat_decided_orders on the learner seats, pw_observe_seats + pw_seat_state. Checked against the hosted
+    # game without shadows (world, executed orders, user inputs) and each learner's hosted reference shadow.
+    let actor = loadActor(model)
+    let learners = @[0, 2, 4, 6, 8, 10, 12, 14]
+    var mask = 0'u32
+    for slot in learners: mask = mask or (1'u32 shl slot)
+    let n = TeamsViewSize + K
+    let handle = pw_create_observation_inputs(70, 400, K)
+    require handle != nil
+    defer: pw_destroy(handle)
+    var differs, rows = 0
+    for (seed, ticks) in [(71'i32, 500), (72'i32, 400)]:
+      checkpoint "seed " & $seed
+      let host = hostMulti(model, manifest, seed, ticks, learners, baseSource)
+      require pw_reset(handle, seed, ticks.int32) == 0
+      for slot in 0..<Seats:
+        if slot in learners: require setPolicy(handle, slot, Policy, manifest) == 0
+        else: require setScript(handle, slot, baseSource) == 0
+      for slot in 0..<Seats:
+        if slot in learners:
+          require pw_set_seat_shadow_script(handle, slot.cint, cbuf(baseSource), baseSource.len.int32) == 0
+          require pw_seat_shadow_status(handle, slot.cint) == 1
+        else:
+          require pw_set_seat_shadow_script(handle, slot.cint, nil, 0) == 0
+          require pw_seat_shadow_status(handle, slot.cint) == 0
+      var observations = newSeq[float32](Seats*n)
+      var resets: array[LegacySeats, float32]
+      var bodies = newSeq[float32](Seats*8)
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var logits: array[LegacySeats*LogitSize, float32]
+      var rewards, terminals: array[LegacySeats, float32]
+      var states = newSeq[seq[float32]](Seats)
+      var wasAlive = newSeq[bool](Seats)
+      for slot in learners: states[slot] = newSeq[float32](actor.hiddenSize)
+      require pw_observe_seats(handle, mask, fbuf(observations), fbuf(resets)) == 0
+      require pw_seat_state(handle, fbuf(bodies)) == 0
+      for t, hash in host.hashes:
+        for slot in learners:
+          let isAlive = observations[slot*n+2] > 0
+          if not isAlive or not wasAlive[slot] or t == 0:
+            for i in 0..<actor.hiddenSize: states[slot][i] = 0
+          wasAlive[slot] = isAlive
+          if isAlive:
+            var output = newSeq[float32](LogitSize)
+            actor.infer(observations.toOpenArray(slot*n, slot*n+n-1), states[slot], output)
+            for i in 0..<LogitSize: logits[slot*LogitSize+i] = output[i]
+        require pw_step_logits(handle, ibuf(actions), fbuf(logits), fbuf(rewards), fbuf(terminals)) == 0
+        require pw_state_hash(handle) == hash                 # the hosted world WITHOUT any shadow
+        for slot in learners:
+          var choices: array[22, int32]
+          require pw_seat_policy_choices(handle, slot.cint, ibuf(choices)) == 0
+          var decided, orders: array[10, int32]
+          require pw_seat_decided_orders(handle, slot.cint, ibuf(decided)) == 0
+          require decided[9] == 2
+          require decided[0..8] == ten(host.shadowDecided[t][slot], true)[0..8]
+          require pw_seat_orders(handle, slot.cint, ibuf(orders)) == 0
+          require orders[0..8] == ten(host.decided[t][slot], true)[0..8]   # each net's own command executed
+          if host.alive[t][slot]:
+            inc rows
+            if decided[0..8] != orders[0..8]: inc differs
+        for slot in 0..<Seats:
+          if slot notin learners:
+            var decided: array[10, int32]
+            require pw_seat_decided_orders(handle, slot.cint, ibuf(decided)) == 0
+            require decided[9] == 1                                         # a scripted seat's own program
+        require pw_observe_seats(handle, mask, fbuf(observations), fbuf(resets)) == 0
+        require pw_seat_state(handle, fbuf(bodies)) == 0
+        for slot in learners:   # each policy.bas keeps writing its user inputs under its shadow
+          for i in 0..<K: require observations[slot*n+TeamsViewSize+i] == userInputFeature(host.inputs[t][slot][i])
+      for slot in learners: check pw_seat_shadow_status(handle, slot.cint) == 1
+    check rows > 2000 and differs * 10 > rows   # the teachers really disagree with the nets
