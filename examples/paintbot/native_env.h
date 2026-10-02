@@ -268,8 +268,8 @@ int pw_elevation(void *handle, int32_t x, int32_t z);
  * below), 203 = teams.view.1h "paintbot-pw.teams.view.1h" (teams.view.1's 512 floats, then a 100-float RAW
  * motion-history block the engine keeps per seat: per identity t-1 / t-2 displacement relative to its current
  * position in 28 u steps plus seen flags, then the seat's own t-1 / t-2 displacement; 612 floats; the teams game only;
- * pw_create_observation_inputs_v(..., 203, K) adds K user inputs, "paintbot-pw.teams.view.1hu<K>"; pw_reset and
- * pw_world_load start every history over). neural_contract.nim encodeTeamsView / encodeTeamsViewH / encodeFfaView
+ * pw_create_observation_inputs_v(..., 203, K) adds K user inputs, "paintbot-pw.teams.view.1hu<K>"; pw_reset starts
+ * every history over, pw_world_save / pw_world_load carry it). neural_contract.nim encodeTeamsView / encodeTeamsViewH / encodeFfaView
  * document every column; each
  * is computed from the seat's SeatView. NULL for any other version (1, 2, 3, 101 and 102
  * were retired for BASIC parity) or a bad max_ticks. pw_observe / pw_observe_seats rows are
