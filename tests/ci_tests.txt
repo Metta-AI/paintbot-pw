@@ -62,6 +62,8 @@ nim r tests/test_paintbot_glory_behind.nim
 nim r tests/test_paintbot_glory_config.nim
 nim r tests/test_paintbot_glory_behind_cogs.nim
 nim r tests/test_paintbot_weapon_buff.nim
+nim r tests/test_paintbot_short_gun.nim
+nim r tests/test_paintbot_rules49_items.nim
 nim r tests/test_paintbot_rules40_golden.nim
 nim r tests/test_paintbot_rules41_golden.nim
 nim r tests/test_paintbot_ffa_config.nim

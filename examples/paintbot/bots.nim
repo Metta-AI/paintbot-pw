@@ -66,6 +66,8 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat, rnd:RndStream): Host 
   discard result.addFunction("heardY",1,proc(a:openArray[int32]):int32 = view().heardY(a[0].int),4)
   discard result.addFunction("sneak",1,proc(a:openArray[int32]):int32 =
     commands[slot].sneak=a[0]!=0;1,4)
+  discard result.addFunction("selfDestruct",0,proc(a:openArray[int32]):int32 =
+    commands[slot].selfDestruct=true;1,4)
   discard result.addFunction("soundCount",0,proc(a:openArray[int32]):int32 = view().soundCount,4)
   discard result.addFunction("soundKind",1,proc(a:openArray[int32]):int32 = view().soundKind(a[0].int),4)
   discard result.addFunction("soundDirection",1,proc(a:openArray[int32]):int32 = view().soundDirection(a[0].int),4)
@@ -88,6 +90,13 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat, rnd:RndStream): Host 
   discard result.addFunction("playerY",1,proc(a:openArray[int32]):int32 = view().playerY(a[0].int),4)
   discard result.addFunction("playerHp",1,proc(a:openArray[int32]):int32 = view().playerHp(a[0].int),4)
   discard result.addFunction("playerCarrying",1,proc(a:openArray[int32]):int32 = view().playerCarrying(a[0].int),4)
+  discard result.addFunction("playerMisting",1,proc(a:openArray[int32]):int32 = view().playerMisting(a[0].int),4)
+  discard result.addFunction("mistingTicks",0,proc(a:openArray[int32]):int32 = view().mistingTicks,4)
+  discard result.addFunction("gunRange",0,proc(a:openArray[int32]):int32 = view().gunRange,4)
+  discard result.addFunction("hasSniper",0,proc(a:openArray[int32]):int32 = view().hasSniper,4)
+  discard result.addFunction("playerRadar",1,proc(a:openArray[int32]):int32 = view().playerRadar(a[0].int),4)
+  discard result.addFunction("radarTicks",0,proc(a:openArray[int32]):int32 = view().radarTicks,4)
+  discard result.addFunction("radarBoost",0,proc(a:openArray[int32]):int32 = view().radarBoost,4)
   discard result.addFunction("chargeGrenade",1,proc(a:openArray[int32]):int32 =
     commands[slot].chargeGrenade=a[0]!=0;1,4)
   discard result.addFunction("pickupCount",0,proc(a:openArray[int32]):int32 = view().pickupCount,4)

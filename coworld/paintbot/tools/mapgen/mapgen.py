@@ -832,7 +832,7 @@ def to_json(m: Map):
     }
 
 
-PICKUP_KINDS = ["grenade", "spray", "medkit", "armor", "uniform"]  # sim.nim PickupKind order
+PICKUP_KINDS = ["grenade", "spray", "medkit", "armor", "uniform", "mister", "sniper", "radar"]  # sim.nim PickupKind order
 COVER_KINDS = ["tree", "house", "prop", "rock"]
 
 

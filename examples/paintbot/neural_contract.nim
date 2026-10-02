@@ -378,7 +378,7 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
   ##   Identity j (0..15) at 125 + 10j (zeros unless visible(j)): 0 visible, 1 dx, 2 dz
   ##     (playerX/Y), 3 playerTeam relative to side, 4 playerHp/3, 5 playerCarrying, 6 j = selfId,
   ##     7 (j div 2)/7, 8 wet, 9 dh
-  ##   Pickup i (0..31) at 285 + 5i (zeros unless pickupVisible(i)): 0 visible, 1 dx, 2 dz,
+  ##   Pickup i (0..31) at 285 + 5i (zeros unless pickupVisible(i) and pickupKind(i) <= 4): 0 visible, 1 dx, 2 dz,
   ##     3 pickupKind/4, 4 i/31
   ##   Sound i (0..7) at 445 + 5i (zeros for i >= soundCount): 0 present, 1 soundKind/4,
   ##     2 ((soundDirection + (side = 0 ? 0 : 4)) mod 8)/7, 3 soundDistance/4, 4 soundAge/24
@@ -456,7 +456,8 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
     output[o+9] = dh(x, z)
   for i in 0..<min(TeamsPickupRows, v.pickupCount.int):   # pickupVisible is 0 past pickupCount
     let p = v.pickupRow(i)   # pickupVisible / pickupX / pickupY / pickupKind
-    if not p.visible: continue
+    # teams.view.1 knows the five original kinds; a later one (the rules-49 mister) reads as unseen.
+    if not p.visible or p.kind > 4: continue
     let o = TeamsPickupOffset + i*TeamsPickupWidth
     output[o] = 1
     output[o+1] = dx(p.x)
