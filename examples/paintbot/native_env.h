@@ -265,6 +265,27 @@ int pw_seat_damage_taken_stats(void *handle, int seat, int32_t *eight);
 #define PW_HIT_EVENT_INTS 7
 int pw_set_hit_log(void *handle, int enabled);
 int pw_hit_events(void *handle, int32_t *events, int32_t capacity);
+/* Teacher class masks (training library only; teams game; pure read). For a teacher's decided
+ * command for `seat` (ten int32 in pw_seat_orders' layout), on the CURRENT (pre-step) world: the
+ * action contract 16 (raw) bins whose reference decode reproduces it (walk: the same engine
+ * movement this tick; aim: within one shot SD on a gun-order tick, else the same vision-cone
+ * answer for every other live cog; keep from the seat's own decoder program; fire / grenade /
+ * sneak: the teacher's value). The walk class sets only bins provable without a path search (a
+ * goal walked straight with the teacher's step, or routed to the teacher's own target cell);
+ * pw_teacher_classes_exact runs the path search for every goal (exact class, tens of ms).
+ * PW_TEACHER_CLASS_BYTES bytes, each section byte-aligned, bit i =
+ * byte i>>3, bit i&7: [0,7) head 0 (51; 43..50 = any grid), [7,263) walk dir*8+dist (2048),
+ * [263,267) head 1 (25; 17..24 = any look), [267,8205) offsets identity*3969+bin5*63+bin6,
+ * [8205,8221) look (128), 8221 fire, 8222 grenade, 8223 sneak (bit v = value v). Returns the
+ * byte count; -1 bad args; -2 dead seat. pw_teacher_classes_reference(..., exact): the same masks
+ * (exact 0: pw_teacher_classes', 1: pw_teacher_classes_exact's) by brute force through the reference
+ * decoder script, for gates (slow). */
+#define PW_TEACHER_CLASS_BYTES 8224
+int pw_teacher_classes(void *handle, int seat, const int32_t *command10, uint8_t *out, int32_t capacity);
+int pw_teacher_classes_info(void *handle, int seat, const int32_t *command10, int32_t *two);
+int pw_teacher_classes_exact(void *handle, int seat, const int32_t *command10, uint8_t *out, int32_t capacity);
+int pw_teacher_classes_reference(void *handle, int seat, const int32_t *command10, uint8_t *out, int32_t capacity,
+                                 int exact);
 /* pw_seat_privileged_labels (TRAINING-ONLY supervision labels; training_labels.nim): float[21]
  * for the seat on the current pre-step world = {gun cooldown, gun windup, spray cooldown,
  * shield, respawn (ticks), aim x, aim z, own heart meter, enemy heart meter (scoreTicks; 0 in

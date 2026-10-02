@@ -556,6 +556,52 @@ proc waypointFor*(w: World, slot: int, start, goal: Point): Point =
     return mirrorPoint(w.waypoint(mirrorPoint(start), mirrorPoint(goal)))
   w.waypoint(start, goal)
 
+when defined(pwTraining):
+  # Training only (teacher class masks): waypointFor's own decision before its field search, so a
+  # caller can tell which goals it walks to straight and which it routes, and to which target cell,
+  # without running the search. Rules 38 on (the time-weighted routing); nothing here changes a route.
+  proc routeFrame(w: World, slot: int, p: Point): Point =
+    if visionRulesVersion >= 35 and team(slot) == 1: mirrorPoint(p) else: p
+  proc routePlanned*(): bool = visionRulesVersion >= 38
+  proc routePrepare*(w: World, slot: int, start: Point) =
+    ## Brings the path grid and lake up to date for `w` exactly as waypoint keeps them (it routes
+    ## the start to itself); routeStraight and routeTarget read them, so call this first (once per
+    ## world and map: nothing between may route on another).
+    let a = w.routeFrame(slot, start)
+    discard w.waypoint(a, a)
+  proc routeStraight*(w: World, slot: int, start, goal: Point): bool =
+    ## Whether waypointFor(slot, start, goal) returns `goal` itself: the walk is clear and, from dry
+    ## land, dry (rules 38 on). routePrepare first.
+    let a = w.routeFrame(slot, start)
+    let b = w.routeFrame(slot, goal)
+    let nx = (maxX()-minX()) div NavCell
+    let nz = (maxZ()-minZ()) div NavCell
+    let dryOnly = (let c = navCellOf(a, nx, nz); c < 0 or not nav.water[c])
+    w.walkClear(a, b) and (not dryOnly or navSegmentDry(a, b, nx, nz))
+  proc routeTargetIs*(w: World, slot: int, goal: Point, target: int): bool =
+    ## routeTarget(slot, _, goal) == target, without the goal memo: a goal whose own cell is
+    ## connected has that cell's centre within 71 units, so a farther target centre is not the
+    ## nearest connected one. routePrepare first.
+    let b = w.routeFrame(slot, goal)
+    let nx = (maxX()-minX()) div NavCell
+    let nz = (maxZ()-minZ()) div NavCell
+    let own = navCellOf(b, nx, nz)
+    if target >= 0 and own >= 0 and nav.edges[own].len > 0 and
+        distance2(b, navigationPoint(target, nx)) > 2*(NavCell div 2)*(NavCell div 2):
+      return false
+    nearestConnectedCell(b, nx, nz) == target
+  proc routeTarget*(w: World, slot: int, start, goal: Point): int =
+    ## The target cell waypointFor's field search routes `goal` to when it does not walk straight
+    ## (-1: none, and it returns start). Its answer depends only on this cell and the start.
+    ## routePrepare first.
+    let b = w.routeFrame(slot, goal)
+    let nx = (maxX()-minX()) div NavCell
+    let nz = (maxZ()-minZ()) div NavCell
+    if b in nav.targets: return nav.targets[b]
+    result = nearestConnectedCell(b, nx, nz)
+    if nav.targets.len >= NavTargetLimit: nav.targets.clear()
+    nav.targets[b] = result
+
 proc seatOrder*(w: World): seq[int] =
   ## The order seats act within a tick. Seats alternate teams, so acting in seat order every
   ## tick let red win every contested push, supply and spray exchange. Rules 35 swap each

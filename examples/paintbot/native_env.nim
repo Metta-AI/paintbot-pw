@@ -9,6 +9,7 @@ from neural_host import MaxNeuralOperations, neuralOperationBudget, setCondition
 import polyworld/rngs
 import polyworld/basic
 import snapshot, contract_hash
+import teacher_classes
 
 when not defined(pwTraining): {.error: "native_env requires -d:pwTraining".}
 
@@ -1679,6 +1680,147 @@ proc pw_seat_policy_extra_choices2*(handle: pointer, seat: cint, output: ptr Unc
     output[ExtraHeadsMax+e] = n.offsetChoices[e]
     output[2*ExtraHeadsMax+e] = n.appliedOffsetTemperatures[e]
   0
+
+# ---------------------------------------------------------------------------------------
+# Teacher class masks (action contract 16 raw bins; teacher_classes.nim has the definitions).
+proc teacherCommand(command: ptr UncheckedArray[int32]): TeacherCommand =
+  TeacherCommand(walk: command[0] != 0, goal: Point(x: command[1], z: command[2]), shoot: command[3] != 0,
+    aim: Point(x: command[4], z: command[5]), grenade: command[6] != 0, sneak: command[7] != 0,
+    direct: command[8] != 0)
+
+proc keepFor(env: ptr NativeEnv, seat: int): KeepState =
+  ## The seat's decoder's keep: read from its own BASIC program (the reference decoder's globals
+  ## aimKnown / lastTick / keptX / keptY, as a policy.bas built on it carries them) when it has
+  ## them: known when it last ran on the previous tick and had something to keep. A seat without
+  ## such a program keeps nothing.
+  let bot = env.scriptBots[seat]
+  if bot == nil: return KeepState()
+  try:
+    let known = bot.runtime.getGlobal("aimKnown") == 1 and bot.runtime.getGlobal("lastTick") == env.world.tick-1
+    if known: return KeepState(known: true, point: Point(x: bot.runtime.getGlobal("keptX"), z: bot.runtime.getGlobal("keptY")))
+  except CatchableError: discard
+  KeepState()
+
+proc teacherClassesReference(env: ptr NativeEnv, s: int, cmd: TeacherCommand, keep: KeepState, m: var ClassMasks,
+    mode: WalkMode) =
+  ## The gate's reference: every bin decoded by the reference decoder script itself (a contract-16
+  ## decoder seat, its keep state cleared before each decode), every predicate evaluated bin by
+  ## bin, nothing shared with the fast masks but the predicates (teacher_classes' walk judge, cone,
+  ## SD test).
+  for i in 0..<m.len: m[i] = 0
+  let w = env.world
+  let bot = loadDecoderBot(DecoderSource, s, env.observationHash, acTeamsView1Raw)
+  var bots = newSeq[Bot](env.n)
+  bots[s] = bot
+  proc decode(c: array[ActionSizesRaw.len, int]): Command =
+    bot.runtime.setGlobal("aimKnown", 0)
+    for h in 0..<ActionSizesRaw.len:
+      if h < ActionSizes.len: bot.neural.fedChoices[h] = c[h].int32
+      else: bot.neural.fedOffsetChoices[h-ActionSizes.len] = c[h].int32
+    bot.neural.choicesFed = true
+    result = decideSeats(bots, w)[s]
+    doAssert not bot.failed, "reference decoder failed: " & bot.error
+  let pos = w.cogs[s].pos
+  let judge = walkJudge(w, s, cmd, mode)
+  proc walkIn(c: Command): bool = c.walk and not c.direct and judge.inClass(c.goal)
+  template setb(at, i: int) = m[at + (i shr 3)] = m[at + (i shr 3)] or uint8(1 shl (i and 7))
+  for b in 0..42:
+    if walkIn(decode([b, 0, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, 0, 0, 0])): setb(TcHead0At, b)
+  var grid = false
+  for dir in 0..<WalkDirections:
+    for dist in 0..<WalkDistances.len:
+      if walkIn(decode([43, 0, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, dir, dist, 0])):
+        setb(TcWalkAt, dir*WalkDistances.len + dist); grid = true
+  if grid:
+    for b in 43..50: setb(TcHead0At, b)
+  let order = cmd.shoot and w.cogs[s].cooldown == 0 and w.equipment[s].windup == 0 and not w.equipment[s].sprayCan
+  let sd = if order: 26.5 / 5250.0 * max(w.gunSpreadPercent(pos, cmd.aim), 1).float / 100.0 else: 0.0
+  let mask = coneMask(w, s, cmd.aim)
+  proc aimIn(p: Point): bool = (if order: withinSd(pos, cmd.aim, p, sd) else: coneMask(w, s, p) == mask)
+  let noAim = cmd.aim == Point()
+  let keepIn = if noAim: true else: keep.known and aimIn(keep.point)
+  if keepIn: setb(TcHead1At, 0)
+  for j in 0..<TargetRows:
+    if decode([0, 1+j, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, 0, 0, 0]).aim == Point():
+      # Identity not visible: the decoder gives no aim, as keep does with nothing known.
+      if keepIn: setb(TcHead1At, 1+j)
+      continue
+    if noAim: continue
+    var any = false
+    for bx in 0..<RawOffsetBins:
+      for bz in 0..<RawOffsetBins:
+        if aimIn(decode([0, 1+j, 0, 0, 0, bx, bz, 0, 0, 0]).aim):
+          setb(TcOffsetAt, j*RawOffsetBins*RawOffsetBins + bx*RawOffsetBins + bz); any = true
+    if any: setb(TcHead1At, 1+j)
+  if not noAim:
+    var look = false
+    for k in 0..<LookDirections:
+      if aimIn(decode([0, 17, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, 0, 0, k]).aim):
+        setb(TcLookAt, k); look = true
+    if look:
+      for b in 17..24: setb(TcHead1At, b)
+  m[TcFireAt] = uint8(1 shl cmd.shoot.int)
+  m[TcGrenadeAt] = uint8(1 shl cmd.grenade.int)
+  m[TcSneakAt] = uint8(1 shl cmd.sneak.int)
+
+proc teacherClassesCall(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint, reference: bool, mode = wmRouted): cint =
+  if handle == nil or command == nil or output == nil or capacity < TeacherClassBytes: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if env.obsVersion == ocFfaView1 or seat notin 0..<env.n: return -1
+  if env.world.cogs[seat].hp <= 0: return -2
+  try:
+    let cmd = teacherCommand(command)
+    let keep = env.keepFor(seat.int)
+    var m: ClassMasks
+    if reference: env.teacherClassesReference(seat.int, cmd, keep, m, mode)
+    else: teacherClasses(env.world, seat.int, cmd, keep, m, mode)
+    copyMem(output, addr m[0], TeacherClassBytes)
+    TeacherClassBytes.cint
+  except CatchableError: -1
+
+proc pw_teacher_classes*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Teacher class masks (training library only; teams game): for a teacher's decided command for
+  ## `seat` (ten int32 as pw_seat_orders writes them: walk, goal_x, goal_z, shoot, aim_x, aim_z,
+  ## charge_grenade, sneak, direct, -), the action contract 16 (raw) bins that reproduce it on the
+  ## CURRENT world, so call it after the tick's decision and before pw_step. Layout and classes:
+  ## teacher_classes.nim (8224 bytes). "Keep" is judged from the seat's own decoder program
+  ## (aimKnown / lastTick / keptX / keptY) when it has one. Returns 8224; -1 bad args (capacity
+  ## below 8224, an ffa.view.1 handle); -2 the seat is dead. Pure read: the world, its hash and
+  ## every seat are unchanged.
+  teacherClassesCall(handle, seat, command, output, capacity, false)
+
+proc pw_teacher_classes_info*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Diagnostics for a teacher command (training library only): int32[2] = {the teacher's goal is
+  ## routed by the path search (1) or walked straight / direct (0), the teacher moves this tick}.
+  ## 0; -1 bad args; -2 dead seat. Pure read.
+  if handle == nil or command == nil or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if env.obsVersion == ocFfaView1 or seat notin 0..<env.n: return -1
+  if env.world.cogs[seat].hp <= 0: return -2
+  try:
+    let j = walkJudge(env.world, seat.int, teacherCommand(command), wmRouted)
+    output[0] = int32(j.teacherRouted)
+    output[1] = int32(j.want.moves)
+    0
+  except CatchableError: -1
+
+proc pw_teacher_classes_exact*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## pw_teacher_classes with the exact walk class: waypointFor for every walk goal, so routed goals
+  ## that reproduce the teacher's step through another target cell are found too. Tens of ms per
+  ## call: for a sampled fraction of ticks. Everything else is pw_teacher_classes'.
+  teacherClassesCall(handle, seat, command, output, capacity, false, wmExact)
+
+proc pw_teacher_classes_reference*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint, exact: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The same masks the slow way, for gates: every bin decoded by the reference decoder script and
+  ## tested on its own; exact = 0 pw_teacher_classes' walk class, 1 pw_teacher_classes_exact's.
+  teacherClassesCall(handle, seat, command, output, capacity, true, (if exact != 0: wmExact else: wmRouted))
 
 proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## The command a scripted seat issued on the last pw_step, ten int32:
