@@ -25,7 +25,8 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             RETIRED_OBSERVATION_CONTRACTS, RETIRED_ACTION_CONTRACTS, RETIRED_CONTRACT_HASHES,
                             RETIRED_DECODER_OPTIONS, ACTION_CONTRACT_TEAMS_VIEW_1_TARGET,
                             ACTION_CONTRACT_TEAMS_VIEW_1_TARGET_HASH, pointer_k_ops, ACTION_CONTRACT_TEAMS_VIEW_1_RAW,
-                            ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH)
+                            ACTION_CONTRACT_TEAMS_VIEW_1_RAW_HASH, OBSERVATION_CONTRACT_TEAMS_VIEW_1H,
+                            OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH, TEAMS_VIEW_1H_SIZE)
 
 ROOT = Path(__file__).parents[2]
 TEAMS, FFA = OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH
@@ -449,6 +450,19 @@ class UserInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not match observation contract teams.view.1u3"):
             unpack_package(self.inputs_package(3, user_inputs={"count": 2, "init": [0, 0]}))
 
+    def test_teams_view_1h_packages(self):
+        """teams.view.1h (203): 612 floats (teams.view.1 + 100 history), and its u<K> variants at 612 + K."""
+        self.assertEqual(TEAMS_VIEW_1H_SIZE, TEAMS_VIEW_1_SIZE + 100)
+        h = OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH
+        self.assertEqual(h, sha("paintbot-pw.teams.view.1h"))
+        unpack_package(self.inputs_package(observation=h, inputs=TEAMS_VIEW_1H_SIZE, user_inputs=None))
+        hu = sha(user_inputs_contract_id(244, OBSERVATION_CONTRACT_TEAMS_VIEW_1H))
+        unpack_package(self.inputs_package(244, observation=hu, inputs=TEAMS_VIEW_1H_SIZE + 244))
+        with self.assertRaisesRegex(ValueError, "input count must be 856 for observation contract teams.view.1hu244"):
+            unpack_package(self.inputs_package(244, observation=hu, inputs=TEAMS_VIEW_1_SIZE + 244))
+        with self.assertRaisesRegex(ValueError, "input count must be 612 for observation contract teams.view.1h"):
+            unpack_package(self.inputs_package(observation=h, inputs=TEAMS_VIEW_1_SIZE, user_inputs=None))
+
     def test_user_inputs_check_the_actor_input_count_and_contract(self):
         with self.assertRaisesRegex(ValueError, "input count must be 515 for observation contract teams.view.1u3"):
             unpack_package(self.inputs_package(3, inputs=TEAMS_VIEW_1_SIZE))
@@ -470,10 +484,10 @@ class UserInputTests(unittest.TestCase):
     def test_user_inputs_contract_ids_match_the_engine(self):
         source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
         self.assertIn('proc userInputsContractId*(k: int, base = ocTeamsView1): string =', source)
-        self.assertIn('(if base == ocTeamsView1: ObservationContractTeamsView1 else: ObservationContractFfaView1) & "u" & $k',
-                      source)
+        self.assertIn('  observationContractId(base) & "u" & $k', source)
         self.assertEqual(user_inputs_contract_id(7), "paintbot-pw.teams.view.1u7")
         self.assertEqual(user_inputs_contract_id(5, OBSERVATION_CONTRACT_FFA_VIEW_1), "paintbot-pw.ffa.view.1u5")
+        self.assertEqual(user_inputs_contract_id(244, OBSERVATION_CONTRACT_TEAMS_VIEW_1H), "paintbot-pw.teams.view.1hu244")
         consts = {name: int(value.replace("_", "")) for name, value in
                   re.findall(r"^  (\w+)\* = ([0-9_]+)(?:'i32)?$", source, re.M)}
         self.assertEqual((MAX_USER_INPUTS, USER_INPUT_LIMIT), (consts["MaxUserInputs"], consts["UserInputLimit"]))

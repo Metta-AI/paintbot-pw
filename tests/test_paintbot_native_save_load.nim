@@ -246,7 +246,7 @@ suite "World snapshots":
     for k in 1..32:
       var corrupt = blob
       let at = 96 + (blob.len - 104) * k div 33
-      for i in at ..< at+8: corrupt[i] = 0xff
+      for i in at ..< at+8: corrupt[i] = corrupt[i] xor 0xff   # always a change (0xff over 0xff bytes is none)
       check load(b, corrupt) == -3
     check save(b) == before
     check pw_world_load(nil, nil, 0) == -1

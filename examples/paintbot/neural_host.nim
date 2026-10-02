@@ -85,6 +85,7 @@ type
     # Action contract 15: heads 5 and 6 are drawn from the 23-logit row of the identity the aim head chose (rows at
     # LogitSize + (head - 5) * TargetRows * 23 + j * 23); no draw (the centre bin) when it chose keep or a compass point.
     targetRows*: bool
+    history*: TeamsHistory   # observation contract teams.view.1h: this seat's motion history (encodeTeamsViewH)
     offsetTemperatures: array[ExtraHeadsMax, float32]
     offsetTemperatureSet: array[ExtraHeadsMax, bool]
     offsetSelected*, offsetChoices*: array[ExtraHeadsMax, int32]
@@ -408,7 +409,7 @@ proc observationFor(hash: string): (ObservationContractVersion, int) =
 
 proc requireMode(observationContract: ObservationContractVersion) =
   ## teams.view.1 is the teams game's 16-seat contract, ffa.view.1 FFA-kin's.
-  if observationContract == ocTeamsView1:
+  if observationContract in {ocTeamsView1, ocTeamsView1h}:
     if ffa(): raise newException(ValueError, "observation contract teams.view.1 is for the teams game only")
     if Seats != LegacySeats:
       raise newException(ValueError, "observation contract teams.view.1 needs a 16-seat match; this match has " &
@@ -487,7 +488,7 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
     return
   let actor = loadActor(data)
   let heads = actionLogitHeads(contract)
-  if actor.inputSize != TeamsViewSize + userInputs or actor.outputSize != actionLogitSize(contract) or
+  if actor.inputSize != observationSize(observationContract) + userInputs or actor.outputSize != actionLogitSize(contract) or
       actor.headSizes != heads:
     raise newException(ValueError, "neural actor dimensions do not match Paintbot contract")
   budgetCheck(actor)
@@ -497,7 +498,8 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
   result.actor = actor
   result.contract = contract
   result.observationContract = observationContract
-  result.observation = newSeq[float32](TeamsViewSize + userInputs)
+  result.observation = newSeq[float32](observationSize(observationContract) + userInputs)
+  result.history.resetHistory()
   result.state = newSeq[float32](actor.stateSize)
 
 proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string): NeuralSeat =
@@ -527,7 +529,8 @@ proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string)
     result.observation = newSeq[float32](result.layout.size + userInputs)
     result.fedLogits = newSeq[float32](result.logits.len)
     return
-  result.observation = newSeq[float32](TeamsViewSize + userInputs)
+  result.observation = newSeq[float32](observationSize(observationContract) + userInputs)
+  result.history.resetHistory()
   result.fedLogits = newSeq[float32](result.logits.len)
 
 proc decoderNeuralSeat*(slot: int, observationHash: string, contract: ActionContractVersion): NeuralSeat =
@@ -617,7 +620,8 @@ proc ensureObservation(seat: NeuralSeat) =
       raise newException(ValueError, "the match's ffa.view.1 layout differs from the one the seat was loaded for")
     encodeObservation(seat.view, ocFfaView1, seat.observation, seat.userInputView, rows = seat.rowsFor())
   else:
-    encodeObservation(seat.view, ocTeamsView1, seat.observation, seat.userInputView)
+    encodeObservation(seat.view, seat.observationContract, seat.observation, seat.userInputView,
+      history = addr seat.history)
   seat.observationFresh = true
 
 proc selectConditionals(seat: NeuralSeat, actions: var array[ActionSizes.len, int32],
