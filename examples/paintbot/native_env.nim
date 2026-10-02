@@ -118,6 +118,23 @@ type
     decided: seq[Command]
     decidedTick: int32
     decidedValid: bool
+    # pw_seat_decided_orders: the order each BASIC seat's own program (script or policy.bas)
+    # decided on the last pw_step, whatever the seat executed (a pending raw command, an
+    # override mask); lastDecidedSet = the seat's program ran on that step. A read-only
+    # record: nothing in the world or its hash depends on it.
+    lastDecided: seq[Command]
+    lastDecidedSet: seq[bool]
+    # Shadow scripts (pw_set_seat_shadow_script; default-off, every list empty / zero unused): a second BASIC
+    # program on a seat, with its own runtime, globals and rnd stream, that decides every step on the pre-step
+    # world through the seat's SeatView and hears what the seat hears, but whose order is never executed and whose
+    # shouts are never delivered. The seat itself (caller-driven, scripted or policy seat) plays exactly as without
+    # it. shadowOrders / shadowSet: its decision on the last step (pw_seat_decided_orders).
+    shadowScripts: seq[string]
+    shadowBots: seq[Bot]
+    shadowStatus: seq[int32]
+    shadowOrders: seq[Command]
+    shadowSet: seq[bool]
+    shadowCount: int
     # Observation contract the handle encodes (chosen at create, kept across resets):
     # teams.view.1 (pw_create) or ffa.view.1. The world never reads it.
     obsVersion: ObservationContractVersion
@@ -221,6 +238,14 @@ proc allocSeats(env: ptr NativeEnv, n: int) =
   env.commandShown = newSeq[bool](n)
   env.decided = newSeq[Command](n)
   env.decidedValid = false
+  env.lastDecided = newSeq[Command](n)
+  env.lastDecidedSet = newSeq[bool](n)
+  env.shadowScripts = newSeq[string](n)
+  env.shadowBots = newSeq[Bot](n)
+  env.shadowStatus = newSeq[int32](n)
+  env.shadowOrders = newSeq[Command](n)
+  env.shadowSet = newSeq[bool](n)
+  env.shadowCount = 0
   env.policy = newSeq[bool](n)
   env.policyManifests = newSeq[string](n)
   env.policyConditionals = newSeq[seq[Conditional]](n)
@@ -491,16 +516,34 @@ proc installScript(env: ptr NativeEnv, slot: int) =
   except ValueError as e:
     env.scriptStatus[slot] = 2
     env.scriptErrors[slot] = "policy manifest rejected: " & e.msg
+proc installShadow(env: ptr NativeEnv, slot: int) =
+  ## A fresh runtime for the seat's shadow script (fresh globals and rnd stream), as installScript builds a script
+  ## seat; no shadow script = nothing installed.
+  env.shadowBots[slot] = nil
+  env.shadowOrders[slot] = Command()
+  env.shadowSet[slot] = false
+  if env.shadowScripts[slot].len == 0:
+    env.shadowStatus[slot] = 0
+    return
+  try:
+    env.shadowBots[slot] = loadScriptBot(env.shadowScripts[slot], slot)
+    env.shadowStatus[slot] = 1
+  except BasicError:
+    env.shadowStatus[slot] = 2
 proc sizeHeard(env: ptr NativeEnv) =
   ## Carried speech, one list per seat (a zeroed handle starts with none).
   if env.scriptHeard.len != env.n: env.scriptHeard.setLen(env.n)
 proc resetScripts(env: ptr NativeEnv) =
   env.scriptCount = 0
   env.decidedValid = false
+  for slot in 0..<env.lastDecidedSet.len:
+    env.lastDecided[slot] = Command()
+    env.lastDecidedSet[slot] = false
   env.scriptHeard = newSeq[seq[HeardMessage]](env.n)
   for slot in 0..<env.n:
     env.installScript(slot)
     if env.scripts[slot].len > 0: inc env.scriptCount
+    if slot < env.shadowScripts.len: env.installShadow(slot)
 proc scriptDecide(env: ptr NativeEnv) =
   ## The production tick's decision half: every BASIC seat decides on the pre-step world
   ## (hearing what was shouted last tick), shouts are delivered for next tick. Runs once
@@ -519,6 +562,29 @@ proc scriptDecide(env: ptr NativeEnv) =
   for slot in 0..<env.n: env.decided[slot] = decided[slot]
   env.decidedTick = env.world.tick
   env.decidedValid = true
+proc shadowDecide(env: ptr NativeEnv) =
+  ## The shadow scripts decide on the pre-step world, hearing what their seats hear this tick (scriptHeard). Nothing
+  ## they do reaches the world: their orders are only recorded, their shouts are dropped (the shout lists are
+  ## restored), and the seats' BASIC peak telemetry is restored.
+  for slot in 0..<env.shadowSet.len: env.shadowSet[slot] = false
+  if env.shadowCount == 0: return
+  env.sizeHeard()
+  let savedHeard = heard
+  let savedShouts = shouts
+  let savedPeaks = (peakInstructions, peakWork, peakStrings, peakNativeWork)
+  heard = env.scriptHeard
+  try:
+    let d = decideSeats(env.shadowBots, env.world)
+    for slot in 0..<env.n:
+      let b = env.shadowBots[slot]
+      if b == nil: continue
+      if b.failed and env.shadowStatus[slot] == 1: env.shadowStatus[slot] = 3
+      env.shadowOrders[slot] = d[slot]
+      env.shadowSet[slot] = true
+  finally:
+    heard = savedHeard
+    shouts = savedShouts
+    (peakInstructions, peakWork, peakStrings, peakNativeWork) = savedPeaks
 const
   DecoderSource = staticRead("players/neural_decode.bas")
   DecoderSourceFfa = staticRead("players/neural_decode_ffa.bas")
@@ -964,6 +1030,10 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     var commands = newSeq[Command](env.n)
     var wasDead = newSeq[bool](env.n)
     var decoders = newSeq[Bot](env.n)
+    for slot in 0..<env.n: env.lastDecidedSet[slot] = false
+    # The shadows decide before the tick's speech is delivered. pw_script_decide already ran them (and delivered
+    # the speech) when it took this tick's decision ahead of the step.
+    if not (env.decidedValid and env.decidedTick == env.world.tick): env.shadowDecide()
     for slot in 0..<env.n:
       wasDead[slot] = env.world.cogs[slot].hp <= 0
       if env.commandPending[slot] or (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
@@ -1008,6 +1078,8 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       env.decidedValid = false
       for slot in 0..<env.n:
         if env.scripts[slot].len == 0: continue
+        env.lastDecided[slot] = env.decided[slot]
+        env.lastDecidedSet[slot] = true
         let mask = env.overrideMask[slot]
         if mask == 0:
           commands[slot] = env.decided[slot]
@@ -1409,6 +1481,8 @@ proc pw_set_seat_script*(handle: pointer, seat: cint, source: ptr UncheckedArray
   if length > 0: copyMem(addr env.scripts[seat][0], source, length)
   env.sizeHeard()
   env.scriptHeard[seat] = @[]
+  env.lastDecided[seat] = Command()   # pw_seat_decided_orders: nothing decided by the new program yet
+  env.lastDecidedSet[seat] = false
   env.installScript(seat)
   if env.scripts[seat].len > 0: inc env.scriptCount
   if env.scriptStatus[seat] == 2: 1 else: 0
@@ -1454,6 +1528,8 @@ proc pw_set_seat_policy_script*(handle: pointer, seat: cint, source: ptr Uncheck
   if length > 0 and manifestLength > 0: copyMem(addr env.policyManifests[seat][0], manifest, manifestLength)
   env.sizeHeard()
   env.scriptHeard[seat] = @[]
+  env.lastDecided[seat] = Command()   # pw_seat_decided_orders: nothing decided by the new program yet
+  env.lastDecidedSet[seat] = false
   env.installScript(seat)
   if env.scripts[seat].len > 0:
     inc env.scriptCount
@@ -1621,6 +1697,52 @@ proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int
   output[9] = int32(env.scripts[seat].len > 0)
   0
 
+proc pw_seat_decided_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## The order the seat's own BASIC program (its script, or its policy.bas on the caller's
+  ## logits) decided on the last pw_step, ten int32 in pw_seat_orders' layout:
+  ## [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct, ran], whatever
+  ## the seat executed: a pending raw command (pw_set_seat_command) or an override mask
+  ## replaces the executed order, never this one. ran = 1 when the program ran on that step;
+  ## a seat without a program, or before any step since the last reset or script change,
+  ## reports zeros with ran = 0. A pure read; never calling it changes nothing. Returns 0, -1
+  ## for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  let shadow = env.shadowSet[seat]
+  let ran = shadow or env.lastDecidedSet[seat]
+  let c = if shadow: env.shadowOrders[seat] elif ran: env.lastDecided[seat] else: Command()
+  output[0] = c.walk.int32; output[1] = c.goal.x; output[2] = c.goal.z
+  output[3] = c.shoot.int32; output[4] = c.aim.x; output[5] = c.aim.z
+  output[6] = c.chargeGrenade.int32; output[7] = c.sneak.int32; output[8] = c.direct.int32
+  output[9] = (if shadow: 2'i32 elif ran: 1'i32 else: 0'i32)
+  0
+
+proc pw_set_seat_shadow_script*(handle: pointer, seat: cint, source: ptr UncheckedArray[char],
+    length: int32): cint {.exportc, cdecl, dynlib.} =
+  ## A teacher script that SHADOWS the seat (training library only; default-off): a second BASIC program with its
+  ## own runtime, globals and rnd stream, built and limited exactly as pw_set_seat_script builds a seat. Every step
+  ## it decides on the pre-step world through the seat's SeatView and hears what the seat hears; its order is never
+  ## executed and its shouts are never delivered, so the seat (caller-driven, scripted, or a policy seat whose
+  ## policy.bas keeps running and writing its user inputs) plays and the world steps exactly as without it.
+  ## pw_seat_decided_orders then reports the shadow's decision (ran = 2). Fresh runtime here and at every pw_reset;
+  ## length 0 removes it. Returns 0 (running), 1 (compile failed: nothing shadows the seat), -1 bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or length < 0 or (length > 0 and source == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if env.shadowScripts[seat].len > 0: dec env.shadowCount
+  env.shadowScripts[seat] = newString(length)
+  if length > 0: copyMem(addr env.shadowScripts[seat][0], source, length)
+  env.installShadow(seat)
+  if env.shadowScripts[seat].len > 0: inc env.shadowCount
+  if env.shadowStatus[seat] == 2: 1 else: 0
+
+proc pw_seat_shadow_status*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The seat's shadow script: 0 none, 1 running, 2 compile failed, 3 disabled by a runtime error. -1 bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).shadowStatus[seat].cint
+
 proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## A raw command for one seat on the next pw_step only, nine int32 in pw_seat_orders'
   ## layout: [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct],
@@ -1629,7 +1751,11 @@ proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[
   ## point), lookAt/shootAt's aim clamped to the map (aim (0,0) = no aim order). A harness
   ## tool (replays, probes), not a seat: for that step the seat's heads are not decoded and
   ## not checked against its forbid mask, and a scripted seat's script still runs but its
-  ## order is replaced. The fire period applies only if already set on the seat (off by
+  ## order is replaced. A policy seat (pw_set_seat_policy_script) likewise still runs its
+  ## policy.bas on the caller's logits (pw_step_logits), so its BASIC state, user inputs and
+  ## sampling streams advance as if it had acted; only the executed command is the raw one.
+  ## pw_seat_decided_orders reads what that program decided (a net teacher shadowing the
+  ## seat while a student's command plays). The fire period applies only if already set on the seat (off by
   ## default).
   ## pw_seat_orders echoes the command after the step (an unscripted seat reports zeros
   ## again after a step without one). A later call before the step replaces it; pw_reset
@@ -1678,6 +1804,7 @@ proc pw_script_decide*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   if env.policyCount > 0: return -4   # a policy seat decides only with its logits (pw_step_logits)
   if env.scriptCount == 0 or env.world.winner != -1 or env.world.tick >= env.world.endTick: return 0
   if env.decidedValid and env.decidedTick == env.world.tick: return 0
+  env.shadowDecide()   # before scriptDecide delivers this tick's speech: the shadows hear what their seats hear
   env.scriptDecide()
   1
 
@@ -2310,7 +2437,7 @@ proc pw_world_save*(handle: pointer, output: ptr UncheckedArray[byte], capacity:
   w.put(SnapMagic); w.putU64(SnapFormat); w.put(SnapBuildId)
   w.put(env.obsVersion); w.put(env.n)
   for name, f in fieldPairs(env[]):
-    when name == "scriptBots" or name == "decoders":
+    when name == "scriptBots" or name == "decoders" or name == "shadowBots":
       w.putU64(f.len.uint64)
       for b in f: w.saveBot(b)
     else:
@@ -2356,10 +2483,10 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
     if tail.at != r.data.len or sum != snapChecksum(r.data, body): r.fail("checksum mismatch")
     r.data.setLen(body)
     var tmp = env[]
-    var botBlobs: array[2, seq[(int, seq[byte])]]
+    var botBlobs: array[3, seq[(int, seq[byte])]]
     for name, f in fieldPairs(tmp):
-      when name == "scriptBots" or name == "decoders":
-        let k = when name == "scriptBots": 0 else: 1
+      when name == "scriptBots" or name == "decoders" or name == "shadowBots":
+        let k = when name == "scriptBots": 0 elif name == "decoders": 1 else: 2
         let count = r.getU64()
         if count != uint64(n): r.fail("bot count")
         f = newSeq[Bot](n)
@@ -2398,6 +2525,14 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
       let b = decoderFor(addr tmp, slot)
       var br = SnapReader(data: blob)
       br.loadBot(b)
+    for (slot, blob) in botBlobs[2]:
+      # installShadow resets the shadow's status and last order, which the blob already restored
+      let (status, orders, ran) = (tmp.shadowStatus[slot], tmp.shadowOrders[slot], tmp.shadowSet[slot])
+      installShadow(addr tmp, slot)
+      if tmp.shadowBots[slot].isNil: r.fail("shadow script for slot " & $slot & " did not build")
+      tmp.shadowStatus[slot] = status; tmp.shadowOrders[slot] = orders; tmp.shadowSet[slot] = ran
+      var br = SnapReader(data: blob)
+      br.loadBot(tmp.shadowBots[slot])
     env[] = tmp   # teams.view.1h: the seats' motion histories come back with the blob (exact continuation)
   except SnapError, ValueError:
     snapLastError = getCurrentExceptionMsg()
