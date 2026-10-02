@@ -2398,9 +2398,7 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
       let b = decoderFor(addr tmp, slot)
       var br = SnapReader(data: blob)
       br.loadBot(b)
-    env[] = tmp
-    # teams.view.1h: a loaded world starts its seats' motion histories over (the snapshot holds no history)
-    for h in env.histories.mitems: h.resetHistory()
+    env[] = tmp   # teams.view.1h: the seats' motion histories come back with the blob (exact continuation)
   except SnapError, ValueError:
     snapLastError = getCurrentExceptionMsg()
     ready(handle)

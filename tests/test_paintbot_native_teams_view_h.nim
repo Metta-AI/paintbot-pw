@@ -1,7 +1,7 @@
 ## Observation contract teams.view.1h (203): teams.view.1's 512 floats, then the engine's 100-float motion-history
 ## block (neural_contract.encodeTeamsViewH). Through the native ABI: sizes and hashes, the base 512 columns byte-equal to
 ## a 201 handle's on the same game, every history column against an independent per-seat record built from SeatView,
-## gaps (a skipped observation) and pw_reset starting the history over. Build with --mm:arc --threads:on -d:pwTraining.
+## gaps (a skipped observation), pw_reset starting the history over and pw_world_save / load carrying it. Build with --mm:arc --threads:on -d:pwTraining.
 import std/[unittest, random, importutils]
 import ../examples/paintbot/[sim, neural_contract, native_env, seat_view]
 
@@ -148,3 +148,36 @@ suite "Observation contract teams.view.1h (203)":
     check pw_observe(h, fbuf(ob), fbuf(rs)) == 0
     for s in 0..<Seats:
       for i in 512..<612: check ob[s*612 + i] == 0
+
+  test "pw_world_save / pw_world_load carry the history: the loaded handle's 1h rows continue exactly":
+    let a = pw_create_observation(45, 900, 203)
+    let b = pw_create_observation(45, 900, 203)
+    require a != nil and b != nil
+    defer: pw_destroy(a); pw_destroy(b)
+    var oa = newSeq[cfloat](Seats*612)
+    var ob = newSeq[cfloat](Seats*612)
+    var rs = newSeq[cfloat](Seats)
+    var actions = newSeq[int32](Seats*5)
+    var rewards, terminals = newSeq[cfloat](Seats)
+    for t in 0..<40:
+      for s in 0..<Seats: actions[s*5] = int32((t + s) mod 51)
+      check pw_observe(a, fbuf(oa), fbuf(rs)) == 0
+      check pw_step(a, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+    let size = pw_world_save(a, nil, 0)
+    require size > 0
+    var blob = newSeq[byte](size)
+    require pw_world_save(a, cast[ptr UncheckedArray[byte]](addr blob[0]), size) == size
+    require pw_world_load(b, cast[ptr UncheckedArray[byte]](addr blob[0]), size) == 0
+    var nonzero = 0
+    for t in 0..<20:
+      check pw_observe(a, fbuf(oa), fbuf(rs)) == 0
+      check pw_observe(b, fbuf(ob), fbuf(rs)) == 0
+      for i in 0..<Seats*612: check oa[i] == ob[i]
+      for s in 0..<Seats:
+        for i in 512..<612:
+          if oa[s*612+i] != 0: inc nonzero
+      for s in 0..<Seats: actions[s*5] = int32((t * 3 + s) mod 51)
+      check pw_step(a, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+      check pw_step(b, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+    check nonzero > 0
+
