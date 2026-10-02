@@ -35,7 +35,9 @@ suite "Paintbot generated maps":
       for p in w.pickups: inc kinds[p.kind]
       # Items and trenches scale with the hearts: one rules-40 set per ten hearts.
       let copies = max(1, (w.controlHearts.len+5) div 10)
-      check kinds == [4*copies, 2*copies, 4*copies, 2*copies, 2*copies] # grenade, spray, medkit, armor, uniform
+      # grenade, spray, medkit, armor, uniform; then the rules-49 mister, sniper and radar
+      let late = if visionRulesVersion >= 49: 2*copies else: 0
+      check kinds == [4*copies, 2*copies, 4*copies, 2*copies, 2*copies, late, late, late]
       check w.trenches.len == 6*copies
       check w.cover.len == currentMap().cover.len
       for i in countup(0, w.controlHearts.len-2, 2):

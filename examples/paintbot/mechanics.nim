@@ -195,6 +195,8 @@ proc initializeMapEquipment(w: var World) =
   let m = currentMap()
   for p in m.pickups:
     if ffa() and PickupKind(p.kind) == uniformPickup: continue
+    # The maps carry the rules-49 items after every older one; earlier rules never place them.
+    if PickupKind(p.kind) >= misterPickup and visionRulesVersion < 49: continue
     w.pickups.add Pickup(pos: point(p.x, p.z), kind: PickupKind(p.kind))
   for t in m.trenches:
     w.trenches.add Cover(x: t.x.int32, z: t.z.int32, w: t.w.int32, h: t.h.int32)

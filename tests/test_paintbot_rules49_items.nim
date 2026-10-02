@@ -87,6 +87,16 @@ suite "Rules 49: items are placed on the island":
           for o in w.pickups:
             if o.pos != s: check distance2(o.pos, s) >= 300*300
           for h in w.controlHearts: check distance2(h.pos, s) >= 300*300
+  test "generated maps carry them from rules 49 only":
+    for rules in [48, 49]:
+      visionRulesVersion = rules
+      configureMap("crater")
+      let w = newWorld(7)
+      var n = 0
+      for p in w.pickups:
+        if p.kind in {misterPickup, sniperPickup, radarPickup}: inc n
+      check n == (if rules >= 49: 6 else: 0)
+    configureMap("")
   test "rules 48 islands carry none of them":
     visionRulesVersion = 48
     let w = newWorld(7)
