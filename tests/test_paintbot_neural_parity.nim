@@ -48,9 +48,9 @@ proc script(ffa: bool): string =
   readFile(Root / "coworld/paintbot/players" / (if ffa: "ffa.bas" else: "base.bas"))
 
 proc observationHash(s: Scenario): string =
-  if s.obs == ocFfaView1.int32: ObservationContractFfaView1Hash
-  elif s.inputs > 0: userInputsContractHash(s.inputs.int)
-  else: ObservationContractTeamsView1Hash
+  let version = ObservationContractVersion(s.obs)
+  if s.inputs > 0 and version != ocFfaView1: userInputsContractHash(s.inputs.int, version)
+  else: observationContractHash(version)
 
 proc manifest(s: Scenario): string =
   result = """{"schema": "paintbot-neural-basic/2", "observation_contract": """" & s.observationHash &
@@ -159,6 +159,9 @@ const Scenarios = [
   Scenario(name: "teams.view.1, teams, rules 47", obs: 201, rules: 47, map: -1),
   Scenario(name: "teams.view.1, teams, rules 47, crater", obs: 201, rules: 47, map: 3),
   Scenario(name: "teams.view.1u4, teams", obs: 201, inputs: 4, map: -1),
+  Scenario(name: "teams.view.1h, teams, rules 48", obs: 203, rules: 48, map: -1),
+  Scenario(name: "teams.view.1s, teams, rules 48", obs: 204, rules: 48, map: -1),
+  Scenario(name: "teams.view.1su4, teams, rules 47, crater", obs: 204, inputs: 4, rules: 47, map: 3),
   Scenario(name: "ffa.view.1, FFA-kin", obs: 202, ffa: true, map: -1),
   Scenario(name: "ffa.view.1, FFA-kin, rules 48 (fog of war)", obs: 202, ffa: true, rules: 48, map: -1),
   Scenario(name: "ffa.view.1, FFA-kin, rules 47, twin-mesas", obs: 202, ffa: true, rules: 47, map: 0)]

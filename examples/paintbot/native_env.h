@@ -341,12 +341,18 @@ int pw_elevation(void *handle, int32_t x, int32_t z);
  * motion-history block the engine keeps per seat: per identity t-1 / t-2 displacement relative to its current
  * position in 28 u steps plus seen flags, then the seat's own t-1 / t-2 displacement; 612 floats; the teams game only;
  * pw_create_observation_inputs_v(..., 203, K) adds K user inputs, "paintbot-pw.teams.view.1hu<K>"; pw_reset starts
- * every history over, pw_world_save / pw_world_load carry it). neural_contract.nim encodeTeamsView / encodeTeamsViewH / encodeFfaView
+ * every history over, pw_world_save / pw_world_load carry it), 204 = teams.view.1s "paintbot-pw.teams.view.1s"
+ * (teams.view.1h's 612 floats, then a 128-float RAW stop-clock block the engine keeps per seat: per identity j, 8
+ * floats at 612 + 8j: stop_age/32, stop_valid, stop_len/8, stop_live, stand_age/32, stand_valid, gap/32, run/32,
+ * from the seat's own sightings of that identity only (a stop = a still step, <= 8 u, right after a fast one, on three
+ * consecutive visible ticks); 740 floats; the teams game only; pw_create_observation_inputs_v(..., 204, K) adds K
+ * user inputs, "paintbot-pw.teams.view.1su<K>"; reset and saved with the history).
+ * neural_contract.nim encodeTeamsView / encodeTeamsViewH / encodeTeamsViewS / encodeFfaView
  * document every column; each
  * is computed from the seat's SeatView. NULL for any other version (1, 2, 3, 101 and 102
  * were retired for BASIC parity) or a bad max_ticks. pw_observe / pw_observe_seats rows are
  * then that many floats apart. pw_observation_size() = 512; pw_observation_size_for(201) =
- * 512, (203) = 612 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
+ * 512, (203) = 612, (204) = 740 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
  * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
  * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
  * 0, or -1 bad args). */

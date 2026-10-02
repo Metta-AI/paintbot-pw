@@ -409,7 +409,7 @@ proc observationFor(hash: string): (ObservationContractVersion, int) =
 
 proc requireMode(observationContract: ObservationContractVersion) =
   ## teams.view.1 is the teams game's 16-seat contract, ffa.view.1 FFA-kin's.
-  if observationContract in {ocTeamsView1, ocTeamsView1h}:
+  if observationContract in TeamsObservationContracts:
     if ffa(): raise newException(ValueError, "observation contract teams.view.1 is for the teams game only")
     if Seats != LegacySeats:
       raise newException(ValueError, "observation contract teams.view.1 needs a 16-seat match; this match has " &

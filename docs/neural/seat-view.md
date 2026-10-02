@@ -82,6 +82,14 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
   displacement. Positions come from `playerX` / `playerY` / `selfX` / `selfY` at those ticks, so a BASIC seat could
   keep the same record; it is engine-computed so that seats whose script does not write it (a caller-driven training
   seat, a teacher shadow) still see it.
+- Observation contract teams.view.1s (204, `paintbot-pw.teams.view.1s`, and its `...1su<K>` user-input variants) is
+  teams.view.1h plus a 128-float stop-clock block the engine keeps per seat (`encodeTeamsViewS`): per identity, how
+  long ago the seat last watched it go from moving to still, how long that stop has lasted and whether it has moved
+  since, the same age for the last earlier stop that held, the sight gap before the current run of sight (or the
+  ticks since it was last visible) and the length of that run. It is built only from `visible` / `playerX` /
+  `playerY` on the ticks the seat's observation is encoded (a stop takes three consecutive visible ticks; nothing is
+  inferred across a sight gap), so a BASIC seat could keep the same clocks with `dim` arrays; no gun, cooldown or
+  order state of another cog is read.
 - The retired contracts and decoder options are refused by name at staging
   (`neural_package.py`) and at load (`neural_host.nim`, `neural_contract.retiredContract`).
 - Training-only supervision: `pw_seat_privileged_labels` (21 floats: the retired world fields,
