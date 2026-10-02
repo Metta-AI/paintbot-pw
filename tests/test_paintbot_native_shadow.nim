@@ -270,16 +270,19 @@ suite "Net-teacher shadow: pw_set_seat_command on a policy seat, pw_seat_decided
     var o: array[10, int32]
     check pw_set_seat_shadow_script(nil, 0, nil, 0) == -1
     check pw_seat_shadow_status(nil, 0) == -1
-    # positive control: the same shouter as seat 0's REAL script is heard by seat 1
+    # positive control: the same shouter as seat 0's REAL script is heard by some listener (every other seat
+    # listens; teammates spawn within hearing range)
     let control = pw_create(51, 200)
     require control != nil
     defer: pw_destroy(control)
-    require setScript(control, 0, Shouter) == 0 and setScript(control, 1, Listener) == 0
+    require setScript(control, 0, Shouter) == 0
+    for slot in 1..<Seats: require setScript(control, slot, Listener) == 0
     var heardMax = 0
     for t in 0..<20:
       require pw_step(control, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
-      require pw_seat_orders(control, 1, ibuf(o)) == 0
-      heardMax = max(heardMax, o[1].int)
+      for slot in 1..<Seats:
+        require pw_seat_orders(control, slot.cint, ibuf(o)) == 0
+        heardMax = max(heardMax, o[1].int)
     check heardMax >= 1
     # as a SHADOW on caller-driven seat 0 it is never heard, and the world equals a twin without it
     let h = pw_create(51, 200)
@@ -295,7 +298,7 @@ suite "Net-teacher shadow: pw_set_seat_command on a policy seat, pw_seat_decided
     check pw_seat_decided_orders(h, 0, ibuf(o)) == 0 and o[9] == 0     # a failed shadow decides nothing
     check pw_set_seat_shadow_script(h, 0, nil, 0) == 0 and pw_seat_shadow_status(h, 0) == 0
     require pw_set_seat_shadow_script(h, 0, cbuf(Shouter), Shouter.len.int32) == 0
-    require setScript(h, 1, Listener) == 0 and setScript(twin, 1, Listener) == 0
+    for slot in 1..<Seats: require setScript(h, slot, Listener) == 0 and setScript(twin, slot, Listener) == 0
     for t in 0..<20:
       for slot in 1..<Seats:   # seat 0 stays (alive, so its shadow keeps deciding); the rest move at random
         for head, size in ActionSizes: actions[slot*ActionSizes.len+head] = int32((t * 7 + slot * 3 + head) mod size)
@@ -304,8 +307,9 @@ suite "Net-teacher shadow: pw_set_seat_command on a policy seat, pw_seat_decided
       check pw_state_hash(h) == pw_state_hash(twin)
       require pw_seat_decided_orders(h, 0, ibuf(o)) == 0
       check o[9] == 2 and o[0] == 1 and o[1] == int32(t + 1) and o[2] == 7    # its own globals advance
-      require pw_seat_orders(h, 1, ibuf(o)) == 0
-      check o[1] == 0                                                          # nobody hears the shadow
+      for slot in 1..<Seats:
+        require pw_seat_orders(h, slot.cint, ibuf(o)) == 0
+        check o[1] == 0                                                        # nobody hears the shadow
     # save at this tick, play 5, load, play 5 again: the shadow's runtime state is part of the snapshot
     let size = pw_world_save(h, nil, 0)
     require size > 0
