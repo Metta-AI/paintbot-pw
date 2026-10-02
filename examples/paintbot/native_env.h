@@ -90,7 +90,10 @@ int pw_seat_decided_orders(void *handle, int seat, int32_t *ten);
  * the seat hears, but its order is never executed and its shouts are never delivered: the seat
  * (caller-driven, scripted, or a policy seat whose policy.bas keeps running and writing its user
  * inputs) and the world play exactly as without it. Its decision is pw_seat_decided_orders'
- * (ran = 2). Fresh runtime here and at every pw_reset; saved / loaded with the world; length 0
+ * (ran = 2). It hears the speech its seat hears, never its own or another shadow's (a seated teacher's
+ * shouts would reach its listeners; shadows on several seats do not hear one another). It decides before
+ * the tick's speech is delivered, also when pw_script_decide takes the tick's decision ahead of pw_step.
+ * Fresh runtime here and at every pw_reset; saved / loaded with the world; length 0
  * removes it. Returns 0 running, 1 compile failed (nothing shadows the seat), -1 bad args.
  * pw_seat_shadow_status: 0 none, 1 running, 2 compile failed, 3 disabled by a runtime error. */
 int pw_set_seat_shadow_script(void *handle, int seat, const char *source, int32_t length);
