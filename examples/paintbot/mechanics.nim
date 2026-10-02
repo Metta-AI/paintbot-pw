@@ -401,6 +401,12 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     let hpBefore = w.cogs[victim].hp
   w.cogs[victim].hp = max(0'i32, w.cogs[victim].hp-(amount.int32-absorbed))
   when defined(pwTraining):
+    # Hit attribution (telemetry only): this event; `final` is set below once the lives are known.
+    let hitIndex = if hitLog != nil: hitLog[].len else: -1
+    if hitLog != nil:
+      hitLog[].add HitEvent(attacker: attacker.int32, victim: victim.int32, health: hpBefore-w.cogs[victim].hp,
+        armor: absorbed, weapon: ord(damageWeapon).int32, killed: int32(w.cogs[victim].hp == 0))
+  when defined(pwTraining):
     if combatTelemetry != nil:
       # Telemetry only: a hit is a damage event past shield and life checks; damage is
       # the health it removed (armor absorbs first). Attacker -1 is the map itself.
@@ -468,6 +474,8 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     w.resetHeart(1-team(victim)); w.cogs[victim].carrying = false
   let lives = if visionRulesVersion in 13..18:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
   w.equipment[victim] = Equipment(lives: lives)
+  when defined(pwTraining):
+    if hitIndex >= 0: hitLog[][hitIndex].final = int32(lives <= 0)
   w.uniforms[victim] = false
   w.cogs[victim].respawn = seatRespawnTicks(victim)
   w.cogs[victim].cooldown = 0
