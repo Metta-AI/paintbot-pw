@@ -54,7 +54,10 @@ PRINT "CONTINUED", code
                 seats.append(seat)
             config = dict(tokens=[str(i) for i in range(4)], players=[dict(name=str(i)) for i in range(4)],
                           seed=2026, max_ticks=240)
-            inputs = {"CONFIG": config, "PLAYER_SEATS": dict(schema="coworld-player-seats/1", seats=seats,
+            manifest = json.loads((ROOT / "coworld/paintbot/coworld_manifest_template.json").read_text())
+            schema = manifest["game"]["runnable"]["env"]["COGAME_PLAYER_SEATS_SCHEMA"]
+            self.assertEqual(schema, "coworld-player-seats/2")
+            inputs = {"CONFIG": config, "PLAYER_SEATS": dict(schema=schema, seats=seats,
                       player_status_uri=(root / "status.json").as_uri())}
             env = dict(os.environ, COGAME_HOST="127.0.0.1", COGAME_TICK_SECONDS="0")
             env.pop("COWORLD_LLM_ENDPOINT", None)

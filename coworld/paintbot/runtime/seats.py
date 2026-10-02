@@ -56,8 +56,8 @@ def read_uri(uri: str, limit: int = MAX_FILE) -> bytes:
 
 def load_seats(uri: str) -> dict:
     document = json.loads(read_uri(uri, 1024 * 1024))
-    if document.get("schema") != "coworld-player-seats/1":
-        raise ValueError("expected coworld-player-seats/1")
+    if document.get("schema") not in ("coworld-player-seats/1", "coworld-player-seats/2"):
+        raise ValueError("expected coworld-player-seats/1 or coworld-player-seats/2")
     seats = document["seats"]
     if not 1 <= len(seats) <= MAX_SEATS or [s["slot"] for s in seats] != list(
         range(len(seats))

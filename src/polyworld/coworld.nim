@@ -286,7 +286,7 @@ proc coworldOptions*(slotCount: int): GameOptions =
   except JsonError as error:
     raise newException(CoworldError,
       "Invalid Coworld configuration: " & error.msg)
-  if seats.schema != "coworld-player-seats/1" or
+  if seats.schema notin ["coworld-player-seats/1", "coworld-player-seats/2"] or
     seats.seats.len != slotCount or config.tokens.len != slotCount or
     config.players.len != slotCount:
       raise newException(CoworldError, "Coworld roster does not match the game")
