@@ -25,8 +25,8 @@ assigned to mixed. Both use the native sixteen-cog, interleaved 8v8 setup:
   balanced across games.
 
 Each policy counts once per game, averaging its slots first. Win rate uses the
-explicit winning team, even if it wins at the time limit or earns zero glory.
-The second ladder uses native Paintbot Glory, including losses and draws as zero.
+explicit winning team, even if it wins at the time limit or earns a zero score.
+The second ladder uses Paintbot's native match score, including losses and draws as zero.
 No extra XP or elapsed-time adjustment is applied. Equal averages are marked as
 ties and ordered consistently by the frozen policy-version ID. Stability counts
 policies whose displayed rank changed every ten games within each format; the

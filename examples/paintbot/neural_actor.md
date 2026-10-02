@@ -85,7 +85,7 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 | magic | ASCII `PWNET002` |
 | version | 2 |
 | I | input count, 1..4096 (the observation contract's width: 512 for teams.view.1, 512 + K for teams.view.1u<K>; ffa.view.1: the match's width, usually the layout word `0xFFFEE000`) |
-| O | output count, 2..1024 (the logits; no value row: 82, or 128 for the aim-offset variant, 174 for movement-offset; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
+| O | output count, 2..4096 (the logits; no value row: 82, or 128 for the aim-offset variant, 174 for movement-offset, 818 for target-conditioned, 2490 for raw; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
 | head count | 1..32 |
 | head sizes | one uint32 per head, each 2..1024, summing to O (layout words allowed) |
 | observation contract | 64 lowercase hex bytes (as PWNET001) |
@@ -127,6 +127,7 @@ when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 | 12 | PAD | `at, len` | none |
 | 13 | COND_HEAD | `when_head, head` | `W[size(head), size(when_head)]` |
 | 14 | TOKEN_PAIR | `source, p, geo_base, geo_stride, x, z, self_pairs` | `A[p, d]`, `B[p, d]`, `C[p, 10]`, `b[p]` |
+| 15 | POINTER_K | `source, offset, k` | `V[k, z]`, `c[k]` (z = the source's token width) |
 
 Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1024;
 `act` 0 = none, 1 = relu; `eps` finite and > 0; TOKEN_MLP tokens 1..256, segments 1..8, layers
@@ -247,6 +248,10 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
 - **ENTITY_ATTN's token rows** (the final `h_n` and the valid flags) are available to a later
   TOKEN_MIX, POINTER or ATTN_POOL that names the ENTITY_ATTN layer as its `source`; the layer
   then also copies them to a token buffer (`T*d + T` more operations, counted once).
+- **POINTER_K** (K per-token scores into chosen outputs): POINTER generalised to K logits per token,
+  `out[offset + n*k + j] += V[j] . z_n + c[j]` for the source's valid tokens n (invalid tokens leave their k
+  outputs as they are). Action contract 15 uses two of them, reading the identity tokens, for heads 5 and 6's
+  per-identity rows, so the offset row of identity j is a function of j's own token.
 - **POINTER** (per-token scores into chosen outputs): `source` names an earlier TOKEN_MIX,
   TOKEN_MLP or ENTITY_ATTN with the same tokens. `y = x`, then for each valid token n: `y[offset + n] = x[offset + n] +
   (sum_i z_n[i]*v[i] + c)`; invalid tokens add nothing. `offset + tokens` must not exceed the
@@ -356,6 +361,7 @@ unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 | TOKEN_MIX | `2*W*z + W + T*(2*d*z + 3*z) + pool(z)` |
 | token-layer norm | `+ T*(8*n + 32)` per normalised width n (TOKEN_MLP: each `d_l`; TOKEN_MIX: `z`) |
 | POINTER | `W + T*(2*z + 2)` |
+| POINTER_K | `W + T*k*(2*z + 2)` |
 | SEGMENT_NEAR | `I + 12*T*T + 8*T` |
 | ENTITY_ATTN | `embed + blocks*block + pool` (+ `T*d + T` when a later layer reads its token rows) |
 | ATTN_POOL | `W + (2*W*h*k + h*k) + T*((2*z*h*k + h*k) + h*(2*k + 1) + h*(8 + 3) + (2*z*h*v + h*v) + 2*h*v) + h*(T + 8)` |
@@ -440,6 +446,8 @@ gun cooldown, windup, spray cooldown, shield, respawn, the seat's current aim, h
 | teams.view.1 | `paintbot-pw.teams.view.1.action.51-25-2-2-2` | 51, 25, 2, 2, 2 | 11 |
 | teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 | 13 |
 | teams.view.1 movement-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23` | 51, 25, 2, 2, 2, 23, 23, 23, 23 | 14 |
+| teams.view.1 target-conditioned aim offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16` | 51, 25, 2, 2, 2, 368, 368 (logits; heads 5 and 6 are 16 identity rows of 23, drawn from the row of the identity the aim head chose) | 15 |
+| teams.view.1 raw | `paintbot-pw.teams.view.1.action.51-25-2-2-2-63x16-63x16-256-8-128` | 51, 25, 2, 2, 2, 1008, 1008, 256, 8, 128 (logits; 63-bin identity rows, then the walk direction, walk distance and look direction heads) | 16 |
 | ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 | 12 |
 
 An action contract names head sizes; what each index means is the `policy.bas`'s business. The

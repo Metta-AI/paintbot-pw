@@ -94,11 +94,16 @@
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa_v2.nim": 30.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_parity.nim": 25.0,
     "nim r -d:headless tests/test_paintbot_neural_layers.nim": 8.0,
+    "nim r -d:headless tests/test_paintbot_neural_target_offset.nim": 12.0,
     "nim r -d:headless tests/test_paintbot_neural_view_contracts.nim": 17.0,
     "nim r tests/test_paintbot_seat_view_boundary.nim": 10.0,
     "nim r -d:headless tests/test_paintbot_seat_view_parity.nim": 7.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_aim_offset.nim": 27.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_move_offset.nim": 30.0,
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_target_offset.nim": 30.0,
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_raw_heads.nim": 40.0,
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_h.nim": 40.0,
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_shadow.nim": 60.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_mixed_contracts.nim": 30.0
   }
 }

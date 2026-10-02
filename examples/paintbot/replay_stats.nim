@@ -62,7 +62,7 @@ proc report(path: string) =
   echo &"{path.extractFilename}: {ticks} of {w.endTick} ticks " &
        &"({ticks * 100 div w.endTick}% of the limit), winner {(if winner < 0: \"draw\" else: (if winner == 0: \"Ember\" else: \"Azure\"))}"
   for s in 0..1:
-    echo &"  {(if s == 0: \"Ember/even\" else: \"Azure/odd \")}  glory {w.glory[s]:4}  lives {lives[s]:3}  " &
+    echo &"  {(if s == 0: \"Ember/even\" else: \"Azure/odd \")}  score {w.glory[s]:4}  lives {lives[s]:3}  " &
          &"standing {standing[s]}  captures {w.captures[s]:2}  heart-ticks {heartTicks[s]:6}  " &
          &"ahead {ahead[s]:5}  friendly-fire {ffHits[s]:2} (+{ffGlory[s]})  quiet-supplies {quietHits[s]} (+{quietGlory[s]})"
 

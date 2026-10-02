@@ -53,8 +53,8 @@ suite "Native training environment":
 
   test "contract selection: teams.view.1 (201) and ffa.view.1 (202); the retired versions are refused":
     check pw_observation_size_for(201) == TeamsViewSize
-    for version in [0'i32, 1, 2, 3, 101, 102, 202, 203]: check pw_observation_size_for(version) == -1
-    for version in [0'i32, 1, 2, 3, 101, 102, 203]: check pw_create_observation(1, 24, version) == nil
+    for version in [0'i32, 1, 2, 3, 101, 102, 202, 204]: check pw_observation_size_for(version) == -1
+    for version in [0'i32, 1, 2, 3, 101, 102, 204]: check pw_create_observation(1, 24, version) == nil
     check pw_create_observation(1, HeartMeterMatchTicks+1, 201) == nil
     check pw_observation_contract(nil) == -1 and pw_handle_observation_size(nil) == -1
     check pw_action_contract(nil) == -1
@@ -85,13 +85,13 @@ suite "Native training environment":
       check pw_reset(h, 6, 24) == 0 # kept across reset
       check pw_observation_contract(h) == 201 and pw_action_contract(h) == 11
     check pw_observation_contract(ffa) == 202 and pw_action_contract(ffa) == 12
-    # pw_set_action_contract selects between teams.view.1's three action contracts (the five
-    # heads, the aim-offset seven, or the movement-offset nine); ffa.view.1 has only its pointer
+    # pw_set_action_contract selects between teams.view.1's four action contracts (the five
+    # heads, the aim-offset seven, the movement-offset nine, or the target-conditioned seven); ffa.view.1 has only its pointer
     # contract; every retired or native-decoder contract is refused.
     var layout: array[10, int32]
     check pw_set_action_contract(nil, 11) == -1
-    for version in [0'i32, 1, 2, 3, 12, 15, 101]: check pw_set_action_contract(teams, version) == -1
-    for version in [0'i32, 1, 2, 11, 13, 14]: check pw_set_action_contract(ffa, version) == -1
+    for version in [0'i32, 1, 2, 3, 12, 17, 101]: check pw_set_action_contract(teams, version) == -1
+    for version in [0'i32, 1, 2, 11, 13, 14, 15, 16]: check pw_set_action_contract(ffa, version) == -1
     check pw_set_action_contract(ffa, 12) == 0 and pw_action_contract(ffa) == 12
     check pw_action_layout(teams, ibuf(layout)) == 0 and layout[0..7] == @[5'i32, 51, 25, 2, 2, 2, 82, 0]
     check pw_action_layout_ext(teams, ibuf(layout)) == 0 and layout == [5'i32, 51, 25, 2, 2, 2, 0, 0, 82, 0]
@@ -99,6 +99,8 @@ suite "Native training environment":
     check pw_action_layout(teams, ibuf(layout)) == -1   # seven heads: the _ext form only
     check pw_action_layout_ext(teams, ibuf(layout)) == 0 and layout == [7'i32, 51, 25, 2, 2, 2, 23, 23, 128, 0]
     check pw_reset(teams, 7, 24) == 0 and pw_action_contract(teams) == 13   # kept across reset
+    check pw_set_action_contract(teams, 15) == 0 and pw_action_contract(teams) == 15   # target-conditioned offsets
+    check pw_action_layout_ext(teams, ibuf(layout)) == 0 and layout == [7'i32, 51, 25, 2, 2, 2, 23, 23, 818, 0]
     check pw_set_action_contract(teams, 11) == 0 and pw_action_contract(teams) == 11
     # teams.view.1 is the teams game's: FFA-kin (mode or config) and other seat counts are refused.
     check pw_set_game_mode(teams, 1) == -1
@@ -114,7 +116,7 @@ suite "Native training environment":
   test "teams.view.1u<K> handles and hashes":
     check pw_create_observation_inputs(1, 100, -1) == nil and pw_create_observation_inputs(1, 100, 257) == nil
     # (202 = ffa.view.1u<K>: tests/test_paintbot_native_ffa_v2.nim.)
-    for (v, k) in [(1'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32), (203'i32, 3'i32), (201'i32, 257'i32),
+    for (v, k) in [(1'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32), (204'i32, 3'i32), (201'i32, 257'i32),
         (201'i32, -1'i32), (202'i32, 257'i32), (202'i32, -1'i32)]:
       check pw_create_observation_inputs_v(1, 100, v, k) == nil
     check pw_create_observation_inputs_v(1, HeartMeterMatchTicks+1, 201, 3) == nil
@@ -132,7 +134,7 @@ suite "Native training environment":
         (0.cint, userInputsContractHash(k.int))
       check userInputsContractHash(k.int) == sha256Hex("paintbot-pw.teams.view.1u" & $k)
       pw_destroy(a); pw_destroy(b)
-    for (v, k) in [(201'i32, 0'i32), (201'i32, 257'i32), (202'i32, 0'i32), (202'i32, 257'i32), (203'i32, 3'i32),
+    for (v, k) in [(201'i32, 0'i32), (201'i32, 257'i32), (202'i32, 0'i32), (202'i32, 257'i32), (204'i32, 3'i32),
         (2'i32, 3'i32), (3'i32, 3'i32)]:
       check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash_v(v, k, o, 65))[0] == -1
     check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash(3, o, 64))[0] == -1

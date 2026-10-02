@@ -110,6 +110,12 @@ proc pointerHead*(r: var Rand, source, offset, z: int): Spec =
   result.tensors = r.weights(z, 1.0/sqrt(z.float))
   result.tensors.add r.weights(1, 0.1)
 
+proc pointerK*(r: var Rand, source, offset, z, k: int): Spec =
+  ## POINTER_K: V [k, z] row-major, c [k].
+  result = Spec(code: 15, params: [source.uint32, offset.uint32, k.uint32, 0, 0, 0, 0, 0])
+  result.tensors = r.weights(k*z, 1.0/sqrt(z.float))
+  result.tensors.add r.weights(k, 0.1)
+
 proc attnPool*(r: var Rand, source, width, tokenWidth, heads, keyWidth, valueWidth: int): Spec =
   ## ATTN_POOL: Wq [h*k, width], bq [h*k], Wk [h*k, tokenWidth], bk [h*k], Wv [h*v, tokenWidth], bv [h*v].
   result = Spec(code: 11, params: [source.uint32, heads.uint32, keyWidth.uint32, valueWidth.uint32, 0, 0, 0, 0])
