@@ -81,8 +81,20 @@ int pw_set_seat_command(void *handle, int seat, const int32_t *nine);
  * an override mask replaces the executed order, never this one). ran = 1 when the program
  * ran on that step; otherwise zeros with ran = 0 (no program, or no step since the last reset
  * or script change). With pw_set_seat_command this lets a teacher's program shadow a seat
- * while a student's command plays. A pure read. Returns 0, -1 bad args. */
+ * while a student's command plays. With a shadow script on the seat (below) it reports the
+ * shadow's decision instead, with ran = 2. A pure read. Returns 0, -1 bad args. */
 int pw_seat_decided_orders(void *handle, int seat, int32_t *ten);
+/* Shadow script (training library only, default-off): a second BASIC program on the seat, with
+ * its own runtime, globals and rnd stream (built and limited as pw_set_seat_script builds a
+ * seat). Every step it decides on the pre-step world through the seat's SeatView and hears what
+ * the seat hears, but its order is never executed and its shouts are never delivered: the seat
+ * (caller-driven, scripted, or a policy seat whose policy.bas keeps running and writing its user
+ * inputs) and the world play exactly as without it. Its decision is pw_seat_decided_orders'
+ * (ran = 2). Fresh runtime here and at every pw_reset; saved / loaded with the world; length 0
+ * removes it. Returns 0 running, 1 compile failed (nothing shadows the seat), -1 bad args.
+ * pw_seat_shadow_status: 0 none, 1 running, 2 compile failed, 3 disabled by a runtime error. */
+int pw_set_seat_shadow_script(void *handle, int seat, const char *source, int32_t length);
+int pw_seat_shadow_status(void *handle, int seat);
 /* Curriculum knobs (additive to v1), kept across pw_reset; defaults 1 and 1000 leave
  * every world byte-identical to a library without them.
  * pw_set_seat_fire_period: the seat's shoot order (script, Nim bot or caller) is honoured

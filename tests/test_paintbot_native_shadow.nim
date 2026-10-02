@@ -77,11 +77,12 @@ proc ten(c: Command, ran: bool): array[10, int32] =
 type HostRun = object
   hashes: seq[uint32]
   decided: seq[Command]          # the teacher program's own order each tick
+  shadowDecided: seq[Command]    # with a shadow source: the shadow script's order each tick
   selected: seq[array[ActionSizes.len, int32]]
   sampled: seq[bool]
   inputs: seq[seq[int32]]
 
-proc hostRun(model, manifest: string, seed: int32, ticks: int, shadow: bool): HostRun =
+proc hostRun(model, manifest: string, seed: int32, ticks: int, shadow: bool, shadowSrc = ""): HostRun =
   ## The game's own loop: seat Teacher runs the bundle, the rest base.bas. With shadow, the teacher
   ## decides on the world as usual, then the world executes student(t) for its seat instead.
   let path = getTempDir()/("paintbot-shadow-host-" & $getCurrentProcessId() & ".bas")
@@ -92,12 +93,17 @@ proc hostRun(model, manifest: string, seed: int32, ticks: int, shadow: bool): Ho
     for suffix in ["", ".model.bin", ".neural.json"]: removeFile(path & suffix)
   resetOracle()
   var players = newSeq[Bot](Seats)
-  let neural = loadBots(@[BotGroup(path: path, count: 1)])
+  let neural = loadBots(@[BotGroup(path: path, count: Seats)])
   let plain = loadBots(@[BotGroup(path: Base, count: Seats)])
-  for slot in 0..<Seats: players[slot] = if slot == Teacher: neural[0] else: plain[slot]
+  for slot in 0..<Seats: players[slot] = if slot == Teacher: neural[slot] else: plain[slot]
+  # the reference shadow: its own bot for the teacher's slot, deciding on the pre-step world before the tick's
+  # decide, hearing what the seat hears (decide resets the shout lists, so its shouts go nowhere)
+  var shadowBots = newSeq[Bot](Seats)
+  if shadowSrc.len > 0: shadowBots[Teacher] = loadScriptBot(shadowSrc, Teacher)
   var w = newWorld(seed, ticks.int32)
   var t = 0
   while w.tick < ticks and w.winner == -1:
+    if shadowSrc.len > 0: result.shadowDecided.add decideSeats(shadowBots, w)[Teacher]
     var commands = players.decide(w)
     deliverSpeech(w)
     check not players[Teacher].failed
@@ -207,3 +213,117 @@ suite "Net-teacher shadow: pw_set_seat_command on a policy seat, pw_seat_decided
       check pw_seat_script_status(handle, Teacher.cint, nil, 0) == 1
       pw_destroy(handle)
     check shadowTicksDiffer > 500     # the teacher's order really differs from what was executed
+
+  test "a shadow SCRIPT on a policy seat: the seat's policy.bas and the world are untouched; decided = the hosted shadow":
+    let actor = loadActor(model)
+    var differs = 0
+    for (seed, ticks) in [(31'i32, 900), (32'i32, 600)]:
+      checkpoint "seed " & $seed
+      let host = hostRun(model, manifest, seed, ticks, false, baseSource)
+      let handle = pw_create_observation_inputs(seed, ticks.int32, K)
+      require handle != nil
+      for slot in 0..<Seats:
+        if slot == Teacher: require setPolicy(handle, slot, Policy, manifest) == 0
+        else: require setScript(handle, slot, baseSource) == 0
+      require pw_set_seat_shadow_script(handle, Teacher.cint, cbuf(baseSource), baseSource.len.int32) == 0
+      check pw_seat_shadow_status(handle, Teacher.cint) == 1
+      let n = TeamsViewSize + K
+      var state = newSeq[float32](actor.hiddenSize)
+      var alive = false
+      var observations = newSeq[float32](Seats*n)
+      var resets: array[LegacySeats, float32]
+      var actions: array[LegacySeats*ActionSizes.len, int32]
+      var logits: array[LegacySeats*LogitSize, float32]
+      var rewards, terminals: array[LegacySeats, float32]
+      for t, hash in host.hashes:
+        require pw_observe(handle, fbuf(observations), fbuf(resets)) == 0
+        if t > 0:   # the policy seat's own policy.bas keeps writing its user inputs
+          for i in 0..<K: require observations[Teacher*n+TeamsViewSize+i] == userInputFeature(host.inputs[t-1][i])
+        let isAlive = observations[Teacher*n+2] > 0
+        if not isAlive or not alive or t == 0:
+          for i in 0..<actor.hiddenSize: state[i] = 0
+        alive = isAlive
+        if isAlive:
+          var output = newSeq[float32](LogitSize)
+          actor.infer(observations.toOpenArray(Teacher*n, Teacher*n+n-1), state, output)
+          for i in 0..<LogitSize: logits[Teacher*LogitSize+i] = output[i]
+        require pw_step_logits(handle, ibuf(actions), fbuf(logits), fbuf(rewards), fbuf(terminals)) == 0
+        require pw_state_hash(handle) == hash                 # the hosted world WITHOUT any shadow
+        var decided, orders: array[10, int32]
+        require pw_seat_decided_orders(handle, Teacher.cint, ibuf(decided)) == 0
+        require decided[0..8] == ten(host.shadowDecided[t], true)[0..8] and decided[9] == 2
+        require pw_seat_orders(handle, Teacher.cint, ibuf(orders)) == 0
+        require orders[0..8] == ten(host.decided[t], true)[0..8]   # the net's own command executed
+        if decided[0..8] != orders[0..8]: inc differs
+        var choices: array[22, int32]
+        require pw_seat_policy_choices(handle, Teacher.cint, ibuf(choices)) == 0
+        require (choices[0] == 1) == host.sampled[t]
+      check pw_seat_shadow_status(handle, Teacher.cint) == 1
+      pw_destroy(handle)
+    check differs > 300
+
+  test "a shadow script's shouts are dropped; fresh globals per reset; caller-driven seat; status codes; save / load":
+    const Shouter = "dim c(1)\nc(0) = c(0) + 1\nshout(\"x\")\nwalkTo(c(0), 7)\n"
+    const Listener = "walkTo(heardCount(), 0)\n"
+    var actions: array[LegacySeats*ActionSizes.len, int32]
+    var rewards, terminals: array[LegacySeats, float32]
+    var o: array[10, int32]
+    check pw_set_seat_shadow_script(nil, 0, nil, 0) == -1
+    check pw_seat_shadow_status(nil, 0) == -1
+    # positive control: the same shouter as seat 0's REAL script is heard by seat 1
+    let control = pw_create(51, 200)
+    require control != nil
+    defer: pw_destroy(control)
+    require setScript(control, 0, Shouter) == 0 and setScript(control, 1, Listener) == 0
+    var heardMax = 0
+    for t in 0..<20:
+      require pw_step(control, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+      require pw_seat_orders(control, 1, ibuf(o)) == 0
+      heardMax = max(heardMax, o[1].int)
+    check heardMax >= 1
+    # as a SHADOW on caller-driven seat 0 it is never heard, and the world equals a twin without it
+    let h = pw_create(51, 200)
+    let twin = pw_create(51, 200)
+    require h != nil and twin != nil
+    defer: pw_destroy(h); pw_destroy(twin)
+    check pw_set_seat_shadow_script(h, Seats.cint, cbuf(Shouter), Shouter.len.int32) == -1
+    check pw_set_seat_shadow_script(h, 0, cbuf("walkTo("), 7) == 1
+    check pw_seat_shadow_status(h, 0) == 2
+    require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+    require pw_step(twin, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+    check pw_seat_decided_orders(h, 0, ibuf(o)) == 0 and o[9] == 0     # a failed shadow decides nothing
+    check pw_set_seat_shadow_script(h, 0, nil, 0) == 0 and pw_seat_shadow_status(h, 0) == 0
+    require pw_set_seat_shadow_script(h, 0, cbuf(Shouter), Shouter.len.int32) == 0
+    require setScript(h, 1, Listener) == 0 and setScript(twin, 1, Listener) == 0
+    for t in 0..<20:
+      for slot in 1..<Seats:   # seat 0 stays (alive, so its shadow keeps deciding); the rest move at random
+        for head, size in ActionSizes: actions[slot*ActionSizes.len+head] = int32((t * 7 + slot * 3 + head) mod size)
+      require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+      require pw_step(twin, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+      check pw_state_hash(h) == pw_state_hash(twin)
+      require pw_seat_decided_orders(h, 0, ibuf(o)) == 0
+      check o[9] == 2 and o[0] == 1 and o[1] == int32(t + 1) and o[2] == 7    # its own globals advance
+      require pw_seat_orders(h, 1, ibuf(o)) == 0
+      check o[1] == 0                                                          # nobody hears the shadow
+    # save at this tick, play 5, load, play 5 again: the shadow's runtime state is part of the snapshot
+    let size = pw_world_save(h, nil, 0)
+    require size > 0
+    var blob = newSeq[byte](size)
+    require pw_world_save(h, cast[ptr UncheckedArray[byte]](addr blob[0]), size) == size
+    var first: seq[int32]
+    for t in 0..<5:
+      require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+      require pw_seat_decided_orders(h, 0, ibuf(o)) == 0
+      first.add o[1]
+    check first == @[21'i32, 22, 23, 24, 25]
+    require pw_world_load(h, cast[ptr UncheckedArray[byte]](addr blob[0]), size) == 0
+    for t in 0..<5:
+      require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+      require pw_seat_decided_orders(h, 0, ibuf(o)) == 0
+      check o[1] == first[t]
+    # pw_reset installs a fresh runtime: the counter starts over
+    require pw_reset(h, 52, 200) == 0
+    check pw_seat_decided_orders(h, 0, ibuf(o)) == 0 and o[9] == 0
+    require pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
+    check pw_seat_decided_orders(h, 0, ibuf(o)) == 0 and o[9] == 2 and o[1] == 1
+    check pw_seat_shadow_status(h, 0) == 1
