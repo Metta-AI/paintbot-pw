@@ -90,6 +90,14 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
   `playerY` on the ticks the seat's observation is encoded (a stop takes three consecutive visible ticks; nothing is
   inferred across a sight gap), so a BASIC seat could keep the same clocks with `dim` arrays; no gun, cooldown or
   order state of another cog is read.
+- Observation contract teams.view.1t (205, `paintbot-pw.teams.view.1t`, and its `...1tu<K>` user-input variants) is
+  teams.view.1s plus an 11-float hunt-clock block the engine keeps per seat (`encodeTeamsViewT`): at 740, how long
+  since the seat last saw a living enemy-parity identity (capped at 720 ticks); at 741 + r, how long since the seat
+  itself was within 600 u of map heart r xor selfTeam (the team frame; capped at 2760 ticks; 0 past the map's heart
+  count, hearts 0..9 only). The clocks start at the match start, count only the ticks the seat is encoded alive on and
+  keep running across a death (the block reads zeros while dead). It is built only from `visible` / `playerHp` /
+  `selfX` / `selfY` / `controlX` / `controlY` / `heartCount`: the same clocks a BASIC seat keeps in two variables
+  per value (the pw-arch hunt inputs 36..42 of policy.bas are 3 x these columns, one tick later).
 - The retired contracts and decoder options are refused by name at staging
   (`neural_package.py`) and at load (`neural_host.nim`, `neural_contract.retiredContract`).
 - Training-only supervision: `pw_seat_privileged_labels` (21 floats: the retired world fields,

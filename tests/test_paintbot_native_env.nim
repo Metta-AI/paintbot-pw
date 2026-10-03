@@ -53,8 +53,8 @@ suite "Native training environment":
 
   test "contract selection: teams.view.1 (201) and ffa.view.1 (202); the retired versions are refused":
     check pw_observation_size_for(201) == TeamsViewSize
-    for version in [0'i32, 1, 2, 3, 101, 102, 202, 205]: check pw_observation_size_for(version) == -1
-    for version in [0'i32, 1, 2, 3, 101, 102, 205]: check pw_create_observation(1, 24, version) == nil
+    for version in [0'i32, 1, 2, 3, 101, 102, 202, 206]: check pw_observation_size_for(version) == -1
+    for version in [0'i32, 1, 2, 3, 101, 102, 206]: check pw_create_observation(1, 24, version) == nil
     check pw_create_observation(1, HeartMeterMatchTicks+1, 201) == nil
     check pw_observation_contract(nil) == -1 and pw_handle_observation_size(nil) == -1
     check pw_action_contract(nil) == -1
@@ -116,7 +116,7 @@ suite "Native training environment":
   test "teams.view.1u<K> handles and hashes":
     check pw_create_observation_inputs(1, 100, -1) == nil and pw_create_observation_inputs(1, 100, 257) == nil
     # (202 = ffa.view.1u<K>: tests/test_paintbot_native_ffa_v2.nim.)
-    for (v, k) in [(1'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32), (205'i32, 3'i32), (201'i32, 257'i32),
+    for (v, k) in [(1'i32, 3'i32), (2'i32, 3'i32), (3'i32, 3'i32), (206'i32, 3'i32), (201'i32, 257'i32),
         (201'i32, -1'i32), (202'i32, 257'i32), (202'i32, -1'i32)]:
       check pw_create_observation_inputs_v(1, 100, v, k) == nil
     check pw_create_observation_inputs_v(1, HeartMeterMatchTicks+1, 201, 3) == nil
@@ -134,7 +134,7 @@ suite "Native training environment":
         (0.cint, userInputsContractHash(k.int))
       check userInputsContractHash(k.int) == sha256Hex("paintbot-pw.teams.view.1u" & $k)
       pw_destroy(a); pw_destroy(b)
-    for (v, k) in [(201'i32, 0'i32), (201'i32, 257'i32), (202'i32, 0'i32), (202'i32, 257'i32), (205'i32, 3'i32),
+    for (v, k) in [(201'i32, 0'i32), (201'i32, 257'i32), (202'i32, 0'i32), (202'i32, 257'i32), (206'i32, 3'i32),
         (2'i32, 3'i32), (3'i32, 3'i32)]:
       check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash_v(v, k, o, 65))[0] == -1
     check hashText(proc(o: ptr UncheckedArray[char]): cint = pw_user_inputs_contract_hash(3, o, 64))[0] == -1
