@@ -85,7 +85,7 @@ type
     # Action contract 15: heads 5 and 6 are drawn from the 23-logit row of the identity the aim head chose (rows at
     # LogitSize + (head - 5) * TargetRows * 23 + j * 23); no draw (the centre bin) when it chose keep or a compass point.
     targetRows*: bool
-    history*: TeamsHistory   # observation contract teams.view.1h: this seat's motion history (encodeTeamsViewH)
+    history*: TeamsHistory   # teams.view.1h / 1s / 1t: this seat's motion history, stop and hunt clocks (encodeTeamsViewH/S/T)
     offsetTemperatures: array[ExtraHeadsMax, float32]
     offsetTemperatureSet: array[ExtraHeadsMax, bool]
     offsetSelected*, offsetChoices*: array[ExtraHeadsMax, int32]

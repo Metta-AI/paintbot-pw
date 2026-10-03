@@ -162,11 +162,11 @@ suite "Observation contract teams.view.1s (204)":
     check observationContractVersion(ObservationContractTeamsView1sHash) == ocTeamsView1s
     check observationContractId(ocTeamsView1s) == "paintbot-pw.teams.view.1s"
     check pw_observation_size_for(204) == 740 and pw_observation_size_for(203) == 612 and
-      pw_observation_size_for(201) == 512 and pw_observation_size_for(205) == -1
+      pw_observation_size_for(201) == 512 and pw_observation_size_for(206) == -1
     let h = pw_create_observation(1, 600, 204)
     require h != nil
     defer: pw_destroy(h)
-    check pw_create_observation(1, 600, 205) == nil
+    check pw_create_observation(1, 600, 206) == nil
     check pw_handle_observation_size(h) == 740 and pw_observation_contract(h) == 204
     var hex: array[65, char]
     check pw_observation_contract_hash(204, cast[ptr UncheckedArray[char]](addr hex[0]), 65) == 0

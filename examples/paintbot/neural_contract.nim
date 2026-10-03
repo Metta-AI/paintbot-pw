@@ -148,16 +148,41 @@ const
   StopAgeCap* = 32'i32
   StopLenCap* = 8'i32
   StandWindow* = 4'i32     # a stop held when no fast step was observed in its first StandWindow ticks
+  ## Observation contract teams.view.1t (205): teams.view.1s's 740 floats, then an 11-float "hunt clock" block the
+  ## engine keeps per seat (HuntClocks; encodeTeamsViewT):
+  ##   740         enemy_gap     min(t - E, 720) / 720: E = the last tick an enemy-parity identity j (j mod 2 !=
+  ##                             selfTeam, so a disguised enemy still counts) had visible(j) = 1 and playerHp(j) > 0;
+  ##                             0 while one is visible
+  ##   741 + r     heart_gap[r]  r = 0..9, heart h = r xor selfTeam (the team frame over the MAP heart index; hearts come
+  ##                             in mirrored pairs 2m / 2m + 1): min(t - N[h], 2760) / 2760, N[h] = the last tick THIS SEAT
+  ##                             (selfX / selfY, not a teammate) was within 600 u of controlX / controlY(h)
+  ##                             (|d|^2 <= 360000); 0 while within; 0 when h >= heartCount (base column 25 + 10h,
+  ##                             present, tells real hearts from padding). Hearts 0..9 only.
+  ## E and N start at 0 (a match start counts as the last sighting / visit). Only ticks the seat is encoded alive on
+  ## are taken in, each once (as the history and stop clocks); a dead seat's block reads zeros, and the clocks keep
+  ## counting across the death (no reset at respawn), as a BASIC seat's variables do. A tick before the last one
+  ## taken in (a new match on the same seat), or resetHistory, starts them over. Built from SeatView only (visible /
+  ## playerHp of the identities, selfX / selfY, controlX / controlY, heartCount): what a BASIC seat keeps itself
+  ## (policy.bas inputs 36..42 = 3 x these columns, one tick later).
+  ObservationContractTeamsView1t* = "paintbot-pw.teams.view.1t"
+  HuntHearts* = 10
+  HuntWidth* = 1 + HuntHearts
+  TeamsViewTSize* = TeamsViewSSize + HuntWidth
+  EnemyGapCap* = 720'i32
+  HeartGapCap* = 2760'i32
+  HeartNear2* = 360000'i64  # within 600 u of a heart, inclusive
 static:
   doAssert TeamsViewSize == 512
   doAssert TeamsViewHSize == 612
   doAssert TeamsViewSSize == 740
+  doAssert TeamsViewTSize == 751
+  doAssert HuntHearts == TeamsHeartRows
   doAssert FfaCogWidth == 1 + 2 + 1 + 1 + Loci + 1 + 1 + 1 + 1 + 2 + 1
 
 type
   ObservationContractVersion* = enum
     ## Version numbers are the native ABI's (pw_create_observation).
-    ocTeamsView1 = 201, ocFfaView1 = 202, ocTeamsView1h = 203, ocTeamsView1s = 204
+    ocTeamsView1 = 201, ocFfaView1 = 202, ocTeamsView1h = 203, ocTeamsView1s = 204, ocTeamsView1t = 205
   ActionContractVersion* = enum
     acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13, acTeamsView1Move = 14, acTeamsView1Target = 15,
     acTeamsView1Raw = 16
@@ -167,9 +192,10 @@ const
   ObservationContractFfaView1Hash* = sha256Hex(ObservationContractFfaView1)
   ObservationContractTeamsView1hHash* = sha256Hex(ObservationContractTeamsView1h)
   ObservationContractTeamsView1sHash* = sha256Hex(ObservationContractTeamsView1s)
+  ObservationContractTeamsView1tHash* = sha256Hex(ObservationContractTeamsView1t)
   ## The teams game's contracts (teams.view.1 and its supersets) and the ones that keep a per-seat TeamsHistory.
-  TeamsObservationContracts* = {ocTeamsView1, ocTeamsView1h, ocTeamsView1s}
-  HistoryObservationContracts* = {ocTeamsView1h, ocTeamsView1s}
+  TeamsObservationContracts* = {ocTeamsView1, ocTeamsView1h, ocTeamsView1s, ocTeamsView1t}
+  HistoryObservationContracts* = {ocTeamsView1h, ocTeamsView1s, ocTeamsView1t}
   ActionContractTeamsView1Hash* = sha256Hex(ActionContractTeamsView1)
   ActionContractFfaView1PointerHash* = sha256Hex(ActionContractFfaView1Pointer)
   ActionContractTeamsView1OffsetHash* = sha256Hex(ActionContractTeamsView1Offset)
@@ -270,12 +296,14 @@ proc observationContractHash*(version: ObservationContractVersion): string =
   of ocFfaView1: ObservationContractFfaView1Hash
   of ocTeamsView1h: ObservationContractTeamsView1hHash
   of ocTeamsView1s: ObservationContractTeamsView1sHash
+  of ocTeamsView1t: ObservationContractTeamsView1tHash
 proc observationContractId*(version: ObservationContractVersion): string =
   case version
   of ocTeamsView1: ObservationContractTeamsView1
   of ocFfaView1: ObservationContractFfaView1
   of ocTeamsView1h: ObservationContractTeamsView1h
   of ocTeamsView1s: ObservationContractTeamsView1s
+  of ocTeamsView1t: ObservationContractTeamsView1t
 proc observationSize*(version: ObservationContractVersion): int =
   ## The fixed width of a contract. ffa.view.1's width follows the match (ffaViewLayout):
   ## ValueError here, so no caller can mistake it for a constant.
@@ -283,6 +311,7 @@ proc observationSize*(version: ObservationContractVersion): int =
   of ocTeamsView1: TeamsViewSize
   of ocTeamsView1h: TeamsViewHSize
   of ocTeamsView1s: TeamsViewSSize
+  of ocTeamsView1t: TeamsViewTSize
   of ocFfaView1: raise newException(ValueError, "observation contract ffa.view.1 has a per-match width (ffaViewLayout)")
 proc observationContractVersion*(hash: string): ObservationContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
@@ -290,6 +319,7 @@ proc observationContractVersion*(hash: string): ObservationContractVersion =
   elif hash == ObservationContractFfaView1Hash: ocFfaView1
   elif hash == ObservationContractTeamsView1hHash: ocTeamsView1h
   elif hash == ObservationContractTeamsView1sHash: ocTeamsView1s
+  elif hash == ObservationContractTeamsView1tHash: ocTeamsView1t
   elif retiredContract(hash): raise newException(ValueError, "neural observation contract " & RetiredMessage)
   else: raise newException(ValueError, "unknown neural observation contract")
 proc pairedAction*(version: ObservationContractVersion): ActionContractVersion =
@@ -716,20 +746,30 @@ type
   StopClocks* = object
     tick*: int32       # the last tick the clocks took in; -1 = none
     c*: array[16, StopClock]
+  HuntClocks* = object
+    ## teams.view.1t: the last tick an enemy was seen and the last tick the seat was near each heart (map index).
+    tick*: int32                      # the last tick the clocks took in; -1 = none
+    enemy*: int32                     # E; 0 at a match start
+    near*: array[HuntHearts, int32]   # N[h], h = map heart index 0..9; 0 at a match start
   TeamsHistory* = object
     ## The seat's last three observed alive ticks (a ring keyed by tick), kept by whoever encodes its observation
     ## (the native env per slot, a hosted seat itself). Reset at a match start. teams.view.1s: the stop clocks too
-    ## (untouched under teams.view.1h).
+    ## (untouched under teams.view.1h). teams.view.1t: the hunt clocks too (untouched under 1h / 1s).
     recs*: array[3, HistoryRecord]
     stops*: StopClocks
+    hunt*: HuntClocks
 
 proc resetStops(s: var StopClocks) =
   s.tick = -1
   for j in 0..<s.c.len: s.c[j] = StopClock(seen: -1, runStart: -1, runGap: StopAgeCap, stop: -1, brk: -1, stand: -1)
 
+proc resetHunt(c: var HuntClocks) =
+  c = HuntClocks(tick: -1)
+
 proc resetHistory*(h: var TeamsHistory) =
   for i in 0..<h.recs.len: h.recs[i] = HistoryRecord(tick: -1)
   h.stops.resetStops()
+  h.hunt.resetHunt()
 
 proc findRec(h: TeamsHistory, tick: int32): int =
   for i in 0..<h.recs.len:
@@ -843,6 +883,35 @@ proc encodeTeamsViewS*(v: SeatView, h: var TeamsHistory, output: var openArray[f
       output[o+6] = float32(if c.seen < 0: StopAgeCap else: min(t - c.seen, StopAgeCap)) / float32(StopAgeCap)
       output[o+7] = 0
 
+proc encodeTeamsViewT*(v: SeatView, h: var TeamsHistory, output: var openArray[float32]) =
+  ## Observation contract teams.view.1t: teams.view.1s (encodeTeamsViewS) into output[0 ..< 740], then the 11-float
+  ## hunt-clock block (ObservationContractTeamsView1t's doc). The clocks take in only the ticks the seat is observed
+  ## alive on (a dead seat's block is zeros; E and N keep their ticks, so a death counts as time passing), each tick
+  ## once (a second encode in the same tick writes the same floats); a tick before the last one taken in (a new match
+  ## on the same seat) starts them over.
+  if output.len != TeamsViewTSize: raise newException(ValueError, "invalid neural observation dimensions")
+  encodeTeamsViewS(v, h, output.toOpenArray(0, TeamsViewSSize-1))
+  for i in TeamsViewSSize..<TeamsViewTSize: output[i] = 0
+  if v.selfHp <= 0: return   # as the history and stop clocks: only a tick the seat is observed alive on counts
+  let t = v.worldTick
+  let side = v.selfTeam.int
+  let hearts = min(HuntHearts, v.heartCount.int)
+  if t < h.hunt.tick: h.hunt.resetHunt()
+  if t != h.hunt.tick:
+    for j in 0..<16:
+      if j mod 2 != side and v.visible(j) == 1 and v.playerHp(j) > 0:
+        h.hunt.enemy = t
+        break
+    let me = Point(x: v.selfX, z: v.selfY)
+    for i in 0..<hearts:
+      if distance2(me, Point(x: v.controlX(i), z: v.controlY(i))) <= HeartNear2: h.hunt.near[i] = t
+    h.hunt.tick = t
+  output[TeamsViewSSize] = float32(min(t - h.hunt.enemy, EnemyGapCap)) / float32(EnemyGapCap)
+  for r in 0..<HuntHearts:
+    let i = r xor side
+    if i < hearts:
+      output[TeamsViewSSize + 1 + r] = float32(min(t - h.hunt.near[i], HeartGapCap)) / float32(HeartGapCap)
+
 proc encodeObservation*(v: SeatView, version: ObservationContractVersion, output: var openArray[float32],
     inputs: openArray[int32] = [], rows = FfaViewRows(), mask = 0'u32, history: ptr TeamsHistory = nil) =
   ## The observation of the given contract: teams.view.1 (then the K user inputs of
@@ -865,6 +934,11 @@ proc encodeObservation*(v: SeatView, version: ObservationContractVersion, output
       raise newException(ValueError, "invalid neural observation dimensions")
     encodeTeamsViewS(v, history[], output.toOpenArray(0, TeamsViewSSize-1))
     for i, value in inputs: output[TeamsViewSSize+i] = userInputFeature(value)
+  of ocTeamsView1t:
+    if output.len != TeamsViewTSize + inputs.len or inputs.len > MaxUserInputs or history == nil:
+      raise newException(ValueError, "invalid neural observation dimensions")
+    encodeTeamsViewT(v, history[], output.toOpenArray(0, TeamsViewTSize-1))
+    for i, value in inputs: output[TeamsViewTSize+i] = userInputFeature(value)
   of ocFfaView1:
     let size = output.len - inputs.len
     if size < 0 or inputs.len > MaxUserInputs: raise newException(ValueError, "invalid neural observation dimensions")

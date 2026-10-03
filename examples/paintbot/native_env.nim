@@ -620,11 +620,13 @@ proc pw_env_version*(): cint {.exportc, cdecl, dynlib.} = 1
 proc pw_observation_size*(): cint {.exportc, cdecl, dynlib.} = TeamsViewSize
 proc pw_action_count*(): cint {.exportc, cdecl, dynlib.} = ActionSizes.len
 
-const NativeObservationVersions = [ocTeamsView1.int32, ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32]
+const NativeObservationVersions = [ocTeamsView1.int32, ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32,
+  ocTeamsView1t.int32]
 proc obsContract(version: int32): ObservationContractVersion =
-  ## A native observation version already checked to be 201, 202, 203 or 204.
+  ## A native observation version already checked to be 201, 202, 203, 204 or 205.
   if version == ocTeamsView1.int32: ocTeamsView1 elif version == ocTeamsView1h.int32: ocTeamsView1h
-  elif version == ocTeamsView1s.int32: ocTeamsView1s else: ocFfaView1
+  elif version == ocTeamsView1s.int32: ocTeamsView1s elif version == ocTeamsView1t.int32: ocTeamsView1t
+  else: ocFfaView1
 proc layoutOf(env: ptr NativeEnv): FfaViewLayout =
   ## The ffa.view.1 layout of the handle's current world.
   ffaViewLayout(env.n, env.world.controlHearts.len)
@@ -634,6 +636,7 @@ proc rowWidth(env: ptr NativeEnv): int =
   if env.obsVersion == ocFfaView1: env.layoutOf.size + env.userInputs
   elif env.obsVersion == ocTeamsView1h: TeamsViewHSize + env.userInputs
   elif env.obsVersion == ocTeamsView1s: TeamsViewSSize + env.userInputs
+  elif env.obsVersion == ocTeamsView1t: TeamsViewTSize + env.userInputs
   else: TeamsViewSize + env.userInputs
 proc actionHeads(env: ptr NativeEnv): seq[int] =
   ## The head sizes of the handle's action contract (teams.view.1: ActionSizes; ffa.view.1
@@ -680,7 +683,8 @@ proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.export
   ## 202 = ffa.view.1 (any seat count, pw_set_seats; the width follows the match:
   ## pw_handle_observation_size, pw_observation_layout), 203 = teams.view.1h (teams.view.1 + the 100-float
   ## motion-history block, 612 floats; the teams game only), 204 = teams.view.1s (teams.view.1h + the 128-float
-  ## stop-clock block, 740 floats; the teams game only). nil for any other version (the
+  ## stop-clock block, 740 floats; the teams game only), 205 = teams.view.1t (teams.view.1s + the 11-float
+  ## hunt-clock block, 751 floats; the teams game only). nil for any other version (the
   ## contracts before teams.view.1 were retired for BASIC parity) or a bad max_ticks.
   if obsVersion notin NativeObservationVersions: return nil
   createEnv(seed, maxTicks, obsContract(obsVersion))
@@ -690,6 +694,7 @@ proc pw_observation_size_for*(obsVersion: int32): cint {.exportc, cdecl, dynlib.
   ## (ffa.view.1), whose width follows the match (pw_handle_observation_size).
   if obsVersion == ocTeamsView1h.int32: return TeamsViewHSize.cint
   if obsVersion == ocTeamsView1s.int32: return TeamsViewSSize.cint
+  if obsVersion == ocTeamsView1t.int32: return TeamsViewTSize.cint
   if obsVersion != ocTeamsView1.int32: return -1
   TeamsViewSize.cint
 
@@ -720,7 +725,8 @@ proc pw_create_observation_inputs_v*(seed, maxTicks, obsVersion, userInputs: int
   ## floats, a policy seat's as its policy.bas set them, zeros for every other seat; K = 0 is
   ## pw_create_observation(seed, max_ticks, 202). nil for another version, a bad K or max_ticks.
   if obsVersion == ocTeamsView1.int32: return pw_create_observation_inputs(seed, maxTicks, userInputs)
-  if obsVersion notin [ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32] or userInputs notin 0'i32..MaxUserInputs.int32: return nil
+  if obsVersion notin [ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32, ocTeamsView1t.int32] or
+      userInputs notin 0'i32..MaxUserInputs.int32: return nil
   result = createEnv(seed, maxTicks, obsContract(obsVersion))
   if result != nil: cast[ptr NativeEnv](result).userInputs = userInputs.int
 
@@ -898,7 +904,7 @@ proc pw_user_inputs_contract_hash_v*(obsVersion, userInputs: int32, output: ptr 
   ## pw_user_inputs_contract_hash with the base contract named: 201 = teams.view.1u<K>,
   ## 202 = ffa.view.1u<K> ("paintbot-pw.ffa.view.1u<K>"). -1 for another version or bad args.
   if obsVersion == ocTeamsView1.int32: return pw_user_inputs_contract_hash(userInputs, output, capacity)
-  if obsVersion notin [ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32]: return -1
+  if obsVersion notin [ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32, ocTeamsView1t.int32]: return -1
   if output == nil or capacity < 65 or userInputs notin 1'i32..MaxUserInputs.int32: return -1
   let hash = userInputsContractHash(userInputs.int, obsContract(obsVersion))
   for i, c in hash: output[i] = c
@@ -2634,7 +2640,7 @@ const
   SnapFormat = 1'u64
   # Any change to a source that defines a snapshotted type changes the id: a blob loads only into the build that wrote it.
   SnapBuildId = sha256Hex(staticRead("sim.nim") & staticRead("mechanics.nim") & staticRead("native_env.nim") &
-    staticRead("neural_host.nim") & staticRead("bots.nim") & staticRead("kinship.nim") &
+    staticRead("neural_host.nim") & staticRead("neural_contract.nim") & staticRead("bots.nim") & staticRead("kinship.nim") &
     staticRead("training_labels.nim") & staticRead("snapshot.nim") & staticRead("../../src/polyworld/basic.nim") &
     staticRead("../../src/polyworld/rngs.nim"))
 
