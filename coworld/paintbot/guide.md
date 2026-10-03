@@ -47,7 +47,8 @@ public too: `glory(team)` (-1 for an invalid team) (rules 37). In FFA-kin mode
 (Heartland, below) owners and capturers are seats instead of teams: `controlOwner(i)`,
 its FFA-only alias `heartOwner(i)` and `controlCaptureTeam(i)` return the seat (0-15) or -1.
 
-Cogs have three base HP and three respawns (four lives total). Death loses equipment and respawns
+Cogs have three base HP and three respawns (four lives total); from rules 49, 10 base HP and a
+single life, so a cog that dies is out (see Rules 49). Death loses equipment and respawns
 after 72 ticks; spawn protection lasts 36 ticks. Initial spawns and respawns are within 350 world units
 of an owned heart, sampled with softmax over the sum of distances from living teammates (excluding
 self). Larger sums favor less-covered hearts. Temperature is 1,000 world units, with distances
@@ -78,7 +79,9 @@ Older replays retain their original capture-the-heart rules.
 - Vision is a 120-degree forward cone with unlimited distance and wall occlusion.
 - Paintball guns lock aim during a five-tick windup, then trace a hitscan ray.
   Friendly fire is enabled. Shots released together choose targets before damage.
-  Range is 5250 units. The user-selected cadence is one shot per second.
+  Range is 2133 units, 21 m (5250 before rules 49; 2000 in FFA-kin).
+  Long shots are unreliable from rules 49 (see Short guns). The user-selected cadence
+  is one shot per second.
 - Four grenade pickups refill after five seconds. Carry one; hold C to charge up
   to 24 ticks and release to throw. Grenades fly over walls, land after ten ticks,
   and deal three damage (two before rules 40) to every body in the blast, including
@@ -115,7 +118,8 @@ BASIC read-only data: `selfId`, `selfTeam`, `selfX`, `selfY`, `selfHp`, `carryin
 
 Queries: `visible(slot)`, `playerX(slot)`, `playerY(slot)`, `playerHp(slot)`,
 `playerCarrying(slot)`, `pickupCount()`, `pickupVisible(id)`, `pickupX(id)`,
-`pickupY(id)`, `pickupKind(id)` (0 grenade, 1 spray, 2 medkit, 3 armor),
+`pickupY(id)`, `pickupKind(id)` (0 grenade, 1 spray, 2 medkit, 3 armor, and from rules 49
+5 windex-mister, 6 sniper rifle, 7 radar),
 `glory(team)` (rules 37), `gloryHeartCount()`, `gloryHeartX(id)`, `gloryHeartY(id)`,
 `gloryHeartTicksLeft(id)` (rules 38). The scoreboard the HUD shows: `teamLives(team)` (lives
 left summed over the team's cogs, the count the behind-in-lives award compares),
@@ -358,6 +362,56 @@ A cog is out of the match once it is dead with no lives left. From rules 47, eve
 count, on top of the behind-in-lives award (a cog that runs out still counts toward the lives
 deficit as well). The team with fewer cogs out earns nothing. Teams recordings at rules 46 and
 older never pay it and replay as before.
+
+### Rules 49: short guns, one life, new items and self-destruct
+
+**One life, 10 HP.** Teams cogs carry 10 base HP (a medkit restores all 10) and a single life,
+like FFA-kin cogs: a cog that dies is out of the match. Gun, sniper and spray damage per hit,
+grenades and armor are unchanged, so fights take several hits.
+
+**Short guns.** The gun reaches 2133 units (21 m, about half the distance between the bases)
+instead of 5250; FFA-kin keeps its 2000. Two things make long shots unreliable, in both modes:
+
+- **Aim error.** The sideways jitter is about ten times wider (up to ~6.5 degrees either side,
+  triangular, so most shots stay near the aim line). Elevation and the FFA-kin territory
+  boost scale it as before.
+- **Duds.** A ball that reaches a cog farther than 711 units (a third of the reach) away
+  may land without bursting: no damage. The chance rises linearly to 50% at full reach. A
+  dud still stops at the cog it reached.
+
+On level ground with perfect aim at a still cog, about 100% of shots land at 500 units,
+67% at 1000, 39% at 1500 and 20% at full reach: 80% of max-range shots miss or fizzle.
+
+**New items.** The island (not the generated maps) adds one mirrored pair of each. Like other
+supplies they respawn 30 s after pickup.
+
+- **Sniper rifle** (`pickupKind` 6). Replaces the gun until death: the same windup and 1 damage,
+  but it reaches 4800 units (48 m, half the island's height) with the old tight aim and no
+  duds, and fires once every 4 s (tripled by armor, carrying or a trench, like the gun; a hit
+  never shortens it). It shares the spray can's slot: a cog carrying one cannot pick up the
+  other. BASIC: `hasSniper()`.
+- **Windex-mister** (`pickupKind` 5). For one minute its cog cannot attack (gun, sniper, spray,
+  grenade or self-destruct; an attack in progress is dropped), and every 15 s it heals 1 HP to
+  every living cog within 500 units, any team, itself included, up to max HP (four heals). A
+  blue halo the exact size of that radius marks who is healed. Death ends it; a misting cog
+  cannot pick up another. BASIC: `mistingTicks()` (ticks left, 0 when not misting) and
+  `playerMisting(slot)` (fog gated).
+- **Radar** (`pickupKind` 7). For one minute, or until its carrier picks up anything else or
+  dies, every living cog within 800 units of the carrier deals double damage (every weapon,
+  any team; several radars do not stack). The carrier cannot attack and moves at 60% speed.
+  An orange ring with a sweep line shows its reach. BASIC: `radarTicks()`, `radarBoost()`
+  (1 while your damage is doubled) and `playerRadar(slot)` (fog gated).
+
+**Self-destruct.** `selfDestruct()` in BASIC (Shift+X when playing in the viewer) blows the cog
+up on that tick, like a grenade landing where it stands: every other living cog within the
+grenade blast (360 units plus the body radius), allies included, takes the bomber's current HP
+as damage (armor absorbs as usual; walls and trenches do not matter), and the bomber dies
+whatever its shield or armor. Self-destructs go off in seat order before that tick's gunfire
+lands. Not while misting or carrying a radar.
+
+Neural seats (`teams.view.1`, `ffa.view.1`) do not see the three new pickup kinds: their rows
+read as unseen. Rules 49 recordings store the self-destruct order in every command; rules 48
+and older recordings keep their shapes and replay unchanged.
 
 ### Team vision (rules 42, opt-in)
 

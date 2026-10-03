@@ -70,6 +70,8 @@ const
   TerritoryBoostPercent* = 30
   ControlHeartRadius* = 140 # A cog within this (and a traversable line) touches a control heart.
   TeamsMaxHp = 3
+  # Rules 49: the teams game plays like FFA-kin's cogs - FfaMaxHp HP and a single life.
+  OneLifeRules* = 49
   # Compile-time exponential table keeps native/WASM sampling integer-only.
   # Scores are quantized to 10 world units (1% of the temperature).
   SpawnWeights = block:
@@ -114,7 +116,10 @@ type
     carrier*: int32 # -1 on ground
     returnAt*: int32
   PickupKind* = enum
-    grenadePickup, sprayPickup, medkitPickup, armorPickup, uniformPickup
+    grenadePickup, sprayPickup, medkitPickup, armorPickup, uniformPickup,
+    misterPickup ## Rules 49: the windex-mister (mechanics.nim MisterRules). Appended, so older kinds keep their ordinals.
+    sniperPickup ## Rules 49: the sniper rifle (mechanics.nim SniperRules).
+    radarPickup ## Rules 49: the radar (mechanics.nim RadarRules).
   Pickup* = object
     pos*: Point
     kind*: PickupKind
@@ -191,6 +196,10 @@ type
     greatShare*: seq[int32] # Great-heart bounty paid to each seat, in tenths.
     greatHearts*: array[2, GreatHeart]
     spawnAnchor*: seq[Point] # Where each seat's family (or the loner) spawns.
+    # Rules 49; hashed from then on, so older hashes are unchanged.
+    misterUntil*: seq[int32] # The tick a seat's windex-mister runs out (its last heal); 0 when not misting.
+    sniper*: seq[bool] # Whether a seat carries the sniper rifle (it replaces the gun until death).
+    radarUntil*: seq[int32] # The tick a seat's radar runs out; 0 when it carries none.
   TerritoryWorld = object
     seed*, tick*: int32
     rng*: Rng
@@ -225,6 +234,7 @@ type
     goal*, aim*: Point
     chargeGrenade*: bool
     sneak*: bool
+    selfDestruct*: bool ## rules 49: blow up now (mechanics.nim SelfDestructRules); recorded from rules 49
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
@@ -234,7 +244,7 @@ type GameMode* = enum
   gmTeams, gmFfaKin
 # Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
 # still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
-const LiveRules* = 48
+const LiveRules* = 49
   ## The rules live games play and record (game.nim's replayRulesVersion starts here too). The
   ## training library defaults to its own NativeRules and accepts NativeRules .. LiveRules.
 const FfaFogRules* = 48
@@ -346,8 +356,9 @@ proc wadesToWetGoals*(): bool =
   ## older, and FFA at 43 and older, keep the rules-38 dry anchors.
   visionRulesVersion >= 45 or (ffa() and visionRulesVersion >= 44)
 proc maxHp*(): int32 =
-  ## Base HP a cog spawns with and a medkit restores: FfaMaxHp in FFA-kin, 3 otherwise.
-  if ffa(): FfaMaxHp.int32 else: TeamsMaxHp.int32
+  ## Base HP a cog spawns with and a medkit restores: FfaMaxHp in FFA-kin and from rules 49,
+  ## 3 in the teams game before.
+  if ffa() or visionRulesVersion >= OneLifeRules: FfaMaxHp.int32 else: TeamsMaxHp.int32
 proc seatMaxHp*(slot: int): int32 =
   ## The HP this seat spawns with and a medkit restores: maxHp(), or a training handicap.
   when defined(pwTraining):
@@ -1003,6 +1014,9 @@ proc sizeSeats*(w: var World) =
   w.heartSeconds.setLen(Seats)
   w.greatShare.setLen(Seats)
   w.spawnAnchor.setLen(Seats)
+  w.misterUntil.setLen(Seats)
+  w.sniper.setLen(Seats)
+  w.radarUntil.setLen(Seats)
 proc newWorld*(seed: int32, endTick: int32 = 0): World =
   ## A world for the current seat count (Seats; see configureSeats).
   configureRules(visionRulesVersion)
@@ -1198,6 +1212,8 @@ proc stateHash*(w: World): uint32 =
         if visionRulesVersion >= 38: result.addHashy(value)
       elif name in ["seatScore", "heartSeconds", "greatShare", "greatHearts", "spawnAnchor"]:
         if ffa(): result.addHashy(value)
+      elif name in ["misterUntil", "sniper", "radarUntil"]:
+        if visionRulesVersion >= 49: result.addHashy(value)
       else: result.addHashy(value)
     return
   if visionRulesVersion >= 13:
@@ -1230,6 +1246,8 @@ proc dropHeart(w: var World, slot: int) =
   w.cogs[slot].carrying = false
 # Optional spectator instrumentation lives outside World and its hash.
 var observeShot*: proc(tick: int32, slot: int) {.closure.}
+var observeMisterHeal*: proc(tick: int32, cog, mister: int) {.closure.}
+  ## Rules 49: `mister`'s windex-mister healed `cog` 1 HP.
 var observeHit*: proc(tick: int32, victim, attacker: int,
     pos: Point) {.closure.}
 var observeTag*: proc(tick: int32, victim, attacker: int,

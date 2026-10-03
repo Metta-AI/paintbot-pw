@@ -105,6 +105,8 @@
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_h.nim": 40.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_t.nim": 75.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_shadow.nim": 60.0,
-    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_mixed_contracts.nim": 30.0
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_mixed_contracts.nim": 30.0,
+    "nim r tests/test_paintbot_short_gun.nim": 20.0,
+    "nim r tests/test_paintbot_rules49_items.nim": 25.0
   }
 }

@@ -167,7 +167,7 @@ while nk < nearN
         cost = cost - 2500000
         thief = i
       end if
-      if cost < bestCost and d2 <= 27562500 then
+      if cost < bestCost and d2 <= gunRange() * gunRange() then
         best = i
         bestCost = cost
       end if
