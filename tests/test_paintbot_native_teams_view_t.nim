@@ -197,6 +197,7 @@ type
   GameSpec = object
     seed, rules, map: int32   # map -1 = the rules' own island (Heartwick)
     team, scripted: bool      # team vision; base.bas on every seat (else sticky random heads)
+    parked: bool              # every seat stays put facing its own side (no enemy in sight: the 720 cap is reached)
     ticks, fire: int          # fire: one random tick in `fire` shoots (0 = never)
   GameStats = object
     rows, dead, enemyZero, enemyMid, enemyCap, heartZero, heartMid, heartCap, ticks: int
@@ -246,7 +247,12 @@ proc game(g: GameSpec): GameStats =
       for k in 0..<10:
         if (k xor team(s)) >= hearts: continue
         if want[1+k] == 0: inc result.heartZero elif want[1+k] == 1: inc result.heartCap else: inc result.heartMid
-    if not g.scripted:
+    if g.parked:
+      for s in 0..<Seats:
+        actions[s*5] = 0
+        actions[s*5+1] = 21   # compass west, mirrored for team 1: toward the seat's own side
+        actions[s*5+2] = 0; actions[s*5+3] = 0; actions[s*5+4] = 0
+    elif not g.scripted:
       for s in 0..<Seats:
         # sticky random heads: head for a heart (or anywhere) for a while
         if hold[s] == 0:
@@ -361,12 +367,14 @@ suite "Observation contract teams.view.1t (205)":
       GameSpec(seed: 64, rules: 47, map: -1, team: true, scripted: true, ticks: 900),
       GameSpec(seed: 65, rules: 48, map: 0, ticks: 900, fire: 4),        # twin-mesas
       GameSpec(seed: 66, rules: 47, map: 7, scripted: true, ticks: 900),  # atoll
-      GameSpec(seed: 67, rules: 48, map: 10, ticks: 1200, fire: 4)]      # big-twin-mesas: 100 hearts, rows 0..9
+      GameSpec(seed: 67, rules: 48, map: 10, ticks: 1200, fire: 4),      # big-twin-mesas: 100 hearts, rows 0..9
+      GameSpec(seed: 68, rules: 48, map: -1, parked: true, ticks: 1500),
+      GameSpec(seed: 69, rules: 47, map: 3, parked: true, ticks: 1000)]   # crater
     var long = 0
     for g in specs:
       let s = game(g)
       echo "  seed ", g.seed, " rules ", g.rules, " map ", g.map, (if g.team: " team vision" else: ""),
-        (if g.scripted: " base.bas" else: " random heads"), ": ticks ", s.ticks, ", rows ", s.rows, ", dead ", s.dead,
+        (if g.parked: " parked" elif g.scripted: " base.bas" else: " random heads"), ": ticks ", s.ticks, ", rows ", s.rows, ", dead ", s.dead,
         "; enemy 0 / mid / cap ", s.enemyZero, " / ", s.enemyMid, " / ", s.enemyCap,
         "; hearts 0 / mid / cap ", s.heartZero, " / ", s.heartMid, " / ", s.heartCap
       if s.ticks >= 2900: inc long
@@ -463,16 +471,19 @@ suite "Observation contract teams.view.1t (205)":
     check look(4023, far) == row(4023, e, n) and look(4023, far)[7] == 1
     # death and respawn: zeros while dead (near heart 8 and in sight of an enemy: neither counts), the clocks span the
     # death, and the spawn heart reads 0 on the first alive tick
+    n[2] = 4099
+    check look(4099, heart(2)) == row(4099, e, n)
+    x = look(4100, far, other = 1)
+    require sees(1)
     e = 4100
-    n[2] = 4100
-    check look(4100, heart(2), other = 1) == row(4100, e, n)
+    check x == row(4100, e, n) and x[0] == 0
     for t in 4101..4110:
       x = look(t, heart(8), alive = false, other = 1)
       for c in 0..<11: check x[c] == 0
     n[0] = 4111
     x = look(4111, heart(0))
     check x == row(4111, e, n)
-    check x[0] == q(11) and x[1] == 0 and x[3] == g(11) and x[9] == 1
+    check x[0] == q(11) and x[1] == 0 and x[3] == g(12) and x[9] == 1
     # a disguised enemy shows a friendly-parity identity: not an enemy sighting
     w.uniforms[1] = true
     x = look(4200, far, other = 1)
