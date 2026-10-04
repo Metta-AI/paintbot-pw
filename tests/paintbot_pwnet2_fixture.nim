@@ -298,3 +298,9 @@ proc tokenPair*(r: var Rand, source, tokenIn, p, geoBase, geoStride, geoX, geoZ:
   result.tensors = r.weights(2*p*tokenIn, 1.0/sqrt(tokenIn.float))
   result.tensors.add r.weights(p*10, 0.5)
   result.tensors.add r.weights(p, 0.1)
+
+proc delay*(offset, length: int, init: seq[float32]): Spec =
+  ## DELAY: y = [x, prev]; prev = init on a fresh or zeroed state, else the slice x[offset ..< offset+length] of the
+  ## previous inference. Weights init [length].
+  result = Spec(code: 16, params: [offset.uint32, length.uint32, 0, 0, 0, 0, 0, 0])
+  result.tensors = init

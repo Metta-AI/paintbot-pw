@@ -7,7 +7,7 @@ type
     ## PWNET002 layer type codes (the u32 `type` of a layer record).
     lkDense = 1, lkRmsNorm = 2, lkMinGru = 3, lkResidual = 4, lkEntityAttn = 5, lkConcatInput = 6,
     lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9, lkSegmentNear = 10, lkAttnPool = 11,
-    lkPad = 12, lkCondHead = 13, lkTokenPair = 14, lkPointerK = 15
+    lkPad = 12, lkCondHead = 13, lkTokenPair = 14, lkPointerK = 15, lkDelay = 16
   AttnGroup = object
     offset, stride, count, width, valid: int  # valid = -1: every token of the group is valid
     weight: int                               # E_g [d, width] then e_g [d], offsets into weights
@@ -26,10 +26,11 @@ type
     relu, highway: bool
     gates: int             # MINGRU: 3 with highway, 2 without
     eps: float32
-    stateOffset: int       # MINGRU: this layer's slice of the recurrent state
+    stateOffset: int       # MINGRU / DELAY: this layer's slice of the recurrent state
     source: int            # RESIDUAL: the earlier layer added; CONCAT_INPUT: input offset;
-                           # TOKEN_MIX / POINTER: the TOKEN_MLP / TOKEN_MIX layer read
-    length: int            # CONCAT_INPUT: slice length; POINTER: the output offset of token 0
+                           # TOKEN_MIX / POINTER: the TOKEN_MLP / TOKEN_MIX layer read;
+                           # DELAY: the offset of the delayed slice in the current vector
+    length: int            # CONCAT_INPUT / DELAY: slice length; POINTER: the output offset of token 0
     output: int            # scratch offset of this layer's output (outWidth floats)
     groups: seq[AttnGroup] # ENTITY_ATTN
     dModel, heads, blocks, ff, passOffset, passLength, tokens: int
@@ -152,7 +153,7 @@ proc interpolate(a, b, weight: float32): float32 =
 # ---------------------------------------------------------------------------------------
 # PWNET002: the architecture is data. A layer stack from a fixed menu (DENSE, RMSNORM,
 # MINGRU, RESIDUAL, ENTITY_ATTN, CONCAT_INPUT, TOKEN_MLP, TOKEN_MIX (both with an optional pre-relu
-# LayerNorm), POINTER, SEGMENT_NEAR, ATTN_POOL, PAD), FP32
+# LayerNorm), POINTER, SEGMENT_NEAR, ATTN_POOL, PAD, COND_HEAD, TOKEN_PAIR, POINTER_K, DELAY), FP32
 # (SEGMENT_NEAR's geometry: float64), fixed summation order, loaded and validated once, run
 # with bounded per-model scratch sized at load (no inference allocation). The format,
 # equations and the published operation-count formula are in neural_actor.md ("PWNET002").
@@ -164,7 +165,7 @@ const
   MaxNet2Parameters* = 4_194_304
   MaxNet2Layers* = 64
   MaxNet2Width* = 4096      # any vector between layers
-  MaxNet2State* = 4096      # recurrent floats, all MINGRU layers together
+  MaxNet2State* = 4096      # recurrent floats, all MINGRU and DELAY layers together
   MaxMinGruHidden* = 1024
   MaxAttnGroups* = 8
   MaxAttnTokens* = 256
@@ -739,6 +740,24 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       if layer.outWidth > MaxNet2Width: net2Error(where & "TOKEN_PAIR output exceeds " & $MaxNet2Width)
       work = max(work, 2*t*pw + pw + TokenPairFeatures + 2*t)
       layer.operations = tokenPairOps(t, d, pw, width)
+    of lkDelay.uint32:
+      # DELAY (neural_actor.md): y = [x, prev], prev = init until the layer has run since the last state reset,
+      # then the slice x[offset ..< offset + length] of the previous inference. Its state: that slice, then a
+      # primed flag (0 in a fresh or zeroed state, 1 once the layer has run).
+      layer.kind = lkDelay
+      layer.source = int(q[0])  # the slice's offset in the current vector
+      layer.length = int(q[1])
+      unused(2)
+      if layer.length notin 1..MaxNet2Width or layer.source > width or layer.length > width - layer.source:
+        net2Error(where & "DELAY slice outside the width " & $width)
+      layer.weight = net.weights.len
+      net.readWeights(data, p, layer.length)  # init [length]
+      layer.stateOffset = net.stateSize
+      net.stateSize += layer.length + 1
+      if net.stateSize > MaxNet2State: net2Error(where & "recurrent state exceeds " & $MaxNet2State)
+      layer.outWidth = width + layer.length
+      if layer.outWidth > MaxNet2Width: net2Error(where & "DELAY output exceeds " & $MaxNet2Width)
+      layer.operations = int64(layer.length)
     of lkCondHead.uint32:
       layer.kind = lkCondHead
       let whenHead = int(q[0])
@@ -1372,6 +1391,17 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
       attnPool(layer[], net.layers[layer.source], x, w, scratch, scratch.at(net.work), y)
     of lkTokenPair:
       tokenPair(layer[], net.layers[layer.source], x, input, w, scratch, scratch.at(net.work), y)
+    of lkDelay:
+      # y = [x, prev]; the next state (the slice now, primed) is staged and committed with every other state.
+      let n = layer.length
+      let old = oldState.at(layer.stateOffset)
+      let init = w.at(layer.weight)
+      let next = scratch.at(net.nextState + layer.stateOffset)
+      for i in 0..<layer.inWidth: y[i] = x[i]
+      let primed = old[n] != 0'f32
+      for i in 0..<n: y[layer.inWidth+i] = if primed: old[i] else: init[i]
+      for i in 0..<n: next[i] = x[layer.source+i]
+      next[n] = 1'f32
     of lkCondHead:
       # A declaration for the selection (Actor.conditionals); the vector passes through.
       for i in 0..<layer.outWidth: y[i] = x[i]

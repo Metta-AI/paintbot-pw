@@ -726,6 +726,19 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
                 bad(where + "TOKEN_PAIR output exceeds %d" % lim["width"])
             token_layers[k] = ("pair", tokens, d + 2 * pw)
             operations += token_pair_ops(tokens, d, pw, width)
+        elif code == 16:  # DELAY: y = [x, prev]; state = the slice and a primed flag (neural_actor.nim lkDelay)
+            offset, length = q[0], q[1]
+            unused(2)
+            if not 1 <= length <= lim["width"] or offset > width or length > width - offset:
+                bad(where + "DELAY slice outside the width %d" % width)
+            weights(length)
+            state += length + 1
+            if state > lim["state"]:
+                bad(where + "recurrent state exceeds %d" % lim["state"])
+            out = width + length
+            if out > lim["width"]:
+                bad(where + "DELAY output exceeds %d" % lim["width"])
+            operations += length
         elif code == 13:  # COND_HEAD
             when_head, head = q[0], q[1]
             unused(2)

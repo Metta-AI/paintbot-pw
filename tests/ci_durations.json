@@ -104,6 +104,7 @@
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_raw_heads.nim": 40.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_h.nim": 40.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_t.nim": 75.0,
+    "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_delay.nim": 45.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_shadow.nim": 60.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_mixed_contracts.nim": 30.0
   }
