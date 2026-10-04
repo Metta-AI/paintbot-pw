@@ -2610,7 +2610,7 @@ proc pw_net_contracts*(net: pointer, output: ptr UncheckedArray[char], capacity:
 
 proc pw_net_infer*(net: pointer, observation, state, logits: ptr UncheckedArray[float32]): cint {.exportc, cdecl, dynlib.} =
   ## One inference, the hosted seat's run_neural_net: reads `inputs` observation floats and
-  ## the `state` floats (all MINGRU states in layer order), writes the new state in place
+  ## the `state` floats (every MINGRU and DELAY state, in layer order), writes the new state in place
   ## and `outputs` logits. Returns 0; -1 bad arguments; -2 when inference fails (a
   ## nonfinite input, state, intermediate or output), leaving state and logits untouched,
   ## as the hosted seat is then disabled without committing either. The reset convention is

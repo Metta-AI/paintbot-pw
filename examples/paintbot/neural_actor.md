@@ -106,8 +106,8 @@ must be 0; every flag must be 0 or 1. The file is at most 16 MiB (the package bo
 The network carries one vector from layer to layer. Before layer 0 it is the observation
 (width I). Each layer reads the current vector (its declared input width must equal the
 current width), writes its output, and that output becomes the current vector. The last
-layer's width must equal O. The recurrent state is every MINGRU layer's state,
-concatenated in layer order (at most 4096 floats); a stack without MINGRU keeps no state.
+layer's width must equal O. The recurrent state is every MINGRU and DELAY layer's state,
+concatenated in layer order (at most 4096 floats); a stack without MINGRU or DELAY keeps no state.
 Layers that read "the input" (CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP) read the raw observation, or,
 when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 
@@ -128,14 +128,16 @@ when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 | 13 | COND_HEAD | `when_head, head` | `W[size(head), size(when_head)]` |
 | 14 | TOKEN_PAIR | `source, p, geo_base, geo_stride, x, z, self_pairs` | `A[p, d]`, `B[p, d]`, `C[p, 10]`, `b[p]` |
 | 15 | POINTER_K | `source, offset, k` | `V[k, z]`, `c[k]` (z = the source's token width) |
+| 16 | DELAY | `offset, len` | `init[len]` |
 
 Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1024;
 `act` 0 = none, 1 = relu; `eps` finite and > 0; TOKEN_MLP tokens 1..256, segments 1..8, layers
 1..4, at most 1024 gathered floats per token, TOKEN_MLP widths and TOKEN_MIX `z` 1..256;
 ENTITY_ATTN at most 256 tokens over all groups; SEGMENT_NEAR only as layer 0, tokens 1..256;
 ATTN_POOL heads 1..32, `key` and `value` 1..256, heads x key and heads x value at most 1024;
-PAD `at` <= the current width, `len` 0..4096. (The token caps were 64 before the per-match
-FFA contract; a model within the old caps loads and costs exactly as before.)
+PAD `at` <= the current width, `len` 0..4096; DELAY `len` 1..4096 with `offset + len` <= the
+current width. (The token caps were 64 before the per-match FFA contract; a model within the old
+caps loads and costs exactly as before.)
 
 ### Layout words
 
@@ -184,6 +186,14 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
   equations and expressions: PWNET001's actor is exactly
   `DENSE(I, H, no bias, none) -> MINGRU(H, H, highway, no bias) -> DENSE(H, O, no bias, none)`,
   bit for bit, with the same operation count.
+- **DELAY** (an exact one-inference delay of a slice of the current vector): the layer's state slice
+  is `len + 1` floats, the stored slice `m[len]` then a primed flag `f`. Output (width `W + len`):
+  `y = [x, prev]` with `prev = init` when `f == 0` (a fresh or zeroed state: the first inference
+  after initial use, match reset, death or respawn) and `prev = m` otherwise. The state slice
+  becomes `[x[offset ..< offset + len], 1]`, staged and committed with every other state (so a
+  failed inference commits none of it). `prev` is therefore exactly the slice this layer read on
+  the seat's previous inference since the last reset, or `init` on the first. MINGRU cannot give
+  this: its output at tick t always mixes in its current input whenever its state updates.
 - **RESIDUAL**: `y = x + output(start)`, where `start` names an earlier layer (0-based,
   `start < this layer's index`) whose output width equals the current width.
 - **CONCAT_INPUT**: `y = [x, input[offset ..< offset+len]]`, reading the raw observation
@@ -366,6 +376,7 @@ unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 | ENTITY_ATTN | `embed + blocks*block + pool` (+ `T*d + T` when a later layer reads its token rows) |
 | ATTN_POOL | `W + (2*W*h*k + h*k) + T*((2*z*h*k + h*k) + h*(2*k + 1) + h*(8 + 3) + (2*z*h*v + h*v) + 2*h*v) + h*(T + 8)` |
 | PAD | `W + len` |
+| DELAY | `len` |
 | COND_HEAD | `W + size(head)` (the copy, and the column add at selection) |
 | TOKEN_PAIR | `W + T*(4*d*p + 2 + d) + T*T*(18 + 26*p) + T*(8 + p) + pool(d + 2p)` |
 

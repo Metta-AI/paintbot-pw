@@ -819,6 +819,38 @@ class Pwnet2Tests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, fragment):
                 validate_pwnet2(pwnet2(64, heads, layers))
 
+    def test_delay_cost_state_and_structure(self):
+        # DELAY (16): params offset, len; weights init [len]; y = [x, prev]; state len + 1 floats; cost len.
+        heads = [2, 2, 2, 3]
+        body = [(1, [64, 20, 1, 0], [], 64 * 20 + 20), (3, [20, 20, 1, 0], [], 3 * 20 * 20)]
+        tail = [(1, [23, 9, 1], [], 23 * 9 + 9)]
+        base = validate_pwnet2(pwnet2(64, heads, body + [(1, [20, 9, 1], [], 20 * 9 + 9)]))
+        info = validate_pwnet2(pwnet2(64, heads, body + [(16, [5, 3], [], 3)] + tail))
+        self.assertEqual(base["state"], 20)
+        self.assertEqual(info["state"], 20 + 3 + 1)
+        self.assertEqual(info["parameters"], base["parameters"] + 3 + 3 * 9)
+        self.assertEqual(info["operations"], base["operations"] - (2 * 20 * 9 + 9) + 3 + (2 * 23 * 9 + 9))
+        two = validate_pwnet2(pwnet2(64, heads, [(16, [0, 64], [], 64), (16, [60, 68], [], 68),
+                                                 (1, [196, 9, 1], [], 196 * 9 + 9)]))
+        self.assertEqual(two["state"], 65 + 69)
+        cases = [
+            ([(16, [0, 0], [], 0)] + [(1, [64, 9], [], 64 * 9)], "DELAY slice outside"),
+            ([(16, [60, 5], [], 5)] + [(1, [69, 9], [], 69 * 9)], "DELAY slice outside"),
+            ([(16, [65, 1], [], 1)] + [(1, [65, 9], [], 65 * 9)], "DELAY slice outside"),
+            ([(16, [0, 4, 1], [], 4)] + [(1, [68, 9], [], 68 * 9)], "unused parameter 2"),
+            ([(16, [0, w], [], w) for w in (64, 128, 256, 512, 1024, 2048)]     # state 4038 of 4096
+             + [(1, [4096, 64], [], 4096 * 64), (16, [0, 64], [], 64), (1, [128, 9], [], 128 * 9)],
+             "recurrent state exceeds"),
+            ([(1, [64, 4000], [], 64 * 4000), (16, [0, 200], [], 200), (1, [4200, 9], [], 4200 * 9)], "output exceeds"),
+            (body + [(16, [5, 3], [], 2)] + tail, ""),
+        ]
+        for layers, fragment in cases:
+            with self.assertRaisesRegex(ValueError, fragment):
+                validate_pwnet2(pwnet2(64, heads, layers))
+        with self.assertRaisesRegex(ValueError, "COND_HEAD layers must come after"):
+            validate_pwnet2(pwnet2(64, [2, 2, 2, 3], [(1, [64, 9], [], 576), (13, [0, 1], [], 4), (16, [0, 1], [], 1),
+                                                       (1, [10, 9], [], 90)]))
+
     def test_cond_head_cost_and_structure(self):
         # COND_HEAD (13): params (condition head, re-selected head), weights size(head) x size(condition head),
         # passes the vector through; costs the copy of the width and the column add. After every other layer.
