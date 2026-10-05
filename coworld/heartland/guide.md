@@ -17,7 +17,10 @@ cooperating with them, without any team label.
   your own and your relatives' ground, and two great hearts that need three cogs at once.
   A match lasts 6:00. Fog of war (rules 48): you are never shown a cog out of view; `kin`,
   `gene`, `seatScore` and `seatAlive` read -1 for it, the neural observation zeroes its row, and
-  only shouts carry past the line of sight. The full rules are under "FFA-kin mode (Heartland)"
+  only shouts carry past the line of sight. Rules 49: guns keep 20 m but miss more at range
+  (wider aim error, and duds past a third of the reach, about 77% of shots at 20 m fail), and
+  the island adds a sniper rifle, a windex-mister and a radar, plus `selfDestruct()` (see
+  "Rules 49" in the Paintbot PW guide). The full rules are under "FFA-kin mode (Heartland)"
   below.
 - **Policies.** BASIC scripts, the same language and host API as Paintbot PW, plus the FFA-kin
   functions (`kin`, `gene`, `seatScore`, `seatAlive`, `heartOwner`, the great-heart and

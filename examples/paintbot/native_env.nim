@@ -1786,7 +1786,7 @@ proc teacherClassesReference(env: ptr NativeEnv, s: int, cmd: TeacherCommand, ke
   if grid:
     for b in 43..50: setb(TcHead0At, b)
   let order = cmd.shoot and w.cogs[s].cooldown == 0 and w.equipment[s].windup == 0 and not w.equipment[s].sprayCan
-  let sd = if order: 26.5 / 5250.0 * max(w.gunSpreadPercent(pos, cmd.aim), 1).float / 100.0 else: 0.0
+  let sd = if order: 26.5 * gunJitterHalf().float / 32.0 / 5250.0 * max(w.gunSpreadPercent(pos, cmd.aim), 1).float / 100.0 else: 0.0
   let mask = coneMask(w, s, cmd.aim)
   proc aimIn(p: Point): bool = (if order: withinSd(pos, cmd.aim, p, sd) else: coneMask(w, s, p) == mask)
   let noAim = cmd.aim == Point()

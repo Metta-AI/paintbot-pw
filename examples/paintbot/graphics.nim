@@ -94,6 +94,9 @@ var
   insetSize = 0.25'f32
   bars = true
   trails = false
+  healHp: seq[int32] ## every cog's HP at healTick, to spot heals as playback advances
+  healTick = -1'i32
+  heals: seq[tuple[seat, tick, amount: int32]] ## recent heals, each floating a green "+N"
   camX = 0'f32
   camZ = 0'f32
   distance = 60'f32
@@ -123,6 +126,9 @@ proc chargeGrenade(held: cint) {.exportc: "pw_charge", cdecl,
 proc sneak(held: cint) {.exportc: "pw_sneak", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   setSneaking(held != 0 and options.playerSlot > 0 and not replayMode and not transport.inHistory)
+proc destruct() {.exportc: "pw_destruct", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  if options.playerSlot > 0 and not replayMode and not transport.inHistory: queueSelfDestruct()
 proc issueOrder(x, y: cfloat, kind, seat: cint) {.exportc: "pw_order", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   if options.playerSlot > 0 and not replayMode and not transport.inHistory:
@@ -1148,6 +1154,9 @@ proc runGraphics*() =
         of uniformPickup: rgbx(192, 126, 245, 255)
         of armorPickup: rgbx(96, 191, 241, 255)
         of medkitPickup: rgbx(243, 238, 207, 255)
+        of misterPickup: rgbx(64, 196, 255, 255)
+        of sniperPickup: rgbx(214, 160, 70, 255)
+        of radarPickup: rgbx(255, 120, 60, 255)
       shapes.addCircle(position(item.pos, 0.04), if special: 1.0 else: 0.55, color)
       if special:
         shapes.equipmentPickup(p,eye,spin,item.kind == grenadePickup)
@@ -1162,6 +1171,18 @@ proc runGraphics*() =
       if item.kind == medkitPickup:
         shapes.box(p.x, p.y+0.49, p.z, 0.26, 0.03, 0.08, rgbx(215, 69, 66, 255), spin)
         shapes.box(p.x, p.y+0.49, p.z, 0.08, 0.03, 0.26, rgbx(215, 69, 66, 255), spin)
+      if item.kind == sniperPickup:
+        # A long rifle: dark barrel and a scope on top.
+        shapes.box(p.x, p.y+0.55, p.z, 0.9, 0.07, 0.07, rgbx(52, 56, 60, 255), spin)
+        shapes.box(p.x, p.y+0.68, p.z, 0.25, 0.07, 0.07, rgbx(20, 22, 24, 255), spin)
+      if item.kind == radarPickup:
+        # A radar mast with a spinning dish.
+        shapes.box(p.x, p.y+0.5, p.z, 0.06, 0.25, 0.06, rgbx(200, 205, 210, 255), 0)
+        shapes.box(p.x, p.y+0.8, p.z, 0.35, 0.05, 0.12, rgbx(255, 120, 60, 255), spin*3)
+      if item.kind == misterPickup:
+        # A spray bottle: blue body, white trigger head and nozzle.
+        shapes.box(p.x, p.y+0.62, p.z, 0.22, 0.16, 0.22, rgbx(240, 248, 255, 255), spin)
+        shapes.box(p.x+0.22, p.y+0.66, p.z, 0.2, 0.06, 0.06, rgbx(240, 248, 255, 255), spin)
 
     # Rules 38 glory hearts: small spinning gold hearts that blink out in their last five seconds.
     for heart in world.gloryHearts:
@@ -1223,6 +1244,12 @@ proc runGraphics*() =
           175, 66, 255))
       if e.sprayCan:
         shapes.sprayCan(poses[i]+vec3(0.72, 0.65, 0))
+      if world.hasSniper(i):
+        # Rules 49 sniper rifle: a long barrel with a scope, pointing along the cog's aim.
+        let c = world.cogs[i]
+        let yaw = arctan2(-(c.aim.z-c.pos.z).float32, (c.aim.x-c.pos.x).float32)
+        shapes.box(poses[i].x, poses[i].y+1.0, poses[i].z, 1.1, 0.07, 0.07, rgbx(52, 56, 60, 255), yaw)
+        shapes.box(poses[i].x, poses[i].y+1.12, poses[i].z, 0.3, 0.07, 0.07, rgbx(20, 22, 24, 255), yaw)
       for hp in 0..<e.armor: shapes.box(poses[i].x-0.3+hp.float32*0.25, poses[
           i].y+2.1, poses[i].z, 0.16, 0.09, 0.09, rgbx(65, 203, 245, 255))
     when defined(pwViewerProfile): profMark(15)
@@ -1314,9 +1341,88 @@ proc runGraphics*() =
         shapes.heartTower(base, eye, (if dormant: rgbx(128, 132, 138, 255) else: rgbx(255, 196, 60, 255)),
           heartAnimationTime, big = true)
     profMark(13)
+    # Heals (the windex-mister's, a medkit's) float a green "+N" over the cog for HealPopupTicks.
+    # Spotted from the HP the cogs had when the previous tick was drawn: a respawn (from 0) is not
+    # a heal, and a seek (backwards, or a long jump) clears the popups instead of inventing heals.
+    const HealPopupTicks = 36'i32
+    if world.tick != healTick:
+      let advanced = world.tick - healTick
+      if healTick >= 0 and advanced > 0 and advanced <= TickRate*2 and healHp.len == world.cogs.len:
+        for i, c in world.cogs:
+          if healHp[i] > 0 and c.hp > healHp[i]:
+            heals.add (i.int32, world.tick, c.hp - healHp[i])
+      else:
+        heals.setLen 0
+      healHp.setLen world.cogs.len
+      for i, c in world.cogs: healHp[i] = c.hp
+      healTick = world.tick
+      var kept: seq[tuple[seat, tick, amount: int32]]
+      for h in heals:
+        if world.tick - h.tick < HealPopupTicks: kept.add h
+      heals = kept
+    for h in heals:
+      let i = h.seat.int
+      if i >= world.cogs.len or world.cogs[i].hp <= 0 or not shown(i) or not onScreen(poses[i]): continue
+      let age = clamp(((world.tick - h.tick).float32 + alpha) / HealPopupTicks.float32, 0, 1)
+      let base = poses[i] + vec3(0, 3.2 + 1.8*age, 0)
+      # A billboard: right and up both lie in the screen plane, so the steep spectator camera
+      # does not squash the glyphs' vertical strokes.
+      let toEye = normalize(eye - base)
+      let right = normalize(cross(vec3(0, 1, 0), toEye))
+      let up = cross(toEye, right)
+      let green = rgbx(90, 255, 120, uint8(255*(1 - age*age)))
+      # Sized by distance, so the popup reads the same at every zoom.
+      let s = clamp(0.022'f32*length(eye - base), 0.5'f32, 2.4'f32)
+      proc stroke(x0, y0, x1, y1: float32) =
+        shapes.addLine(base + right*(x0*s) + up*(y0*s), base + right*(x1*s) + up*(y1*s), green,
+          halfWidth = 0.2*s)
+      # The text is centred on the cog: a plus, then the amount in seven-segment digits.
+      let digits = $h.amount
+      var x = -(1.4 + 1.3*digits.len.float32) / 2
+      stroke(x, 1, x + 1, 1)
+      stroke(x + 0.5, 0.5, x + 0.5, 1.5)
+      x += 1.4
+      for ch in digits:
+        # Segments a..g over a 0.9-wide, 2-tall cell.
+        const segs = [(0'f32, 2'f32, 0.9'f32, 2'f32), (0.9'f32, 2'f32, 0.9'f32, 1'f32),
+          (0.9'f32, 1'f32, 0.9'f32, 0'f32), (0'f32, 0'f32, 0.9'f32, 0'f32), (0'f32, 1'f32, 0'f32, 0'f32),
+          (0'f32, 2'f32, 0'f32, 1'f32), (0'f32, 1'f32, 0.9'f32, 1'f32)]
+        const lit = ["abcdef", "bc", "abged", "abgcd", "fgbc", "afgcd", "afgedc", "abc", "abcdefg", "abfgcd"]
+        for k, seg in segs:
+          if chr(ord('a') + k) in lit[ord(ch) - ord('0')]:
+            stroke(x + seg[0], seg[1], x + seg[2], seg[3])
+        x += 1.3
     for i, c in world.cogs:
       if c.hp <= 0 or not shown(i) or not onScreen(poses[i]): continue
       let p = poses[i]
+      if world.hasRadar(i):
+        # Rules 49 radar: an orange ring exactly RadarRadius wide; every cog inside deals double
+        # damage. A sweep line turns once a second.
+        let radius = RadarRadius.float32/100
+        shapes.addCircle(p+vec3(0, 0.012, 0), radius, rgbx(255, 120, 60, 28))
+        for n in 0..<64:
+          let a = 2*PI.float32*n.float32/64
+          let b = 2*PI.float32*(n+1).float32/64
+          shapes.addLine(p+vec3(cos(a)*radius, 0.07, sin(a)*radius),
+            p+vec3(cos(b)*radius, 0.07, sin(b)*radius), rgbx(255, 150, 80, 190), halfWidth = 0.05)
+        let sweep = 2*PI.float32*((world.tick.float32+alpha)/TickRate.float32)
+        shapes.addLine(p+vec3(0, 0.08, 0), p+vec3(cos(sweep)*radius, 0.08, sin(sweep)*radius),
+          rgbx(255, 200, 140, 170), halfWidth = 0.04)
+        shapes.box(p.x, p.y+1.6, p.z, 0.35, 0.05, 0.12, rgbx(255, 120, 60, 255), sweep)
+      if world.misting(i):
+        # Rules 49 windex-mister: a blue halo exactly MisterRadius wide marks every cog it heals.
+        # It brightens for half a second after each heal.
+        let radius = MisterRadius.float32/100
+        let sinceHeal = (MisterTicks-(world.misterUntil[i]-world.tick)) mod MisterHealTicks
+        let flash = if sinceHeal < TickRate div 2 and world.misterUntil[i]-world.tick < MisterTicks:
+            1-sinceHeal.float32/(TickRate div 2).float32 else: 0'f32
+        shapes.addCircle(p+vec3(0, 0.015, 0), radius, rgbx(64, 196, 255, uint8(38+70*flash)))
+        for n in 0..<64:
+          let a = 2*PI.float32*n.float32/64
+          let b = 2*PI.float32*(n+1).float32/64
+          shapes.addLine(p+vec3(cos(a)*radius, 0.06, sin(a)*radius),
+            p+vec3(cos(b)*radius, 0.06, sin(b)*radius), rgbx(150, 225, 255, uint8(170+85*flash)),
+            halfWidth = 0.05+0.06*flash)
       if ffa():
         # Kin view: kin of the selected cog get a halo as bright as their relatedness; with
         # families picked in the header, their cogs get the halo. Everyone else fades to 40%.
@@ -1365,6 +1471,10 @@ proc runGraphics*() =
         let color=if ffa():kinColor(b.owner.int) elif team(b.owner.int)==0:rgbx(255,108,74,255) else:rgbx(89,220,255,255)
         shapes.paintball(ball,0.32-bead.float32*0.035,color)
         shapes.paintball(ball+vec3(-0.07,0.12,-0.04),0.085,rgbx(255,250,214,255))
+      if world.hasSniper(b.owner.int):
+        # A sniper shot also leaves a thin bright trail, so long-range fire reads at a glance.
+        shapes.addLine(position(start,1.05), mix(position(start,1.05),position(b.pos,1.05),f),
+          rgbx(255,244,200,200), halfWidth = 0.04)
     if islandTerrain: drawWater(vp, eye, (world.tick.float32+alpha)/24)
     profMark(7)
     shapes.draw(vp)

@@ -432,6 +432,11 @@ if worldTick mod 72 = 0 then
   progressY = selfY
 end if
 
+' Our HP cap is the most we have seen (spawn HP): 3 before rules 49, 10 from them.
+if selfHp > hpCap then
+  hpCap = selfHp
+end if
+
 ' Opponents and teammates in view. Every query is fog gated.
 best = -1
 bestCost = 2147483647
@@ -458,7 +463,7 @@ while i < 16
         cost = cost - 2500000
         thief = i
       end if
-      if cost < bestCost and d2 <= 27562500 then
+      if cost < bestCost and d2 <= gunRange() * gunRange() then
         best = i
         bestCost = cost
       end if
@@ -538,7 +543,7 @@ if useFocus and foesSeen > 0 then
     if visible(i) then
       dx = playerX(i) - selfX
       dy = playerY(i) - selfY
-      if dx * dx + dy * dy <= 27562500 then
+      if dx * dx + dy * dy <= gunRange() * gunRange() then
         ex = playerX(i) - fcX
         ey = playerY(i) - fcY
         cost = ex * ex + ey * ey - (3 - playerHp(i)) * kFocusHp
@@ -611,7 +616,7 @@ if jevInit = 0 then
   ' within 20 m falls back to the heart far from them and near us, so its squad arrives together.
   useKite = 0
   kKiteMargin = 1
-  kKiteFoeR2 = 27562500
+  kKiteFoeR2 = gunRange() * gunRange()
   kKiteMateR2 = 4000000
   ' useRush: we carry a grenade half our alive time and throw almost none - the leader's clusters
   ' sit at 30-50 m and a grenade lands at most 12.8 m out. A carrier that sees two or more enemies
@@ -1389,6 +1394,30 @@ if heartCount() > 0 then
   end if
 end if
 
+' Rules 49: a misting or radar cog cannot attack, so it keeps beside its nearest teammate,
+' inside the mister's heal (500) or the radar's boost (800).
+if (mistingTicks() > 0 or radarTicks() > 0) and not carrying then
+  mate = -1
+  mateD = 2147483647
+  i = 0
+  while i < 16
+    if i <> selfId and i mod 2 = selfTeam and visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      if dx * dx + dy * dy < mateD then
+        mate = i
+        mateD = dx * dx + dy * dy
+      end if
+    end if
+    i = i + 1
+  wend
+  if mate >= 0 and mateD > 90000 then
+    goalX = playerX(mate)
+    goalY = playerY(mate)
+    holding = 0
+  end if
+end if
+
 ' ---- Cover spot: a cover cog stands on the high point beside its post. ----
 if useCoverSpot and objective >= 0 and seat >= 2 and not carrying then
   if goalX <> controlX(objective) or goalY <> controlY(objective) then
@@ -1459,12 +1488,18 @@ if not carrying and thief < 0 then
   while j < pickupCount() and j < 64
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
       kind = pickupMemoryKind(j)
-      wanted = (kind = 0 and not hasGrenade and (kWantGrenade = 1 or (kWantGrenade = 2 and clSpread))) or (kind = 2 and selfHp < 3) or (kind = 3 and armorHp < 3 and selfHp = 3) or (kind = 1 and wantSpray)
+      wanted = (kind = 0 and not hasGrenade and (kWantGrenade = 1 or (kWantGrenade = 2 and clSpread))) or (kind = 2 and selfHp < hpCap) or (kind = 3 and armorHp < 3 and selfHp = hpCap) or (kind = 1 and wantSpray)
+      ' Rules 49 items: a sniper when we carry no spray, the mister when half hurt, the radar
+      ' among friends. Any pickup ends a radar, so its carrier takes only a medkit it needs.
+      wanted = wanted or (kind = 6 and hasSniper() = 0 and hasSpray = 0) or (kind = 5 and selfHp * 2 <= hpCap and mistingTicks() = 0) or (kind = 7 and friendsNear >= 3 and radarTicks() = 0)
+      if radarTicks() > 0 and not (kind = 2 and selfHp * 3 <= hpCap) then
+        wanted = 0
+      end if
       if wanted then
         dx = pickupMemoryX(j) - selfX
         dy = pickupMemoryY(j) - selfY
         cost = dx * dx + dy * dy
-        if kind = 2 and selfHp = 1 then
+        if kind = 2 and selfHp > 0 and selfHp * 3 <= hpCap then
           ' A medkit is worth a whole life to a cog on one hit point.
           cost = cost / 4
         end if
@@ -1480,7 +1515,7 @@ if not carrying and thief < 0 then
     end if
     j = j + 1
   wend
-  if nearest >= 0 and (best < 0 or bestCost > 1440000 or selfHp = 1) then
+  if nearest >= 0 and (best < 0 or bestCost > 1440000 or (selfHp > 0 and selfHp * 3 <= hpCap)) then
     goalX = pickupMemoryX(nearest)
     goalY = pickupMemoryY(nearest)
     holding = 0
@@ -2095,7 +2130,7 @@ end if
     end if
     j = j + 1
   wend
-  if medkit >= 0 and selfHp < 3 then
+  if medkit >= 0 and selfHp < hpCap then
     retX(retCount) = pickupMemoryX(medkit)
     retY(retCount) = pickupMemoryY(medkit)
     retOption(retCount, pickupMemoryX(medkit) - selfX, pickupMemoryY(medkit) - selfY)
@@ -2637,6 +2672,31 @@ if best < 0 and soundCount() > 0 and objective >= 0 then
   dy = controlY(objective) - selfY
   if dx * dx + dy * dy < 810000 then
     sneak(1)
+  end if
+end if
+
+' Rules 49 self-destruct: a dying cog with no teammate in the blast (270) takes a foe it can kill.
+if selfHp > 0 and selfHp * 3 <= hpCap and mistingTicks() = 0 and radarTicks() = 0 then
+  kills = 0
+  i = 0
+  while i < 16
+    if i <> selfId and visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      if dx * dx + dy * dy <= 72900 then
+        if i mod 2 = selfTeam then
+          kills = -100
+        else
+          if playerHp(i) <= selfHp then
+            kills = kills + 1
+          end if
+        end if
+      end if
+    end if
+    i = i + 1
+  wend
+  if kills > 0 then
+    selfDestruct()
   end if
 end if
 

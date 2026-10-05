@@ -28,7 +28,7 @@ proc expectTeams(v: SeatView): seq[float32] =
   proc dx(x: int32): float32 = float32(x - sx) * flip / spanX
   proc dz(z: int32): float32 = float32(z - sz) * flip / spanZ
   proc dh(x, z: int32): float32 = float32(v.terrainHeight(x.int, z.int) - own) / 800
-  let self = [float32(sx - cx) * flip / spanX, float32(sz - cz) * flip / spanZ, float32(v.selfHp) / 3,
+  let self = [float32(sx - cx) * flip / spanX, float32(sz - cz) * flip / spanZ, float32(v.selfHp) / float32(maxHp()),
     float32(v.armorHp) / 3, float32(v.livesLeft) / 4, float32(v.hasGrenade), float32(v.hasSpray),
     float32(v.grenadeCharge) / 24, float32(v.carrying), float32(v.hasUniform), float32((v.trenchId >= 0).int),
     float32(v.selfId div 2) / 7, float32(v.worldTick) / 14400, float32(v.waterAt(sx.int, sz.int)),
@@ -48,12 +48,13 @@ proc expectTeams(v: SeatView): seq[float32] =
     if v.visible(j) == 0: continue
     let o = 125 + 10*j
     let (x, z) = (v.playerX(j), v.playerY(j))
-    for k, value in [1'f32, dx(x), dz(z), rel(v.playerTeam(j).int, side), float32(v.playerHp(j)) / 3,
+    for k, value in [1'f32, dx(x), dz(z), rel(v.playerTeam(j).int, side), float32(v.playerHp(j)) / float32(maxHp()),
         float32(v.playerCarrying(j)), float32((j == v.selfId.int).int), float32(j div 2) / 7,
         float32(v.waterAt(x.int, z.int)), dh(x, z)]:
       result[o+k] = value
   for i in 0..<32:
-    if v.pickupVisible(i) == 0: continue
+    # The contract predates the rules-49 kinds (mister, sniper, radar) and shows none of them.
+    if v.pickupVisible(i) == 0 or v.pickupKind(i) > 4: continue
     for k, value in [1'f32, dx(v.pickupX(i)), dz(v.pickupY(i)), float32(v.pickupKind(i)) / 4, float32(i) / 31]:
       result[285 + 5*i + k] = value
   for i in 0..<min(8, v.soundCount.int):

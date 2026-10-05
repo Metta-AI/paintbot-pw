@@ -11,7 +11,7 @@
 ##   aim (head 1; heads 5 x 6 per identity; head 9 for the look alias 17..24): on a gun ORDER tick
 ##     (shoot, cooldown 0, windup 0, no spray can) the candidate's direction from the seat is within
 ##     one SD of the teacher's (zcov_raw's expression: |atan2 difference| <= 26.5 / 5250 x
-##     max(gunSpreadPercent(pos, A), 1) / 100); on any other tick the facing half of canSeePoint
+##     max(gunSpreadPercent(pos, A), 1) / 100, scaled by gunJitterHalf() / 32 from rules 49); on any other tick the facing half of canSeePoint
 ##     gives the same answer for every other live cog; keep (bin 0) reproduces the aim the seat's
 ##     decoder would keep; with no teacher aim (A = 0, 0) the class is keep alone;
 ##   fire / grenade / sneak: the teacher's value.
@@ -166,7 +166,7 @@ proc aimTest(w: World, s: int, cmd: TeacherCommand): AimTest =
     result.cogX[result.cogs] = dx; result.cogZ[result.cogs] = dz; result.cogD[result.cogs] = dx*dx + dz*dz
     inc result.cogs
   if result.order:
-    result.sd = 26.5 / 5250.0 * max(w.gunSpreadPercent(pos, cmd.aim), 1).float / 100.0
+    result.sd = 26.5 * gunJitterHalf().float / 32.0 / 5250.0 * max(w.gunSpreadPercent(pos, cmd.aim), 1).float / 100.0
   else:
     result.mask = coneMask(w, s, cmd.aim)
     doAssert result.coneOf(cmd.aim, result.allCogs) == result.mask

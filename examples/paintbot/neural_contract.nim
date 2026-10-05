@@ -394,7 +394,7 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
   ## cx, cz = the map centre ((mapMinX + mapMaxX) / 2, likewise y); spanX = mapMaxX - mapMinX,
   ## spanZ likewise; dx = (x - selfX) * flip / spanX, dz = (y - selfY) * flip / spanZ; "wet" is
   ## waterAt, "dh" is (terrainHeight(point) - terrainHeight(self)) / 800.
-  ##   Self (0..24): 0 (selfX - cx) * flip / spanX, 1 (selfY - cz) * flip / spanZ, 2 selfHp/3,
+  ##   Self (0..24): 0 (selfX - cx) * flip / spanX, 1 (selfY - cz) * flip / spanZ, 2 selfHp/maxHp (3; 10 from rules 49),
   ##     3 armorHp/3, 4 livesLeft/4, 5 hasGrenade, 6 hasSpray, 7 grenadeCharge/24, 8 carrying,
   ##     9 hasUniform, 10 trenchId >= 0, 11 (selfId div 2)/7, 12 worldTick/14400, 13 self wet,
   ##     14 terrainHeight(self)/800, 15 glory(side)/1000, 16 glory(1-side)/1000,
@@ -406,9 +406,9 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
   ##     (controlCaptureTeam, relative), 5 controlCaptureTicks/72, 6 controlContested,
   ##     7 controlPoints/5, 8 wet, 9 dh
   ##   Identity j (0..15) at 125 + 10j (zeros unless visible(j)): 0 visible, 1 dx, 2 dz
-  ##     (playerX/Y), 3 playerTeam relative to side, 4 playerHp/3, 5 playerCarrying, 6 j = selfId,
+  ##     (playerX/Y), 3 playerTeam relative to side, 4 playerHp/maxHp, 5 playerCarrying, 6 j = selfId,
   ##     7 (j div 2)/7, 8 wet, 9 dh
-  ##   Pickup i (0..31) at 285 + 5i (zeros unless pickupVisible(i)): 0 visible, 1 dx, 2 dz,
+  ##   Pickup i (0..31) at 285 + 5i (zeros unless pickupVisible(i) and pickupKind(i) <= 4): 0 visible, 1 dx, 2 dz,
   ##     3 pickupKind/4, 4 i/31
   ##   Sound i (0..7) at 445 + 5i (zeros for i >= soundCount): 0 present, 1 soundKind/4,
   ##     2 ((soundDirection + (side = 0 ? 0 : 4)) mod 8)/7, 3 soundDistance/4, 4 soundAge/24
@@ -431,7 +431,7 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
   template dh(px, pz: int32): float32 = float32(v.terrainHeight(px.int, pz.int) - own) / hs
   output[0] = float32(sx - cx) * flip / spanX
   output[1] = float32(sz - cz) * flip / spanZ
-  output[2] = float32(v.selfHp) / 3
+  output[2] = float32(v.selfHp) / float32(maxHp())   # 3 before rules 49, 10 from them
   output[3] = float32(v.armorHp) / 3
   output[4] = float32(v.livesLeft) / 4
   output[5] = float32(v.hasGrenade)
@@ -478,7 +478,7 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
     output[o+1] = dx(x)
     output[o+2] = dz(z)
     output[o+3] = relative(r.team.int, side)
-    output[o+4] = float32(r.hp) / 3
+    output[o+4] = float32(r.hp) / float32(maxHp())
     output[o+5] = float32(r.carrying)
     output[o+6] = float32((j == v.selfId.int).int)
     output[o+7] = float32(j div 2) / 7
@@ -486,7 +486,8 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
     output[o+9] = dh(x, z)
   for i in 0..<min(TeamsPickupRows, v.pickupCount.int):   # pickupVisible is 0 past pickupCount
     let p = v.pickupRow(i)   # pickupVisible / pickupX / pickupY / pickupKind
-    if not p.visible: continue
+    # teams.view.1 knows the five original kinds; a later one (the rules-49 mister) reads as unseen.
+    if not p.visible or p.kind > 4: continue
     let o = TeamsPickupOffset + i*TeamsPickupWidth
     output[o] = 1
     output[o+1] = dx(p.x)

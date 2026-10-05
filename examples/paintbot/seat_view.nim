@@ -136,6 +136,14 @@ proc playerHp*(v: SeatView, identity: int): int32 =
 proc playerCarrying*(v: SeatView, identity: int): int32 =
   let body = v.bodyForSeat(identity)
   if body >= 0: v.world.cogs[body].carrying.int32 else: 0
+proc playerRadar*(v: SeatView, identity: int): int32 =
+  ## Rules 49: 1 while a visible cog carries a working radar (its ring shows), else 0.
+  let body = v.bodyForSeat(identity)
+  if body >= 0: v.world.hasRadar(body).int32 else: 0
+proc playerMisting*(v: SeatView, identity: int): int32 =
+  ## Rules 49: 1 while a visible cog wears a windex-mister (its halo shows), else 0.
+  let body = v.bodyForSeat(identity)
+  if body >= 0: v.world.misting(body).int32 else: 0
 
 type IdentityRow* = object
   ## visible(identity) and playerX / playerY / playerTeam / playerHp / playerCarrying(identity)
@@ -287,6 +295,22 @@ proc worldTick*(v: SeatView): int32 = v.world.tick
 proc hasGrenade*(v: SeatView): int32 = v.world.equipment[v.slot].grenade.int32
 proc hasSpray*(v: SeatView): int32 = v.world.equipment[v.slot].sprayCan.int32
 proc armorHp*(v: SeatView): int32 = v.world.equipment[v.slot].armor
+proc gunRange*(v: SeatView): int32 =
+  ## How far this seat's shots reach: 5250 before rules 49, 2133 from them (2000 in FFA-kin),
+  ## and SniperRange while it carries the sniper rifle.
+  (if v.world.hasSniper(v.slot): SniperRange else: gunReach()).int32
+proc hasSniper*(v: SeatView): int32 =
+  ## Rules 49: 1 while this seat carries the sniper rifle (it fires in place of the gun).
+  v.world.hasSniper(v.slot).int32
+proc radarTicks*(v: SeatView): int32 =
+  ## Rules 49: ticks until this seat's radar runs out (no attacks, slow until then); 0 without one.
+  if v.world.hasRadar(v.slot): v.world.radarUntil[v.slot]-v.world.tick else: 0
+proc radarBoost*(v: SeatView): int32 =
+  ## Rules 49: 1 while this seat stands within a working radar's reach (its damage doubles).
+  v.world.radarBoosted(v.slot).int32
+proc mistingTicks*(v: SeatView): int32 =
+  ## Rules 49: ticks until this seat's windex-mister runs out (no attacks until then); 0 when not misting.
+  if v.world.misting(v.slot): v.world.misterUntil[v.slot]-v.world.tick else: 0
 proc livesLeft*(v: SeatView): int32 = v.world.equipment[v.slot].lives
 proc grenadeCharge*(v: SeatView): int32 = v.world.equipment[v.slot].charge
 proc trenchId*(v: SeatView): int32 = v.world.trenchAt(v.world.cogs[v.slot].pos).int32

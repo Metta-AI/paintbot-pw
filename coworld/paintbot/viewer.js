@@ -63,6 +63,11 @@
   window.addEventListener('keyup', e => {
     if (state?.playerSlot && e.code === 'KeyQ') Module._pw_sneak(0);
   });
+  window.addEventListener('keydown', e => {
+    // Rules 49 self-destruct: Shift+X, so a stray key never blows a cog up.
+    if (state?.playerSlot && e.code === 'KeyX' && e.shiftKey && !e.repeat && Module._pw_destruct &&
+        !['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) Module._pw_destruct();
+  });
   window.addEventListener('blur', () => {
     if (state?.playerSlot) { Module._pw_charge(0); Module._pw_sneak(0); }
   });

@@ -6,9 +6,12 @@
   const pickups = {
     grenadePickup: ['Grenade', 'A throwable paint grenade. Deals 2 damage in the open, 1 into another trench, or 6 inside the blast’s trench.'],
     sprayPickup: ['Spray can', 'Adds a reusable short-range paint spray that hits in a forward cone.'],
-    medkitPickup: ['Med kit', 'Restores full health (3 HP; 10 in FFA-kin) when collected by an injured cog.'],
+    medkitPickup: ['Med kit', 'Restores full health (10 HP in FFA-kin and from rules 49, 3 before) when collected by an injured cog.'],
     armorPickup: ['Armor', 'Grants 3 armor points that absorb damage. While armored, gun cooldown is tripled.'],
     uniformPickup: ['Uniform', 'Disguises the cog as the opposing team. Attacking ends the disguise; friendly fire still applies.'],
+    misterPickup: ['Windex-mister', 'For 60 s the cog cannot attack, but every 15 s heals 1 HP to every cog within 5 m (its halo), any team, itself included.'],
+    radarPickup: ['Radar', 'For 60 s (or until its carrier picks up anything else) every cog within 8 m deals double damage, any team. The carrier cannot attack and moves at 60% speed.'],
+    sniperPickup: ['Sniper rifle', 'Replaces the gun until death: accurate to 48 m with no duds, one shot every 4 s. Cannot be carried with a spray can.'],
   };
   function equipment(cog, e = {}, uniform = false) {
     const items = [];
