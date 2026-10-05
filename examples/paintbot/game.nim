@@ -223,9 +223,16 @@ proc toCommand(c: Command26): Command =
   Command(walk: c.walk, shoot: c.shoot, direct: c.direct, goal: c.goal, aim: c.aim,
     chargeGrenade: c.chargeGrenade, sneak: c.sneak)
 proc toCommand26(c: Command): Command26 =
-  ## A rules 26-48 recording cannot hold selfDestruct; those rules never act on it.
-  Command26(walk: c.walk, shoot: c.shoot, direct: c.direct, goal: c.goal, aim: c.aim,
-    chargeGrenade: c.chargeGrenade, sneak: c.sneak)
+  ## A rules 26-48 recording cannot hold selfDestruct; those rules never act on it. Recordings
+  ## store the object's raw bytes, so its padding is zeroed first, as a fresh seq slot was.
+  zeroMem(addr result, sizeof(result))
+  result.walk = c.walk
+  result.shoot = c.shoot
+  result.direct = c.direct
+  result.goal = c.goal
+  result.aim = c.aim
+  result.chargeGrenade = c.chargeGrenade
+  result.sneak = c.sneak
 proc convertFrames(frames: seq[Frame16]): seq[Frame] =
   for f in frames:
     var next = Frame(hash: f.hash)
