@@ -326,6 +326,16 @@ when defined(pwTraining):
     killed*, final*: int32     # the victim died; and it was its last life (out of the match)
     disguised*: int32          # the attacker wore a uniform when it ORDERED this shot (0 for the map)
   var hitLog* {.threadvar.}: ptr seq[HitEvent]
+  # Kill log (native pw_kill_events): the host points this at its per-handle queue for one step
+  # and damage() appends every death there (the point pw_seat_stats counts one), credited kills
+  # (the attacker's tags) and self / map deaths alike. Telemetry only; never part of World, its
+  # hash or any decision.
+  type KillEvent* = object
+    tick*: int32               # the world tick the step started from (w.tick while it deals damage)
+    attacker*, victim*: int32  # attacker -1 = the map; attacker == victim = its own weapon
+    weapon*: int32             # ord(DamageWeapon): 0 other, 1 gun, 2 grenade, 3 spray
+    final*: int32              # it was the victim's last life (out of the match)
+  var killLog* {.threadvar.}: ptr seq[KillEvent]
   # The attacker's uniform at the tick it ordered the shot that later deals damage: firing takes the
   # uniform off at once, so the state at the hit is always "off". Latched per seat at a gun's wind-up
   # start and a spray's trigger (one of each at a time), and per grenade at its throw (in landing
