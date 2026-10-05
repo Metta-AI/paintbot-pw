@@ -2463,6 +2463,90 @@ proc pw_seat_state*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl
     output[o+7] = float32((if e.grenade: 1 else: 0) + (if e.sprayCan: 2 else: 0))
   0
 
+const
+  SeatItemFloats* = 12 ## pw_seat_items floats per seat
+  PickupFloats* = 5    ## pw_pickups floats per pickup
+  PickupKinds* = 8     ## pw_seat_pickups int32 per seat: PickupKind ordinals 0..7
+
+proc pw_seat_items*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
+  ## Every seat's rules-49 item state in one call (training library only), n seats (pw_seats) x
+  ## SeatItemFloats = 12 floats in seat order, raw engine units (each an exact integer), read on
+  ## the current (pre-step) world: [has sniper, misting, mister ticks left (misterUntil - tick,
+  ## 0..1439; 0 on its final tick, while misting is still 1), mister heal in (ticks left mod
+  ## MisterHealTicks: 0 = it heals on this step), has radar, radar ticks left (radarUntil - tick,
+  ## 0..1439; 0 on its final tick, while has radar is still 1), radar boosted (within
+  ## RadarRadius of a living carrier, the carrier included: its damage doubles), disarmed
+  ## (misting or carrying a radar: no gun, sniper, spray, grenade or self-destruct), cooldown
+  ## (cogs[i].cooldown: the gun's, or the sniper's when it carries one; 0..72 gun, 0..288
+  ## sniper), gun reach (SniperRange with a sniper, else gunReach()), spray can, self-destruct
+  ## ready (rules >= 49, alive, not disarmed: the engine keeps no "armed" state; the blast deals
+  ## the cog's hp)]. A dead seat's row (hp <= 0) is all zeros; before rules 49 every item field
+  ## reads 0. A pure read: the world and its hash are unchanged. Returns 0, -1 for bad arguments.
+  if handle == nil or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  template w: untyped = env.world
+  for slot in 0..<env.n:
+    let o = slot*SeatItemFloats
+    for k in 0..<SeatItemFloats: output[o+k] = 0
+    if w.cogs[slot].hp <= 0: continue
+    let sniper = w.hasSniper(slot)
+    let misting = w.misting(slot)
+    let misterLeft = (if misting: w.misterUntil[slot] - w.tick else: 0'i32)
+    let radar = w.hasRadar(slot)
+    output[o] = float32(sniper.int)
+    output[o+1] = float32(misting.int)
+    output[o+2] = misterLeft.float32
+    output[o+3] = (if misting: float32(misterLeft mod MisterHealTicks.int32) else: 0'f32)
+    output[o+4] = float32(radar.int)
+    output[o+5] = (if radar: float32(w.radarUntil[slot] - w.tick) else: 0'f32)
+    output[o+6] = float32(w.radarBoosted(slot).int)
+    output[o+7] = float32(w.disarmed(slot).int)
+    output[o+8] = w.cogs[slot].cooldown.float32
+    output[o+9] = float32(if sniper: SniperRange else: gunReach())
+    output[o+10] = float32(w.equipment[slot].sprayCan.int)
+    output[o+11] = float32((visionRulesVersion >= SelfDestructRules and not w.disarmed(slot)).int)
+  0
+
+proc pw_seat_pickups*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Pickups each seat TOOK since the last create/reset (training library only), n seats
+  ## (pw_seats) x PickupKinds = 8 int32 in seat order, by PickupKind ordinal: [grenade, spray,
+  ## medkit, armor, uniform, windex-mister, sniper, radar]. Counted where pw_seat_equip_stats
+  ## counts (kinds 0..4 equal its grenade, spray, medkit, armor and uniform pickups); a
+  ## pw_world_load restores the blob's counts. Pure telemetry. Returns 0, -1 for bad arguments.
+  if handle == nil or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  for slot in 0..<env.n:
+    let s = env.stats[slot]
+    for k, v in [s.grenadePickups, s.sprayPickups, s.medkitPickups, s.armorPickups, s.uniformPickups,
+        s.misterPickups, s.sniperPickups, s.radarPickups]:
+      output[slot*PickupKinds+k] = v
+  0
+
+proc pw_pickups*(handle: pointer, output: FloatBuffer, capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Every pickup on the map, whatever any seat sees (training library only, privileged),
+  ## PickupFloats = 5 floats each: [x, z (world units), kind (PickupKind ordinal 0..7: grenade,
+  ## spray, medkit, armor, uniform, windex-mister, sniper, radar), ready (1 when readyAt <= tick:
+  ## on the ground and takeable), ticks until ready (max(0, readyAt - tick))]. Row i is engine
+  ## pickup i: the same index as teams.view.1's pickup row i, BASIC pickupX / pickupY /
+  ## pickupKind(i) and the movement head's "walk to pickup i" (choice 11 + i, i < 32). Writes
+  ## min(count, capacity) rows and returns the pickup count; capacity 0 (output may be NULL)
+  ## sizes the buffer. A pure read. -1 for bad arguments.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  let tick = env.world.tick
+  for i in 0..<min(env.world.pickups.len, capacity.int):
+    let p = env.world.pickups[i]
+    let o = i*PickupFloats
+    output[o] = p.pos.x.float32
+    output[o+1] = p.pos.z.float32
+    output[o+2] = float32(ord(p.kind))
+    output[o+3] = float32((p.readyAt <= tick).int)
+    output[o+4] = float32(max(0'i32, p.readyAt - tick))
+  env.world.pickups.len.cint
+
 proc pw_world_json*(handle: pointer, output: ptr UncheckedArray[char], capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The whole world as one JSON object (training library only): {"rulesVersion": R,
   ## "heard": {}, then every World field}, the object the engine streamed to PW_POLICY_FD

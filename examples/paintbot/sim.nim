@@ -277,7 +277,7 @@ when defined(pwTraining):
       # Equipment and disguise (pw_seat_equip_stats): pickups taken by kind, health the
       # seat's armor soaked, ticks it ended disguised, and enemy kills plus heart captures it
       # made while disguised.
-      armorPickups*, uniformPickups*, medkitPickups*, grenadePickups*, sprayPickups*: int32
+      armorPickups*, uniformPickups*, medkitPickups*, grenadePickups*, sprayPickups*, misterPickups*, sniperPickups*, radarPickups*: int32
       armorAbsorbed*, disguisedTicks*, disguisedKillsCaptures*: int32
       # Damage taken (pw_seat_damage_taken_stats): hits and health lost by this seat as the
       # victim, by source: enemy gun, enemy grenade, enemy spray, and everything else (its own
@@ -1655,4 +1655,9 @@ when defined(pwTraining):
     weapon*: int32             # ord(DamageWeapon): 0 other, 1 gun, 2 grenade, 3 spray
     final*: int32              # it was the victim's last life (out of the match)
   var killLog* {.threadvar.}: ptr seq[KillEvent]
+  proc latePickups*(s: var SeatStats, kind: PickupKind): var int32 =
+    ## The rules-49 pickup counters (pw_seat_pickups kinds 5..7): mister, sniper, radar.
+    if kind == misterPickup: return s.misterPickups
+    if kind == sniperPickup: return s.sniperPickups
+    s.radarPickups
 include mechanics
