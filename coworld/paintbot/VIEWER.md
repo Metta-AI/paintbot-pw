@@ -21,6 +21,7 @@ Reference: `coworld-ctf/client/replay_broadcast.html`, with the newer communicat
 | Comms, expand/collapse, jump to live | Initially collapsed, team filters, time-correct public shouts, pinned scrolling; no private diagnostic logs |
 | Endcard / result roster | Final outcome and per-seat scoreboard, still able to seek back into the match |
 | Keyboard and embedded host protocol | Shortcuts in `?`; loading/ready/error messages, first-error-wins, hash failures stop playback |
+| Heal popups | A green "+N" rises and fades over a cog for 1.5 s whenever it gains HP during playback (windex-mister heals, medkits); respawns and seeks show none |
 | Mobile layout | Compact roster, touch pan/pinch, one-tap bot POV and second-tap clear, minimap and all replay controls |
 
 Fullscreen, replay download, top-down camera, order traces, and a searchable-by-type event list are also available.

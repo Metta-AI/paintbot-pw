@@ -94,6 +94,9 @@ var
   insetSize = 0.25'f32
   bars = true
   trails = false
+  healHp: seq[int32] ## every cog's HP at healTick, to spot heals as playback advances
+  healTick = -1'i32
+  heals: seq[tuple[seat, tick, amount: int32]] ## recent heals, each floating a green "+N"
   camX = 0'f32
   camZ = 0'f32
   distance = 60'f32
@@ -1338,6 +1341,57 @@ proc runGraphics*() =
         shapes.heartTower(base, eye, (if dormant: rgbx(128, 132, 138, 255) else: rgbx(255, 196, 60, 255)),
           heartAnimationTime, big = true)
     profMark(13)
+    # Heals (the windex-mister's, a medkit's) float a green "+N" over the cog for HealPopupTicks.
+    # Spotted from the HP the cogs had when the previous tick was drawn: a respawn (from 0) is not
+    # a heal, and a seek (backwards, or a long jump) clears the popups instead of inventing heals.
+    const HealPopupTicks = 36'i32
+    if world.tick != healTick:
+      let advanced = world.tick - healTick
+      if healTick >= 0 and advanced > 0 and advanced <= TickRate*2 and healHp.len == world.cogs.len:
+        for i, c in world.cogs:
+          if healHp[i] > 0 and c.hp > healHp[i]:
+            heals.add (i.int32, world.tick, c.hp - healHp[i])
+      else:
+        heals.setLen 0
+      healHp.setLen world.cogs.len
+      for i, c in world.cogs: healHp[i] = c.hp
+      healTick = world.tick
+      var kept: seq[tuple[seat, tick, amount: int32]]
+      for h in heals:
+        if world.tick - h.tick < HealPopupTicks: kept.add h
+      heals = kept
+    for h in heals:
+      let i = h.seat.int
+      if i >= world.cogs.len or world.cogs[i].hp <= 0 or not shown(i) or not onScreen(poses[i]): continue
+      let age = clamp(((world.tick - h.tick).float32 + alpha) / HealPopupTicks.float32, 0, 1)
+      let base = poses[i] + vec3(0, 3.2 + 1.8*age, 0)
+      # A billboard: right and up both lie in the screen plane, so the steep spectator camera
+      # does not squash the glyphs' vertical strokes.
+      let toEye = normalize(eye - base)
+      let right = normalize(cross(vec3(0, 1, 0), toEye))
+      let up = cross(toEye, right)
+      let green = rgbx(90, 255, 120, uint8(255*(1 - age*age)))
+      # Sized by distance, so the popup reads the same at every zoom.
+      let s = clamp(0.022'f32*length(eye - base), 0.5'f32, 2.4'f32)
+      proc stroke(x0, y0, x1, y1: float32) =
+        shapes.addLine(base + right*(x0*s) + up*(y0*s), base + right*(x1*s) + up*(y1*s), green,
+          halfWidth = 0.2*s)
+      # The text is centred on the cog: a plus, then the amount in seven-segment digits.
+      let digits = $h.amount
+      var x = -(1.4 + 1.3*digits.len.float32) / 2
+      stroke(x, 1, x + 1, 1)
+      stroke(x + 0.5, 0.5, x + 0.5, 1.5)
+      x += 1.4
+      for ch in digits:
+        # Segments a..g over a 0.9-wide, 2-tall cell.
+        const segs = [(0'f32, 2'f32, 0.9'f32, 2'f32), (0.9'f32, 2'f32, 0.9'f32, 1'f32),
+          (0.9'f32, 1'f32, 0.9'f32, 0'f32), (0'f32, 0'f32, 0.9'f32, 0'f32), (0'f32, 1'f32, 0'f32, 0'f32),
+          (0'f32, 2'f32, 0'f32, 1'f32), (0'f32, 1'f32, 0.9'f32, 1'f32)]
+        const lit = ["abcdef", "bc", "abged", "abgcd", "fgbc", "afgcd", "afgedc", "abc", "abcdefg", "abfgcd"]
+        for k, seg in segs:
+          if chr(ord('a') + k) in lit[ord(ch) - ord('0')]:
+            stroke(x + seg[0], seg[1], x + seg[2], seg[3])
+        x += 1.3
     for i, c in world.cogs:
       if c.hp <= 0 or not shown(i) or not onScreen(poses[i]): continue
       let p = poses[i]
