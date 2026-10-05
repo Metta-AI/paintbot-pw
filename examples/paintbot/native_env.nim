@@ -623,12 +623,13 @@ proc pw_observation_size*(): cint {.exportc, cdecl, dynlib.} = TeamsViewSize
 proc pw_action_count*(): cint {.exportc, cdecl, dynlib.} = ActionSizes.len
 
 const NativeObservationVersions = [ocTeamsView1.int32, ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32,
-  ocTeamsView1t.int32, ocTeamsView1p.int32]
+  ocTeamsView1t.int32, ocTeamsView1p.int32, ocTeamsView1i.int32]
 proc obsContract(version: int32): ObservationContractVersion =
-  ## A native observation version already checked to be 201, 202, 203, 204, 205 or 206.
+  ## A native observation version already checked to be 201 .. 207.
   if version == ocTeamsView1.int32: ocTeamsView1 elif version == ocTeamsView1h.int32: ocTeamsView1h
   elif version == ocTeamsView1s.int32: ocTeamsView1s elif version == ocTeamsView1t.int32: ocTeamsView1t
   elif version == ocTeamsView1p.int32: ocTeamsView1p
+  elif version == ocTeamsView1i.int32: ocTeamsView1i
   else: ocFfaView1
 proc layoutOf(env: ptr NativeEnv): FfaViewLayout =
   ## The ffa.view.1 layout of the handle's current world.
@@ -641,6 +642,7 @@ proc rowWidth(env: ptr NativeEnv): int =
   elif env.obsVersion == ocTeamsView1s: TeamsViewSSize + env.userInputs
   elif env.obsVersion == ocTeamsView1t: TeamsViewTSize + env.userInputs
   elif env.obsVersion == ocTeamsView1p: TeamsViewPSize + env.userInputs
+  elif env.obsVersion == ocTeamsView1i: TeamsViewISize + env.userInputs
   else: TeamsViewSize + env.userInputs
 proc actionHeads(env: ptr NativeEnv): seq[int] =
   ## The head sizes of the handle's action contract (teams.view.1: ActionSizes; ffa.view.1
@@ -689,7 +691,8 @@ proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.export
   ## motion-history block, 612 floats; the teams game only), 204 = teams.view.1s (teams.view.1h + the 128-float
   ## stop-clock block, 740 floats; the teams game only), 205 = teams.view.1t (teams.view.1s + the 11-float
   ## hunt-clock block, 751 floats; the teams game only), 206 = teams.view.1p (teams.view.1t + the 4-float own
-  ## true-timer block, 755 floats; the teams game only). nil for any other version (the
+  ## true-timer block, 755 floats; the teams game only), 207 = teams.view.1i (teams.view.1p + the held cooldown / 288
+  ## and the 81-float rules-49 item block, 837 floats; the teams game only). nil for any other version (the
   ## contracts before teams.view.1 were retired for BASIC parity) or a bad max_ticks.
   if obsVersion notin NativeObservationVersions: return nil
   createEnv(seed, maxTicks, obsContract(obsVersion))
@@ -701,6 +704,7 @@ proc pw_observation_size_for*(obsVersion: int32): cint {.exportc, cdecl, dynlib.
   if obsVersion == ocTeamsView1s.int32: return TeamsViewSSize.cint
   if obsVersion == ocTeamsView1t.int32: return TeamsViewTSize.cint
   if obsVersion == ocTeamsView1p.int32: return TeamsViewPSize.cint
+  if obsVersion == ocTeamsView1i.int32: return TeamsViewISize.cint
   if obsVersion != ocTeamsView1.int32: return -1
   TeamsViewSize.cint
 
@@ -732,7 +736,7 @@ proc pw_create_observation_inputs_v*(seed, maxTicks, obsVersion, userInputs: int
   ## pw_create_observation(seed, max_ticks, 202). nil for another version, a bad K or max_ticks.
   if obsVersion == ocTeamsView1.int32: return pw_create_observation_inputs(seed, maxTicks, userInputs)
   if obsVersion notin [ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32, ocTeamsView1t.int32,
-      ocTeamsView1p.int32] or
+      ocTeamsView1p.int32, ocTeamsView1i.int32] or
       userInputs notin 0'i32..MaxUserInputs.int32: return nil
   result = createEnv(seed, maxTicks, obsContract(obsVersion))
   if result != nil: cast[ptr NativeEnv](result).userInputs = userInputs.int
@@ -912,7 +916,7 @@ proc pw_user_inputs_contract_hash_v*(obsVersion, userInputs: int32, output: ptr 
   ## 202 = ffa.view.1u<K> ("paintbot-pw.ffa.view.1u<K>"). -1 for another version or bad args.
   if obsVersion == ocTeamsView1.int32: return pw_user_inputs_contract_hash(userInputs, output, capacity)
   if obsVersion notin [ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32, ocTeamsView1t.int32,
-      ocTeamsView1p.int32]: return -1
+      ocTeamsView1p.int32, ocTeamsView1i.int32]: return -1
   if output == nil or capacity < 65 or userInputs notin 1'i32..MaxUserInputs.int32: return -1
   let hash = userInputsContractHash(userInputs.int, obsContract(obsVersion))
   for i, c in hash: output[i] = c

@@ -408,13 +408,23 @@ int pw_elevation(void *handle, int32_t x, int32_t z);
  * encoded alive on t - 1; held across a death and shown on the respawn row; zeros before the first alive encode of a
  * match; a dead seat's block reads zeros); 755 floats; the teams game only; pw_create_observation_inputs_v(..., 206,
  * K) adds K user inputs at 755, "paintbot-pw.teams.view.1pu<K>"; reset and saved with the history. Unlike every other
- * column this block is engine state a BASIC seat cannot read: seat_view.ownTimers, docs/neural/seat-view.md).
+ * column this block is engine state a BASIC seat cannot read: seat_view.ownTimers, docs/neural/seat-view.md), 207 =
+ * teams.view.1i "paintbot-pw.teams.view.1i" (teams.view.1p's 755 floats unchanged, then at 755 the same held true
+ * cooldown / 288 (the rules-49 sniper's slow shot is 3 x 96; 751's / 72 reads up to 4), then an 81-float rules-49 ITEM
+ * BLOCK read on the tick's own pre-step world through BASIC's builtins: 756 hasSniper, 757 playerMisting(self), 758
+ * mistingTicks / 1440, 759 misting ? (mistingTicks mod 360) / 360 : 0, 760 playerRadar(self), 761 radarTicks / 1440,
+ * 762 radarBoost; 763 + 2j, 764 + 2j playerMisting(j), playerRadar(j) for identities j = 0..15; 795 + 7r for r =
+ * 0..5 the r-th visible pickup of kind 5..7 (windex-mister, sniper, radar; hidden by teams.view.1's pickup rows) in
+ * index order: visible, dx, dz, mister, sniper, radar, index / 31; a dead seat's 755 .. 836 read zeros; 837 floats;
+ * the teams game only; pw_create_observation_inputs_v(..., 207, K) adds K user inputs at 837,
+ * "paintbot-pw.teams.view.1iu<K>"; reset and saved with the history).
  * neural_contract.nim encodeTeamsView / encodeTeamsViewH / encodeTeamsViewS / encodeTeamsViewT / encodeTeamsViewP /
+ * encodeTeamsViewI (encodeItemBlock) /
  * encodeFfaView document every column; each
  * is computed from the seat's SeatView (206's timer block through seat_view.ownTimers). NULL for any other version (1, 2, 3, 101 and 102
  * were retired for BASIC parity) or a bad max_ticks. pw_observe / pw_observe_seats rows are
  * then that many floats apart. pw_observation_size() = 512; pw_observation_size_for(201) =
- * 512, (203) = 612, (204) = 740, (205) = 751, (206) = 755 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
+ * 512, (203) = 612, (204) = 740, (205) = 751, (206) = 755, (207) = 837 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
  * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
  * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
  * 0, or -1 bad args). */

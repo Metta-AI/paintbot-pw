@@ -33,6 +33,10 @@ OBSERVATION_CONTRACT_TEAMS_VIEW_1T = "paintbot-pw.teams.view.1t"
 # wind-up / 5, spray cooldown / 60, as of its previous alive tick) (755 floats); neural_contract.nim encodeTeamsViewP.
 # Engine state a BASIC seat cannot read (docs/neural/seat-view.md, "Engine state beyond BASIC"); not retired.
 OBSERVATION_CONTRACT_TEAMS_VIEW_1P = "paintbot-pw.teams.view.1p"
+# teams.view.1i (207): teams.view.1p's 755 floats, then the held true cooldown / 288 and an 81-float rules-49 item block
+# (own sniper / windex-mister / radar, every identity's mister and radar, the visible rules-49 pickups) (837 floats);
+# neural_contract.nim encodeTeamsViewI. The item block is BASIC perception; not retired.
+OBSERVATION_CONTRACT_TEAMS_VIEW_1I = "paintbot-pw.teams.view.1i"
 ACTION_CONTRACT_TEAMS_VIEW_1 = "paintbot-pw.teams.view.1.action.51-25-2-2-2"
 ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23"
 ACTION_CONTRACT_TEAMS_VIEW_1_MOVE = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23"
@@ -55,6 +59,7 @@ OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH = contract_hash(OBSERVATION_CONTRACT_TEA
 OBSERVATION_CONTRACT_TEAMS_VIEW_1S_HASH = contract_hash(OBSERVATION_CONTRACT_TEAMS_VIEW_1S)
 OBSERVATION_CONTRACT_TEAMS_VIEW_1T_HASH = contract_hash(OBSERVATION_CONTRACT_TEAMS_VIEW_1T)
 OBSERVATION_CONTRACT_TEAMS_VIEW_1P_HASH = contract_hash(OBSERVATION_CONTRACT_TEAMS_VIEW_1P)
+OBSERVATION_CONTRACT_TEAMS_VIEW_1I_HASH = contract_hash(OBSERVATION_CONTRACT_TEAMS_VIEW_1I)
 ACTION_CONTRACT_TEAMS_VIEW_1_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1)
 ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET)
 ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH = contract_hash(ACTION_CONTRACT_TEAMS_VIEW_1_MOVE)
@@ -66,6 +71,7 @@ TEAMS_VIEW_1H_SIZE = 612
 TEAMS_VIEW_1S_SIZE = 740
 TEAMS_VIEW_1T_SIZE = 751
 TEAMS_VIEW_1P_SIZE = 755
+TEAMS_VIEW_1I_SIZE = 837
 ACTION_SIZES = (51, 25, 2, 2, 2)  # action contract teams.view.1
 ACTION_SIZES_OFFSET = (51, 25, 2, 2, 2, 23, 23)  # its aim-offset variant
 ACTION_SIZES_MOVE = (51, 25, 2, 2, 2, 23, 23, 23, 23)  # its movement-offset variant
@@ -117,6 +123,8 @@ TEAMS_S_USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k, 
 TEAMS_T_USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k, OBSERVATION_CONTRACT_TEAMS_VIEW_1T)): k
                                        for k in range(1, MAX_USER_INPUTS + 1)}
 TEAMS_P_USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k, OBSERVATION_CONTRACT_TEAMS_VIEW_1P)): k
+                                       for k in range(1, MAX_USER_INPUTS + 1)}
+TEAMS_I_USER_INPUTS_CONTRACT_HASHES = {contract_hash(user_inputs_contract_id(k, OBSERVATION_CONTRACT_TEAMS_VIEW_1I)): k
                                        for k in range(1, MAX_USER_INPUTS + 1)}
 
 
@@ -833,14 +841,16 @@ def unpack_package(data, seats=16):
     teams_s_inputs = TEAMS_S_USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
     teams_t_inputs = TEAMS_T_USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
     teams_p_inputs = TEAMS_P_USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
+    teams_i_inputs = TEAMS_I_USER_INPUTS_CONTRACT_HASHES.get(observation_contract, 0)
     user_inputs_named = (teams_inputs or ffa_inputs or teams_h_inputs or teams_s_inputs or teams_t_inputs
-                         or teams_p_inputs)
+                         or teams_p_inputs or teams_i_inputs)
     teams_h = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH or teams_h_inputs > 0
     teams_s = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1S_HASH or teams_s_inputs > 0
     teams_t = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1T_HASH or teams_t_inputs > 0
     teams_p = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1P_HASH or teams_p_inputs > 0
+    teams_i = observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1I_HASH or teams_i_inputs > 0
     teams = (observation_contract == OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH or teams_inputs > 0 or teams_h or teams_s
-             or teams_t or teams_p)
+             or teams_t or teams_p or teams_i)
     if not teams and observation_contract != OBSERVATION_CONTRACT_FFA_VIEW_1_HASH and not ffa_inputs:
         raise ValueError("unknown neural observation contract")
     if action_contract not in (ACTION_CONTRACT_TEAMS_VIEW_1_HASH, ACTION_CONTRACT_TEAMS_VIEW_1_OFFSET_HASH,
@@ -879,8 +889,9 @@ def unpack_package(data, seats=16):
         if manifest.get("schema") != "paintbot-neural-basic/2":
             raise ValueError("user_inputs need package schema 2")
         user_inputs = validate_user_inputs(manifest["user_inputs"])
-    family = ("teams.view.1pu" if teams_p else "teams.view.1tu" if teams_t else "teams.view.1su" if teams_s
-              else "teams.view.1hu" if teams_h else "teams.view.1u" if teams else "ffa.view.1u")
+    family = ("teams.view.1iu" if teams_i else "teams.view.1pu" if teams_p else "teams.view.1tu" if teams_t
+              else "teams.view.1su" if teams_s else "teams.view.1hu" if teams_h else "teams.view.1u" if teams
+              else "ffa.view.1u")
     if user_inputs and not user_inputs_named:
         raise ValueError("user_inputs need observation contract %s<K>" % family)
     if user_inputs_named and not user_inputs:
@@ -901,12 +912,13 @@ def unpack_package(data, seats=16):
         inputs, observation = actor_header(files["model.bin"])
         if observation != observation_contract:
             raise ValueError("package and actor contract mismatch")
-        base_size = (TEAMS_VIEW_1P_SIZE if teams_p else TEAMS_VIEW_1T_SIZE if teams_t else TEAMS_VIEW_1S_SIZE if teams_s
-                     else TEAMS_VIEW_1H_SIZE if teams_h else TEAMS_VIEW_1_SIZE)
+        base_size = (TEAMS_VIEW_1I_SIZE if teams_i else TEAMS_VIEW_1P_SIZE if teams_p else TEAMS_VIEW_1T_SIZE if teams_t
+                     else TEAMS_VIEW_1S_SIZE if teams_s else TEAMS_VIEW_1H_SIZE if teams_h else TEAMS_VIEW_1_SIZE)
         if inputs != base_size + user_inputs:
             raise ValueError("neural actor input count must be %d for observation contract teams.view.1%s%s"
                              % (base_size + user_inputs,
-                                "p" if teams_p else "t" if teams_t else "s" if teams_s else "h" if teams_h else "",
+                                "i" if teams_i else "p" if teams_p else "t" if teams_t else "s" if teams_s
+                                else "h" if teams_h else "",
                                 "u%d" % user_inputs if user_inputs else ""))
     return files["policy.bas"], files["model.bin"], manifest
 
