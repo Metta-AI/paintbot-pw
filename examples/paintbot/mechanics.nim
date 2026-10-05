@@ -583,6 +583,9 @@ proc damage*(w: var World, victim, attacker, baseAmount: int) =
   if victim < w.radarUntil.len: w.radarUntil[victim] = 0
   when defined(pwTraining):
     if hitIndex >= 0: hitLog[][hitIndex].final = int32(lives <= 0)
+    if killLog != nil:
+      killLog[].add KillEvent(tick: w.tick, attacker: attacker.int32, victim: victim.int32,
+        weapon: ord(damageWeapon).int32, final: int32(lives <= 0))
   w.uniforms[victim] = false
   w.cogs[victim].respawn = seatRespawnTicks(victim)
   w.cogs[victim].cooldown = 0

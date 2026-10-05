@@ -1644,4 +1644,15 @@ proc step*(w: var World, commands: openArray[Command],
       if w.captures[side] >= CaptureTarget: w.winner = side.int32
   inc w.tick
 
+when defined(pwTraining):
+  # Kill log (native pw_kill_events): the host points this at its per-handle queue for one step
+  # and damage() appends every death there (the point pw_seat_stats counts one), credited kills
+  # (the attacker's tags) and self / map deaths alike. Telemetry only; never part of World, its
+  # hash or any decision.
+  type KillEvent* = object
+    tick*: int32               # the world tick the step started from (w.tick while it deals damage)
+    attacker*, victim*: int32  # attacker -1 = the map; attacker == victim = its own weapon
+    weapon*: int32             # ord(DamageWeapon): 0 other, 1 gun, 2 grenade, 3 spray
+    final*: int32              # it was the victim's last life (out of the match)
+  var killLog* {.threadvar.}: ptr seq[KillEvent]
 include mechanics

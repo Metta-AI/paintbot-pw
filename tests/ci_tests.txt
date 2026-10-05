@@ -101,6 +101,7 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_training_te
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_save_load.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_damage_taken.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_hit_log.nim
+nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_kill_log.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teacher_classes.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_state.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.nim
