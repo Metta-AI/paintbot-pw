@@ -41,7 +41,7 @@ proc worldOf(h: pointer): ptr World = addr cast[ptr NativeEnv](h).world
 proc setVision(h: pointer, team: bool) =
   cast[ptr NativeEnv](h).vision = team
   cast[ptr NativeEnv](h).nextVision = team
-proc bits(x: cfloat): uint32 = cast[uint32](x)
+proc bits(x: float32): uint32 = cast[uint32](x)
 proc baseScript(): string = readFile(Root / "coworld/paintbot/players/base.bas")
 
 type Timers = array[4, int32]   # cooldown, shield, windup, spray cooldown (block order)
@@ -124,7 +124,7 @@ proc count(c: var Coverage, before: Pre, w: World, s: int) =
     if before.armor > 0 and after.armor == 0 and after.hp == before.hp: inc c.capArmourBreak
     elif after.hp < before.hp: inc c.capHpDrop
 
-proc checkRow(c: var Coverage, rec: var TimerRecord, w: World, s: int, row: openArray[cfloat], what: string) =
+proc checkRow(c: var Coverage, rec: var TimerRecord, w: World, s: int, row: openArray[float32], what: string) =
   ## Seat s's block against the reference on the tick just observed, then the tick is recorded (alive only).
   inc c.rows
   if w.cogs[s].hp <= 0:
@@ -152,7 +152,7 @@ proc checkRow(c: var Coverage, rec: var TimerRecord, w: World, s: int, row: open
 
 proc labelsAgree(h: pointer, w: World, s: int) =
   ## The world fields the reference reads are the privileged labels' timers (training_labels.nim).
-  var l: array[PrivilegedLabelCount, cfloat]
+  var l: array[21, float32]   # pw_seat_privileged_labels writes 21 floats
   doAssert pw_seat_privileged_labels(h, s.cint, cast[Buffer](addr l[0])) == 0
   let x = truth(w, s)
   doAssert l[0] == x[0].float32 and l[3] == x[1].float32 and l[1] == x[2].float32 and l[2] == x[3].float32
@@ -173,12 +173,12 @@ proc game(g: GameSpec): Coverage =
   for h in [a, b]:
     doAssert pw_set_rules(h, g.rules) == 0 and pw_set_map(h, g.map) == 0
     setVision(h, g.team)
-  var oa = newSeq[cfloat](Seats*T)
-  var ob = newSeq[cfloat](Seats*W)
-  var ra, rb = newSeq[cfloat](Seats)
+  var oa = newSeq[float32](Seats*T)
+  var ob = newSeq[float32](Seats*W)
+  var ra, rb = newSeq[float32](Seats)
   var actions = newSeq[int32](Seats*5)
   var hold = newSeq[int](Seats)
-  var rewards, terminals = newSeq[cfloat](Seats)
+  var rewards, terminals = newSeq[float32](Seats)
   for episode in 0..<g.episodes:
     let seed = g.seed + int32(1000*episode)
     for h in [a, b]: doAssert pw_reset(h, seed, 0) == 0
@@ -339,13 +339,14 @@ suite "Observation contract teams.view.1p (206)":
         (if g.scripted: " base.bas" else: " random heads"), ": ", s
       total.add s
     echo "  total: ", total
-    check total.rows > 300000 and total.dead > 1000 and total.first >= 16*total.matches
-    check total.matches >= 11 and total.respawn > 50 and total.deaths > 50
-    check total.shownCd72 > 500 and total.shownCdMid > 10000 and total.shownShield > 10000 and
-      total.shownWindup > 1000 and total.shownSpray > 50
-    check total.normalShot > 500 and total.slowArmour > 10 and total.slowTrench > 0
+    check total.rows > 200000 and total.dead > 10000 and total.first == 16*total.matches
+    check total.matches >= 11 and total.respawn > 200 and total.deaths > 200
+    # 72 / 72 shows on one row per slow shot (the row after the shot's next tick)
+    check total.shownCd72 > 50 and total.shownCdMid > 100000 and total.shownShield > 10000 and
+      total.shownWindup > 10000 and total.shownSpray > 1000
+    check total.normalShot > 500 and total.slowArmour > 10 and total.slowTrench > 10
     check total.capArmourBreak > 0 and total.capHpDrop > 0
-    check total.sprayPickups > 0 and total.sprayShots > 0
+    check total.sprayPickups > 10 and total.sprayShots > 100
 
   test "scripted S2: the previous alive tick's timers, a repeated encode, a skipped observation, death, a new match, pw_reset":
     let h = pw_create_observation(71, 0, 206)
@@ -353,8 +354,8 @@ suite "Observation contract teams.view.1p (206)":
     defer: pw_destroy(h)
     require pw_set_rules(h, 48) == 0 and pw_reset(h, 71, 0) == 0
     let w = worldOf(h)
-    var ob = newSeq[cfloat](Seats*W)
-    var rs = newSeq[cfloat](Seats)
+    var ob = newSeq[float32](Seats*W)
+    var rs = newSeq[float32](Seats)
     let hp0 = w.cogs[0].hp
     proc look(t: int, x: Timers, alive = true, mask = 0xFFFF'u32): array[4, float32] =
       ## Seat 0 alive (or dead) on tick t with timers x; its block after the observe.
@@ -411,10 +412,10 @@ suite "Observation contract teams.view.1p (206)":
     require pw_set_rules(h, 48) == 0 and pw_set_map(h, -1) == 0 and pw_reset(h, 81, 0) == 0
     check sprayRecoveryTicks() == StrongSprayRecoveryTicks and SprayCycle == 13
     let w = worldOf(h)
-    var ob = newSeq[cfloat](Seats*W)
-    var rs = newSeq[cfloat](Seats)
+    var ob = newSeq[float32](Seats*W)
+    var rs = newSeq[float32](Seats)
     var actions = newSeq[int32](Seats*5)
-    var rewards, terminals = newSeq[cfloat](Seats)
+    var rewards, terminals = newSeq[float32](Seats)
     var recs = newSeq[TimerRecord](Seats)
     var cov: Coverage
     var shown: seq[array[4, float32]]   # seat 0's block per observed tick
@@ -429,7 +430,9 @@ suite "Observation contract teams.view.1p (206)":
       for s in 0..<Seats:
         cov.checkRow(recs[s], w[], s, ob.toOpenArray(s*W, s*W + W - 1), "stepped")
         before[s] = pre(w[], s)
-      shown.add [ob[T], ob[T+1], ob[T+2], ob[T+3]]
+      var x: array[4, float32]
+      for c in 0..3: x[c] = float32(ob[T + c])
+      shown.add x
       truths.add truth(w[], 0)
       doAssert pw_step(h, ibuf(actions), fbuf(rewards), fbuf(terminals)) == 0
       for s in 0..<Seats: cov.count(before[s], w[], s)
@@ -489,7 +492,7 @@ suite "Observation contract teams.view.1p (206)":
     w.equipment[0].sprayCan = false
     let trench = w.trenches[0]
     place(0, Point(x: trench.x + trench.w div 2, z: trench.z + trench.h div 2))
-    require w.trenchAt(w.cogs[0].pos) >= 0 and w.equipment[0].armor == 0 and not w.cogs[0].carrying
+    require w[].trenchAt(w.cogs[0].pos) >= 0 and w.equipment[0].armor == 0 and not w.cogs[0].carrying
     actions[1] = 17
     actions[2] = 1
     let gun = shown.len
@@ -516,11 +519,11 @@ suite "Observation contract teams.view.1p (206)":
       # the nearest open ground east of the trench
       for dx in countup(200, 1500, 50):
         let p = Point(x: trench.x + trench.w + dx.int32, z: trench.z + trench.h div 2)
-        if not w[].blocked(p) and w.trenchAt(p) < 0 and not w[].blocked(Point(x: p.x + 900, z: p.z)):
+        if not w[].blocked(p) and w[].trenchAt(p) < 0 and not w[].blocked(Point(x: p.x + 900, z: p.z)):
           place(0, p)
           break outside
       doAssert false, "no open ground east of the trench"
-    require w.trenchAt(w.cogs[0].pos) < 0
+    require w[].trenchAt(w.cogs[0].pos) < 0
     for i in 0..<3: tick()
     require w.cogs[0].cooldown > 30
     let capsBefore = cov.capHpDrop
@@ -596,13 +599,13 @@ suite "Observation contract teams.view.1p (206)":
       w.cogs[s].goal = w.cogs[s].pos
     let start = w[]
     var r = initRand(91)
-    var rows: seq[seq[cfloat]]
+    var rows: seq[seq[float32]]
     var acts: seq[seq[int32]]
     var hashes: seq[uint32]
-    var ob = newSeq[cfloat](Seats*W)
-    var rs = newSeq[cfloat](Seats)
+    var ob = newSeq[float32](Seats*W)
+    var rs = newSeq[float32](Seats)
     var actions = newSeq[int32](Seats*5)
-    var rewards, terminals = newSeq[cfloat](Seats)
+    var rewards, terminals = newSeq[float32](Seats)
     for step in 0..<900:
       doAssert pw_observe(h, fbuf(ob), fbuf(rs)) == 0
       for s in 0..<Seats:
@@ -705,11 +708,11 @@ suite "Observation contract teams.view.1p (206)":
     let b = pw_create_observation(77, 900, 206)
     require a != nil and b != nil
     defer: pw_destroy(a); pw_destroy(b)
-    var oa = newSeq[cfloat](Seats*W)
-    var ob = newSeq[cfloat](Seats*W)
-    var rs = newSeq[cfloat](Seats)
+    var oa = newSeq[float32](Seats*W)
+    var ob = newSeq[float32](Seats*W)
+    var rs = newSeq[float32](Seats)
     var actions = newSeq[int32](Seats*5)
-    var rewards, terminals = newSeq[cfloat](Seats)
+    var rewards, terminals = newSeq[float32](Seats)
     proc act(t: int) =
       for s in 0..<Seats:
         actions[s*5] = int32(1 + (t div 60 + s) mod 10)

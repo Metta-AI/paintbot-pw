@@ -86,7 +86,7 @@ type
     # LogitSize + (head - 5) * TargetRows * 23 + j * 23); no draw (the centre bin) when it chose keep or a compass point.
     targetRows*: bool
     # teams.view.1h / 1s / 1t / 1p: this seat's motion history, stop and hunt clocks and own-timer hold
-    # (encodeTeamsViewH/S/T/P; 1p's timers come through seat_view.ownTimers on the seat's own view)
+    # (encodeTeamsViewH/S/T/P; 1p's own timers are read off the seat's own view by encodeTeamsViewP)
     history*: TeamsHistory
     offsetTemperatures: array[ExtraHeadsMax, float32]
     offsetTemperatureSet: array[ExtraHeadsMax, bool]
