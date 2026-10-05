@@ -1394,6 +1394,30 @@ if heartCount() > 0 then
   end if
 end if
 
+' Rules 49: a misting or radar cog cannot attack, so it keeps beside its nearest teammate,
+' inside the mister's heal (500) or the radar's boost (800).
+if (mistingTicks() > 0 or radarTicks() > 0) and not carrying then
+  mate = -1
+  mateD = 2147483647
+  i = 0
+  while i < 16
+    if i <> selfId and i mod 2 = selfTeam and visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      if dx * dx + dy * dy < mateD then
+        mate = i
+        mateD = dx * dx + dy * dy
+      end if
+    end if
+    i = i + 1
+  wend
+  if mate >= 0 and mateD > 90000 then
+    goalX = playerX(mate)
+    goalY = playerY(mate)
+    holding = 0
+  end if
+end if
+
 ' ---- Cover spot: a cover cog stands on the high point beside its post. ----
 if useCoverSpot and objective >= 0 and seat >= 2 and not carrying then
   if goalX <> controlX(objective) or goalY <> controlY(objective) then
@@ -1465,6 +1489,12 @@ if not carrying and thief < 0 then
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
       kind = pickupMemoryKind(j)
       wanted = (kind = 0 and not hasGrenade and (kWantGrenade = 1 or (kWantGrenade = 2 and clSpread))) or (kind = 2 and selfHp < hpCap) or (kind = 3 and armorHp < 3 and selfHp = hpCap) or (kind = 1 and wantSpray)
+      ' Rules 49 items: a sniper when we carry no spray, the mister when half hurt, the radar
+      ' among friends. Any pickup ends a radar, so its carrier takes only a medkit it needs.
+      wanted = wanted or (kind = 6 and hasSniper() = 0 and hasSpray = 0) or (kind = 5 and selfHp * 2 <= hpCap and mistingTicks() = 0) or (kind = 7 and friendsNear >= 3 and radarTicks() = 0)
+      if radarTicks() > 0 and not (kind = 2 and selfHp * 3 <= hpCap) then
+        wanted = 0
+      end if
       if wanted then
         dx = pickupMemoryX(j) - selfX
         dy = pickupMemoryY(j) - selfY
@@ -2642,6 +2672,31 @@ if best < 0 and soundCount() > 0 and objective >= 0 then
   dy = controlY(objective) - selfY
   if dx * dx + dy * dy < 810000 then
     sneak(1)
+  end if
+end if
+
+' Rules 49 self-destruct: a dying cog with no teammate in the blast (270) takes a foe it can kill.
+if selfHp > 0 and selfHp * 3 <= hpCap and mistingTicks() = 0 and radarTicks() = 0 then
+  kills = 0
+  i = 0
+  while i < 16
+    if i <> selfId and visible(i) then
+      dx = playerX(i) - selfX
+      dy = playerY(i) - selfY
+      if dx * dx + dy * dy <= 72900 then
+        if i mod 2 = selfTeam then
+          kills = -100
+        else
+          if playerHp(i) <= selfHp then
+            kills = kills + 1
+          end if
+        end if
+      end if
+    end if
+    i = i + 1
+  wend
+  if kills > 0 then
+    selfDestruct()
   end if
 end if
 

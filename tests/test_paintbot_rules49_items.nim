@@ -4,7 +4,8 @@
 ## the real engine.
 import std/[unittest, os, math]
 import polyworld/[rngs, tapes]
-import ../examples/paintbot/[sim, game]
+import ../examples/paintbot/[sim, game, bots]
+import polyworld/cli
 
 const Site = Point(x: 2060, z: 2940) # dry, open ground (the rules-49 mister spot)
 
@@ -301,3 +302,21 @@ suite "Rules 49: radar":
     check w.hasRadar(0)
     w.give(0, grenadePickup)
     check not w.hasRadar(0) and w.equipment[0].grenade
+
+suite "rules 49 bundled bots":
+  test "base.bas takes a sniper, a mister and a radar in a real match":
+    visionRulesVersion = LiveRules
+    configureMap("")
+    var bots = loadBots(@[BotGroup(path: "examples/paintbot/players/base.bas", count: Seats)])
+    var w = newWorld(7)
+    var sniper, mister, radar = false
+    for tick in 0..<2400:
+      w.step(bots.decide(w))
+      for i in 0..<Seats:
+        sniper = sniper or w.hasSniper(i)
+        mister = mister or w.misting(i)
+        radar = radar or w.hasRadar(i)
+      if w.winner != -1: break
+    check sniper and mister and radar
+    for i in 0..<Seats:
+      check not bots[i].failed
