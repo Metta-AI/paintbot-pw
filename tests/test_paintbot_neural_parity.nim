@@ -168,6 +168,9 @@ const Scenarios = [
   Scenario(name: "teams.view.1tu4, teams, rules 47, crater", obs: 205, inputs: 4, rules: 47, map: 3),
   # 2900 ticks: past both hunt-clock caps (720 and 2760 ticks)
   Scenario(name: "teams.view.1t, teams, rules 48, 2900 ticks", obs: 205, rules: 48, map: -1, ticks: 2900),
+  Scenario(name: "teams.view.1p, teams, rules 48", obs: 206, rules: 48, map: -1),
+  Scenario(name: "teams.view.1pu4, teams, rules 47, crater", obs: 206, inputs: 4, rules: 47, map: 3),
+  Scenario(name: "teams.view.1p, teams, rules 48, twin-mesas, 1500 ticks", obs: 206, rules: 48, map: 0, ticks: 1500),
   Scenario(name: "ffa.view.1, FFA-kin", obs: 202, ffa: true, map: -1),
   Scenario(name: "ffa.view.1, FFA-kin, rules 48 (fog of war)", obs: 202, ffa: true, rules: 48, map: -1),
   Scenario(name: "ffa.view.1, FFA-kin, rules 47, twin-mesas", obs: 202, ffa: true, rules: 47, map: 0)]

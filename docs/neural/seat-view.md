@@ -98,6 +98,16 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
   keep running across a death (the block reads zeros while dead). It is built only from `visible` / `playerHp` /
   `selfX` / `selfY` / `controlX` / `controlY` / `heartCount`: the same clocks a BASIC seat keeps in two variables
   per value (the pw-arch hunt inputs 36..42 of policy.bas are 3 x these columns, one tick later).
+- Observation contract teams.view.1p (206, `paintbot-pw.teams.view.1p`, and its `...1pu<K>` user-input variants) is
+  teams.view.1t plus a 4-float block of the seat's OWN TRUE timers (`encodeTeamsViewP`): at 751 gun cooldown / 72,
+  752 shield / 36, 753 gun wind-up / 5, 754 spray cooldown / 60 (the scales of the BASIC P1 user inputs 91 / 93 / 94 /
+  95, so a transplant is scale 1). Timing ("S2", pw PLAN-features 7c-132): the block on tick t holds the timers read on
+  the pre-step world of the seat's previous alive encoded tick (t - 1 for a seat encoded alive on t - 1), held across a
+  death and shown on the respawn row, zeros before the seat's first alive encode of a match; a new match or
+  `resetHistory` starts it over, as the hunt clocks. It is deliberately not the tick's own timers (same-tick truth
+  moved L9b's policy by act-KL 0.505; S2 by 0.0081). Dead rows read zeros, as teams.view.1t's block (S2 was measured
+  on alive rows only; a dead seat's recurrent state is reset anyway). **This block is the one exception to the rule
+  above** (see "Engine state beyond BASIC").
 - The retired contracts and decoder options are refused by name at staging
   (`neural_package.py`) and at load (`neural_host.nim`, `neural_contract.retiredContract`).
 - Training-only supervision: `pw_seat_privileged_labels` (21 floats: the retired world fields,
@@ -107,3 +117,19 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
 - The boundary test also checks that `neural_contract.nim`, `neural_actor.nim` and
   `neural_host.nim` import neither `sim` nor anything naming `World`, and that `host()` in
   `bots.nim` reads only its `SeatView`.
+
+## Engine state beyond BASIC: teams.view.1p (2026-10-05)
+
+The operator's decision for the pw-features P1 step ("go with A for P1"): the engine exposes each seat's own TRUE
+timers (gun cooldown, shield, gun wind-up, spray cooldown) as a raw observation. These are among the "Removed columns"
+of decision 4, and a BASIC seat cannot read them (BASIC P1 replays them from what it sees; the replay misses, e.g.,
+the cooldown cap of an armour-breaking hit). So:
+- contract 206 (teams.view.1p) reads engine state BASIC cannot. It is an opt-in contract: 201 .. 205 are unchanged
+  byte for byte, and no other contract reads the timers;
+- the timers reach the encoder through one accessor, `seat_view.ownTimers` (the seat's own `cogs[slot].cooldown` /
+  `.shield`, `equipment[slot].windup` / `.sprayCooldown` on the view's world). It is the only exported `SeatView` proc
+  outside the BASIC perception surface: `bots.nim` registers no builtin for it, and the boundary test checks that only
+  `neural_contract.nim` names it. Native env and hosted host both encode from a `SeatView` of the pre-step world, so
+  they produce the same block;
+- it is not a retired contract and is not refused at staging or load.
+
