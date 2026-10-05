@@ -49,6 +49,7 @@ type
     # it is asked; nothing about apparent identities is cached here.
     resets: seq[float32]
     stats: CombatTelemetry # Cumulative since the last create/reset; see pw_seat_stats.
+    killEvents: seq[KillEvent] # deaths not yet drained by pw_kill_events (always recorded; cleared by create/reset)
     # BASIC seats: the production interpreter, host functions, limits and per-decision
     # budget from bots.nim drive these slots instead of the caller's actions.
     scripts: seq[string]
@@ -246,6 +247,7 @@ proc resetDecoders(env: ptr NativeEnv) =
 proc resetStats(env: ptr NativeEnv) =
   for slot in 0..<env.n:
     env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
+  env.killEvents.setLen(0)
 proc recent(now, then: int32): bool =
   ## "In the last KinWindow ticks", exclusive: then happened within the 72 ticks before now,
   ## now's own tick included (now - then in 0 ..< KinWindow).
@@ -993,8 +995,10 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     combatTelemetry = addr env.stats
     damageScale = addr env.damagePermille
     handicap = addr env.handicapKnobs
+    killLog = addr env.killEvents
     try: env.world.step(commands)
     finally:
+      killLog = nil
       combatTelemetry = nil
       damageScale = nil
       handicap = nil
@@ -1820,6 +1824,32 @@ proc pw_seat_grenade_stats*(handle: pointer, seat: cint, output: ptr UncheckedAr
       s.grenadeDamageTeam]:
     output[i] = v
   0
+
+proc pw_kill_events*(handle: pointer, output: ptr UncheckedArray[int32], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Kill log (training library only; always recorded, no switch): every death since the last
+  ## drain, oldest first, PW_KILL_EVENT_INTS = 5 int32 each: {tick (the world tick the dealing
+  ## pw_step started from: pw_results' tick before that step), attacker (-1 = the map), victim,
+  ## weapon (0 other, 1 gun, 2 grenade, 3 spray), final (it was the
+  ## victim's last life: out of the match)}. A death is pw_seat_stats' death (the victim's health
+  ## reached 0 in a damage event), so a match's events by victim count its deaths. The kill is
+  ## CREDITED to the attacker (its tags, the replay's "tag" feed event) iff attacker >= 0 and
+  ## attacker != victim; attacker == victim is its own weapon (its own grenade).
+  ## DRAINS: writes the oldest min(pending, capacity) events, removes them, and returns how many it
+  ## wrote; the rest stay queued for the next call. capacity 0 (output may be NULL) drains
+  ## nothing and returns the pending count. Create, pw_reset and pw_world_load (the blob's own
+  ## queue) replace the queue. Pure telemetry: the world, its hash and every decision are the
+  ## same whether or not it is ever called. -1 bad args.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if capacity == 0: return cint(env.killEvents.len)
+  let n = min(env.killEvents.len, capacity.int)
+  for i in 0..<n:
+    let e = env.killEvents[i]
+    for k, v in [e.tick, e.attacker, e.victim, e.weapon, e.final]:
+      output[i*5+k] = v
+  if n > 0: env.killEvents = env.killEvents[n .. ^1]
+  cint(n)
 
 proc pw_seat_damage_taken_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## Damage taken by one seat (training library only), eight int32, cumulative since the last

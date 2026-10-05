@@ -209,6 +209,19 @@ int pw_world_load_error(char *output, int32_t capacity);
  * and everything else (own / teammate weapon, map). The hit counts sum to pw_seat_stats'
  * hits_taken; health lost is after armor. -1 bad args. */
 int pw_seat_damage_taken_stats(void *handle, int seat, int32_t *eight);
+/* Kill log (training library only; pure telemetry, always recorded, no switch). Every death
+ * since the last drain, oldest first, PW_KILL_EVENT_INTS int32 each: {tick (the world tick the
+ * pw_step that dealt it started from; pw_results' tick before that step), attacker (-1 the map),
+ * victim, weapon (0 other, 1 gun, 2 grenade, 3 spray), final (the
+ * victim's last life: out of the match)}. A death is pw_seat_stats' death, so a match's events by
+ * victim count its deaths; the kill is credited to the attacker (its tags; the replay feed's "tag")
+ * iff attacker >= 0 and attacker != victim. pw_kill_events DRAINS: it writes the oldest
+ * min(pending, capacity) events, removes them and returns how many it wrote (the rest stay
+ * queued); capacity 0 (events may be NULL) drains nothing and returns the pending count.
+ * Create, pw_reset and pw_world_load (the blob's queue) replace the queue. The world, its hash
+ * and every decision are the same whether or not it is called. -1 bad args. */
+#define PW_KILL_EVENT_INTS 5
+int pw_kill_events(void *handle, int32_t *events, int32_t capacity);
 /* pw_seat_privileged_labels (TRAINING-ONLY supervision labels; training_labels.nim): float[21]
  * for the seat on the current pre-step world = {gun cooldown, gun windup, spray cooldown,
  * shield, respawn (ticks), aim x, aim z, own heart meter, enemy heart meter (scoreTicks; 0 in

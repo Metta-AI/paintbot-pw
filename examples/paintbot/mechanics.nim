@@ -468,6 +468,10 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     w.resetHeart(1-team(victim)); w.cogs[victim].carrying = false
   let lives = if visionRulesVersion in 13..18:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
   w.equipment[victim] = Equipment(lives: lives)
+  when defined(pwTraining):
+    if killLog != nil:
+      killLog[].add KillEvent(tick: w.tick, attacker: attacker.int32, victim: victim.int32,
+        weapon: ord(damageWeapon).int32, final: int32(lives <= 0))
   w.uniforms[victim] = false
   w.cogs[victim].respawn = seatRespawnTicks(victim)
   w.cogs[victim].cooldown = 0
