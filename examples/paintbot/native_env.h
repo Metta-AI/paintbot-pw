@@ -353,13 +353,19 @@ int pw_elevation(void *handle, int32_t x, int32_t z);
  * of heart h, 2760) / 2760, 0 when h >= the heart count; clocks start at 0 at a match start, count only the ticks the
  * seat is encoded alive on and run on across a death (a dead seat's block reads zeros); 751 floats; the teams game
  * only; pw_create_observation_inputs_v(..., 205, K) adds K user inputs at 751, "paintbot-pw.teams.view.1tu<K>"; reset
- * and saved with the history).
- * neural_contract.nim encodeTeamsView / encodeTeamsViewH / encodeTeamsViewS / encodeTeamsViewT / encodeFfaView
- * document every column; each
- * is computed from the seat's SeatView. NULL for any other version (1, 2, 3, 101 and 102
+ * and saved with the history), 206 = teams.view.1p "paintbot-pw.teams.view.1p" (teams.view.1t's 751 floats, then a
+ * 4-float block of the seat's OWN TRUE timers: at 751 gun cooldown / 72, 752 shield / 36, 753 gun wind-up / 5, 754
+ * spray cooldown / 60, as read on the pre-step world of the seat's PREVIOUS alive encoded tick ("S2": t - 1 for a seat
+ * encoded alive on t - 1; held across a death and shown on the respawn row; zeros before the first alive encode of a
+ * match; a dead seat's block reads zeros); 755 floats; the teams game only; pw_create_observation_inputs_v(..., 206,
+ * K) adds K user inputs at 755, "paintbot-pw.teams.view.1pu<K>"; reset and saved with the history. Unlike every other
+ * column this block is engine state a BASIC seat cannot read: seat_view.ownTimers, docs/neural/seat-view.md).
+ * neural_contract.nim encodeTeamsView / encodeTeamsViewH / encodeTeamsViewS / encodeTeamsViewT / encodeTeamsViewP /
+ * encodeFfaView document every column; each
+ * is computed from the seat's SeatView (206's timer block through seat_view.ownTimers). NULL for any other version (1, 2, 3, 101 and 102
  * were retired for BASIC parity) or a bad max_ticks. pw_observe / pw_observe_seats rows are
  * then that many floats apart. pw_observation_size() = 512; pw_observation_size_for(201) =
- * 512, (203) = 612, (204) = 740, (205) = 751 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
+ * 512, (203) = 612, (204) = 740, (205) = 751, (206) = 755 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
  * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
  * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
  * 0, or -1 bad args). */

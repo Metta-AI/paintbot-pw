@@ -357,9 +357,9 @@ suite "Native ffa.view.1 and N-seat handles":
       check hashV(202, k) == 0 and $cast[cstring](addr text[0]) == userInputsContractHash(k.int, ocFfaView1)
       check $cast[cstring](addr text[0]) == sha256Hex("paintbot-pw.ffa.view.1u" & $k)
       check hashV(201, k) == 0 and $cast[cstring](addr text[0]) == userInputsContractHash(k.int)
-    for (v, k) in [(202'i32, 0'i32), (202'i32, 257'i32), (206'i32, 5'i32)]: check hashV(v, k) == -1
+    for (v, k) in [(202'i32, 0'i32), (202'i32, 257'i32), (207'i32, 5'i32)]: check hashV(v, k) == -1
     check pw_user_inputs_contract_hash_v(202, 5, cast[ptr UncheckedArray[char]](addr text[0]), 64) == -1
-    for (v, k) in [(202'i32, -1'i32), (202'i32, 257'i32), (206'i32, 5'i32)]:
+    for (v, k) in [(202'i32, -1'i32), (202'i32, 257'i32), (207'i32, 5'i32)]:
       check pw_create_observation_inputs_v(7, 0, v, k) == nil
     check pw_create_observation_inputs_v(7, HeartMeterMatchTicks+1, 202, 5) == nil
     # K = 0 is a plain 202 handle.

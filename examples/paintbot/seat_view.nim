@@ -291,6 +291,21 @@ proc livesLeft*(v: SeatView): int32 = v.world.equipment[v.slot].lives
 proc grenadeCharge*(v: SeatView): int32 = v.world.equipment[v.slot].charge
 proc trenchId*(v: SeatView): int32 = v.world.trenchAt(v.world.cogs[v.slot].pos).int32
 
+type OwnTimers* = object
+  ## The seat's own TRUE timers on the view's world (raw engine ticks): gun cooldown and shield (cogs[slot]), gun
+  ## wind-up and spray cooldown (equipment[slot]).
+  cooldown*, shield*, windup*, sprayCooldown*: int32
+
+proc ownTimers*(v: SeatView): OwnTimers =
+  ## NOT BASIC perception: the one exported proc of this module that reads engine state a BASIC seat cannot see
+  ## (docs/neural/seat-view.md, "Engine state beyond BASIC: teams.view.1p"). It exists only for observation contract
+  ## teams.view.1p (206, neural_contract.encodeTeamsViewP), per the operator's decision "go with A for P1" (the engine
+  ## exposes each seat's own true timers as a raw observation). bots.nim registers no builtin for it, and
+  ## tests/test_paintbot_seat_view_boundary.nim checks that only neural_contract.nim names it.
+  let me = v.world.cogs[v.slot]
+  let gear = v.world.equipment[v.slot]
+  OwnTimers(cooldown: me.cooldown, shield: me.shield, windup: gear.windup, sprayCooldown: gear.sprayCooldown)
+
 proc dataValues*(v: SeatView): array[DataNames.len, int32] =
   ## The DATA variables a BASIC seat reads, in DataNames order.
   let h = v.homeHeart()

@@ -29,7 +29,9 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             OBSERVATION_CONTRACT_TEAMS_VIEW_1H_HASH, TEAMS_VIEW_1H_SIZE,
                             OBSERVATION_CONTRACT_TEAMS_VIEW_1S, OBSERVATION_CONTRACT_TEAMS_VIEW_1S_HASH,
                             TEAMS_VIEW_1S_SIZE, OBSERVATION_CONTRACT_TEAMS_VIEW_1T,
-                            OBSERVATION_CONTRACT_TEAMS_VIEW_1T_HASH, TEAMS_VIEW_1T_SIZE)
+                            OBSERVATION_CONTRACT_TEAMS_VIEW_1T_HASH, TEAMS_VIEW_1T_SIZE,
+                            OBSERVATION_CONTRACT_TEAMS_VIEW_1P, OBSERVATION_CONTRACT_TEAMS_VIEW_1P_HASH,
+                            TEAMS_VIEW_1P_SIZE)
 
 ROOT = Path(__file__).parents[2]
 TEAMS, FFA = OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH
@@ -497,6 +499,27 @@ class UserInputTests(unittest.TestCase):
             unpack_package(self.inputs_package(observation=tu, inputs=TEAMS_VIEW_1T_SIZE + 43, user_inputs=None))
         with self.assertRaisesRegex(ValueError, "user_inputs need observation contract teams.view.1tu<K>"):
             unpack_package(self.inputs_package(3, observation=t, inputs=TEAMS_VIEW_1T_SIZE + 3))
+
+    def test_teams_view_1p_packages(self):
+        """teams.view.1p (206): 755 floats (teams.view.1t + 4 own true timers), and its u<K> variants at 755 + K."""
+        self.assertEqual(TEAMS_VIEW_1P_SIZE, TEAMS_VIEW_1T_SIZE + 4)
+        p = OBSERVATION_CONTRACT_TEAMS_VIEW_1P_HASH
+        self.assertEqual(p, sha("paintbot-pw.teams.view.1p"))
+        self.assertEqual(OBSERVATION_CONTRACT_TEAMS_VIEW_1P, "paintbot-pw.teams.view.1p")
+        unpack_package(self.inputs_package(observation=p, inputs=TEAMS_VIEW_1P_SIZE, user_inputs=None))
+        pu = sha(user_inputs_contract_id(110, OBSERVATION_CONTRACT_TEAMS_VIEW_1P))
+        self.assertEqual(pu, sha("paintbot-pw.teams.view.1pu110"))
+        unpack_package(self.inputs_package(110, observation=pu, inputs=TEAMS_VIEW_1P_SIZE + 110))
+        with self.assertRaisesRegex(ValueError, "input count must be 865 for observation contract teams.view.1pu110"):
+            unpack_package(self.inputs_package(110, observation=pu, inputs=TEAMS_VIEW_1T_SIZE + 110))
+        with self.assertRaisesRegex(ValueError, "input count must be 755 for observation contract teams.view.1p"):
+            unpack_package(self.inputs_package(observation=p, inputs=TEAMS_VIEW_1T_SIZE, user_inputs=None))
+        with self.assertRaisesRegex(ValueError, "teams.view.1pu110 needs manifest user_inputs"):
+            unpack_package(self.inputs_package(observation=pu, inputs=TEAMS_VIEW_1P_SIZE + 110, user_inputs=None))
+        with self.assertRaisesRegex(ValueError, "user_inputs need observation contract teams.view.1pu<K>"):
+            unpack_package(self.inputs_package(3, observation=p, inputs=TEAMS_VIEW_1P_SIZE + 3))
+        # 206 is not retired: engine state beyond BASIC by the operator's decision, refused nowhere
+        self.assertNotIn(p, RETIRED_CONTRACT_HASHES)
 
     def test_user_inputs_check_the_actor_input_count_and_contract(self):
         with self.assertRaisesRegex(ValueError, "input count must be 515 for observation contract teams.view.1u3"):
