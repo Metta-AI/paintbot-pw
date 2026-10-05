@@ -334,6 +334,32 @@ int pw_seat_privileged_labels(void *handle, int seat, float *twenty_one);
  * args. */
 int pw_seat_state(void *handle, float *sixteen_seats_times_eight);
 
+/* Rules-49 item state (training library only; pure reads; rows follow pw_seats).
+ * pw_seat_items: float[n * PW_SEAT_ITEM_FLOATS], per seat in seat order, raw engine units (exact
+ * integers), on the current pre-step world: {has sniper, misting, mister ticks left (0..1439; 0 on
+ * its final tick while misting is still 1), mister heal in (ticks left mod 360; 0 = heals this
+ * step), has radar, radar ticks left (0..1439; 0 on its final tick while has radar is still 1),
+ * radar boosted (within 800 of a living carrier, the carrier included), disarmed (misting or
+ * radar), cooldown (the shared gun / sniper cooldown: 0..72 gun, 0..288 sniper), gun reach (4800
+ * sniper, else 2133 teams rules 49 / 2000 FFA-kin / 5250 before), spray can, self-destruct ready
+ * (rules >= 49, alive, not disarmed; the engine keeps no armed state)}. A dead seat's row is
+ * zeros; before rules 49 the item fields read 0.
+ * pw_seat_pickups: int32[n * PW_PICKUP_KINDS], pickups each seat took since create / pw_reset, by
+ * kind {grenade, spray, medkit, armor, uniform, windex-mister, sniper, radar} (kinds 0..4 equal
+ * pw_seat_equip_stats' counts; pw_world_load restores the blob's).
+ * pw_pickups: every pickup (privileged: no sight test), PW_PICKUP_FLOATS each, {x, z, kind 0..7,
+ * ready (readyAt <= tick), ticks until ready}; row i is engine pickup i, the index of
+ * teams.view.1's pickup row i, BASIC pickupX/pickupY/pickupKind(i) and the movement head's
+ * "walk to pickup i" (choice 11 + i). Writes min(count, capacity) rows and returns the count;
+ * capacity 0 (output may be NULL) sizes it. Each: -1 bad args; the world and its hash are
+ * unchanged. */
+#define PW_SEAT_ITEM_FLOATS 12
+#define PW_PICKUP_KINDS 8
+#define PW_PICKUP_FLOATS 5
+int pw_seat_items(void *handle, float *seats_times_twelve);
+int pw_seat_pickups(void *handle, int32_t *seats_times_eight);
+int pw_pickups(void *handle, float *output, int32_t capacity);
+
 /* pw_world_json (training library only): the whole world as one JSON object, {"rulesVersion": R,
  * "heard": {}, then every World field} -- the object the engine streamed to PW_POLICY_FD each tick
  * before seats stopped acting through the host (#51) -- for external controllers that plan from

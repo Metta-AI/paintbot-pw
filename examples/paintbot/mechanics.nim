@@ -789,7 +789,7 @@ proc pickupEquipment(w: var World, attacked: openArray[bool]) =
             of medkitPickup: inc t[i].medkitPickups
             of grenadePickup: inc t[i].grenadePickups
             of sprayPickup: inc t[i].sprayPickups
-            of misterPickup, sniperPickup, radarPickup: discard
+            of misterPickup, sniperPickup, radarPickup: inc t[i].latePickups(w.pickups[k].kind)
         w.lastSupplyTick[team(i)] = w.tick
         w.pickups[k].readyAt = w.tick+(if w.pickups[k].kind ==
             grenadePickup: 120 else: 720)
