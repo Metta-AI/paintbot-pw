@@ -32,7 +32,7 @@ const
     "neuralLogits(), neuralState())\nneuralSample()\n"
   H0 = [8, 9, 7, 1, 3, 5]   # policy.bas's six hunt hearts (team 0; team 1 reads h xor 1)
   # pw-arch hunt inputs 36..42, verbatim: paintbot-rl origin/pw/zc-launch-s2 pw/league/pod/recipe_view/v0.policy.bas
-  # lines 131-228 (blob d0a3743c).
+  # lines 131-228 (blob d0a3743c), ported to Bassy: integer division is `\`.
   HuntSnippet = """
 hiJ = 1 - selfTeam
 while hiJ < 16
@@ -43,7 +43,7 @@ while hiJ < 16
   end if
   hiJ = hiJ + 2
 wend
-hiU = (worldTick - hiSeen) * 1000 / 240
+hiU = (worldTick - hiSeen) * 1000 \ 240
 if hiU > 3000 then
   hiU = 3000
 end if
@@ -125,7 +125,7 @@ while hvK < 6
       hvT5 = worldTick
     end if
   end if
-  hvV = (worldTick - hvLast) * 3000 / 2760
+  hvV = (worldTick - hvLast) * 3000 \ 2760
   if hvV > 3000 then
     hvV = 3000
   end if
