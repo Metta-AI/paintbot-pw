@@ -369,6 +369,12 @@ int pw_seat_state(void *handle, float *sixteen_seats_times_eight);
 int pw_seat_items(void *handle, float *seats_times_twelve);
 int pw_seat_pickups(void *handle, int32_t *seats_times_eight);
 int pw_pickups(void *handle, float *output, int32_t capacity);
+/* pw_seat_pickup_visible: which pickups each seat sees now (pre-step world), n seats x `words` uint32
+ * bitsets in seat order: bit (i % 32) of word (i / 32) = seat sees engine pickup i (pw_pickups row i,
+ * BASIC pickupVisible(i), movement choice 11 + i), by the one test BASIC and teams.view.1 / 1i's pickup
+ * rows use (SeatView.pickupVisible = pickupSeen). Returns the pickup count; words 0 (output may be NULL) sizes the
+ * buffer (ceil(count / 32) words per seat). A pure read. -1 bad args. */
+int pw_seat_pickup_visible(void *handle, uint32_t *seats_times_words, int32_t words);
 
 /* pw_world_json (training library only): the whole world as one JSON object, {"rulesVersion": R,
  * "heard": {}, then every World field} -- the object the engine streamed to PW_POLICY_FD each tick
