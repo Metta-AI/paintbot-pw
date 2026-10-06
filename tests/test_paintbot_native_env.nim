@@ -90,8 +90,8 @@ suite "Native training environment":
     # contract; every retired or native-decoder contract is refused.
     var layout: array[10, int32]
     check pw_set_action_contract(nil, 11) == -1
-    for version in [0'i32, 1, 2, 3, 12, 17, 101]: check pw_set_action_contract(teams, version) == -1
-    for version in [0'i32, 1, 2, 11, 13, 14, 15, 16]: check pw_set_action_contract(ffa, version) == -1
+    for version in [0'i32, 1, 2, 3, 12, 18, 101]: check pw_set_action_contract(teams, version) == -1
+    for version in [0'i32, 1, 2, 11, 13, 14, 15, 16, 17]: check pw_set_action_contract(ffa, version) == -1
     check pw_set_action_contract(ffa, 12) == 0 and pw_action_contract(ffa) == 12
     check pw_action_layout(teams, ibuf(layout)) == 0 and layout[0..7] == @[5'i32, 51, 25, 2, 2, 2, 82, 0]
     check pw_action_layout_ext(teams, ibuf(layout)) == 0 and layout == [5'i32, 51, 25, 2, 2, 2, 0, 0, 82, 0]
