@@ -108,6 +108,16 @@ BASIC action verbs (`walkTo`, `lookAt`, `shootAt`, `chargeGrenade`, `sneak`, `sh
   moved L9b's policy by act-KL 0.505; S2 by 0.0081). Dead rows read zeros, as teams.view.1t's block (S2 was measured
   on alive rows only; a dead seat's recurrent state is reset anyway). **This block is the one exception to the rule
   above** (see "Engine state beyond BASIC").
+- Observation contract teams.view.1i (207, `paintbot-pw.teams.view.1i`, and its `...1iu<K>` user-input variants) is
+  teams.view.1p's 755 floats unchanged, then at 755 the same held true cooldown / 288 (rules 49's sniper fires every 96
+  ticks, 3 x 96 = 288 when slow, so 751's / 72 reads up to 4), then the 81-float rules-49 ITEM BLOCK
+  (`encodeItemBlock`), read on the tick's own pre-step world (S0) through BASIC's builtins only: 756 hasSniper, 757
+  playerMisting(selfId), 758 mistingTicks / 1440, 759 the heal phase (mistingTicks mod 360) / 360, 760
+  playerRadar(selfId), 761 radarTicks / 1440, 762 radarBoost; 763 + 2j / 764 + 2j playerMisting(j) / playerRadar(j)
+  for identities 0..15; 795 + 7r for r = 0..5 the r-th visible pickup of kind 5..7 (windex-mister, sniper, radar,
+  which teams.view.1's pickup rows hide) in index order: visible, dx, dz, mister, sniper, radar, index / 31 (the
+  movement head's choice 11 + index walks to it). Dead rows read zeros from 755 on. Only 755 reads engine state beyond
+  BASIC (the 206 hold); the item block is BASIC perception. 837 floats.
 - The retired contracts and decoder options are refused by name at staging
   (`neural_package.py`) and at load (`neural_host.nim`, `neural_contract.retiredContract`).
 - Training-only supervision: `pw_seat_privileged_labels` (21 floats: the retired world fields,

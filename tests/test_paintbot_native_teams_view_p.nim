@@ -278,7 +278,7 @@ proc pickupIndex(w: World, kind: PickupKind, side: int): int =
 suite "Observation contract teams.view.1p (206)":
   configureRules(NativeRules)
 
-  test "sizes, hashes, user-input variants; 201 / 203 / 204 / 205 unchanged; 207 refused":
+  test "sizes, hashes, user-input variants; 201 / 203 / 204 / 205 unchanged; 208 refused":
     check TeamsViewPSize == 755 and TimerWidth == 4 and TeamsViewTSize == 751
     check TimerCooldownScale == 72 and TimerShieldScale == 36 and TimerWindupScale == 5 and TimerSprayScale == 60
     check 3*FireCooldownTicks == 72 and GunWindupTicks == 5   # the slow shot and the wind-up fill their scales
@@ -288,16 +288,16 @@ suite "Observation contract teams.view.1p (206)":
     check observationSize(ocTeamsView1p) == 755
     check pw_observation_size_for(206) == 755 and pw_observation_size_for(205) == 751 and
       pw_observation_size_for(204) == 740 and pw_observation_size_for(203) == 612 and
-      pw_observation_size_for(201) == 512 and pw_observation_size_for(207) == -1
+      pw_observation_size_for(201) == 512 and pw_observation_size_for(208) == -1
     let h = pw_create_observation(1, 600, 206)
     require h != nil
     defer: pw_destroy(h)
-    check pw_create_observation(1, 600, 207) == nil
+    check pw_create_observation(1, 600, 208) == nil
     check pw_handle_observation_size(h) == 755 and pw_observation_contract(h) == 206
     var hex: array[65, char]
     check pw_observation_contract_hash(206, cast[ptr UncheckedArray[char]](addr hex[0]), 65) == 0
     check $cast[cstring](addr hex[0]) == ObservationContractTeamsView1pHash
-    check pw_observation_contract_hash(207, cast[ptr UncheckedArray[char]](addr hex[0]), 65) == -1
+    check pw_observation_contract_hash(208, cast[ptr UncheckedArray[char]](addr hex[0]), 65) == -1
     for v in 201'i32..205'i32:
       check pw_observation_contract_hash(v, cast[ptr UncheckedArray[char]](addr hex[0]), 65) == 0
       check $cast[cstring](addr hex[0]) == observationContractHash(ObservationContractVersion(v))
@@ -306,14 +306,14 @@ suite "Observation contract teams.view.1p (206)":
     require hk != nil
     defer: pw_destroy(hk)
     check pw_handle_observation_size(hk) == 755 + 110 and pw_handle_user_inputs(hk) == 110
-    check pw_create_observation_inputs_v(1, 600, 207, 43) == nil
+    check pw_create_observation_inputs_v(1, 600, 208, 43) == nil
     for k in [1'i32, 110, 256]:
       check pw_user_inputs_contract_hash_v(206, k, cast[ptr UncheckedArray[char]](addr hex[0]), 65) == 0
       check $cast[cstring](addr hex[0]) == userInputsContractHash(k.int, ocTeamsView1p)
       check userInputsContractHash(k.int, ocTeamsView1p) == sha256Hex("paintbot-pw.teams.view.1pu" & $k)
     for k in [0'i32, 257]:
       check pw_user_inputs_contract_hash_v(206, k, cast[ptr UncheckedArray[char]](addr hex[0]), 65) == -1
-    check pw_user_inputs_contract_hash_v(207, 1, cast[ptr UncheckedArray[char]](addr hex[0]), 65) == -1
+    check pw_user_inputs_contract_hash_v(208, 1, cast[ptr UncheckedArray[char]](addr hex[0]), 65) == -1
     check userInputsContractId(110, ocTeamsView1p) == "paintbot-pw.teams.view.1pu110"
     check userInputsContract(userInputsContractHash(110, ocTeamsView1p)) == (ocTeamsView1p, 110)
     check pairs(ocTeamsView1p, acTeamsView1) and pairs(ocTeamsView1p, acTeamsView1Raw)
