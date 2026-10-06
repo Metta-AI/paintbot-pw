@@ -70,6 +70,8 @@ const
   TerritoryBoostPercent* = 30
   ControlHeartRadius* = 140 # A cog within this (and a traversable line) touches a control heart.
   TeamsMaxHp = 3
+  # Rules 49: the teams game plays like FFA-kin's cogs - FfaMaxHp HP and a single life.
+  OneLifeRules* = 49
   # Compile-time exponential table keeps native/WASM sampling integer-only.
   # Scores are quantized to 10 world units (1% of the temperature).
   SpawnWeights = block:
@@ -114,7 +116,10 @@ type
     carrier*: int32 # -1 on ground
     returnAt*: int32
   PickupKind* = enum
-    grenadePickup, sprayPickup, medkitPickup, armorPickup, uniformPickup
+    grenadePickup, sprayPickup, medkitPickup, armorPickup, uniformPickup,
+    misterPickup ## Rules 49: the windex-mister (mechanics.nim MisterRules). Appended, so older kinds keep their ordinals.
+    sniperPickup ## Rules 49: the sniper rifle (mechanics.nim SniperRules).
+    radarPickup ## Rules 49: the radar (mechanics.nim RadarRules).
   Pickup* = object
     pos*: Point
     kind*: PickupKind
@@ -191,6 +196,10 @@ type
     greatShare*: seq[int32] # Great-heart bounty paid to each seat, in tenths.
     greatHearts*: array[2, GreatHeart]
     spawnAnchor*: seq[Point] # Where each seat's family (or the loner) spawns.
+    # Rules 49; hashed from then on, so older hashes are unchanged.
+    misterUntil*: seq[int32] # The tick a seat's windex-mister runs out (its last heal); 0 when not misting.
+    sniper*: seq[bool] # Whether a seat carries the sniper rifle (it replaces the gun until death).
+    radarUntil*: seq[int32] # The tick a seat's radar runs out; 0 when it carries none.
   TerritoryWorld = object
     seed*, tick*: int32
     rng*: Rng
@@ -225,6 +234,7 @@ type
     goal*, aim*: Point
     chargeGrenade*: bool
     sneak*: bool
+    selfDestruct*: bool ## rules 49: blow up now (mechanics.nim SelfDestructRules); recorded from rules 49
 
 proc point*(x, z: int): Point = Point(x: int32(x), z: int32(z))
 proc team*(slot: int): int = slot mod 2
@@ -234,7 +244,7 @@ type GameMode* = enum
   gmTeams, gmFfaKin
 # Rules 36 never existed as behaviour: version 0.3.32 stamped recordings 36 while this default
 # still said 35, so a 36 header means rules 35 play. Glory and everything after start at 37.
-const LiveRules* = 48
+const LiveRules* = 49
   ## The rules live games play and record (game.nim's replayRulesVersion starts here too). The
   ## training library defaults to its own NativeRules and accepts NativeRules .. LiveRules.
 const FfaFogRules* = 48
@@ -267,7 +277,7 @@ when defined(pwTraining):
       # Equipment and disguise (pw_seat_equip_stats): pickups taken by kind, health the
       # seat's armor soaked, ticks it ended disguised, and enemy kills plus heart captures it
       # made while disguised.
-      armorPickups*, uniformPickups*, medkitPickups*, grenadePickups*, sprayPickups*: int32
+      armorPickups*, uniformPickups*, medkitPickups*, grenadePickups*, sprayPickups*, misterPickups*, sniperPickups*, radarPickups*: int32
       armorAbsorbed*, disguisedTicks*, disguisedKillsCaptures*: int32
       # Damage taken (pw_seat_damage_taken_stats): hits and health lost by this seat as the
       # victim, by source: enemy gun, enemy grenade, enemy spray, and everything else (its own
@@ -306,6 +316,33 @@ when defined(pwTraining):
   type DamageObserver* = proc(w: World, victim, attacker: int, removed: int32,
     killed: bool) {.nimcall, gcsafe.}
   var damageObserver* {.threadvar.}: DamageObserver
+  # Hit attribution (native pw_set_hit_log / pw_hit_events): the host points this at its
+  # per-step list and damage() appends every damage event past the shield and life checks.
+  # Telemetry only; never part of World, its hash or any decision.
+  type HitEvent* = object
+    attacker*, victim*: int32  # attacker -1 = the map
+    health*, armor*: int32     # health removed (after armor), armor absorbed
+    weapon*: int32             # ord(DamageWeapon): 0 other, 1 gun, 2 grenade, 3 spray
+    killed*, final*: int32     # the victim died; and it was its last life (out of the match)
+    disguised*: int32          # the attacker wore a uniform when it ORDERED this shot (0 for the map)
+  var hitLog* {.threadvar.}: ptr seq[HitEvent]
+  # The attacker's uniform at the tick it ordered the shot that later deals damage: firing takes the
+  # uniform off at once, so the state at the hit is always "off". Latched per seat at a gun's wind-up
+  # start and a spray's trigger (one of each at a time), and per grenade at its throw (in landing
+  # order per owner: flights are equally long). The host keeps it per handle and points this at it
+  # for a step. Telemetry only; never part of World, its hash or any decision.
+  type
+    LobLatch* = object
+      owner*, landsAt*: int32
+      disguised*: bool
+    HitLatch* = object
+      gun*, spray*: array[MaxSeats, bool]
+      lobs*: seq[LobLatch]
+      # Shots ordered per seat since the match began (pw_seat_shot_orders): gun wind-ups started,
+      # grenades thrown, sprays triggered; and how many of each while wearing a uniform.
+      orders*, ordersDisguised*: array[MaxSeats, array[3, int32]]
+  var hitLatch* {.threadvar.}: ptr HitLatch
+  var lobDisguised* {.threadvar.}: bool   # the exploding grenade's latch, for the blast's damage
 else:
   var visionRulesVersion* = LiveRules
   var gameMode* = gmTeams
@@ -319,8 +356,9 @@ proc wadesToWetGoals*(): bool =
   ## older, and FFA at 43 and older, keep the rules-38 dry anchors.
   visionRulesVersion >= 45 or (ffa() and visionRulesVersion >= 44)
 proc maxHp*(): int32 =
-  ## Base HP a cog spawns with and a medkit restores: FfaMaxHp in FFA-kin, 3 otherwise.
-  if ffa(): FfaMaxHp.int32 else: TeamsMaxHp.int32
+  ## Base HP a cog spawns with and a medkit restores: FfaMaxHp in FFA-kin and from rules 49,
+  ## 3 in the teams game before.
+  if ffa() or visionRulesVersion >= OneLifeRules: FfaMaxHp.int32 else: TeamsMaxHp.int32
 proc seatMaxHp*(slot: int): int32 =
   ## The HP this seat spawns with and a medkit restores: maxHp(), or a training handicap.
   when defined(pwTraining):
@@ -606,9 +644,31 @@ proc lineClearRay(w: World, a, b: Point): bool =
       let eye = if elevated: startHeight+120+(endHeight-startHeight)*i.int div steps.int else: 0
       let blk = terrainBlockAt(p.x.int, p.z.int)
       if blk == nil:
-        # Not tabled (a generated map, or outside the span): the direct lookups, as before.
-        if island and islandMargin(p.x.int, p.z.int) < 40: return false
-        if elevated and w.elevation(p) > eye: return false
+        # Not tabled (a generated map, or outside the span): the direct lookups. On a generated
+        # map the grid cell's bounds (maps.cellMaxHeight / cellMinMargin) settle most samples
+        # without interpolating: a cell whose lowest margin is >= 40 cannot fail the coast test,
+        # one whose highest ground is at or below the eye line cannot block it.
+        let cell = if activeMap() >= 0: mapCell(p.x.int, p.z.int) else: -1
+        if island and (cell < 0 or mapCellMinMargin(cell) < 40) and islandMargin(p.x.int, p.z.int) < 40:
+          return false
+        if elevated and (cell < 0 or mapCellMaxHeight(cell) > eye):
+          # w.elevation(p) > eye: the ground, 60 lower inside a trench. A trench only lowers it,
+          # so ground at or below the eye line is clear without the trench scan; above it, the
+          # trenches listed for the ray (every trench that can hold a sample) are scanned.
+          var height = terrainHeight(p.x.int, p.z.int)
+          if height > eye:
+            if listed:
+              for k in 0..<trenchCount:
+                let t = w.trenches[rayTrenches[k]]
+                if p.x >= t.x and p.x < t.x+t.w and p.z >= t.z and p.z < t.z+t.h:
+                  height -= 60
+                  break
+            else:
+              for t in w.trenches:
+                if p.x >= t.x and p.x < t.x+t.w and p.z >= t.z and p.z < t.z+t.h:
+                  height -= 60
+                  break
+            if height > eye: return false
       elif (island and blk.minMargin.int < 40) or (elevated and blk.maxHeight.int > eye):
         let cell = blk.cellIn(p.x.int, p.z.int)
         if island and cell.margin.int < 40: return false
@@ -954,6 +1014,9 @@ proc sizeSeats*(w: var World) =
   w.heartSeconds.setLen(Seats)
   w.greatShare.setLen(Seats)
   w.spawnAnchor.setLen(Seats)
+  w.misterUntil.setLen(Seats)
+  w.sniper.setLen(Seats)
+  w.radarUntil.setLen(Seats)
 proc newWorld*(seed: int32, endTick: int32 = 0): World =
   ## A world for the current seat count (Seats; see configureSeats).
   configureRules(visionRulesVersion)
@@ -1149,6 +1212,8 @@ proc stateHash*(w: World): uint32 =
         if visionRulesVersion >= 38: result.addHashy(value)
       elif name in ["seatScore", "heartSeconds", "greatShare", "greatHearts", "spawnAnchor"]:
         if ffa(): result.addHashy(value)
+      elif name in ["misterUntil", "sniper", "radarUntil"]:
+        if visionRulesVersion >= 49: result.addHashy(value)
       else: result.addHashy(value)
     return
   if visionRulesVersion >= 13:
@@ -1181,6 +1246,8 @@ proc dropHeart(w: var World, slot: int) =
   w.cogs[slot].carrying = false
 # Optional spectator instrumentation lives outside World and its hash.
 var observeShot*: proc(tick: int32, slot: int) {.closure.}
+var observeMisterHeal*: proc(tick: int32, cog, mister: int) {.closure.}
+  ## Rules 49: `mister`'s windex-mister healed `cog` 1 HP.
 var observeHit*: proc(tick: int32, victim, attacker: int,
     pos: Point) {.closure.}
 var observeTag*: proc(tick: int32, victim, attacker: int,
@@ -1577,4 +1644,38 @@ proc step*(w: var World, commands: openArray[Command],
       if w.captures[side] >= CaptureTarget: w.winner = side.int32
   inc w.tick
 
+when defined(pwTraining):
+  # Kill log (native pw_kill_events): the host points this at its per-handle queue for one step
+  # and damage() appends every death there (the point pw_seat_stats counts one), credited kills
+  # (the attacker's tags) and self / map deaths alike. Telemetry only; never part of World, its
+  # hash or any decision.
+  type KillEvent* = object
+    tick*: int32               # the world tick the step started from (w.tick while it deals damage)
+    attacker*, victim*: int32  # attacker -1 = the map; attacker == victim = its own weapon
+    weapon*: int32             # ord(DamageWeapon): 0 other, 1 gun, 2 grenade, 3 spray
+    final*: int32              # it was the victim's last life (out of the match)
+  var killLog* {.threadvar.}: ptr seq[KillEvent]
+  proc latePickups*(s: var SeatStats, kind: PickupKind): var int32 =
+    ## The rules-49 pickup counters (pw_seat_pickups kinds 5..7): mister, sniper, radar.
+    if kind == misterPickup: return s.misterPickups
+    if kind == sniperPickup: return s.sniperPickups
+    s.radarPickups
+  # Damage log (native pw_damage_events): the host points this at its per-handle queue for one step and damage()
+  # appends every damage event past the shield and life checks, with a weapon code finer than DamageWeapon:
+  # 0 other / map, 1 gun, 2 grenade, 3 spray, 4 sniper, 5 self-destruct. Telemetry only; never part of World,
+  # its hash or any decision. damageSource overrides ord(damageWeapon) while nonzero (the gun loop: 1 / 4 per
+  # target, latched at target selection in gunSniper; selfDestruct: 5); gunCursor walks gunSniper.
+  type DamageEvent* = object
+    tick*, attacker*, victim*, weapon*, health*, armor*, killed*, final*: int32
+  var damageLog* {.threadvar.}: ptr seq[DamageEvent]
+  var damageSource* {.threadvar.}: int32
+  var gunSniper* {.threadvar.}: seq[bool]
+  var gunCursor* {.threadvar.}: int
+  proc noteDamage*(w: World, victim, attacker: int, health, armor: int32): int =
+    ## Appends one damage event (killed from the victim's hp now) and returns its index; -1 when nobody listens.
+    if damageLog == nil: return -1
+    damageLog[].add DamageEvent(tick: w.tick, attacker: attacker.int32, victim: victim.int32,
+      weapon: (if damageSource != 0: damageSource else: ord(damageWeapon).int32), health: health, armor: armor,
+      killed: int32(w.cogs[victim].hp == 0))
+    damageLog[].len - 1
 include mechanics

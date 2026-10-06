@@ -214,7 +214,7 @@ advised league is scored separately.
 ### On hosted leagues: through the LLM sidecar
 
 A hosted game pod has no provider credentials and may not set `AWS_*` in its manifest; all model
-traffic goes through the platform's per-pod LLM sidecar at `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`.
+traffic goes through the platform's per-pod LLM sidecar at `COWORLD_LLM_ENDPOINT`.
 When `COGAME_ORACLE_URL` is unset and that variable is present, `Oracle.from_env` posts to
 `<sidecar>/v1/systemone` (the sidecar's System One route, which forwards to OpenRouter's
 `/api/v1/systemone`) with no credential and `X-Coworld-Player-Slot: <seat>`, so spend and the

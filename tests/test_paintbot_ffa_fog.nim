@@ -72,8 +72,8 @@ suite "FFA-kin fog of war (rules 48)":
     visionRulesVersion = LiveRules
     heard = @[]
 
-  test "rules 48 is live and gates the fog in FFA only":
-    check LiveRules == 48 and FfaFogRules == 48
+  test "rules 48 on gate the fog in FFA only":
+    check LiveRules >= 48 and FfaFogRules == 48
     visionRulesVersion = 48
     gameMode = gmFfaKin
     check ffaFog()

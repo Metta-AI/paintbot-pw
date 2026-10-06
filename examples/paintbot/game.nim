@@ -10,9 +10,19 @@ type
     ## One tick: every seat's command (one per seat) and the state hash after the step.
     commands*: seq[Command]
     hash*: uint32
+  Command26 = object
+    ## A command as every recording from rules 26 to 48 stores it: Command before selfDestruct.
+    walk, shoot, direct: bool
+    goal, aim: Point
+    chargeGrenade: bool
+    sneak: bool
+  Frame26 = object
+    ## A frame as recordings at rules 46-48 store it: Frame with rules 26-48 commands.
+    commands: seq[Command26]
+    hash: uint32
   Frame16 = object
     ## A frame as every recording before rules 46 stores it: exactly LegacySeats commands.
-    commands: array[LegacySeats, Command]
+    commands: array[LegacySeats, Command26]
     hash: uint32
   LegacyCommand = object
     walk, shoot, direct: bool
@@ -83,13 +93,24 @@ type
   Recording46 = object
     ## Teams recordings at rules 46: Recording with the rules 43-46 glory awards.
     seed: int32
-    frames: seq[Frame]
+    frames: seq[Frame26]
     names: seq[string]
     communications: seq[Communication]
     endTick: int32
     map: string
     vision: string
     glory: PreCogsGloryConfig
+    seats: int32
+  Recording47 = object
+    ## Teams recordings at rules 47-48: Recording with rules 26-48 commands.
+    seed: int32
+    frames: seq[Frame26]
+    names: seq[string]
+    communications: seq[Communication]
+    endTick: int32
+    map: string
+    vision: string
+    glory: GloryConfig
     seats: int32
   Recording* = object
     ## A match as the engine and viewer hold it, and (from rules 46) as a teams recording
@@ -128,6 +149,20 @@ type
     family: array[LegacySeats, int8]
     genes: array[LegacySeats, uint32]
     ibd: array[LegacySeats, array[LegacySeats, int8]]
+  RecordingFfa46 = object
+    ## FFA-kin recordings at rules 46-48: RecordingFfa with rules 26-48 commands.
+    seed: int32
+    frames: seq[Frame26]
+    names: seq[string]
+    communications: seq[Communication]
+    endTick: int32
+    map: string
+    seats: int32
+    mode: uint8
+    layout: uint8
+    family: seq[int8]
+    genes: seq[uint32]
+    ibd: seq[seq[int8]]
   RecordingFfa* = object
     ## FFA-kin recordings (gameVersion 1000 + rules) from rules 46: Recording's fields, then
     ## the mode and the match's kinship, so a replay plays the recorded families even under a
@@ -154,6 +189,14 @@ type
     ## FfaReplayVersionBase + rules): RecordingFfa, then the range in metres.
     ffa: RecordingFfa
     visionRange: int32
+  RecordingRanged48 = object
+    ## RecordingRanged at rules 48, with rules 26-48 commands.
+    recording: Recording47
+    visionRange: int32
+  RecordingFfaRanged48 = object
+    ## RecordingFfaRanged at rules 48, with rules 26-48 commands.
+    ffa: RecordingFfa46
+    visionRange: int32
   BridgeReply = object
     ## The host's answer to one bridge line: settled advisor-oracle requests, nothing else.
     oracle: seq[OracleReply]
@@ -176,15 +219,42 @@ proc convertFrames(frames: seq[PreSoundFrame]): seq[Frame] =
       next.commands[i] = Command(walk: c.walk, shoot: c.shoot, direct: c.direct,
         goal: c.goal, aim: c.aim, chargeGrenade: c.chargeGrenade)
     result.add next
+proc toCommand(c: Command26): Command =
+  Command(walk: c.walk, shoot: c.shoot, direct: c.direct, goal: c.goal, aim: c.aim,
+    chargeGrenade: c.chargeGrenade, sneak: c.sneak)
+proc toCommand26(c: Command): Command26 =
+  ## A rules 26-48 recording cannot hold selfDestruct; those rules never act on it. Recordings
+  ## store the object's raw bytes, so its padding is zeroed first, as a fresh seq slot was.
+  zeroMem(addr result, sizeof(result))
+  result.walk = c.walk
+  result.shoot = c.shoot
+  result.direct = c.direct
+  result.goal = c.goal
+  result.aim = c.aim
+  result.chargeGrenade = c.chargeGrenade
+  result.sneak = c.sneak
 proc convertFrames(frames: seq[Frame16]): seq[Frame] =
-  for f in frames: result.add Frame(hash: f.hash, commands: @(f.commands))
+  for f in frames:
+    var next = Frame(hash: f.hash)
+    for c in f.commands: next.commands.add c.toCommand
+    result.add next
+proc convertFrames(frames: seq[Frame26]): seq[Frame] =
+  for f in frames:
+    var next = Frame(hash: f.hash)
+    for c in f.commands: next.commands.add c.toCommand
+    result.add next
+proc toFrames26(frames: seq[Frame]): seq[Frame26] =
+  for f in frames:
+    var next = Frame26(hash: f.hash)
+    for c in f.commands: next.commands.add c.toCommand26
+    result.add next
 proc toFrames16(frames: seq[Frame]): seq[Frame16] =
   ## Frames for a pre-46 recording, which only 16-seat matches can make.
   for f in frames:
     if f.commands.len != LegacySeats:
       raise newException(ReplayError, "Recordings before rules 46 hold exactly 16 seats")
     var next = Frame16(hash: f.hash)
-    for i, c in f.commands: next.commands[i] = c
+    for i, c in f.commands: next.commands[i] = c.toCommand26
     result.add next
 proc toLegacyFrames(frames: seq[Frame]): seq[LegacyFrame] =
   for f in toFrames16(frames):
@@ -209,13 +279,13 @@ proc ibdSeq(ibd: array[LegacySeats, array[LegacySeats, int8]]): seq[seq[int8]] =
   for row in ibd: result.add @row
 var replayRulesVersion* = LiveRules
 const
-  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1048 today).
-  FfaRulesVersions = [40, 41, 42, 43, 44, 45, 46, 47, 48]
+  FfaReplayVersionBase* = 1000 ## FFA-kin recordings are stamped 1000 + rules (1049 today).
+  FfaRulesVersions = [40, 41, 42, 43, 44, 45, 46, 47, 48, 49]
   SeatCountRules* = 46 ## The first rules whose recordings carry their seat count.
   BehindCogsRules* = 47 ## The first rules whose recordings carry the behind-in-cogs award.
   VisionRangeReplayVersionBase* = 2000
     ## A match played with a "vision_range" (sim.visionRangeMetres) is stamped 2000 over its
-    ## usual version (2048 teams, 3048 FFA-kin today) and stores the range after the usual
+    ## usual version (2049 teams, 3049 FFA-kin today) and stores the range after the usual
     ## payload. A match without one saves exactly as before. Like FFA kinship, the range is
     ## the thread's: saving reads it, loading binds it (0 for every other recording).
   VisionRangeRules* = 48 ## The first rules whose recordings may carry a vision range.
@@ -239,6 +309,22 @@ proc toFfaRecording(r: Recording, k: Kinship): RecordingFfa =
   RecordingFfa(seed: r.seed, frames: r.frames, names: r.names, communications: r.communications,
     endTick: r.endTick, map: r.map, seats: r.seats, mode: gameMode.uint8, layout: k.layout.uint8,
     family: k.family, genes: k.genes, ibd: k.ibd)
+proc toFfa46(r: RecordingFfa): RecordingFfa46 =
+  RecordingFfa46(seed: r.seed, frames: toFrames26(r.frames), names: r.names,
+    communications: r.communications, endTick: r.endTick, map: r.map, seats: r.seats,
+    mode: r.mode, layout: r.layout, family: r.family, genes: r.genes, ibd: r.ibd)
+proc fromFfa46(r: RecordingFfa46): RecordingFfa =
+  RecordingFfa(seed: r.seed, frames: convertFrames(r.frames), names: r.names,
+    communications: r.communications, endTick: r.endTick, map: r.map, seats: r.seats,
+    mode: r.mode, layout: r.layout, family: r.family, genes: r.genes, ibd: r.ibd)
+proc to47(r: Recording): Recording47 =
+  Recording47(seed: r.seed, frames: toFrames26(r.frames), names: r.names,
+    communications: r.communications, endTick: r.endTick, map: r.map, vision: r.vision,
+    glory: r.glory, seats: r.seats)
+proc from47(r: Recording47): Recording =
+  Recording(seed: r.seed, frames: convertFrames(r.frames), names: r.names,
+    communications: r.communications, endTick: r.endTick, map: r.map, vision: r.vision,
+    glory: r.glory, seats: r.seats)
 proc saveRecordingAs*(path: string, version: int, r: Recording) =
   ## A teams recording in exactly the shape loadRecording reads at `version`; every version
   ## before rules 46 holds 16 seats. With a vision range, the ranged shape (rules 48 on).
@@ -249,11 +335,15 @@ proc saveRecordingAs*(path: string, version: int, r: Recording) =
   if version >= SeatCountRules:
     var r = r
     if r.seats == 0: r.seats = (if r.names.len > 0: r.names.len else: Seats).int32
-    if visionRangeMetres() > 0:
+    if visionRangeMetres() > 0 and version >= SelfDestructRules:
       saveReplayFile(path, "paintbot_pw", uint16(VisionRangeReplayVersionBase+version),
         RecordingRanged(recording: r, visionRange: visionRangeMetres().int32))
-    elif version >= BehindCogsRules: saveReplayFile(path, "paintbot_pw", v, r)
-    else: saveReplayFile(path, "paintbot_pw", v, Recording46(seed: r.seed, frames: r.frames,
+    elif visionRangeMetres() > 0:
+      saveReplayFile(path, "paintbot_pw", uint16(VisionRangeReplayVersionBase+version),
+        RecordingRanged48(recording: r.to47, visionRange: visionRangeMetres().int32))
+    elif version >= SelfDestructRules: saveReplayFile(path, "paintbot_pw", v, r)
+    elif version >= BehindCogsRules: saveReplayFile(path, "paintbot_pw", v, r.to47)
+    else: saveReplayFile(path, "paintbot_pw", v, Recording46(seed: r.seed, frames: toFrames26(r.frames),
       names: r.names, communications: r.communications, endTick: r.endTick, map: r.map,
       vision: r.vision, glory: toPreCogs(r.glory), seats: r.seats))
   elif version >= 43:
@@ -291,11 +381,16 @@ proc saveRecording*(path: string, r: Recording) =
   if ffa():
     let k = activeKinship
     checkRangedRules(replayRulesVersion)
-    if visionRangeMetres() > 0:
+    if visionRangeMetres() > 0 and replayRulesVersion >= SelfDestructRules:
       saveReplayFile(path, "paintbot_pw", replayGameVersion(), RecordingFfaRanged(
         ffa: r.toFfaRecording(k), visionRange: visionRangeMetres().int32))
-    elif replayRulesVersion >= SeatCountRules:
+    elif visionRangeMetres() > 0:
+      saveReplayFile(path, "paintbot_pw", replayGameVersion(), RecordingFfaRanged48(
+        ffa: r.toFfaRecording(k).toFfa46, visionRange: visionRangeMetres().int32))
+    elif replayRulesVersion >= SelfDestructRules:
       saveReplayFile(path, "paintbot_pw", replayGameVersion(), r.toFfaRecording(k))
+    elif replayRulesVersion >= SeatCountRules:
+      saveReplayFile(path, "paintbot_pw", replayGameVersion(), r.toFfaRecording(k).toFfa46)
     elif replayRulesVersion >= 41:
       saveReplayFile(path, "paintbot_pw", replayGameVersion(), RecordingFfa41(seed: r.seed,
         frames: toFrames16(r.frames), names: toNames16(r.names), communications: r.communications,
@@ -315,12 +410,19 @@ proc loadFfaRecording(path: string, version: int, ranged: bool, visionRange: var
   if rules notin FfaRulesVersions or (ranged and rules notin VisionRangeRules..LiveRules):
     raise newException(ReplayError, "Unsupported Paintbot FFA replay version")
   let old =
-    if ranged:
+    if ranged and rules >= SelfDestructRules:
       let pre = loadReplayFile(path, "paintbot_pw", uint16(VisionRangeReplayVersionBase+version),
         RecordingFfaRanged)
       visionRange = pre.visionRange
       pre.ffa
-    elif rules >= SeatCountRules: loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa)
+    elif ranged:
+      let pre = loadReplayFile(path, "paintbot_pw", uint16(VisionRangeReplayVersionBase+version),
+        RecordingFfaRanged48)
+      visionRange = pre.visionRange
+      pre.ffa.fromFfa46
+    elif rules >= SelfDestructRules: loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa)
+    elif rules >= SeatCountRules:
+      loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa46).fromFfa46
     elif rules >= 41:
       let pre = loadReplayFile(path, "paintbot_pw", version.uint16, RecordingFfa41)
       RecordingFfa(seed: pre.seed, frames: convertFrames(pre.frames), names: @(pre.names),
@@ -373,10 +475,16 @@ proc loadRecording*(path: string): Recording =
   elif ranged:
     if replayRulesVersion notin VisionRangeRules..LiveRules:
       raise newException(ReplayError, "Unsupported Paintbot replay version")
-    let old = loadReplayFile(path, "paintbot_pw", uint16(VisionRangeReplayVersionBase+version),
-      RecordingRanged)
-    result = old.recording
-    visionRange = old.visionRange
+    if replayRulesVersion >= SelfDestructRules:
+      let old = loadReplayFile(path, "paintbot_pw", uint16(VisionRangeReplayVersionBase+version),
+        RecordingRanged)
+      result = old.recording
+      visionRange = old.visionRange
+    else:
+      let old = loadReplayFile(path, "paintbot_pw", uint16(VisionRangeReplayVersionBase+version),
+        RecordingRanged48)
+      result = old.recording.from47
+      visionRange = old.visionRange
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision != "": raise newException(ReplayError, "A vision range needs per-cog vision")
     if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
@@ -420,15 +528,18 @@ proc loadRecording*(path: string): Recording =
     if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
   elif replayRulesVersion == SeatCountRules:
     let old = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording46)
-    result = Recording(seed: old.seed, frames: old.frames, names: old.names,
+    result = Recording(seed: old.seed, frames: convertFrames(old.frames), names: old.names,
       communications: old.communications, endTick: old.endTick, map: old.map, vision: old.vision,
       glory: fromPreCogs(old.glory), seats: old.seats)
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
     if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")
   elif replayRulesVersion in BehindCogsRules..LiveRules:
-    # Rules 48 (the FFA-kin fog of war) changed no recorded field: the rules 47 shape.
-    result = loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
+    # Rules 48 (the FFA-kin fog of war) changed no recorded field: the rules 47 shape. Rules 49
+    # commands add selfDestruct.
+    result = if replayRulesVersion >= SelfDestructRules:
+        loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording)
+      else: loadReplayFile(path, "paintbot_pw", replayRulesVersion.uint16, Recording47).from47
     discard mapIndex(result.map) # an unknown map is an invalid replay
     if result.vision notin ["", "team"]: raise newException(ReplayError, "Unknown Paintbot vision mode")
     if not validGloryConfig(result.glory): raise newException(ReplayError, "Invalid Paintbot glory awards")

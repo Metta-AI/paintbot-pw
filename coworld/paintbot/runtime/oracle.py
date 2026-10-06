@@ -12,7 +12,7 @@ The endpoint, model and credential come only from the host environment; the gues
 neither. `COGAME_ORACLE_URL` names an endpoint directly (local play: TypeSafe, or OpenRouter's
 `https://openrouter.ai/api/v1/systemone`, which serves the same wire format). Hosted Softmax
 pods hold no provider key; there the platform's LLM sidecar does, at the reserved
-`AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, and the oracle posts to its `/v1/systemone` route naming the
+`COWORLD_LLM_ENDPOINT`, and the oracle posts to its `/v1/systemone` route naming the
 asking seat in `X-Coworld-Player-Slot`, so spend and the request-rate bucket are charged to that
 seat under the league's limits. With neither variable, or with `COGAME_ORACLE=off`, every ask is
 refused, so certification pods that run with no network behave exactly as before.
@@ -38,7 +38,7 @@ STATUS_PENDING = 0
 STATUS_FAILED = -1
 STATUS_TOO_SMALL = -2
 
-SIDECAR_ENV = "AWS_ENDPOINT_URL_BEDROCK_RUNTIME"  # historical name; the value is the sidecar's base URL
+SIDECAR_ENV = "COWORLD_LLM_ENDPOINT"
 SIDECAR_PATH = "/v1/systemone"
 # The sidecar takes canonical OpenRouter slugs only, so no moving `latest` alias here.
 SIDECAR_MODEL = "typesafe/jev-1.13"

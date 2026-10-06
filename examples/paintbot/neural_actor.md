@@ -85,7 +85,7 @@ All integers are little-endian uint32, all tensors little-endian FP32, row-major
 | magic | ASCII `PWNET002` |
 | version | 2 |
 | I | input count, 1..4096 (the observation contract's width: 512 for teams.view.1, 512 + K for teams.view.1u<K>; ffa.view.1: the match's width, usually the layout word `0xFFFEE000`) |
-| O | output count, 2..1024 (the logits; no value row: 82, or 128 for the aim-offset variant, 174 for movement-offset; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
+| O | output count, 2..4096 (the logits; no value row: 82, or 128 for the aim-offset variant, 174 for movement-offset, 818 for target-conditioned, 2490 for raw; action contract ffa.view.1 pointer: the match's, usually `0xFFFEE100`) |
 | head count | 1..32 |
 | head sizes | one uint32 per head, each 2..1024, summing to O (layout words allowed) |
 | observation contract | 64 lowercase hex bytes (as PWNET001) |
@@ -106,8 +106,8 @@ must be 0; every flag must be 0 or 1. The file is at most 16 MiB (the package bo
 The network carries one vector from layer to layer. Before layer 0 it is the observation
 (width I). Each layer reads the current vector (its declared input width must equal the
 current width), writes its output, and that output becomes the current vector. The last
-layer's width must equal O. The recurrent state is every MINGRU layer's state,
-concatenated in layer order (at most 4096 floats); a stack without MINGRU keeps no state.
+layer's width must equal O. The recurrent state is every MINGRU and DELAY layer's state,
+concatenated in layer order (at most 4096 floats); a stack without MINGRU or DELAY keeps no state.
 Layers that read "the input" (CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP) read the raw observation, or,
 when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 
@@ -127,14 +127,17 @@ when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 | 12 | PAD | `at, len` | none |
 | 13 | COND_HEAD | `when_head, head` | `W[size(head), size(when_head)]` |
 | 14 | TOKEN_PAIR | `source, p, geo_base, geo_stride, x, z, self_pairs` | `A[p, d]`, `B[p, d]`, `C[p, 10]`, `b[p]` |
+| 15 | POINTER_K | `source, offset, k` | `V[k, z]`, `c[k]` (z = the source's token width) |
+| 16 | DELAY | `offset, len` | `init[len]` |
 
 Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1024;
 `act` 0 = none, 1 = relu; `eps` finite and > 0; TOKEN_MLP tokens 1..256, segments 1..8, layers
 1..4, at most 1024 gathered floats per token, TOKEN_MLP widths and TOKEN_MIX `z` 1..256;
 ENTITY_ATTN at most 256 tokens over all groups; SEGMENT_NEAR only as layer 0, tokens 1..256;
 ATTN_POOL heads 1..32, `key` and `value` 1..256, heads x key and heads x value at most 1024;
-PAD `at` <= the current width, `len` 0..4096. (The token caps were 64 before the per-match
-FFA contract; a model within the old caps loads and costs exactly as before.)
+PAD `at` <= the current width, `len` 0..4096; DELAY `len` 1..4096 with `offset + len` <= the
+current width. (The token caps were 64 before the per-match FFA contract; a model within the old
+caps loads and costs exactly as before.)
 
 ### Layout words
 
@@ -183,6 +186,14 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
   equations and expressions: PWNET001's actor is exactly
   `DENSE(I, H, no bias, none) -> MINGRU(H, H, highway, no bias) -> DENSE(H, O, no bias, none)`,
   bit for bit, with the same operation count.
+- **DELAY** (an exact one-inference delay of a slice of the current vector): the layer's state slice
+  is `len + 1` floats, the stored slice `m[len]` then a primed flag `f`. Output (width `W + len`):
+  `y = [x, prev]` with `prev = init` when `f == 0` (a fresh or zeroed state: the first inference
+  after initial use, match reset, death or respawn) and `prev = m` otherwise. The state slice
+  becomes `[x[offset ..< offset + len], 1]`, staged and committed with every other state (so a
+  failed inference commits none of it). `prev` is therefore exactly the slice this layer read on
+  the seat's previous inference since the last reset, or `init` on the first. MINGRU cannot give
+  this: its output at tick t always mixes in its current input whenever its state updates.
 - **RESIDUAL**: `y = x + output(start)`, where `start` names an earlier layer (0-based,
   `start < this layer's index`) whose output width equals the current width.
 - **CONCAT_INPUT**: `y = [x, input[offset ..< offset+len]]`, reading the raw observation
@@ -247,6 +258,10 @@ sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
 - **ENTITY_ATTN's token rows** (the final `h_n` and the valid flags) are available to a later
   TOKEN_MIX, POINTER or ATTN_POOL that names the ENTITY_ATTN layer as its `source`; the layer
   then also copies them to a token buffer (`T*d + T` more operations, counted once).
+- **POINTER_K** (K per-token scores into chosen outputs): POINTER generalised to K logits per token,
+  `out[offset + n*k + j] += V[j] . z_n + c[j]` for the source's valid tokens n (invalid tokens leave their k
+  outputs as they are). Action contract 15 uses two of them, reading the identity tokens, for heads 5 and 6's
+  per-identity rows, so the offset row of identity j is a function of j's own token.
 - **POINTER** (per-token scores into chosen outputs): `source` names an earlier TOKEN_MIX,
   TOKEN_MLP or ENTITY_ATTN with the same tokens. `y = x`, then for each valid token n: `y[offset + n] = x[offset + n] +
   (sum_i z_n[i]*v[i] + c)`; invalid tokens add nothing. `offset + tokens` must not exceed the
@@ -356,10 +371,12 @@ unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 | TOKEN_MIX | `2*W*z + W + T*(2*d*z + 3*z) + pool(z)` |
 | token-layer norm | `+ T*(8*n + 32)` per normalised width n (TOKEN_MLP: each `d_l`; TOKEN_MIX: `z`) |
 | POINTER | `W + T*(2*z + 2)` |
+| POINTER_K | `W + T*k*(2*z + 2)` |
 | SEGMENT_NEAR | `I + 12*T*T + 8*T` |
 | ENTITY_ATTN | `embed + blocks*block + pool` (+ `T*d + T` when a later layer reads its token rows) |
 | ATTN_POOL | `W + (2*W*h*k + h*k) + T*((2*z*h*k + h*k) + h*(2*k + 1) + h*(8 + 3) + (2*z*h*v + h*v) + 2*h*v) + h*(T + 8)` |
 | PAD | `W + len` |
+| DELAY | `len` |
 | COND_HEAD | `W + size(head)` (the copy, and the column add at selection) |
 | TOKEN_PAIR | `W + T*(4*d*p + 2 + d) + T*T*(18 + 26*p) + T*(8 + p) + pool(d + 2p)` |
 
@@ -440,6 +457,8 @@ gun cooldown, windup, spray cooldown, shield, respawn, the seat's current aim, h
 | teams.view.1 | `paintbot-pw.teams.view.1.action.51-25-2-2-2` | 51, 25, 2, 2, 2 | 11 |
 | teams.view.1 aim-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23` | 51, 25, 2, 2, 2, 23, 23 | 13 |
 | teams.view.1 movement-offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23` | 51, 25, 2, 2, 2, 23, 23, 23, 23 | 14 |
+| teams.view.1 target-conditioned aim offset | `paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16` | 51, 25, 2, 2, 2, 368, 368 (logits; heads 5 and 6 are 16 identity rows of 23, drawn from the row of the identity the aim head chose) | 15 |
+| teams.view.1 raw | `paintbot-pw.teams.view.1.action.51-25-2-2-2-63x16-63x16-256-8-128` | 51, 25, 2, 2, 2, 1008, 1008, 256, 8, 128 (logits; 63-bin identity rows, then the walk direction, walk distance and look direction heads) | 16 |
 | ffa.view.1 pointer | `paintbot-pw.ffa.view.1.action.pointer` | 11 + H, 9 + C, 2, 2, 2 | 12 |
 
 An action contract names head sizes; what each index means is the `policy.bas`'s business. The
@@ -476,7 +495,11 @@ masked heads: the mapping-ceiling diagnostics, exact with mask 0.
 `pw_set_seat_sampling(handle, seat, temperature_permille, head_mask)` and
 `pw_sample_actions(handle, seat, float[82], int32[5])` select a seat's head actions from
 logits the way a sampling bundle would (`pw_seat_sample_draws` counts; with sampling off it is
-plain argmax). `pw_set_seat_forbid_objectives(handle, seat, int32 indices[], count)` masks
+plain argmax). `pw_set_sampling_salt(handle, int64 salt)` salts every seat's stream (those and each
+policy seat's own) with `neural_contract.samplingRngSalted`, so byte-identical bundles on the same
+(seed, slot) draw independently (an identical-policy null); 0, the default, is the unsalted stream
+exactly; kept across `pw_reset`, applied from the next one; training library only, never hosted.
+`pw_set_seat_forbid_objectives(handle, seat, int32 indices[], count)` masks
 movement-head candidates out of `pw_sample_actions` and makes `pw_step` return -3 (nothing
 stepped) when the caller hands a live caller-driven seat a forbidden one;
 `pw_seat_forbidden_objectives(handle, seat, int32 out[51])` returns the mask.

@@ -1,6 +1,6 @@
 ## Bounded, persistent BASIC players: every seat is a BASIC script with typed observations.
 import bassy
-import polyworld/[cli, controllers, rngs]
+import polyworld/[cli, controllers, rngs, annotations]
 import sim, oracle, neural_host, seat_view, observations
 from neural_contract import ActionContractVersion
 export oracle, seat_view
@@ -57,6 +57,8 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat, rnd:RndStream): Host 
     seatView(slot)
   result.addNeuralFunctions(neural)
   result.addStringFunctions(strings)
+  when defined(coworld): result.addAnnotationFunctions(strings, playerAnnotations(slot))
+  else: result.addAnnotationFunctions(strings)
   result.addOracleFunctions(slot,strings)
   discard result.addFunction("shout",1,proc(a:openArray[int32]):int32 =
     if shouts[slot].len>=4:return 0
@@ -69,6 +71,8 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat, rnd:RndStream): Host 
   discard result.addQuery("heardY",1,proc(a:openArray[int32]):int32 = view().heardY(a[0].int),4)
   discard result.addFunction("sneak",1,proc(a:openArray[int32]):int32 =
     commands[slot].sneak=a[0]!=0;1,4)
+  discard result.addFunction("selfDestruct",0,proc(a:openArray[int32]):int32 =
+    commands[slot].selfDestruct=true;1,4)
   discard result.addQuery("soundCount",0,proc(a:openArray[int32]):int32 = view().soundCount,4)
   discard result.addQuery("soundKind",1,proc(a:openArray[int32]):int32 = view().soundKind(a[0].int),4)
   discard result.addQuery("soundDirection",1,proc(a:openArray[int32]):int32 = view().soundDirection(a[0].int),4)
@@ -91,6 +95,13 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat, rnd:RndStream): Host 
   discard result.addQuery("playerY",1,proc(a:openArray[int32]):int32 = view().playerY(a[0].int),4)
   discard result.addQuery("playerHp",1,proc(a:openArray[int32]):int32 = view().playerHp(a[0].int),4)
   discard result.addQuery("playerCarrying",1,proc(a:openArray[int32]):int32 = view().playerCarrying(a[0].int),4)
+  discard result.addQuery("playerMisting",1,proc(a:openArray[int32]):int32 = view().playerMisting(a[0].int),4)
+  discard result.addQuery("mistingTicks",0,proc(a:openArray[int32]):int32 = view().mistingTicks,4)
+  discard result.addQuery("gunRange",0,proc(a:openArray[int32]):int32 = view().gunRange,4)
+  discard result.addQuery("hasSniper",0,proc(a:openArray[int32]):int32 = view().hasSniper,4)
+  discard result.addQuery("playerRadar",1,proc(a:openArray[int32]):int32 = view().playerRadar(a[0].int),4)
+  discard result.addQuery("radarTicks",0,proc(a:openArray[int32]):int32 = view().radarTicks,4)
+  discard result.addQuery("radarBoost",0,proc(a:openArray[int32]):int32 = view().radarBoost,4)
   discard result.addFunction("chargeGrenade",1,proc(a:openArray[int32]):int32 =
     commands[slot].chargeGrenade=a[0]!=0;1,4)
   discard result.addQuery("pickupCount",0,proc(a:openArray[int32]):int32 = view().pickupCount,4)

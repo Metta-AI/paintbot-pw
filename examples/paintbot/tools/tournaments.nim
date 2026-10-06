@@ -8,7 +8,7 @@ const
   OutputRoot* = Root.parentDir / "polyworld/tmp/paintbot/tournaments"
   DefaultLeague* = "league_b9458ff8-0854-4e21-82b8-3c99942902e0"
   Ladders* = ["wins", "glory"]
-  Titles* = ["Win rate", "Glory score"]
+  Titles* = ["Win rate", "Match score"]
   Schema* = 1
   Seats* = 16
   TeamSize* = Seats div 2
@@ -224,11 +224,11 @@ proc validateResult*(raw, game, run: JsonNode) =
   for slot, value in raw["scores"].elems:
     require(value.kind in {JInt, JFloat} and
       value.getFloat.classify notin {fcNan, fcInf, fcNegInf} and
-      value.getFloat >= 0, "Invalid glory score")
+      value.getFloat >= 0, "Invalid match score")
     require(value == raw["scores"][slot mod 2],
-      "Paintbot team members have different glory scores")
+      "Paintbot team members have different match scores")
     require(raw.seatWin(slot) == 1 or value.getFloat == 0,
-      "A losing team or draw has nonzero glory")
+      "A losing team or draw has a nonzero match score")
 
 proc gameValues*(game, raw: JsonNode): Table[int, Values] =
   ## Counts each policy once, averaging all its cogs before adding the game.

@@ -9,6 +9,7 @@ from neural_host import MaxNeuralOperations, neuralOperationBudget, setCondition
 import polyworld/rngs
 import bassy
 import snapshot, basic_states, contract_hash
+import teacher_classes
 
 when not defined(pwTraining): {.error: "native_env requires -d:pwTraining".}
 
@@ -48,7 +49,13 @@ type
     # ffa.view.1 handles lay out every seat's row from its SeatView (ffaViewRows) each time
     # it is asked; nothing about apparent identities is cached here.
     resets: seq[float32]
+    histories: seq[TeamsHistory]   # teams.view.1h/1s/1t/1p: each seat's history and clocks (encodeTeamsViewH..P), reset by pw_reset
     stats: CombatTelemetry # Cumulative since the last create/reset; see pw_seat_stats.
+    hitLogOn: bool          # pw_set_hit_log: record the step's damage events (default off)
+    hitEvents: seq[HitEvent] # the last pw_step's damage events (pw_hit_events)
+    killEvents: seq[KillEvent] # deaths not yet drained by pw_kill_events (always recorded; cleared by create/reset)
+    damageEvents: seq[DamageEvent] # damage not yet drained by pw_damage_events (always recorded; cleared by create/reset)
+    hitLatch: HitLatch       # each shot's order-tick uniform, kept until it lands (always tracked; saved with the world)
     # BASIC seats: the production interpreter, host functions, limits and per-decision
     # budget from bots.nim drive these slots instead of the caller's actions.
     scripts: seq[string]
@@ -93,6 +100,12 @@ type
     sampling: seq[SamplingOptions]
     sampleRng: seq[Rng]
     sampleDraws: seq[int32]
+    # Sampling salt (pw_set_sampling_salt, one per handle, kept across resets; 0 by default):
+    # non-zero seeds every seat's stream above, and every policy seat's own, from
+    # neural_contract.samplingRngSalted instead, so byte-identical bundles on the same (seed,
+    # slot) draw independently (an identical-policy null). Applied from the next pw_reset
+    # (and to a policy seat installed after it). Never part of the world or its hash.
+    samplingSalt: int64
     # Decoder objective forbid (pw_set_seat_forbid_objectives, kept across resets): the
     # movement-head indices pw_sample_actions never selects for the seat and pw_step
     # refuses from the caller for it (the hosted bundle option decoder.forbid_objectives).
@@ -109,6 +122,30 @@ type
     decided: seq[Command]
     decidedTick: int32
     decidedValid: bool
+    # pw_seat_decided_orders: the order each BASIC seat's own program (script or policy.bas)
+    # decided on the last pw_step, whatever the seat executed (a pending raw command, an
+    # override mask); lastDecidedSet = the seat's program ran on that step. A read-only
+    # record: nothing in the world or its hash depends on it.
+    lastDecided: seq[Command]
+    lastDecidedSet: seq[bool]
+    # Shadow scripts (pw_set_seat_shadow_script; default-off, every list empty / zero unused): a second BASIC
+    # program on a seat, with its own runtime, globals and rnd stream, that decides every step on the pre-step
+    # world through the seat's SeatView and hears what the seat hears, but whose order is never executed and whose
+    # shouts are never delivered. The seat itself (caller-driven, scripted or policy seat) plays exactly as without
+    # it. shadowOrders / shadowSet: its decision on the last step (pw_seat_decided_orders).
+    shadowScripts: seq[string]
+    shadowBots: seq[Bot]
+    shadowStatus: seq[int32]
+    shadowOrders: seq[Command]
+    shadowSet: seq[bool]
+    shadowCount: int
+    # In-step teacher classes (pw_set_teacher_classes; default-off, masks 0): for the masked live seats, every step
+    # computes pw_teacher_classes from the step's decided order (the shadow's, else the seat's own program's) on the
+    # pre-step world, with the keep its decoder held before the step; read with pw_teacher_classes_last.
+    tcSeats, tcExact: uint32
+    tcKeep: seq[KeepState]
+    tcOut: seq[ClassMasks]
+    tcInfo: seq[array[4, int32]]   # state (1 computed, 0 none, -2 dead), mode (0 default, 1 exact), routed, moves
     # Observation contract the handle encodes (chosen at create, kept across resets):
     # teams.view.1 (pw_create) or ffa.view.1. The world never reads it.
     obsVersion: ObservationContractVersion
@@ -186,6 +223,8 @@ proc allocSeats(env: ptr NativeEnv, n: int) =
   ## seat count, call it; a reset that keeps the count keeps every setting.
   env.n = n
   env.resets = newSeq[float32](n)
+  env.histories = newSeq[TeamsHistory](n)
+  for h in env.histories.mitems: h.resetHistory()
   env.decoders = newSeq[Bot](n)
   env.scripts = newSeq[string](n)
   env.scriptBots = newSeq[Bot](n)
@@ -210,6 +249,17 @@ proc allocSeats(env: ptr NativeEnv, n: int) =
   env.commandShown = newSeq[bool](n)
   env.decided = newSeq[Command](n)
   env.decidedValid = false
+  env.lastDecided = newSeq[Command](n)
+  env.lastDecidedSet = newSeq[bool](n)
+  env.shadowScripts = newSeq[string](n)
+  env.shadowBots = newSeq[Bot](n)
+  env.shadowStatus = newSeq[int32](n)
+  env.shadowOrders = newSeq[Command](n)
+  env.shadowSet = newSeq[bool](n)
+  env.shadowCount = 0
+  env.tcKeep = newSeq[KeepState](n)
+  env.tcOut = newSeq[ClassMasks](n)
+  env.tcInfo = newSeq[array[4, int32]](n)
   env.policy = newSeq[bool](n)
   env.policyManifests = newSeq[string](n)
   env.policyConditionals = newSeq[seq[Conditional]](n)
@@ -246,6 +296,10 @@ proc resetDecoders(env: ptr NativeEnv) =
 proc resetStats(env: ptr NativeEnv) =
   for slot in 0..<env.n:
     env.stats[slot] = SeatStats(firstFriendlyFireTick: -1)
+  env.hitEvents.setLen(0)
+  env.killEvents.setLen(0)
+  env.damageEvents.setLen(0)
+  env.hitLatch = HitLatch()
 proc recent(now, then: int32): bool =
   ## "In the last KinWindow ticks", exclusive: then happened within the 72 ticks before now,
   ## now's own tick included (now - then in 0 ..< KinWindow).
@@ -424,7 +478,9 @@ proc kinAfterStep(env: ptr NativeEnv, preScore, preGreat: openArray[int32],
 proc resetSampling(env: ptr NativeEnv) =
   ## Fresh streams for the new match (options persist); draw counts belong to the match.
   for slot in 0..<env.n:
-    env.sampleRng[slot] = samplingRng(env.world.seed, slot)
+    env.sampleRng[slot] =
+      if env.samplingSalt == 0: samplingRng(env.world.seed, slot)
+      else: samplingRngSalted(env.world.seed, slot, env.samplingSalt)
     env.sampleDraws[slot] = 0
 proc resetCurriculum(env: ptr NativeEnv) =
   ## Knob values persist; the shot history belongs to the match.
@@ -469,6 +525,7 @@ proc installScript(env: ptr NativeEnv, slot: int) =
       else: loadScriptBot(env.scripts[slot], slot)
     if env.policy[slot] and env.policyConditionals[slot].len > 0:
       env.scriptBots[slot].neural.setConditionals(env.policyConditionals[slot])
+    if env.policy[slot]: env.scriptBots[slot].neural.sampleSalt = env.samplingSalt
     env.scriptStatus[slot] = 1
   except BasicError as e:
     env.scriptStatus[slot] = 2
@@ -476,16 +533,34 @@ proc installScript(env: ptr NativeEnv, slot: int) =
   except ValueError as e:
     env.scriptStatus[slot] = 2
     env.scriptErrors[slot] = "policy manifest rejected: " & e.msg
+proc installShadow(env: ptr NativeEnv, slot: int) =
+  ## A fresh runtime for the seat's shadow script (fresh globals and rnd stream), as installScript builds a script
+  ## seat; no shadow script = nothing installed.
+  env.shadowBots[slot] = nil
+  env.shadowOrders[slot] = Command()
+  env.shadowSet[slot] = false
+  if env.shadowScripts[slot].len == 0:
+    env.shadowStatus[slot] = 0
+    return
+  try:
+    env.shadowBots[slot] = loadScriptBot(env.shadowScripts[slot], slot)
+    env.shadowStatus[slot] = 1
+  except BasicError:
+    env.shadowStatus[slot] = 2
 proc sizeHeard(env: ptr NativeEnv) =
   ## Carried speech, one list per seat (a zeroed handle starts with none).
   if env.scriptHeard.len != env.n: env.scriptHeard.setLen(env.n)
 proc resetScripts(env: ptr NativeEnv) =
   env.scriptCount = 0
   env.decidedValid = false
+  for slot in 0..<env.lastDecidedSet.len:
+    env.lastDecided[slot] = Command()
+    env.lastDecidedSet[slot] = false
   env.scriptHeard = newSeq[seq[HeardMessage]](env.n)
   for slot in 0..<env.n:
     env.installScript(slot)
     if env.scripts[slot].len > 0: inc env.scriptCount
+    if slot < env.shadowScripts.len: env.installShadow(slot)
 proc scriptDecide(env: ptr NativeEnv) =
   ## The production tick's decision half: every BASIC seat decides on the pre-step world
   ## (hearing what was shouted last tick), shouts are delivered for next tick. Runs once
@@ -504,6 +579,29 @@ proc scriptDecide(env: ptr NativeEnv) =
   for slot in 0..<env.n: env.decided[slot] = decided[slot]
   env.decidedTick = env.world.tick
   env.decidedValid = true
+proc shadowDecide(env: ptr NativeEnv) =
+  ## The shadow scripts decide on the pre-step world, hearing what their seats hear this tick (scriptHeard). Nothing
+  ## they do reaches the world: their orders are only recorded, their shouts are dropped (the shout lists are
+  ## restored), and the seats' BASIC peak telemetry is restored.
+  for slot in 0..<env.shadowSet.len: env.shadowSet[slot] = false
+  if env.shadowCount == 0: return
+  env.sizeHeard()
+  let savedHeard = heard
+  let savedShouts = shouts
+  let savedPeaks = (peakInstructions, peakWork, peakStrings, peakNativeWork)
+  heard = env.scriptHeard
+  try:
+    let d = decideSeats(env.shadowBots, env.world)
+    for slot in 0..<env.n:
+      let b = env.shadowBots[slot]
+      if b == nil: continue
+      if b.failed and env.shadowStatus[slot] == 1: env.shadowStatus[slot] = 3
+      env.shadowOrders[slot] = d[slot]
+      env.shadowSet[slot] = true
+  finally:
+    heard = savedHeard
+    shouts = savedShouts
+    (peakInstructions, peakWork, peakStrings, peakNativeWork) = savedPeaks
 const
   DecoderSource = staticRead("players/neural_decode.bas")
   DecoderSourceFfa = staticRead("players/neural_decode_ffa.bas")
@@ -526,10 +624,15 @@ proc pw_env_version*(): cint {.exportc, cdecl, dynlib.} = 1
 proc pw_observation_size*(): cint {.exportc, cdecl, dynlib.} = TeamsViewSize
 proc pw_action_count*(): cint {.exportc, cdecl, dynlib.} = ActionSizes.len
 
-const NativeObservationVersions = [ocTeamsView1.int32, ocFfaView1.int32]
+const NativeObservationVersions = [ocTeamsView1.int32, ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32,
+  ocTeamsView1t.int32, ocTeamsView1p.int32, ocTeamsView1i.int32]
 proc obsContract(version: int32): ObservationContractVersion =
-  ## A native observation version already checked to be 201 or 202.
-  if version == ocTeamsView1.int32: ocTeamsView1 else: ocFfaView1
+  ## A native observation version already checked to be 201 .. 207.
+  if version == ocTeamsView1.int32: ocTeamsView1 elif version == ocTeamsView1h.int32: ocTeamsView1h
+  elif version == ocTeamsView1s.int32: ocTeamsView1s elif version == ocTeamsView1t.int32: ocTeamsView1t
+  elif version == ocTeamsView1p.int32: ocTeamsView1p
+  elif version == ocTeamsView1i.int32: ocTeamsView1i
+  else: ocFfaView1
 proc layoutOf(env: ptr NativeEnv): FfaViewLayout =
   ## The ffa.view.1 layout of the handle's current world.
   ffaViewLayout(env.n, env.world.controlHearts.len)
@@ -537,13 +640,21 @@ proc rowWidth(env: ptr NativeEnv): int =
   ## Floats per seat this handle's pw_observe writes: the contract's width (ffa.view.1: the
   ## current world's layout) plus the user inputs.
   if env.obsVersion == ocFfaView1: env.layoutOf.size + env.userInputs
+  elif env.obsVersion == ocTeamsView1h: TeamsViewHSize + env.userInputs
+  elif env.obsVersion == ocTeamsView1s: TeamsViewSSize + env.userInputs
+  elif env.obsVersion == ocTeamsView1t: TeamsViewTSize + env.userInputs
+  elif env.obsVersion == ocTeamsView1p: TeamsViewPSize + env.userInputs
+  elif env.obsVersion == ocTeamsView1i: TeamsViewISize + env.userInputs
   else: TeamsViewSize + env.userInputs
 proc actionHeads(env: ptr NativeEnv): seq[int] =
   ## The head sizes of the handle's action contract (teams.view.1: ActionSizes; ffa.view.1
   ## pointer: the current world's layout).
   if env.obsVersion == ocFfaView1: pointerHeads(env.layoutOf) else: actionHeadSizes(env.actionContract)
 proc logitWidth(env: ptr NativeEnv): int =
-  ## Logits per seat under the handle's action contract (pw_step_logits' row stride).
+  ## Logits per seat under the handle's action contract (pw_step_logits' row stride). Contract 15's offset heads
+  ## carry one row per identity, so its width is not the sum of its head sizes.
+  if env.obsVersion != ocFfaView1 and env.actionContract == acTeamsView1Target: return LogitSizeTarget
+  if env.obsVersion != ocFfaView1 and env.actionContract == acTeamsView1Raw: return LogitSizeRaw
   for h in env.actionHeads: result += h
 
 proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): pointer =
@@ -559,6 +670,7 @@ proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): p
     env.allocSeats(LegacySeats)
     env.newEnvWorld(seed, maxTicks)
     for i in 0..<env.n: env.resets[i] = 1
+    for h in env.histories.mitems: h.resetHistory()
     env.resetStats()
     env.initCurriculum()
     env.resetDecoders()
@@ -577,7 +689,12 @@ proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.export
   ## pw_create with the observation contract chosen: 201 = teams.view.1 (identical to
   ## pw_create; the teams game only: pw_set_game_mode refuses FFA-kin on the handle),
   ## 202 = ffa.view.1 (any seat count, pw_set_seats; the width follows the match:
-  ## pw_handle_observation_size, pw_observation_layout). nil for any other version (the
+  ## pw_handle_observation_size, pw_observation_layout), 203 = teams.view.1h (teams.view.1 + the 100-float
+  ## motion-history block, 612 floats; the teams game only), 204 = teams.view.1s (teams.view.1h + the 128-float
+  ## stop-clock block, 740 floats; the teams game only), 205 = teams.view.1t (teams.view.1s + the 11-float
+  ## hunt-clock block, 751 floats; the teams game only), 206 = teams.view.1p (teams.view.1t + the 4-float own
+  ## true-timer block, 755 floats; the teams game only), 207 = teams.view.1i (teams.view.1p + the held cooldown / 288
+  ## and the 81-float rules-49 item block, 837 floats; the teams game only). nil for any other version (the
   ## contracts before teams.view.1 were retired for BASIC parity) or a bad max_ticks.
   if obsVersion notin NativeObservationVersions: return nil
   createEnv(seed, maxTicks, obsContract(obsVersion))
@@ -585,6 +702,11 @@ proc pw_create_observation*(seed, maxTicks, obsVersion: int32): pointer {.export
 proc pw_observation_size_for*(obsVersion: int32): cint {.exportc, cdecl, dynlib.} =
   ## Floats per seat under observation contract `obsVersion`; -1 if unknown, and for 202
   ## (ffa.view.1), whose width follows the match (pw_handle_observation_size).
+  if obsVersion == ocTeamsView1h.int32: return TeamsViewHSize.cint
+  if obsVersion == ocTeamsView1s.int32: return TeamsViewSSize.cint
+  if obsVersion == ocTeamsView1t.int32: return TeamsViewTSize.cint
+  if obsVersion == ocTeamsView1p.int32: return TeamsViewPSize.cint
+  if obsVersion == ocTeamsView1i.int32: return TeamsViewISize.cint
   if obsVersion != ocTeamsView1.int32: return -1
   TeamsViewSize.cint
 
@@ -615,8 +737,10 @@ proc pw_create_observation_inputs_v*(seed, maxTicks, obsVersion, userInputs: int
   ## floats, a policy seat's as its policy.bas set them, zeros for every other seat; K = 0 is
   ## pw_create_observation(seed, max_ticks, 202). nil for another version, a bad K or max_ticks.
   if obsVersion == ocTeamsView1.int32: return pw_create_observation_inputs(seed, maxTicks, userInputs)
-  if obsVersion != ocFfaView1.int32 or userInputs notin 0'i32..MaxUserInputs.int32: return nil
-  result = createEnv(seed, maxTicks, ocFfaView1)
+  if obsVersion notin [ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32, ocTeamsView1t.int32,
+      ocTeamsView1p.int32, ocTeamsView1i.int32] or
+      userInputs notin 0'i32..MaxUserInputs.int32: return nil
+  result = createEnv(seed, maxTicks, obsContract(obsVersion))
   if result != nil: cast[ptr NativeEnv](result).userInputs = userInputs.int
 
 proc pw_handle_user_inputs*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
@@ -743,18 +867,35 @@ proc pw_action_layout_ext2*(handle: pointer, output: ptr UncheckedArray[int32]):
   output[10] = env.logitWidth.int32
   0
 
+proc pw_action_layout_ext3*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## The handle's action heads, 13 int32: [heads (5, 7, 9 or 10), the head sizes (10 slots, 0 past the last head),
+  ## logits per seat, 0]. teams.view.1 raw (16): [10, 51, 25, 2, 2, 2, 63, 63, 256, 8, 128, 2490, 0]. 0, or -1 bad args.
+  if handle == nil or output == nil: return -1
+  let env = cast[ptr NativeEnv](handle)
+  let heads = env.actionHeads
+  if heads.len > ActionSizesRaw.len: return -1
+  for i in 0..<13: output[i] = 0
+  output[0] = heads.len.int32
+  for i, h in heads: output[1+i] = h.int32
+  output[11] = env.logitWidth.int32
+  0
+
 proc pw_set_action_contract*(handle: pointer, version: int32): cint {.exportc, cdecl, dynlib.} =
   ## The action contract pw_step reads the caller's heads under: on a 201 handle 11
   ## (teams.view.1, five heads per seat; the default) or 13 (teams.view.1 aim-offset, seven
   ## heads per seat: the five, then two 23-bin aim offsets the reference decoder adds to an
   ## identity aim) or 14 (teams.view.1 movement-offset, nine heads per seat: those seven, then
-  ## two 23-bin offsets the reference decoder adds to the movement goal); on a 202 handle 12
-  ## only. Kept across pw_reset; every decoder seat starts over. 0, or -1 bad args.
+  ## two 23-bin offsets the reference decoder adds to the movement goal) or 15 (teams.view.1 target-conditioned
+  ## aim offset: contract 13's seven heads, heads 5 and 6 drawn from the chosen identity's row of 16 rows, 818
+  ## logits per seat) or 16 (its raw variant: 63 x 7 u identity rows, then walk direction 256, walk distance 8 and
+  ## look direction 128 heads; 2490 logits per seat; describe it with pw_action_layout_ext3); on a 202 handle 12 only. Kept across pw_reset; every decoder seat starts over. 0, or -1 bad
+  ## args.
   if handle == nil: return -1
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32,
-      acTeamsView1Move.int32]: return -1
+      acTeamsView1Move.int32, acTeamsView1Target.int32, acTeamsView1Raw.int32,
+      acTeamsView1SelfDestruct.int32]: return -1
   let contract = ActionContractVersion(version)
   if not pairs(env.obsVersion, contract): return -1
   env.actionContract = contract
@@ -777,9 +918,10 @@ proc pw_user_inputs_contract_hash_v*(obsVersion, userInputs: int32, output: ptr 
   ## pw_user_inputs_contract_hash with the base contract named: 201 = teams.view.1u<K>,
   ## 202 = ffa.view.1u<K> ("paintbot-pw.ffa.view.1u<K>"). -1 for another version or bad args.
   if obsVersion == ocTeamsView1.int32: return pw_user_inputs_contract_hash(userInputs, output, capacity)
-  if obsVersion != ocFfaView1.int32: return -1
+  if obsVersion notin [ocFfaView1.int32, ocTeamsView1h.int32, ocTeamsView1s.int32, ocTeamsView1t.int32,
+      ocTeamsView1p.int32, ocTeamsView1i.int32]: return -1
   if output == nil or capacity < 65 or userInputs notin 1'i32..MaxUserInputs.int32: return -1
-  let hash = userInputsContractHash(userInputs.int, ocFfaView1)
+  let hash = userInputsContractHash(userInputs.int, obsContract(obsVersion))
   for i, c in hash: output[i] = c
   output[hash.len] = '\0'
   0
@@ -808,6 +950,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
   try:
     env.newEnvWorld(seed, maxTicks)
     for i in 0..<env.n: env.resets[i] = 1
+    for h in env.histories.mitems: h.resetHistory()
     env.resetStats()
     env.resetScripts()
     env.resetCurriculum()
@@ -817,8 +960,11 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     for slot in 0..<env.n:
       env.commandPending[slot] = false
       env.commandShown[slot] = false
+      env.tcInfo[slot] = [0'i32, 0, 0, 0]
     return 0
   except CatchableError: return -1
+
+var observeInputs {.threadvar.}: seq[int32]   # observeSeats' user-input row, one per thread, zeroed per seat
 
 proc observeSeats(env: ptr NativeEnv, chosen: proc(slot: int): bool, observations, resets: FloatBuffer) =
   ## Encode the chosen seats' rows (row s at s * rowWidth) from each seat's SeatView of the
@@ -826,16 +972,20 @@ proc observeSeats(env: ptr NativeEnv, chosen: proc(slot: int): bool, observation
   ## row, then the seat's user inputs as its policy.bas left them (zeros for a seat without them).
   let n = env.rowWidth
   beginViews(env.world)
+  template inputs: untyped = observeInputs
+  inputs.setLen(env.userInputs)
   for slot in 0..<env.n:
     if not chosen(slot): continue
     let view = seatView(slot)
     template row: untyped = observations.toOpenArray(slot*n, (slot+1)*n-1)
-    var inputs = newSeq[int32](env.userInputs)
+    for i in 0..<inputs.len: inputs[i] = 0
     let bot = env.scriptBots[slot]
     if env.userInputs > 0 and env.policy[slot] and bot != nil and bot.neural != nil:
       for i in 0..<min(inputs.len, bot.neural.userInputs.len): inputs[i] = bot.neural.userInputs[i]
     if env.obsVersion == ocFfaView1:
       encodeObservation(view, ocFfaView1, row, inputs, rows = ffaViewRows(view), mask = env.obsMask)
+    elif env.obsVersion in HistoryObservationContracts:
+      encodeObservation(view, env.obsVersion, row, inputs, history = addr env.histories[slot])
     else:
       encodeObservation(view, ocTeamsView1, row, inputs)
     resets[slot] = env.resets[slot]
@@ -866,6 +1016,27 @@ proc pw_observe*(handle: pointer, observations, resets: FloatBuffer): cint {.exp
 
 proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: FloatBuffer,
     logits: FloatBuffer): cint
+proc keepFor(env: ptr NativeEnv, seat: int): KeepState
+proc toTeacher(c: Command): TeacherCommand =
+  TeacherCommand(walk: c.walk, goal: c.goal, shoot: c.shoot, aim: c.aim, grenade: c.chargeGrenade, sneak: c.sneak,
+    direct: c.direct)
+proc stepTeacherClasses(env: ptr NativeEnv) =
+  ## In-step teacher classes (pw_set_teacher_classes): after the step's decisions, on the still pre-step world, each
+  ## masked live seat's classes for the order it decided (its shadow's when it has one, else its own program's).
+  for slot in 0..<min(env.n, 32):
+    if (env.tcSeats and (1'u32 shl slot)) == 0: continue
+    if env.world.cogs[slot].hp <= 0:
+      env.tcInfo[slot] = [-2'i32, 0, 0, 0]
+      continue
+    let cmd = if env.shadowSet[slot]: env.shadowOrders[slot]
+              elif env.lastDecidedSet[slot]: env.lastDecided[slot]
+              else: continue
+    let mode = if (env.tcExact and (1'u32 shl slot)) != 0: wmExact else: wmRouted
+    let tc = toTeacher(cmd)
+    teacherClasses(env.world, slot, tc, env.tcKeep[slot], env.tcOut[slot], mode)
+    let j = walkJudge(env.world, slot, tc, wmRouted)
+    env.tcInfo[slot] = [1'i32, int32(mode == wmExact), int32(j.teacherRouted), int32(j.want.moves)]
+
 proc pw_step*(handle: pointer, actions: ActionBuffer, rewards, terminals: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
   ## Settled score reward only, normalized by 1000. Optional shaping belongs in
   ## the training adapter, never hidden in the game ABI. No implicit auto-reset.
@@ -919,6 +1090,15 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     var commands = newSeq[Command](env.n)
     var wasDead = newSeq[bool](env.n)
     var decoders = newSeq[Bot](env.n)
+    for slot in 0..<env.n: env.lastDecidedSet[slot] = false
+    if env.tcSeats != 0:
+      # In-step teacher classes: nothing from an earlier step survives; keep as each decoder holds it before deciding.
+      for slot in 0..<env.n:
+        env.tcInfo[slot] = [0'i32, 0, 0, 0]
+        if slot < 32 and (env.tcSeats and (1'u32 shl slot)) != 0: env.tcKeep[slot] = env.keepFor(slot)
+    # The shadows decide before the tick's speech is delivered. pw_script_decide already ran them (and delivered
+    # the speech) when it took this tick's decision ahead of the step.
+    if not (env.decidedValid and env.decidedTick == env.world.tick): env.shadowDecide()
     for slot in 0..<env.n:
       wasDead[slot] = env.world.cogs[slot].hp <= 0
       if env.commandPending[slot] or (env.scripts[slot].len > 0 and env.overrideMask[slot] == 0): continue
@@ -947,9 +1127,11 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
             # A seat's action contract is its manifest's. The teams contracts' layouts are prefixes of one
             # another (11: 82 logits, 13: 128, 14: 174), so a seat narrower than the handle's contract reads
             # the leading logits of its row: one world can seat contracts 11, 13 and 14 side by side on a
-            # handle set to the widest of them.
+            # handle set to the widest of them. Contract 15 (818: heads 5 and 6 as 16 identity rows) shares only
+            # the five main heads' 82 with them, so a contract-15 handle seats contract 15 and contract 11 only.
             let own = bot.neural.fedLogits.len
-            if own > stride or (own != stride and env.obsVersion == ocFfaView1):
+            if own > stride or (own != stride and env.obsVersion == ocFfaView1) or
+                (env.actionContract in {acTeamsView1Target, acTeamsView1Raw} and own != stride and own != LogitSize):
               raise newException(ValueError, "policy seat logits do not match the handle's action layout")
             for i in 0..<own: bot.neural.fedLogits[i] = logits[slot*stride+i]
             bot.neural.logitsFed = true
@@ -961,6 +1143,8 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       env.decidedValid = false
       for slot in 0..<env.n:
         if env.scripts[slot].len == 0: continue
+        env.lastDecided[slot] = env.decided[slot]
+        env.lastDecidedSet[slot] = true
         let mask = env.overrideMask[slot]
         if mask == 0:
           commands[slot] = env.decided[slot]
@@ -985,6 +1169,7 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
       elif env.commandShown[slot]:
         env.scriptOrders[slot] = Command()
         env.commandShown[slot] = false
+    if env.tcSeats != 0: env.stepTeacherClasses()
     for slot in 0..<env.n: env.gateFire(slot, commands[slot])
     let kinStep = env.mode == gmFfaKin
     var preScore, preGreat: seq[int32]
@@ -1002,8 +1187,19 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     combatTelemetry = addr env.stats
     damageScale = addr env.damagePermille
     handicap = addr env.handicapKnobs
+    env.hitEvents.setLen(0)
+    if env.hitLogOn: hitLog = addr env.hitEvents
+    killLog = addr env.killEvents
+    damageLog = addr env.damageEvents
+    damageSource = 0
+    hitLatch = addr env.hitLatch
     try: env.world.step(commands)
     finally:
+      hitLog = nil
+      killLog = nil
+      damageLog = nil
+      damageSource = 0
+      hitLatch = nil
       combatTelemetry = nil
       damageScale = nil
       handicap = nil
@@ -1110,7 +1306,7 @@ proc pw_set_game_mode*(handle: pointer, mode: int32): cint {.exportc, cdecl, dyn
   ## pw_reset (the current world keeps its mode). 0, or -1 bad args (FFA-kin on an
   ## observation contract teams.view.1 handle included: teams.view.1 is the teams game's).
   if handle == nil or mode notin 0'i32..1'i32: return -1
-  if mode == 1 and cast[ptr NativeEnv](handle).obsVersion == ocTeamsView1: return -1
+  if mode == 1 and cast[ptr NativeEnv](handle).obsVersion in TeamsObservationContracts: return -1
   cast[ptr NativeEnv](handle).nextMode = GameMode(mode)
   0
 
@@ -1187,7 +1383,7 @@ proc pw_set_config_json*(handle: pointer, json: ptr UncheckedArray[char], length
       writeMessage(error, capacity, e.msg)
       return -2
   let env = cast[ptr NativeEnv](handle)
-  if config.mode == gmFfaKin and env.obsVersion == ocTeamsView1:
+  if config.mode == gmFfaKin and env.obsVersion in TeamsObservationContracts:
     # Observation contract teams.view.1 is the teams game's, as pw_set_game_mode refuses it too.
     writeMessage(error, capacity, "observation contract teams.view.1 is for the teams game only")
     return -2
@@ -1359,6 +1555,8 @@ proc pw_set_seat_script*(handle: pointer, seat: cint, source: ptr UncheckedArray
   if length > 0: copyMem(addr env.scripts[seat][0], source, length)
   env.sizeHeard()
   env.scriptHeard[seat] = @[]
+  env.lastDecided[seat] = Command()   # pw_seat_decided_orders: nothing decided by the new program yet
+  env.lastDecidedSet[seat] = false
   env.installScript(seat)
   if env.scripts[seat].len > 0: inc env.scriptCount
   if env.scriptStatus[seat] == 2: 1 else: 0
@@ -1404,6 +1602,8 @@ proc pw_set_seat_policy_script*(handle: pointer, seat: cint, source: ptr Uncheck
   if length > 0 and manifestLength > 0: copyMem(addr env.policyManifests[seat][0], manifest, manifestLength)
   env.sizeHeard()
   env.scriptHeard[seat] = @[]
+  env.lastDecided[seat] = Command()   # pw_seat_decided_orders: nothing decided by the new program yet
+  env.lastDecidedSet[seat] = false
   env.installScript(seat)
   if env.scripts[seat].len > 0:
     inc env.scriptCount
@@ -1519,9 +1719,33 @@ proc pw_seat_policy_extra_choices*(handle: pointer, seat: cint, output: ptr Unch
   if bot == nil or bot.neural == nil: return -1
   if not bot.neural.offsetHeads:
     if env.obsVersion == ocFfaView1 or extraHeads(env.actionContract) == 0: return -1
-    for i in 0..<3*ExtraHeadsMax: output[i] = 0
+    for i in 0..<3*ExtraHeadsAbi4: output[i] = 0
     return 0
+  for i in 0..<3*ExtraHeadsAbi4: output[i] = 0
+  let n = bot.neural
+  if n.extraHeads > ExtraHeadsAbi4: return -1   # contract 16 (five extra heads): pw_seat_policy_extra_choices2
+  if not n.sampled: return 0
+  for e in 0..<n.extraHeads:
+    output[e] = n.offsetSelected[e]
+    output[ExtraHeadsAbi4+e] = n.offsetChoices[e]
+    output[2*ExtraHeadsAbi4+e] = n.appliedOffsetTemperatures[e]
+  0
+
+proc pw_seat_policy_extra_choices2*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## pw_seat_policy_extra_choices for up to five extra heads (heads 5 .. 9; action contract 16 raw), fifteen int32:
+  ## [selected5 .. selected9, final5 .. final9, temperature_milli5 .. temperature_milli9], zeros for a head the seat's
+  ## contract lacks and when the seat did not select. Returns 0, -1 for bad arguments, a seat that is not a policy seat,
+  ## or a seat without extra heads on a handle whose own contract has none.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if not env.policy[seat]: return -1
+  let bot = env.scriptBots[seat]
+  if bot == nil or bot.neural == nil: return -1
   for i in 0..<3*ExtraHeadsMax: output[i] = 0
+  if not bot.neural.offsetHeads:
+    if env.obsVersion == ocFfaView1 or extraHeads(env.actionContract) == 0: return -1
+    return 0
   let n = bot.neural
   if not n.sampled: return 0
   for e in 0..<n.extraHeads:
@@ -1529,6 +1753,186 @@ proc pw_seat_policy_extra_choices*(handle: pointer, seat: cint, output: ptr Unch
     output[ExtraHeadsMax+e] = n.offsetChoices[e]
     output[2*ExtraHeadsMax+e] = n.appliedOffsetTemperatures[e]
   0
+
+# ---------------------------------------------------------------------------------------
+# Teacher class masks (action contract 16 raw bins; teacher_classes.nim has the definitions).
+proc teacherCommand(command: ptr UncheckedArray[int32]): TeacherCommand =
+  TeacherCommand(walk: command[0] != 0, goal: Point(x: command[1], z: command[2]), shoot: command[3] != 0,
+    aim: Point(x: command[4], z: command[5]), grenade: command[6] != 0, sneak: command[7] != 0,
+    direct: command[8] != 0)
+
+proc keepFor(env: ptr NativeEnv, seat: int): KeepState =
+  ## The seat's decoder's keep: read from its own BASIC program (the reference decoder's globals
+  ## aimKnown / lastTick / keptX / keptY, as a policy.bas built on it carries them) when it has
+  ## them: known when it last ran on the previous tick and had something to keep. A seat without
+  ## such a program keeps nothing.
+  let bot = env.scriptBots[seat]
+  if bot == nil: return KeepState()
+  try:
+    let known = bot.runtime.getGlobal("aimKnown") == 1 and bot.runtime.getGlobal("lastTick") == env.world.tick-1
+    if known: return KeepState(known: true, point: Point(x: bot.runtime.getGlobal("keptX"), z: bot.runtime.getGlobal("keptY")))
+  except CatchableError: discard
+  KeepState()
+
+proc teacherClassesReference(env: ptr NativeEnv, s: int, cmd: TeacherCommand, keep: KeepState, m: var ClassMasks,
+    mode: WalkMode) =
+  ## The gate's reference: every bin decoded by the reference decoder script itself (a contract-16
+  ## decoder seat, its keep state cleared before each decode), every predicate evaluated bin by
+  ## bin, nothing shared with the fast masks but the predicates (teacher_classes' walk judge, cone,
+  ## SD test).
+  for i in 0..<m.len: m[i] = 0
+  let w = env.world
+  let bot = loadDecoderBot(DecoderSource, s, env.observationHash, acTeamsView1Raw)
+  var bots = newSeq[Bot](env.n)
+  bots[s] = bot
+  proc decode(c: array[ActionSizesRaw.len, int]): Command =
+    bot.runtime.setGlobal("aimKnown", 0)
+    for h in 0..<ActionSizesRaw.len:
+      if h < ActionSizes.len: bot.neural.fedChoices[h] = c[h].int32
+      else: bot.neural.fedOffsetChoices[h-ActionSizes.len] = c[h].int32
+    bot.neural.choicesFed = true
+    result = decideSeats(bots, w)[s]
+    doAssert not bot.failed, "reference decoder failed: " & bot.error
+  let pos = w.cogs[s].pos
+  let judge = walkJudge(w, s, cmd, mode)
+  proc walkIn(c: Command): bool = c.walk and not c.direct and judge.inClass(c.goal)
+  template setb(at, i: int) = m[at + (i shr 3)] = m[at + (i shr 3)] or uint8(1 shl (i and 7))
+  for b in 0..42:
+    if walkIn(decode([b, 0, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, 0, 0, 0])): setb(TcHead0At, b)
+  var grid = false
+  for dir in 0..<WalkDirections:
+    for dist in 0..<WalkDistances.len:
+      if walkIn(decode([43, 0, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, dir, dist, 0])):
+        setb(TcWalkAt, dir*WalkDistances.len + dist); grid = true
+  if grid:
+    for b in 43..50: setb(TcHead0At, b)
+  let order = cmd.shoot and w.cogs[s].cooldown == 0 and w.equipment[s].windup == 0 and not w.equipment[s].sprayCan
+  let sd = if order: 26.5 * gunJitterHalf().float / 32.0 / 5250.0 * max(w.gunSpreadPercent(pos, cmd.aim), 1).float / 100.0 else: 0.0
+  let mask = coneMask(w, s, cmd.aim)
+  proc aimIn(p: Point): bool = (if order: withinSd(pos, cmd.aim, p, sd) else: coneMask(w, s, p) == mask)
+  let noAim = cmd.aim == Point()
+  let keepIn = if noAim: true else: keep.known and aimIn(keep.point)
+  if keepIn: setb(TcHead1At, 0)
+  for j in 0..<TargetRows:
+    if decode([0, 1+j, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, 0, 0, 0]).aim == Point():
+      # Identity not visible: the decoder gives no aim, as keep does with nothing known.
+      if keepIn: setb(TcHead1At, 1+j)
+      continue
+    if noAim: continue
+    var any = false
+    for bx in 0..<RawOffsetBins:
+      for bz in 0..<RawOffsetBins:
+        if aimIn(decode([0, 1+j, 0, 0, 0, bx, bz, 0, 0, 0]).aim):
+          setb(TcOffsetAt, j*RawOffsetBins*RawOffsetBins + bx*RawOffsetBins + bz); any = true
+    if any: setb(TcHead1At, 1+j)
+  if not noAim:
+    var look = false
+    for k in 0..<LookDirections:
+      if aimIn(decode([0, 17, 0, 0, 0, RawOffsetCentre, RawOffsetCentre, 0, 0, k]).aim):
+        setb(TcLookAt, k); look = true
+    if look:
+      for b in 17..24: setb(TcHead1At, b)
+  m[TcFireAt] = uint8(1 shl cmd.shoot.int)
+  m[TcGrenadeAt] = uint8(1 shl cmd.grenade.int)
+  m[TcSneakAt] = uint8(1 shl cmd.sneak.int)
+
+proc teacherClassesCall(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint, reference: bool, mode = wmRouted): cint =
+  if handle == nil or command == nil or output == nil or capacity < TeacherClassBytes: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if env.obsVersion == ocFfaView1 or seat notin 0..<env.n: return -1
+  if env.world.cogs[seat].hp <= 0: return -2
+  try:
+    let cmd = teacherCommand(command)
+    let keep = env.keepFor(seat.int)
+    var m: ClassMasks
+    if reference: env.teacherClassesReference(seat.int, cmd, keep, m, mode)
+    else: teacherClasses(env.world, seat.int, cmd, keep, m, mode)
+    copyMem(output, addr m[0], TeacherClassBytes)
+    TeacherClassBytes.cint
+  except CatchableError: -1
+
+proc pw_teacher_classes*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Teacher class masks (training library only; teams game): for a teacher's decided command for
+  ## `seat` (ten int32 as pw_seat_orders writes them: walk, goal_x, goal_z, shoot, aim_x, aim_z,
+  ## charge_grenade, sneak, direct, -), the action contract 16 (raw) bins that reproduce it on the
+  ## CURRENT world, so call it after the tick's decision and before pw_step. Layout and classes:
+  ## teacher_classes.nim (8224 bytes). "Keep" is judged from the seat's own decoder program
+  ## (aimKnown / lastTick / keptX / keptY) when it has one. Returns 8224; -1 bad args (capacity
+  ## below 8224, an ffa.view.1 handle); -2 the seat is dead. Pure read: the world, its hash and
+  ## every seat are unchanged.
+  teacherClassesCall(handle, seat, command, output, capacity, false)
+
+proc pw_teacher_classes_info*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Diagnostics for a teacher command (training library only): int32[2] = {the teacher's goal is
+  ## routed by the path search (1) or walked straight / direct (0), the teacher moves this tick}.
+  ## 0; -1 bad args; -2 dead seat. Pure read.
+  if handle == nil or command == nil or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if env.obsVersion == ocFfaView1 or seat notin 0..<env.n: return -1
+  if env.world.cogs[seat].hp <= 0: return -2
+  try:
+    let j = walkJudge(env.world, seat.int, teacherCommand(command), wmRouted)
+    output[0] = int32(j.teacherRouted)
+    output[1] = int32(j.want.moves)
+    0
+  except CatchableError: -1
+
+proc pw_set_teacher_classes*(handle: pointer, seats, exact: uint32): cint {.exportc, cdecl, dynlib.} =
+  ## In-step teacher classes (training library only; default-off): from the next pw_step on, for every live seat
+  ## whose bit is set in `seats` (seats 0..31), the step computes pw_teacher_classes for the order the seat decided
+  ## that step (its shadow script's when it has one, ran = 2, else its own program's, ran = 1), on the pre-step world
+  ## after all of the step's decisions, with the keep its decoder held before deciding; seats also in `exact` get
+  ## pw_teacher_classes_exact's walk class. Read with pw_teacher_classes_last / _last_info. Kept across steps and
+  ## pw_reset until called again; (0, 0) = off. Cheap (two words), safe every step: the last step's results stay
+  ## readable. Pure telemetry: the world and every decision are unchanged. 0, -1.
+  if handle == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if env.obsVersion == ocFfaView1 and seats != 0: return -1
+  env.tcSeats = seats
+  env.tcExact = exact and seats
+  0
+
+proc pw_teacher_classes_last*(handle: pointer, seat: cint, output: ptr UncheckedArray[uint8],
+    capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The masks pw_set_teacher_classes computed for `seat` on the last pw_step (8224 bytes, pw_teacher_classes'
+  ## layout): returns 8224; 0 when none was computed (seat not masked, dead, or without a decided order; output
+  ## untouched); -1 bad args.
+  if handle == nil or output == nil or capacity < TeacherClassBytes: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if seat notin 0..<env.n: return -1
+  if env.tcInfo[seat][0] != 1: return 0
+  copyMem(output, addr env.tcOut[seat][0], TeacherClassBytes)
+  TeacherClassBytes.cint
+
+proc pw_teacher_classes_last_info*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## int32[4] for `seat` on the last pw_step: {state (1 computed, 0 none, -2 dead), mode (0 pw_teacher_classes,
+  ## 1 exact), the teacher's goal is routed, the teacher moves}. 0, -1 bad args.
+  if handle == nil or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if seat notin 0..<env.n: return -1
+  for i in 0..3: output[i] = env.tcInfo[seat][i]
+  0
+
+proc pw_teacher_classes_exact*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## pw_teacher_classes with the exact walk class: waypointFor for every walk goal, so routed goals
+  ## that reproduce the teacher's step through another target cell are found too. Tens of ms per
+  ## call: for a sampled fraction of ticks. Everything else is pw_teacher_classes'.
+  teacherClassesCall(handle, seat, command, output, capacity, false, wmExact)
+
+proc pw_teacher_classes_reference*(handle: pointer, seat: cint, command: ptr UncheckedArray[int32],
+    output: ptr UncheckedArray[uint8], capacity: cint, exact: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The same masks the slow way, for gates: every bin decoded by the reference decoder script and
+  ## tested on its own; exact = 0 pw_teacher_classes' walk class, 1 pw_teacher_classes_exact's.
+  teacherClassesCall(handle, seat, command, output, capacity, true, (if exact != 0: wmExact else: wmRouted))
 
 proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## The command a scripted seat issued on the last pw_step, ten int32:
@@ -1547,6 +1951,75 @@ proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int
   output[9] = int32(env.scripts[seat].len > 0)
   0
 
+proc pw_seat_orders_ex*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## pw_seat_orders plus the rules-49 self-destruct order: eleven int32 = pw_seat_orders' ten,
+  ## then self_destruct (1 when the command the seat issued or was given on the last pw_step
+  ## ordered a self-destruct: BASIC's selfDestruct() or pw_set_seat_command_ex). A pure read.
+  ## Returns 0, -1 for bad arguments.
+  let rc = pw_seat_orders(handle, seat, output)
+  if rc != 0: return rc
+  output[10] = cast[ptr NativeEnv](handle).scriptOrders[seat].selfDestruct.int32
+  0
+
+proc pw_seat_decided_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## The order the seat's own BASIC program (its script, or its policy.bas on the caller's
+  ## logits) decided on the last pw_step, ten int32 in pw_seat_orders' layout:
+  ## [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct, ran], whatever
+  ## the seat executed: a pending raw command (pw_set_seat_command) or an override mask
+  ## replaces the executed order, never this one. ran = 1 when the program ran on that step;
+  ## a seat without a program, or before any step since the last reset or script change,
+  ## reports zeros with ran = 0. A pure read; never calling it changes nothing. Returns 0, -1
+  ## for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  let shadow = env.shadowSet[seat]
+  let ran = shadow or env.lastDecidedSet[seat]
+  let c = if shadow: env.shadowOrders[seat] elif ran: env.lastDecided[seat] else: Command()
+  output[0] = c.walk.int32; output[1] = c.goal.x; output[2] = c.goal.z
+  output[3] = c.shoot.int32; output[4] = c.aim.x; output[5] = c.aim.z
+  output[6] = c.chargeGrenade.int32; output[7] = c.sneak.int32; output[8] = c.direct.int32
+  output[9] = (if shadow: 2'i32 elif ran: 1'i32 else: 0'i32)
+  0
+
+proc pw_set_seat_shadow_script*(handle: pointer, seat: cint, source: ptr UncheckedArray[char],
+    length: int32): cint {.exportc, cdecl, dynlib.} =
+  ## A teacher script that SHADOWS the seat (training library only; default-off): a second BASIC program with its
+  ## own runtime, globals and rnd stream, built and limited exactly as pw_set_seat_script builds a seat. Every step
+  ## it decides on the pre-step world through the seat's SeatView and hears what the seat hears; its order is never
+  ## executed and its shouts are never delivered, so the seat (caller-driven, scripted, or a policy seat whose
+  ## policy.bas keeps running and writing its user inputs) plays and the world steps exactly as without it.
+  ## pw_seat_decided_orders then reports the shadow's decision (ran = 2). Fresh runtime here and at every pw_reset;
+  ## length 0 removes it. Returns 0 (running), 1 (compile failed: nothing shadows the seat), -1 bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or length < 0 or (length > 0 and source == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if env.shadowScripts[seat].len > 0: dec env.shadowCount
+  env.shadowScripts[seat] = newString(length)
+  if length > 0: copyMem(addr env.shadowScripts[seat][0], source, length)
+  env.installShadow(seat)
+  if env.shadowScripts[seat].len > 0: inc env.shadowCount
+  if env.shadowStatus[seat] == 2: 1 else: 0
+
+proc pw_seat_shadow_status*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The seat's shadow script: 0 none, 1 running, 2 compile failed, 3 disabled by a runtime error. -1 bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle): return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).shadowStatus[seat].cint
+
+proc setSeatCommand(handle: pointer, seat: cint, nine: ptr UncheckedArray[int32], selfDestruct: bool): cint =
+  ## pw_set_seat_command / pw_set_seat_command_ex: validate and queue one raw command.
+  if handle == nil or seat notin 0..<seatsOf(handle) or nine == nil: return -1
+  for i in [0, 3, 6, 7, 8]:
+    if nine[i] notin 0'i32..1'i32: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  env.commandNext[seat] = Command(walk: nine[0] == 1, goal: Point(x: nine[1], z: nine[2]), shoot: nine[3] == 1,
+    aim: Point(x: clamp(nine[4], minX().int32, maxX().int32), z: clamp(nine[5], minZ().int32, maxZ().int32)),
+    chargeGrenade: nine[6] == 1, sneak: nine[7] == 1, direct: nine[8] == 1, selfDestruct: selfDestruct)
+  env.commandPending[seat] = true
+  0
+
 proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## A raw command for one seat on the next pw_step only, nine int32 in pw_seat_orders'
   ## layout: [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct],
@@ -1555,22 +2028,29 @@ proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[
   ## point), lookAt/shootAt's aim clamped to the map (aim (0,0) = no aim order). A harness
   ## tool (replays, probes), not a seat: for that step the seat's heads are not decoded and
   ## not checked against its forbid mask, and a scripted seat's script still runs but its
-  ## order is replaced. The fire period applies only if already set on the seat (off by
+  ## order is replaced. A policy seat (pw_set_seat_policy_script) likewise still runs its
+  ## policy.bas on the caller's logits (pw_step_logits), so its BASIC state, user inputs and
+  ## sampling streams advance as if it had acted; only the executed command is the raw one.
+  ## pw_seat_decided_orders reads what that program decided (a net teacher shadowing the
+  ## seat while a student's command plays). The fire period applies only if already set on the seat (off by
   ## default).
   ## pw_seat_orders echoes the command after the step (an unscripted seat reports zeros
   ## again after a step without one). A later call before the step replaces it; pw_reset
   ## drops it. Never calling it is byte-identical to a library without it. Returns 0, -1
   ## for bad arguments.
-  if handle == nil or seat notin 0..<seatsOf(handle) or nine == nil: return -1
-  for i in [0, 3, 6, 7, 8]:
-    if nine[i] notin 0'i32..1'i32: return -1
-  ready(handle)
-  let env = cast[ptr NativeEnv](handle)
-  env.commandNext[seat] = Command(walk: nine[0] == 1, goal: Point(x: nine[1], z: nine[2]), shoot: nine[3] == 1,
-    aim: Point(x: clamp(nine[4], minX().int32, maxX().int32), z: clamp(nine[5], minZ().int32, maxZ().int32)),
-    chargeGrenade: nine[6] == 1, sneak: nine[7] == 1, direct: nine[8] == 1)
-  env.commandPending[seat] = true
-  0
+  setSeatCommand(handle, seat, nine, false)
+
+proc pw_set_seat_command_ex*(handle: pointer, seat: cint, ten: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## pw_set_seat_command plus the rules-49 self-destruct order: ten int32 = pw_set_seat_command's
+  ## nine, then self_destruct (0 or 1; BASIC's selfDestruct()). Everything else is exactly
+  ## pw_set_seat_command (one pending raw command per seat: either call replaces the other's;
+  ## self_destruct 0 is byte-identical to pw_set_seat_command). The order acts only where the
+  ## world's rules act on it (rules >= 49, a live cog that is not disarmed), as a recording's
+  ## command does. A harness tool for replaying rules-49 recordings and probes. Additive: a
+  ## library whose caller never calls it is byte-identical to one without it. Returns 0, -1 for
+  ## bad arguments (self_destruct not 0 or 1 included).
+  if ten == nil or ten[9] notin 0'i32..1'i32: return -1
+  setSeatCommand(handle, seat, ten, ten[9] == 1)
 
 proc pw_action_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   ## The handle's action contract version: 11 (teams.view.1), 12 (ffa.view.1 pointer) or 13
@@ -1582,10 +2062,11 @@ proc pw_action_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
 proc pw_action_contract_hash*(version: int32, output: ptr UncheckedArray[char],
     capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The 64-hex SHA-256 contract hash an actor and its manifest carry for action contract
-  ## `version` (11, 12, 13 or 14), NUL-terminated into output (capacity >= 65). Returns 0, -1
+  ## `version` (11, 12, 13, 14, 15 or 16), NUL-terminated into output (capacity >= 65). Returns 0, -1
   ## for a bad version (the contracts before these were retired for BASIC parity) or buffer.
   if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32,
-      acTeamsView1Move.int32] or
+      acTeamsView1Move.int32, acTeamsView1Target.int32, acTeamsView1Raw.int32,
+      acTeamsView1SelfDestruct.int32] or
       output == nil or capacity < 65: return -1
   let hash = actionContractHash(ActionContractVersion(version))
   copyMem(output, unsafeAddr hash[0], hash.len)
@@ -1604,6 +2085,7 @@ proc pw_script_decide*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   if env.policyCount > 0: return -4   # a policy seat decides only with its logits (pw_step_logits)
   if env.scriptCount == 0 or env.world.winner != -1 or env.world.tick >= env.world.endTick: return 0
   if env.decidedValid and env.decidedTick == env.world.tick: return 0
+  env.shadowDecide()   # before scriptDecide delivers this tick's speech: the shadows hear what their seats hear
   env.scriptDecide()
   1
 
@@ -1748,6 +2230,21 @@ proc pw_sample_actions*(handle: pointer, seat: cint, logits: FloatBuffer, action
     return 0
   except CatchableError: return -1
 
+proc pw_set_sampling_salt*(handle: pointer, salt: int64): cint {.exportc, cdecl, dynlib.} =
+  ## Salt every seat's sampling stream (pw_sample_actions' and each policy seat's own): with
+  ## salt != 0 the streams are seeded by neural_contract.samplingRngSalted(match seed, slot,
+  ## salt) instead of samplingRng, so two byte-identical bundles on the same (seed, slot) draw
+  ## independent samples (an identical-policy null). 0 (the default) is samplingRng exactly:
+  ## a library that never makes this call, or makes it with 0, is byte-identical to one
+  ## without it. Kept across pw_reset; applied from the next pw_reset (the current match's
+  ## streams are already seeded), and to a policy seat installed after the call. The world,
+  ## its hash and pw_step are untouched; a hosted seat has no salt. Returns 0, -1 for a nil
+  ## handle.
+  if handle == nil: return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).samplingSalt = salt
+  0
+
 proc pw_seat_sample_draws*(handle: pointer, seat: cint): cint {.exportc, cdecl, dynlib.} =
   ## Decisions pw_sample_actions drew for the seat since the last create/reset (0 with
   ## sampling off). Pure telemetry. Returns -1 for bad arguments.
@@ -1850,6 +2347,101 @@ proc pw_seat_damage_taken_stats*(handle: pointer, seat: cint, output: ptr Unchec
     output[2*k+1] = s.takenHealth[k]
   0
 
+proc pw_set_hit_log*(handle: pointer, enabled: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Hit attribution (training library only): 1 = from the next pw_step on, every step records
+  ## its damage events for pw_hit_events; 0 = off (the default). Kept across pw_reset. Pure
+  ## telemetry: the world, its hash and every decision are the same either way. 0, -1 bad args.
+  if handle == nil or enabled notin 0..1: return -1
+  ready(handle)
+  cast[ptr NativeEnv](handle).hitLogOn = enabled == 1
+  0
+
+proc pw_hit_events*(handle: pointer, output: ptr UncheckedArray[int32], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## The last pw_step's damage events (pw_set_hit_log on; none after a reset), in the order the
+  ## engine dealt them, PW_HIT_EVENT_INTS = 8 int32 each: {attacker (-1 = the map), victim,
+  ## health removed (after armor), armor absorbed, weapon (0 other, 1 gun, 2 grenade, 3 spray),
+  ## killed (the victim died), final (that death was its last life: out of the match), disguised
+  ## (the attacker wore a uniform at the tick it ORDERED the shot: the gun's wind-up start, the
+  ## grenade's throw, the spray's trigger; firing takes the uniform off at once, so it is off by
+  ## the hit; 0 for the map and for weapon 0)}. An event
+  ## is a damage event past the shield and life checks, pw_seat_stats' hit rule, so a match's
+  ## events by victim sum to pw_seat_damage_taken_stats (hits, health) and pw_seat_stats
+  ## (hits_taken, deaths). Writes min(count, capacity) events (output may be NULL when capacity
+  ## is 0) and returns the count; -1 bad args. Pure read.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  for i in 0..<min(env.hitEvents.len, capacity.int):
+    let e = env.hitEvents[i]
+    for k, v in [e.attacker, e.victim, e.health, e.armor, e.weapon, e.killed, e.final, e.disguised]:
+      output[i*8+k] = v
+  cint(env.hitEvents.len)
+
+proc pw_kill_events*(handle: pointer, output: ptr UncheckedArray[int32], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Kill log (training library only; always recorded, no switch): every death since the last
+  ## drain, oldest first, PW_KILL_EVENT_INTS = 5 int32 each: {tick (the world tick the dealing
+  ## pw_step started from: pw_results' tick before that step), attacker (-1 = the map), victim,
+  ## weapon (0 other, 1 gun, 2 grenade, 3 spray; a rules-49 self-destruct is 2), final (it was the
+  ## victim's last life: out of the match)}. A death is pw_seat_stats' death (the victim's health
+  ## reached 0 in a damage event), so a match's events by victim count its deaths. The kill is
+  ## CREDITED to the attacker (its tags, the replay's "tag" feed event) iff attacker >= 0 and
+  ## attacker != victim; attacker == victim is its own weapon (own grenade, self-destruct).
+  ## DRAINS: writes the oldest min(pending, capacity) events, removes them, and returns how many it
+  ## wrote; the rest stay queued for the next call. capacity 0 (output may be NULL) drains
+  ## nothing and returns the pending count. Create, pw_reset and pw_world_load (the blob's own
+  ## queue) replace the queue. Pure telemetry: the world, its hash and every decision are the
+  ## same whether or not it is ever called. -1 bad args.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if capacity == 0: return cint(env.killEvents.len)
+  let n = min(env.killEvents.len, capacity.int)
+  for i in 0..<n:
+    let e = env.killEvents[i]
+    for k, v in [e.tick, e.attacker, e.victim, e.weapon, e.final]:
+      output[i*5+k] = v
+  if n > 0: env.killEvents = env.killEvents[n .. ^1]
+  cint(n)
+
+proc pw_damage_events*(handle: pointer, output: ptr UncheckedArray[int32], capacity: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Damage log (training library only; always recorded, no switch): every damage event since the last drain,
+  ## oldest first, PW_DAMAGE_EVENT_INTS = 8 int32 each: {tick (the world tick the dealing pw_step started from, as
+  ## pw_kill_events), attacker (-1 = the map; attacker == victim = its own grenade or self-destruct), victim, weapon
+  ## (0 other / map, 1 gun, 2 grenade, 3 spray, 4 sniper, 5 self-destruct: finer than pw_hit_events / pw_kill_events,
+  ## which keep 1 for a sniper hit and 2 for a self-destruct; a sniper hit is the shooter's sniper at TARGET
+  ## SELECTION, so a shooter a same-tick self-destruct kills still lands a 4), health (removed, after armor), armor
+  ## (absorbed), killed (the victim died), final (that death was its last life)}. A damage event is pw_seat_stats'
+  ## hit (past the shield and life checks): by victim, a match's events sum to pw_seat_damage_taken_stats, and the
+  ## killed ones are pw_kill_events' deaths. DRAINS like pw_kill_events: writes the oldest min(pending, capacity)
+  ## events, removes them, returns how many it wrote; capacity 0 (output may be NULL) drains nothing and returns the
+  ## pending count. Create, pw_reset and pw_world_load (the blob's own queue) replace the queue. Pure telemetry:
+  ## the world, its hash and every decision are the same whether or not it is ever called. -1 bad args.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if capacity == 0: return cint(env.damageEvents.len)
+  let n = min(env.damageEvents.len, capacity.int)
+  for i in 0..<n:
+    let e = env.damageEvents[i]
+    for k, v in [e.tick, e.attacker, e.victim, e.weapon, e.health, e.armor, e.killed, e.final]:
+      output[i*8+k] = v
+  if n > 0: env.damageEvents = env.damageEvents[n .. ^1]
+  cint(n)
+
+proc pw_seat_shot_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Shots the seat ORDERED since the last create/reset (training library only), six int32: [gun
+  ## wind-ups started, grenades thrown, sprays triggered, and each of the three counted only when
+  ## the seat wore a uniform at that tick] (the uniform comes off with the order). Hits or not:
+  ## pw_hit_events' disguised flag is the same latch for the shots that hit. Pure telemetry.
+  ## Returns 0, -1 for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  for k in 0..2:
+    output[k] = env.hitLatch.orders[seat][k]
+    output[3+k] = env.hitLatch.ordersDisguised[seat][k]
+  0
+
 proc pw_seat_equip_stats*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## Equipment and disguise telemetry for one seat (training library only), eight int32,
   ## cumulative since the last create/reset: [armor pickups, uniform (disguise) pickups,
@@ -1933,6 +2525,115 @@ proc pw_seat_state*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl
     output[o+6] = (if c.carrying: 1'f32 else: 0'f32)
     output[o+7] = float32((if e.grenade: 1 else: 0) + (if e.sprayCan: 2 else: 0))
   0
+
+const
+  SeatItemFloats* = 12 ## pw_seat_items floats per seat
+  PickupFloats* = 5    ## pw_pickups floats per pickup
+  PickupKinds* = 8     ## pw_seat_pickups int32 per seat: PickupKind ordinals 0..7
+
+proc pw_seat_items*(handle: pointer, output: FloatBuffer): cint {.exportc, cdecl, dynlib.} =
+  ## Every seat's rules-49 item state in one call (training library only), n seats (pw_seats) x
+  ## SeatItemFloats = 12 floats in seat order, raw engine units (each an exact integer), read on
+  ## the current (pre-step) world: [has sniper, misting, mister ticks left (misterUntil - tick,
+  ## 0..1439; 0 on its final tick, while misting is still 1), mister heal in (ticks left mod
+  ## MisterHealTicks: 0 = it heals on this step), has radar, radar ticks left (radarUntil - tick,
+  ## 0..1439; 0 on its final tick, while has radar is still 1), radar boosted (within
+  ## RadarRadius of a living carrier, the carrier included: its damage doubles), disarmed
+  ## (misting or carrying a radar: no gun, sniper, spray, grenade or self-destruct), cooldown
+  ## (cogs[i].cooldown: the gun's, or the sniper's when it carries one; 0..72 gun, 0..288
+  ## sniper), gun reach (SniperRange with a sniper, else gunReach()), spray can, self-destruct
+  ## ready (rules >= 49, alive, not disarmed: the engine keeps no "armed" state; the blast deals
+  ## the cog's hp)]. A dead seat's row (hp <= 0) is all zeros; before rules 49 every item field
+  ## reads 0. A pure read: the world and its hash are unchanged. Returns 0, -1 for bad arguments.
+  if handle == nil or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  template w: untyped = env.world
+  for slot in 0..<env.n:
+    let o = slot*SeatItemFloats
+    for k in 0..<SeatItemFloats: output[o+k] = 0
+    if w.cogs[slot].hp <= 0: continue
+    let sniper = w.hasSniper(slot)
+    let misting = w.misting(slot)
+    let misterLeft = (if misting: w.misterUntil[slot] - w.tick else: 0'i32)
+    let radar = w.hasRadar(slot)
+    output[o] = float32(sniper.int)
+    output[o+1] = float32(misting.int)
+    output[o+2] = misterLeft.float32
+    output[o+3] = (if misting: float32(misterLeft mod MisterHealTicks.int32) else: 0'f32)
+    output[o+4] = float32(radar.int)
+    output[o+5] = (if radar: float32(w.radarUntil[slot] - w.tick) else: 0'f32)
+    output[o+6] = float32(w.radarBoosted(slot).int)
+    output[o+7] = float32(w.disarmed(slot).int)
+    output[o+8] = w.cogs[slot].cooldown.float32
+    output[o+9] = float32(if sniper: SniperRange else: gunReach())
+    output[o+10] = float32(w.equipment[slot].sprayCan.int)
+    output[o+11] = float32((visionRulesVersion >= SelfDestructRules and not w.disarmed(slot)).int)
+  0
+
+proc pw_seat_pickups*(handle: pointer, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## Pickups each seat TOOK since the last create/reset (training library only), n seats
+  ## (pw_seats) x PickupKinds = 8 int32 in seat order, by PickupKind ordinal: [grenade, spray,
+  ## medkit, armor, uniform, windex-mister, sniper, radar]. Counted where pw_seat_equip_stats
+  ## counts (kinds 0..4 equal its grenade, spray, medkit, armor and uniform pickups); a
+  ## pw_world_load restores the blob's counts. Pure telemetry. Returns 0, -1 for bad arguments.
+  if handle == nil or output == nil: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  for slot in 0..<env.n:
+    let s = env.stats[slot]
+    for k, v in [s.grenadePickups, s.sprayPickups, s.medkitPickups, s.armorPickups, s.uniformPickups,
+        s.misterPickups, s.sniperPickups, s.radarPickups]:
+      output[slot*PickupKinds+k] = v
+  0
+
+proc pw_pickups*(handle: pointer, output: FloatBuffer, capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Every pickup on the map, whatever any seat sees (training library only, privileged),
+  ## PickupFloats = 5 floats each: [x, z (world units), kind (PickupKind ordinal 0..7: grenade,
+  ## spray, medkit, armor, uniform, windex-mister, sniper, radar), ready (1 when readyAt <= tick:
+  ## on the ground and takeable), ticks until ready (max(0, readyAt - tick))]. Row i is engine
+  ## pickup i: the same index as teams.view.1's pickup row i, BASIC pickupX / pickupY /
+  ## pickupKind(i) and the movement head's "walk to pickup i" (choice 11 + i, i < 32). Writes
+  ## min(count, capacity) rows and returns the pickup count; capacity 0 (output may be NULL)
+  ## sizes the buffer. A pure read. -1 for bad arguments.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  let tick = env.world.tick
+  for i in 0..<min(env.world.pickups.len, capacity.int):
+    let p = env.world.pickups[i]
+    let o = i*PickupFloats
+    output[o] = p.pos.x.float32
+    output[o+1] = p.pos.z.float32
+    output[o+2] = float32(ord(p.kind))
+    output[o+3] = float32((p.readyAt <= tick).int)
+    output[o+4] = float32(max(0'i32, p.readyAt - tick))
+  env.world.pickups.len.cint
+
+proc pw_seat_pickup_visible*(handle: pointer, output: ptr UncheckedArray[uint32], words: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Which pickups each seat SEES now (training library only), as bitsets on the current (pre-step)
+  ## world: n seats (pw_seats) x `words` uint32 in seat order; bit (i mod 32) of word (i div 32) of
+  ## seat s is 1 when seat s sees engine pickup i (pw_pickups row i, BASIC pickupVisible(i), the
+  ## movement head's "walk to pickup i", choice 11 + i). The test is the seat's SeatView.pickupVisible,
+  ## i.e. seat_view's pickupSeen: the one BASIC's pickupVisible / pickupKind and teams.view.1 / 1i's
+  ## pickup rows (pickupRow) use: on the ground and canSeePoint (a dead seat sees nothing). Views are
+  ## begun on the current world as pw_observe begins them (beginViews: memo caches only). Bits past the pickup count are 0; pickups past
+  ## 32 x words are not written. Returns the pickup count; words 0 (output may be NULL) sizes the
+  ## buffer (ceil(count / 32) words per seat). A pure read: the world and its hash are unchanged.
+  ## -1 for bad arguments.
+  if handle == nil or words < 0 or (words > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  template w: untyped = env.world
+  if words > 0:
+    beginViews(w)
+    for slot in 0..<env.n:
+      for k in 0..<words.int: output[slot*words.int+k] = 0
+      let view = seatView(slot)
+      for i in 0..<min(w.pickups.len, 32*words.int):
+        if view.pickupVisible(i) == 1:
+          output[slot*words.int + i div 32] = output[slot*words.int + i div 32] or (1'u32 shl (i mod 32))
+  w.pickups.len.cint
 
 proc pw_world_json*(handle: pointer, output: ptr UncheckedArray[char], capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The whole world as one JSON object (training library only): {"rulesVersion": R,
@@ -2117,7 +2818,7 @@ proc pw_net_contracts*(net: pointer, output: ptr UncheckedArray[char], capacity:
 
 proc pw_net_infer*(net: pointer, observation, state, logits: ptr UncheckedArray[float32]): cint {.exportc, cdecl, dynlib.} =
   ## One inference, the hosted seat's run_neural_net: reads `inputs` observation floats and
-  ## the `state` floats (all MINGRU states in layer order), writes the new state in place
+  ## the `state` floats (every MINGRU and DELAY state, in layer order), writes the new state in place
   ## and `outputs` logits. Returns 0; -1 bad arguments; -2 when inference fails (a
   ## nonfinite input, state, intermediate or output), leaving state and logits untouched,
   ## as the hosted seat is then disabled without committing either. The reset convention is
@@ -2147,7 +2848,8 @@ const
   SnapFormat = 1'u64
   # Any change to a source that defines a snapshotted type changes the id: a blob loads only into the build that wrote it.
   SnapBuildId = sha256Hex(staticRead("sim.nim") & staticRead("mechanics.nim") & staticRead("native_env.nim") &
-    staticRead("neural_host.nim") & staticRead("bots.nim") & staticRead("kinship.nim") &
+    staticRead("neural_host.nim") & staticRead("neural_contract.nim") & staticRead("seat_view.nim") &
+    staticRead("bots.nim") & staticRead("kinship.nim") &
     staticRead("training_labels.nim") & staticRead("snapshot.nim") &
     staticRead("basic_states.nim") & staticRead("observations.nim") &
     staticRead("../../coworld/dependencies.lock") &
@@ -2196,7 +2898,7 @@ proc pw_world_save*(handle: pointer, output: ptr UncheckedArray[byte], capacity:
   w.put(SnapMagic); w.putU64(SnapFormat); w.put(SnapBuildId)
   w.put(env.obsVersion); w.put(env.n)
   for name, f in fieldPairs(env[]):
-    when name == "scriptBots" or name == "decoders":
+    when name == "scriptBots" or name == "decoders" or name == "shadowBots":
       w.putU64(f.len.uint64)
       for b in f: w.saveBot(b)
     else:
@@ -2242,10 +2944,10 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
     if tail.at != r.data.len or sum != snapChecksum(r.data, body): r.fail("checksum mismatch")
     r.data.setLen(body)
     var tmp = env[]
-    var botBlobs: array[2, seq[(int, seq[byte])]]
+    var botBlobs: array[3, seq[(int, seq[byte])]]
     for name, f in fieldPairs(tmp):
-      when name == "scriptBots" or name == "decoders":
-        let k = when name == "scriptBots": 0 else: 1
+      when name == "scriptBots" or name == "decoders" or name == "shadowBots":
+        let k = when name == "scriptBots": 0 elif name == "decoders": 1 else: 2
         let count = r.getU64()
         if count != uint64(n): r.fail("bot count")
         f = newSeq[Bot](n)
@@ -2284,7 +2986,15 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
       let b = decoderFor(addr tmp, slot)
       var br = SnapReader(data: blob)
       br.loadBot(b)
-    env[] = tmp
+    for (slot, blob) in botBlobs[2]:
+      # installShadow resets the shadow's status and last order, which the blob already restored
+      let (status, orders, ran) = (tmp.shadowStatus[slot], tmp.shadowOrders[slot], tmp.shadowSet[slot])
+      installShadow(addr tmp, slot)
+      if tmp.shadowBots[slot].isNil: r.fail("shadow script for slot " & $slot & " did not build")
+      tmp.shadowStatus[slot] = status; tmp.shadowOrders[slot] = orders; tmp.shadowSet[slot] = ran
+      var br = SnapReader(data: blob)
+      br.loadBot(tmp.shadowBots[slot])
+    env[] = tmp   # teams.view.1h: the seats' motion histories come back with the blob (exact continuation)
   except SnapError, ValueError:
     snapLastError = getCurrentExceptionMsg()
     ready(handle)

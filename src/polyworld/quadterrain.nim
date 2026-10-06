@@ -475,6 +475,15 @@ proc terrainFrag(
 
 ## Water shader: transparent blue with a Blinn-Phong specular highlight.
 
+var waterShaderOverride*: tuple[vertex, fragment: string]
+  ## A game's own water shader (GLSL vertex and fragment sources), used instead of the
+  ## default when set before initTerrain. It must read vertPos and may read normal;
+  ## drawWater still sets mvp, cameraPos, waterTime, waterNormals and the visibility uniforms.
+
+var waterPremultipliedAlpha* = false
+  ## Whether the water shader outputs premultiplied colour, so light it adds (a reflected
+  ## sun) can exceed what straight alpha blending would allow.
+
 var
   cameraPos: Uniform[Vec3]
   waterNormals: Uniform[Sampler2dArray]
@@ -3337,10 +3346,14 @@ proc initTerrain*(
   glBindTexture(GL_TEXTURE_2D, 0)
   showAllTerrain()
 
-  waterProgram = compileProgram(
-    toShader(waterVert, OpenGlShaderTarget, shaderVertex),
-    toShader(waterFrag, OpenGlShaderTarget, shaderFragment)
-  )
+  waterProgram =
+    if waterShaderOverride.vertex.len > 0:
+      compileProgram(waterShaderOverride.vertex, waterShaderOverride.fragment)
+    else:
+      compileProgram(
+        toShader(waterVert, OpenGlShaderTarget, shaderVertex),
+        toShader(waterFrag, OpenGlShaderTarget, shaderFragment)
+      )
   waterMvpLocation = glGetUniformLocation(waterProgram, "mvp")
   waterEnv = envLocations(waterProgram)
   waterCameraLocation = glGetUniformLocation(waterProgram, "cameraPos")
@@ -3590,12 +3603,13 @@ proc initTerrain*(
       nil
     )
     let normalLocation = glGetAttribLocation(waterProgram, "normal")
-    doAssert normalLocation >= 0
-    glEnableVertexAttribArray(normalLocation.GLuint)
-    glVertexAttribPointer(
-      normalLocation.GLuint, 3, cGL_FLOAT, GL_FALSE, stride,
-      cast[pointer](3 * sizeof(float32))
-    )
+    # An override shader may ignore the normal, and GLSL drops unused attributes.
+    if normalLocation >= 0:
+      glEnableVertexAttribArray(normalLocation.GLuint)
+      glVertexAttribPointer(
+        normalLocation.GLuint, 3, cGL_FLOAT, GL_FALSE, stride,
+        cast[pointer](3 * sizeof(float32))
+      )
 
   # Sun depth pass vertex arrays: the same vertex buffers, but only the
   # position attribute (plus uv and layer for the tree cutout).
@@ -3891,6 +3905,10 @@ proc drawTerrain*(viewProjection: Mat4, showEdges = false) =
       drawTexturedBatch(batch, mvp)
   glUseProgram(0)
 
+proc waterShaderProgram*(): GLuint =
+  ## The compiled water program, for setting an override shader's own uniforms.
+  waterProgram
+
 proc drawWater*(viewProjection: Mat4, cameraEye: Vec3, seconds = 0'f32) =
   ## Transparent water pass; call after all opaque drawing.
   if waterMesh.len == 0:
@@ -3914,7 +3932,7 @@ proc drawWater*(viewProjection: Mat4, cameraEye: Vec3, seconds = 0'f32) =
   glBindTexture(GL_TEXTURE_2D, visibilityTexture)
   glUniform1i(waterVisibilityTexLocation, 1)
   glEnable(GL_BLEND)
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+  glBlendFunc(if waterPremultipliedAlpha: GL_ONE else: GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
   glDepthMask(GL_FALSE)
   glBindVertexArray(waterVertexArray)
   glDrawArrays(GL_TRIANGLES, 0, (waterMesh.len div 6).GLsizei)

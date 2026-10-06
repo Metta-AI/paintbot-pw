@@ -749,6 +749,21 @@ def populate(m: Map, rng):
         for _ in range(3):
             p = spread_pick(P, 0.22, 0.48, m.trenches, sep=520, self_sep=900, clear=trench_clear, need_pad=True)
             m.trenches += [p, mirror(p)]
+    # Rules 49 items, drawn after everything above so the rules 41-48 content stays byte-identical
+    # (the engine skips these kinds below rules 49).
+    spec49 = [
+        ("sniper", 0.18, 0.36, h / 120 + n(), "own half, high ground"),
+        ("mister", 0.32, 0.46, dens / 8 + n(), "midfield, near cover"),
+        ("radar", 0.40, 0.52, openness / 20 + n(), "contested centre, open ground"),
+    ]
+    for kind, lo, hi, score, role in spec49:
+        p = P.pick(lo, hi, score, sep=380, self_sep=700)
+        m.pickups += [(p[0], p[1], kind, role), (*mirror(p), kind, role)]
+    for _ in range(item_copies(m) - 1):
+        for kind, lo, hi, _, role in spec49:
+            same = [(x, z) for x, z, k, _ in m.pickups if k == kind]
+            p = spread_pick(P, lo, hi, same, sep=380, self_sep=700, clear=item_clear)
+            m.pickups += [(p[0], p[1], kind, role), (*mirror(p), kind, role)]
 
 
 # ---- validation -----------------------------------------------------------------------
@@ -760,7 +775,8 @@ def validate(m: Map):
     for _, _, k, _ in m.pickups:
         kinds[k] = kinds.get(k, 0) + 1
     copies = item_copies(m)
-    want = {k: v * copies for k, v in {"grenade": 4, "spray": 2, "armor": 2, "medkit": 4, "uniform": 2}.items()}
+    want = {k: v * copies for k, v in {"grenade": 4, "spray": 2, "armor": 2, "medkit": 4, "uniform": 2,
+                                           "sniper": 2, "mister": 2, "radar": 2}.items()}
     if kinds != want:
         bad.append(f"pickup counts {kinds}")
     if len(m.hearts) != heart_target(m) or len(m.trenches) != 6 * copies:
@@ -832,7 +848,7 @@ def to_json(m: Map):
     }
 
 
-PICKUP_KINDS = ["grenade", "spray", "medkit", "armor", "uniform"]  # sim.nim PickupKind order
+PICKUP_KINDS = ["grenade", "spray", "medkit", "armor", "uniform", "mister", "sniper", "radar"]  # sim.nim PickupKind order
 COVER_KINDS = ["tree", "house", "prop", "rock"]
 
 
@@ -881,7 +897,8 @@ def render(m: Map, path: Path, scale=10):
         r = c.r / scale
         d.ellipse([x - r, z - r, x + r, z + r], fill=colors[c.kind], outline=(20, 30, 20))
     icon = {"grenade": ((70, 70, 70), "G"), "spray": ((150, 60, 200), "S"), "armor": ((90, 120, 160), "A"),
-            "medkit": ((240, 240, 240), "+"), "uniform": ((230, 180, 40), "U")}
+            "medkit": ((240, 240, 240), "+"), "uniform": ((230, 180, 40), "U"),
+            "sniper": ((214, 160, 70), "N"), "mister": ((64, 196, 255), "W"), "radar": ((255, 120, 60), "R")}
     for x, z, k, _ in m.pickups:
         px, pz = P(x, z)
         col, ch = icon[k]

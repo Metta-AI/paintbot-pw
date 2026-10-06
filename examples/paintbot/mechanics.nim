@@ -13,6 +13,86 @@ const
   GunWindupTicks* = 5
   GunRange* = 5250
   StartingLives* = 3
+  # Rules 49 shorten the gun to 21 m (about half the distance between the bases) and make long
+  # shots unreliable: a wider aim error (summed jitter +-600 instead of +-64 per GunRange of
+  # aim) and, past a third of the reach, a growing chance that a ball which does hit lands as a dud (no burst, no
+  # damage), up to half at full reach. On level ground with perfect aim at a still cog: ~99%
+  # of shots land at 5 m, ~66% at 10 m, ~39% at 15 m, ~20% at 21 m (40% on target x 50% burst).
+  ShortGunRules* = 49
+  ShortGunRange* = 2133
+  ShortGunJitter* = 300
+  GunDudStart* = ShortGunRange div 3
+  GunDudMaxPercent* = 50
+  # Rules 49 windex-mister: the cog that picks one up cannot attack (gun, spray or grenade) for
+  # a minute, and every MisterHealTicks heals 1 HP to every living cog within MisterRadius of
+  # it, itself and enemies included, up to their max HP. Death ends it.
+  MisterRules* = 49
+  MisterTicks* = 60*TickRate
+  MisterHealTicks* = 15*TickRate
+  MisterRadius* = 500
+  MisterSpot = Point(x: 2300, z: 2700) # nudged to dry, open ground; its mirror is the pair's other half
+  # Rules 49 sniper rifle: replaces the gun until death. Same windup and damage, but it reaches
+  # SniperRange (half the island's height) with the old tight aim and no duds, and fires once
+  # every four seconds (tripled by armor, carrying or a trench, like the gun). It shares the
+  # spray can's slot: a cog carrying one cannot pick up the other.
+  SniperRules* = 49
+  SniperRange* = 4800
+  SniperCooldownTicks* = 4*TickRate
+  SniperSpot = Point(x: 1100, z: 3700)
+  # Rules 49 self-destruct (Command.selfDestruct): the cog blows up like a grenade and dies; every
+  # other living cog within the grenade blast takes the bomber's HP (armor not counted) as damage,
+  # allies too. Walls and trenches do not matter. Not while misting.
+  SelfDestructRules* = 49
+  # Rules 49 radar: for RadarTicks, or until its carrier picks up any other item or dies, every
+  # living cog within RadarRadius of the carrier deals double damage, whatever its side. The
+  # carrier cannot attack and moves at RadarSpeedPercent of its speed.
+  RadarRules* = 49
+  RadarTicks* = 60*TickRate
+  RadarRadius* = 800
+  RadarSpeedPercent* = 60
+  RadarSpot = Point(x: 3000, z: 500)
+
+proc gunReach*(): int =
+  ## How far a gun ray travels: 20 m in FFA-kin, 21 m (ShortGunRange) from rules 49, else GunRange.
+  if ffa(): FfaGunRange
+  elif visionRulesVersion >= ShortGunRules: ShortGunRange
+  else: GunRange
+
+proc gunJitterHalf*(): int =
+  ## Half range of each of the two uniform draws summed into a shot's sideways jitter.
+  if visionRulesVersion >= ShortGunRules: ShortGunJitter else: 32
+
+proc gunDudPercent*(distance: int64): int =
+  ## Rules 49: chance a ball that reaches a cog `distance` away lands without bursting.
+  if visionRulesVersion < ShortGunRules or distance <= GunDudStart: return 0
+  int(min(distance-GunDudStart, ShortGunRange-GunDudStart)*GunDudMaxPercent div
+    (ShortGunRange-GunDudStart))
+
+proc hasSniper*(w: World, i: int): bool =
+  ## Rules 49: whether seat i carries the sniper rifle.
+  i >= 0 and i < w.sniper.len and w.sniper[i]
+
+proc misting*(w: World, i: int): bool =
+  ## Rules 49: whether seat i is under a windex-mister (no attacks, heals around it).
+  i >= 0 and i < w.misterUntil.len and w.misterUntil[i] > 0
+
+proc hasRadar*(w: World, i: int): bool =
+  ## Rules 49: whether seat i carries a working radar (no attacks, slow, doubles damage near it).
+  i >= 0 and i < w.radarUntil.len and w.radarUntil[i] > 0
+
+proc disarmed*(w: World, i: int): bool =
+  ## Rules 49: a misting or radar-carrying cog cannot attack (gun, sniper, spray, grenade or
+  ## self-destruct).
+  w.misting(i) or w.hasRadar(i)
+
+proc radarBoosted*(w: World, i: int): bool =
+  ## Rules 49: whether seat i stands within RadarRadius of a living radar carrier (its damage doubles).
+  if i < 0 or i >= w.radarUntil.len: return false
+  for r in 0..<w.radarUntil.len:
+    if w.radarUntil[r] > 0 and w.cogs[r].hp > 0 and
+        distance2(w.cogs[r].pos, w.cogs[i].pos) <= RadarRadius.int64*RadarRadius:
+      return true
+  false
 
 proc grenadeBlastRadius*(): int =
   if visionRulesVersion >= 40: StrongGrenadeBlastRadius else: GrenadeBlastRadius
@@ -110,11 +190,13 @@ proc initializeMapEquipment(w: var World) =
   ## FFA-kin on a map follows the island's FFA rules: one life, no uniforms, every heart
   ## unowned, no captures, and the great-heart pair.
   for i in 0..<Seats:
-    w.equipment[i].lives = seatStartingLives(i, (if ffa(): 1'i32 else: 4'i32))
+    w.equipment[i].lives = seatStartingLives(i, (if ffa() or visionRulesVersion >= OneLifeRules: 1'i32 else: 4'i32))
     w.cogs[i].aim = home(1-team(i))
   let m = currentMap()
   for p in m.pickups:
     if ffa() and PickupKind(p.kind) == uniformPickup: continue
+    # The maps carry the rules-49 items after every older one; earlier rules never place them.
+    if PickupKind(p.kind) >= misterPickup and visionRulesVersion < 49: continue
     w.pickups.add Pickup(pos: point(p.x, p.z), kind: PickupKind(p.kind))
   for t in m.trenches:
     w.trenches.add Cover(x: t.x.int32, z: t.z.int32, w: t.w.int32, h: t.h.int32)
@@ -143,7 +225,8 @@ proc initializeEquipment(w: var World) =
     for q in [spots[0], spots[1]]:
       w.pickups.add Pickup(pos: q, kind: uniformPickup)
   for i in 0..<Seats:
-    w.equipment[i].lives = seatStartingLives(i, (if ffa(): 1'i32 elif visionRulesVersion >= 19: 4'i32 else: StartingLives.int32))
+    w.equipment[i].lives = seatStartingLives(i, (if ffa() or visionRulesVersion >= OneLifeRules: 1'i32
+      elif visionRulesVersion >= 19: 4'i32 else: StartingLives.int32))
     w.cogs[i].aim = home(1-team(i))
   # Mirrors use the same symmetry as this arena's terrain (180-degree rotation).
   for p in [point(300, 300), point(300, Height-300)]:
@@ -196,6 +279,19 @@ proc initializeEquipment(w: var World) =
       for heart in w.controlHearts:
         w.heartCaptures.add HeartCapture(team: -1)
   if ffa(): w.placeGreatHearts()
+  if visionRulesVersion >= MisterRules:
+    # Appended last, so every older pickup keeps its index. Dry ground, an exact mirror pair.
+    let q = w.dryPickup(MisterSpot)
+    w.pickups.add Pickup(pos: q, kind: misterPickup)
+    w.pickups.add Pickup(pos: mirrorPoint(q), kind: misterPickup)
+  if visionRulesVersion >= SniperRules:
+    let q = w.dryPickup(SniperSpot)
+    w.pickups.add Pickup(pos: q, kind: sniperPickup)
+    w.pickups.add Pickup(pos: mirrorPoint(q), kind: sniperPickup)
+  if visionRulesVersion >= RadarRules:
+    let q = w.dryPickup(RadarSpot)
+    w.pickups.add Pickup(pos: q, kind: radarPickup)
+    w.pickups.add Pickup(pos: mirrorPoint(q), kind: radarPickup)
 
 when defined(pwTraining):
   # Eval-only (native pw_set_spawn_grouping): spawn groups independent of the kinship's
@@ -369,8 +465,11 @@ proc updateTerritory*(w:var World) =
             w.equipment[i].lives = 0
       else: w.winner=side.int32
 
-proc damage*(w: var World, victim, attacker, amount: int) =
+proc damage*(w: var World, victim, attacker, baseAmount: int) =
   if w.cogs[victim].hp <= 0 or w.cogs[victim].shield > 0: return
+  # Rules 49: damage from a cog near a radar counts double.
+  var amount = baseAmount
+  if attacker >= 0 and attacker != victim and w.radarBoosted(attacker): amount *= 2
   when defined(pwTraining):
     # Curriculum: scale what this attacker deals (damageScale) and what this victim takes
     # (handicap.damageTaken), permille, 1000 = exact. With the handicap the fractional part
@@ -378,7 +477,6 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     # every other 1-point hit; without it the old floor. Both at 1000 is the rules' damage
     # exactly. The hit still happens, so shields, cooldown relief, telemetry and
     # friendly-fire glory are as before.
-    var amount = amount
     let attackerScale = if damageScale != nil and attacker >= 0: damageScale[attacker] else: 1000'i32
     let victimScale = if handicap != nil: handicap.damageTaken[victim] else: 1000'i32
     if attackerScale != 1000 or victimScale != 1000:
@@ -400,6 +498,17 @@ proc damage*(w: var World, victim, attacker, amount: int) =
   when defined(pwTraining):
     let hpBefore = w.cogs[victim].hp
   w.cogs[victim].hp = max(0'i32, w.cogs[victim].hp-(amount.int32-absorbed))
+  when defined(pwTraining):
+    # Hit attribution (telemetry only): this event; `final` is set below once the lives are known.
+    let hitIndex = (if hitLog != nil: hitLog[].len else: -1); let damageIndex = w.noteDamage(victim, attacker, hpBefore-w.cogs[victim].hp, absorbed)
+    if hitLog != nil:
+      hitLog[].add HitEvent(attacker: attacker.int32, victim: victim.int32, health: hpBefore-w.cogs[victim].hp,
+        armor: absorbed, weapon: ord(damageWeapon).int32, killed: int32(w.cogs[victim].hp == 0),
+        disguised: int32(attacker >= 0 and hitLatch != nil and (case damageWeapon
+          of dwGun: hitLatch.gun[attacker]
+          of dwSpray: hitLatch.spray[attacker]
+          of dwGrenade: lobDisguised
+          of dwNone: false)))
   when defined(pwTraining):
     if combatTelemetry != nil:
       # Telemetry only: a hit is a damage event past shield and life checks; damage is
@@ -455,8 +564,9 @@ proc damage*(w: var World, victim, attacker, amount: int) =
       damageObserver(w, victim, attacker, hpBefore-w.cogs[victim].hp, w.cogs[victim].hp == 0)
   if w.equipment[victim].armor == 0 and not w.cogs[victim].carrying and
       w.trenchAt(w.cogs[victim].pos) < 0:
+    # A hit cog may fire again within a normal shot's cooldown; a sniper keeps its own cadence.
     w.cogs[victim].cooldown = min(w.cogs[victim].cooldown,
-        FireCooldownTicks.int32)
+        (if w.hasSniper(victim): SniperCooldownTicks else: FireCooldownTicks).int32)
   if w.cogs[victim].hp > 0: return
   if ffa():
     # FFA-kin: a dead cog's hearts go neutral at once, and its capture in progress is lost.
@@ -468,6 +578,14 @@ proc damage*(w: var World, victim, attacker, amount: int) =
     w.resetHeart(1-team(victim)); w.cogs[victim].carrying = false
   let lives = if visionRulesVersion in 13..18:StartingLives.int32 else:max(0'i32, w.equipment[victim].lives-1)
   w.equipment[victim] = Equipment(lives: lives)
+  if victim < w.sniper.len: w.sniper[victim] = false
+  if victim < w.misterUntil.len: w.misterUntil[victim] = 0
+  if victim < w.radarUntil.len: w.radarUntil[victim] = 0
+  when defined(pwTraining):
+    if hitIndex >= 0: hitLog[][hitIndex].final = int32(lives <= 0); (if damageIndex >= 0: damageLog[][damageIndex].final = int32(lives <= 0))
+    if killLog != nil:
+      killLog[].add KillEvent(tick: w.tick, attacker: attacker.int32, victim: victim.int32,
+        weapon: ord(damageWeapon).int32, final: int32(lives <= 0))
   w.uniforms[victim] = false
   w.cogs[victim].respawn = seatRespawnTicks(victim)
   w.cogs[victim].cooldown = 0
@@ -528,6 +646,25 @@ proc explode*(w: var World, p: Point, owner: int) =
     w.damage(i, owner, amount)
     when defined(pwTraining): damageWeapon = weapon
 
+proc selfDestruct*(w: var World, i: int) =
+  ## Rules 49: seat i explodes with its current HP and dies.
+  let p = w.cogs[i].pos
+  let amount = w.cogs[i].hp.int
+  w.emitSound(p, 2, -1, 5000)
+  w.blasts.add Blast(pos: p, tick: w.tick, owner: i.int32, trench: w.trenchAt(p).int32)
+  let reach = grenadeBlastRadius()+Radius
+  when defined(pwTraining):
+    let weapon = damageWeapon
+    damageWeapon = dwGrenade; damageSource = 5
+  for j in 0..<Seats:
+    if j == i or w.cogs[j].hp <= 0 or distance2(w.cogs[j].pos, p) > reach.int64*reach: continue
+    w.damage(j, i, amount)
+  # The bomber dies whatever its shield or armor.
+  w.cogs[i].shield = 0
+  w.equipment[i].armor = 0
+  w.damage(i, i, w.cogs[i].hp)
+  when defined(pwTraining): (damageWeapon = weapon; damageSource = 0)
+
 proc sprayTouches*(w: World, slot, victim: int): bool =
   if victim == slot or w.cogs[victim].hp <= 0: return false
   let c = w.cogs[slot]; let v = w.equipment[slot].sprayAim
@@ -547,6 +684,52 @@ proc waypointFor*(w: World, slot: int, start, goal: Point): Point =
   if visionRulesVersion >= 35 and team(slot) == 1:
     return mirrorPoint(w.waypoint(mirrorPoint(start), mirrorPoint(goal)))
   w.waypoint(start, goal)
+
+when defined(pwTraining):
+  # Training only (teacher class masks): waypointFor's own decision before its field search, so a
+  # caller can tell which goals it walks to straight and which it routes, and to which target cell,
+  # without running the search. Rules 38 on (the time-weighted routing); nothing here changes a route.
+  proc routeFrame(w: World, slot: int, p: Point): Point =
+    if visionRulesVersion >= 35 and team(slot) == 1: mirrorPoint(p) else: p
+  proc routePlanned*(): bool = visionRulesVersion >= 38
+  proc routePrepare*(w: World, slot: int, start: Point) =
+    ## Brings the path grid and lake up to date for `w` exactly as waypoint keeps them (it routes
+    ## the start to itself); routeStraight and routeTarget read them, so call this first (once per
+    ## world and map: nothing between may route on another).
+    let a = w.routeFrame(slot, start)
+    discard w.waypoint(a, a)
+  proc routeStraight*(w: World, slot: int, start, goal: Point): bool =
+    ## Whether waypointFor(slot, start, goal) returns `goal` itself: the walk is clear and, from dry
+    ## land, dry (rules 38 on). routePrepare first.
+    let a = w.routeFrame(slot, start)
+    let b = w.routeFrame(slot, goal)
+    let nx = (maxX()-minX()) div NavCell
+    let nz = (maxZ()-minZ()) div NavCell
+    let dryOnly = (let c = navCellOf(a, nx, nz); c < 0 or not nav.water[c])
+    w.walkClear(a, b) and (not dryOnly or navSegmentDry(a, b, nx, nz))
+  proc routeTargetIs*(w: World, slot: int, goal: Point, target: int): bool =
+    ## routeTarget(slot, _, goal) == target, without the goal memo: a goal whose own cell is
+    ## connected has that cell's centre within 71 units, so a farther target centre is not the
+    ## nearest connected one. routePrepare first.
+    let b = w.routeFrame(slot, goal)
+    let nx = (maxX()-minX()) div NavCell
+    let nz = (maxZ()-minZ()) div NavCell
+    let own = navCellOf(b, nx, nz)
+    if target >= 0 and own >= 0 and nav.edges[own].len > 0 and
+        distance2(b, navigationPoint(target, nx)) > 2*(NavCell div 2)*(NavCell div 2):
+      return false
+    nearestConnectedCell(b, nx, nz) == target
+  proc routeTarget*(w: World, slot: int, start, goal: Point): int =
+    ## The target cell waypointFor's field search routes `goal` to when it does not walk straight
+    ## (-1: none, and it returns start). Its answer depends only on this cell and the start.
+    ## routePrepare first.
+    let b = w.routeFrame(slot, goal)
+    let nx = (maxX()-minX()) div NavCell
+    let nz = (maxZ()-minZ()) div NavCell
+    if b in nav.targets: return nav.targets[b]
+    result = nearestConnectedCell(b, nx, nz)
+    if nav.targets.len >= NavTargetLimit: nav.targets.clear()
+    nav.targets[b] = result
 
 proc seatOrder*(w: World): seq[int] =
   ## The order seats act within a tick. Seats alternate teams, so acting in seat order every
@@ -569,7 +752,12 @@ proc pickupEquipment(w: var World, attacked: openArray[bool]) =
       of grenadePickup:
         if not w.equipment[i].grenade: w.equipment[i].grenade = true; taken = true
       of sprayPickup:
-        if not w.equipment[i].sprayCan: w.equipment[i].sprayCan = true; taken = true
+        if not w.equipment[i].sprayCan and not w.hasSniper(i): w.equipment[i].sprayCan = true; taken = true
+      of sniperPickup:
+        if visionRulesVersion >= SniperRules and not w.hasSniper(i) and not w.equipment[i].sprayCan:
+          w.sniper[i] = true; taken = true
+      of radarPickup:
+        taken = visionRulesVersion >= RadarRules
       of medkitPickup:
         if w.cogs[i].hp < seatMaxHp(i): w.cogs[i].hp = seatMaxHp(i); taken = true
       of uniformPickup:
@@ -579,7 +767,19 @@ proc pickupEquipment(w: var World, attacked: openArray[bool]) =
           w.uniforms[i] = true; taken = true
       of armorPickup:
         if w.equipment[i].armor < 3: w.equipment[i].armor = 3; taken = true
+      of misterPickup:
+        if visionRulesVersion >= MisterRules and not w.misting(i):
+          # Any attack in progress is dropped: an unreleased shot, a burst, a grenade charge.
+          w.misterUntil[i] = w.tick+MisterTicks.int32
+          w.equipment[i].windup = 0; w.equipment[i].burst = 0; w.equipment[i].charge = 0
+          taken = true
       if taken:
+        if visionRulesVersion >= RadarRules:
+          # Any pickup ends a radar; a new radar starts a fresh minute and drops any attack in progress.
+          w.radarUntil[i] = 0
+          if w.pickups[k].kind == radarPickup:
+            w.radarUntil[i] = w.tick+RadarTicks.int32
+            w.equipment[i].windup = 0; w.equipment[i].burst = 0; w.equipment[i].charge = 0
         when defined(pwTraining):
           if combatTelemetry != nil:
             let t = combatTelemetry
@@ -589,10 +789,31 @@ proc pickupEquipment(w: var World, attacked: openArray[bool]) =
             of medkitPickup: inc t[i].medkitPickups
             of grenadePickup: inc t[i].grenadePickups
             of sprayPickup: inc t[i].sprayPickups
+            of misterPickup, sniperPickup, radarPickup: inc t[i].latePickups(w.pickups[k].kind)
         w.lastSupplyTick[team(i)] = w.tick
         w.pickups[k].readyAt = w.tick+(if w.pickups[k].kind ==
             grenadePickup: 120 else: 720)
         break
+
+proc stepMisters(w: var World) =
+  ## Rules 49: each misting cog heals 1 HP to every living cog within MisterRadius (itself and
+  ## enemies too) every MisterHealTicks, the last heal on the tick it runs out. Death ends it.
+  if visionRulesVersion < MisterRules: return
+  for i in 0..<Seats:
+    if w.hasRadar(i) and (w.cogs[i].hp <= 0 or w.tick >= w.radarUntil[i]): w.radarUntil[i] = 0
+  for i in w.seatOrder():
+    if not w.misting(i): continue
+    if w.cogs[i].hp <= 0:
+      w.misterUntil[i] = 0
+      continue
+    let left = w.misterUntil[i]-w.tick
+    if left mod MisterHealTicks == 0 and left < MisterTicks:
+      for j in 0..<Seats:
+        if w.cogs[j].hp <= 0 or w.cogs[j].hp >= seatMaxHp(j): continue
+        if distance2(w.cogs[i].pos, w.cogs[j].pos) > MisterRadius.int64*MisterRadius: continue
+        inc w.cogs[j].hp
+        if observeMisterHeal != nil: observeMisterHeal(w.tick, j, i)
+    if left <= 0: w.misterUntil[i] = 0
 
 proc stepEquipment(w: var World, commands: openArray[Command]) =
   if w.winner != -1: return
@@ -607,7 +828,7 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
     for cue in w.sounds:
       if w.tick-cue.tick < SoundLifetime and w.cogs[cue.listener].hp > 0: recent.add cue
     w.sounds = recent
-  var gunTargets: seq[tuple[attacker, victim: int]]
+  var gunTargets: seq[tuple[attacker, victim: int]]; (when defined(pwTraining): gunSniper.setLen(0))
   var visual: seq[Paintball]
   for b in w.balls:
     if b.life > 1:
@@ -652,12 +873,13 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
         z: clamp(cmd.goal.z, (minZ()+100).int32, (maxZ()-100).int32))
     if cmd.aim != Point(): w.cogs[i].aim = cmd.aim
     elif cmd.walk and cmd.goal != w.cogs[i].pos: w.cogs[i].aim = cmd.goal
-    w.cogs[i].firing = cmd.shoot
+    w.cogs[i].firing = cmd.shoot and not w.disarmed(i)
     let dest = if cmd.direct: w.cogs[i].goal else: w.waypointFor(i, w.cogs[i].pos,
         w.cogs[i].goal)
     var speed = if w.cogs[i].carrying: MoveSpeed*7 div 10 else: MoveSpeed
     # FFA-kin territory boost (0 in the teams game, where this is the identity).
     speed = boostedSpeed(speed, w.territoryBoost(i))
+    if w.hasRadar(i): speed = speed*RadarSpeedPercent div 100
     if visionRulesVersion >= 26 and cmd.sneak: speed = speed div 2
     if visionRulesVersion >= 30 and riverBlend(w.cogs[i].pos.x.int, w.cogs[i].pos.z.int) > 0 and
         terrainHeight(w.cogs[i].pos.x.int, w.cogs[i].pos.z.int) < RiverWaterHeight:
@@ -695,10 +917,18 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
   for i in 0..<Seats:
     if w.cogs[i].hp <= 0: continue
     let cmd = commands[i]
+    when defined(pwTraining):
+      # The seat's uniform as this tick's orders find it: a grenade thrown and a shot ordered on the
+      # same tick are both ordered in disguise, though the first takes the uniform off.
+      let wore = w.uniforms[i]
     if w.equipment[i].grenade:
-      if cmd.chargeGrenade: w.equipment[i].charge = min(
+      if cmd.chargeGrenade and not w.disarmed(i): w.equipment[i].charge = min(
           GrenadeChargeTicks.int32, w.equipment[i].charge+1)
       elif w.equipment[i].charge > 0:
+        when defined(pwTraining):
+          if hitLatch != nil:   # the throw order: the uniform before it comes off
+            hitLatch.lobs.add LobLatch(owner: i.int32, landsAt: w.tick+GrenadeFlightTicks, disguised: wore)
+            inc hitLatch.orders[i][1]; hitLatch.ordersDisguised[i][1] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.grenades.add Lob(start: w.cogs[i].pos, target: w.grenadeTarget(i),
@@ -708,7 +938,11 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
           if combatTelemetry != nil: inc combatTelemetry[i].grenadeThrows
         w.equipment[i].grenade = false; w.equipment[i].charge = 0
     if w.equipment[i].sprayCan:
-      if cmd.shoot and w.equipment[i].sprayCooldown == 0:
+      if cmd.shoot and w.equipment[i].sprayCooldown == 0 and not w.disarmed(i):
+        when defined(pwTraining):
+          if hitLatch != nil:   # the trigger
+            hitLatch.spray[i] = wore
+            inc hitLatch.orders[i][2]; hitLatch.ordersDisguised[i][2] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.emitSound(w.cogs[i].pos, 3, i, 1800)
@@ -726,7 +960,9 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
           w.emitSound(origin, 1, i, 3500)
           var aim = w.equipment[i].gunAim
           # Bounded triangular jitter approximates the original small angular spread.
-          var jitter = w.rng.between(-32, 32)+w.rng.between(-32, 32)
+          let sniper = w.hasSniper(i)
+          let half = (if sniper: 32'i32 else: gunJitterHalf().int32)
+          var jitter = w.rng.between(-half, half)+w.rng.between(-half, half)
           if visionRulesVersion >= 10:
             let target = Point(x: origin.x+aim.x, z: origin.z+aim.z)
             # FFA-kin territory boost narrows the spread (identity at boost 0).
@@ -738,8 +974,8 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
           let ray = direction(Point(), aim, GunRange)
           var checked: SeatMask
           var endPoint = origin
-          # FFA-kin rays stop at FfaGunRange: the same samples along the same ray, fewer of them.
-          let samples = (if ffa(): FfaGunRange else: GunRange) div 20
+          # Shorter rays (FFA-kin, rules 49) take the same samples along the same ray, fewer of them.
+          let samples = (if sniper: SniperRange else: gunReach()) div 20
           block trace:
             for n in 1..samples:
               let p = Point(x: origin.x+ray.x*n.int32 div (GunRange div 20),
@@ -755,11 +991,18 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
                 let trench = w.trenchAt(w.cogs[j].pos)
                 if trench >= 0 and trench != w.trenchAt(origin) and
                     w.rng.between(0, 99) < 70: continue
-                gunTargets.add (i, j)
+                # Rules 49: the ball stops at the cog it reached, but may not burst.
+                let dud = if sniper: 0 else: gunDudPercent(isqrt(distance2(origin, w.cogs[j].pos)))
+                if dud > 0 and w.rng.between(0, 99) < dud: break trace
+                gunTargets.add (i, j); (when defined(pwTraining): gunSniper.add sniper)
                 break trace
           w.balls.add Paintball(pos: endPoint, velocity: Point(
               x: endPoint.x-origin.x, z: endPoint.z-origin.z), owner: i.int32, life: (if visionRulesVersion >= 9: 6 else: 2))
-      elif cmd.shoot and w.cogs[i].cooldown == 0:
+      elif cmd.shoot and w.cogs[i].cooldown == 0 and not w.disarmed(i):
+        when defined(pwTraining):
+          if hitLatch != nil:   # the wind-up starts
+            hitLatch.gun[i] = wore
+            inc hitLatch.orders[i][0]; hitLatch.ordersDisguised[i][0] += wore.int32
         w.uniforms[i] = false
         attacked[i] = true
         w.equipment[i].windup = GunWindupTicks
@@ -769,12 +1012,20 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
         else: direction(w.cogs[i].pos, w.cogs[i].aim, GunRange)
         let slow = w.equipment[i].armor > 0 or w.cogs[i].carrying or w.trenchAt(
             w.cogs[i].pos) >= 0
-        w.cogs[i].cooldown = int32(FireCooldownTicks*(if slow: 3 else: 1))
+        let cadence = if w.hasSniper(i): SniperCooldownTicks else: FireCooldownTicks
+        w.cogs[i].cooldown = int32(cadence*(if slow: 3 else: 1))
+  # Rules 49 self-destructs go off in seat order before this tick's gunfire lands, from every cog
+  # still standing (a cog a blast already killed does not explode).
+  if visionRulesVersion >= SelfDestructRules:
+    for i in w.seatOrder():
+      if commands[i].selfDestruct and w.cogs[i].hp > 0 and not w.disarmed(i):
+        w.uniforms[i] = false
+        w.selfDestruct(i)
   # Targets were selected before damage, allowing simultaneous mutual kills.
-  when defined(pwTraining): damageWeapon = dwGun
-  for hit in gunTargets: w.damage(hit.victim, hit.attacker, 1)
+  when defined(pwTraining): (damageWeapon = dwGun; gunCursor = 0)
+  for hit in gunTargets: (when defined(pwTraining): (damageSource = (if gunSniper[gunCursor]: 4'i32 else: 1'i32); inc gunCursor)); w.damage(hit.victim, hit.attacker, 1)
   when defined(pwTraining):
-    damageWeapon = dwSpray
+    damageWeapon = dwSpray; damageSource = 0
     sprayDamagePhase = true
   for i in w.seatOrder():
     if w.equipment[i].burst > 0 and w.cogs[i].hp > 0:
@@ -790,10 +1041,21 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
   w.updateBarrage()
   var airborne: seq[Lob]
   for g in w.grenades:
-    if w.tick >= g.landsAt: w.explode(g.target, g.owner.int)
+    if w.tick >= g.landsAt:
+      when defined(pwTraining):
+        lobDisguised = false
+        if hitLatch != nil and g.owner >= 0:
+          for k in 0..<hitLatch.lobs.len:   # this owner's oldest throw: flights are equally long
+            if hitLatch.lobs[k].owner == g.owner:
+              lobDisguised = hitLatch.lobs[k].disguised
+              hitLatch.lobs.delete(k)
+              break
+      w.explode(g.target, g.owner.int)
+      when defined(pwTraining): lobDisguised = false
     else: airborne.add g
   w.grenades = airborne
   w.pickupEquipment(attacked)
+  w.stepMisters()
   if ffa():
     # FFA-kin: no glory, meter or elimination victory. The match ends at endTick or when at
     # most one cog is left standing, and winner -3 means "ended" (results carry the scores).

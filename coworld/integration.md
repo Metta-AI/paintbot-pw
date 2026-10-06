@@ -24,8 +24,8 @@ coworld build --project coworld/lvd --version 2026.9.9.3
 coworld build --project coworld/cta --version 2026.9.9.3
 ```
 
-`nimby.lock` pins ordinary dependencies. `coworld/dependencies.lock` pins the same
-revisions plus optional Mummy. `sync_dependencies.py --latest` resolves upstream
+`nimby.lock` and `coworld/dependencies.lock` pin the same revisions, including Mummy,
+so CI shards can build `-d:coworld` engines. `sync_dependencies.py --latest` resolves upstream
 HEADs and updates both locks; ordinary builds never update revisions implicitly.
 The build hook validates the asset commit in `coworld/assets.json`. `POLYWORLD_ART`
 can point at a checkout of that revision. Per-game `webdata.txt` files include only
@@ -39,7 +39,7 @@ The runner supplies local `file://` URIs through `COGAME_CONFIG_URI`,
 `COGAME_PLAYER_FAILURE_URI`. Optional `COGAME_ORACLE_URL`, `COGAME_ORACLE_KEY`, `COGAME_ORACLE_MODEL`,
 `COGAME_ORACLE_INTERVAL` and `COGAME_ORACLE_DEADLINE` enable the advisor oracle (see the
 Paintbot guide). Hosted pods reach it through the platform's LLM sidecar instead
-(`AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, no key in the pod). With neither, or with `COGAME_ORACLE=off`, seats have no advisor. Configurations require the game's fixed-length tokens
+(`COWORLD_LLM_ENDPOINT`, no key in the pod). With neither, or with `COGAME_ORACLE=off`, seats have no advisor. Configurations require the game's fixed-length tokens
 and players arrays. Staged policy filenames may have no extension. Raw BASIC source
 is read from the disk with bounded reads and compiled with the existing game limits.
 

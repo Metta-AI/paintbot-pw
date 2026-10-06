@@ -62,6 +62,8 @@ nim r tests/test_paintbot_glory_behind.nim
 nim r tests/test_paintbot_glory_config.nim
 nim r tests/test_paintbot_glory_behind_cogs.nim
 nim r tests/test_paintbot_weapon_buff.nim
+nim r tests/test_paintbot_short_gun.nim
+nim r tests/test_paintbot_rules49_items.nim
 nim r tests/test_paintbot_rules40_golden.nim
 nim r tests/test_paintbot_rules41_golden.nim
 nim r tests/test_paintbot_ffa_config.nim
@@ -83,6 +85,8 @@ nim r -d:headless tests/test_paintbot_seat_view_parity.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_env.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_geometry_cache.nim
 nim r tests/test_paintbot_geometry_cache.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_map_ray_bounds.nim
+nim r tests/test_paintbot_map_ray_bounds.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_seat_stats.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_scripts.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_command.nim
@@ -98,12 +102,28 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_save_load.n
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_bassy_snapshots.nim
 nim r --mm:arc --threads:on -d:pwTraining -d:bassyNoJit tests/test_paintbot_bassy_snapshots.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_damage_taken.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_hit_log.nim
+nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_kill_log.nim
+nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_items.nim
+nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_seat_command_ex.nim
+nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_pickup_visible.nim
+nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_damage_log.nim
+nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_self_destruct_head.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teacher_classes.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_seat_state.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_world_json.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_ffa_v2.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_aim_offset.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_move_offset.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_target_offset.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_raw_heads.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_h.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_s.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_t.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_p.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_teams_view_i.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_shadow.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_mixed_contracts.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_parity.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_policy_script.nim
@@ -116,9 +136,11 @@ nim r -d:headless tests/test_paintbot_neural_basic_io.nim "neuralMask forbids*" 
 nim r -d:headless tests/test_paintbot_neural_basic_io.nim "the heads are numbers*" "neuralLogit(i) reads*" "call-order and range errors*" "neuralObs reads*" "user inputs: init*" "a user-input actor reads*" "user-input actors above*" "user-input bundles*"
 nim r -d:headless tests/test_paintbot_neural_net2.nim
 nim r -d:headless tests/test_paintbot_neural_layers.nim
+nim r -d:headless tests/test_paintbot_neural_target_offset.nim
 nim r -d:headless tests/test_paintbot_neural_joint.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_net2.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_cond_head.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_neural_delay.nim
 python -m unittest discover -s coworld/paintbot -p test_neural_package.py
 # The jev.bas switch-combination arms are split three ways; part 0 also runs the file's other tests.
 nim r -d:jevArmShards=3 -d:jevArmShard=0 tests/test_paintbot_jev_baseline.nim
@@ -144,3 +166,6 @@ python tests/test_paintbot_art.py
 
 nim r -d:headless -d:pwTraining tests/test_paintbot_bassy.nim
 nim r -d:headless -d:pwTraining -d:bassyNoJit tests/test_paintbot_bassy.nim
+nim r tests/test_annotations.nim
+
+[posix-only] python coworld/paintbot/test_annotations.py

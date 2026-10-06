@@ -136,6 +136,30 @@ proc playerHp*(v: SeatView, identity: int): int32 =
 proc playerCarrying*(v: SeatView, identity: int): int32 =
   let body = v.bodyForSeat(identity)
   if body >= 0: v.world.cogs[body].carrying.int32 else: 0
+proc playerRadar*(v: SeatView, identity: int): int32 =
+  ## Rules 49: 1 while a visible cog carries a working radar (its ring shows), else 0.
+  let body = v.bodyForSeat(identity)
+  if body >= 0: v.world.hasRadar(body).int32 else: 0
+proc playerMisting*(v: SeatView, identity: int): int32 =
+  ## Rules 49: 1 while a visible cog wears a windex-mister (its halo shows), else 0.
+  let body = v.bodyForSeat(identity)
+  if body >= 0: v.world.misting(body).int32 else: 0
+
+type IdentityRow* = object
+  ## visible(identity) and playerX / playerY / playerTeam / playerHp / playerCarrying(identity)
+  ## of one tick, from one body resolution (the observation encoders read all six together).
+  visible*: bool
+  x*, z*, team*, hp*, carrying*: int32
+
+proc identityRow*(v: SeatView, identity: int): IdentityRow =
+  ## Exactly what visible, playerX, playerY, playerTeam, playerHp and playerCarrying return for
+  ## `identity` (one bodyForSeat instead of six).
+  let body = v.bodyForSeat(identity)
+  if body < 0: return IdentityRow(visible: false, x: -1, z: -1, team: -1, hp: 0, carrying: 0)
+  let c = v.world.cogs[body]
+  IdentityRow(visible: true, x: c.pos.x, z: c.pos.z,
+    team: (if ffa(): body.int32 else: v.world.observedTeam(v.slot, body).int32),
+    hp: c.hp, carrying: c.carrying.int32)
 
 # ---------------------------------------------------------------------------------------
 # Nearby agents.
@@ -271,9 +295,40 @@ proc worldTick*(v: SeatView): int32 = v.world.tick
 proc hasGrenade*(v: SeatView): int32 = v.world.equipment[v.slot].grenade.int32
 proc hasSpray*(v: SeatView): int32 = v.world.equipment[v.slot].sprayCan.int32
 proc armorHp*(v: SeatView): int32 = v.world.equipment[v.slot].armor
+proc gunRange*(v: SeatView): int32 =
+  ## How far this seat's shots reach: 5250 before rules 49, 2133 from them (2000 in FFA-kin),
+  ## and SniperRange while it carries the sniper rifle.
+  (if v.world.hasSniper(v.slot): SniperRange else: gunReach()).int32
+proc hasSniper*(v: SeatView): int32 =
+  ## Rules 49: 1 while this seat carries the sniper rifle (it fires in place of the gun).
+  v.world.hasSniper(v.slot).int32
+proc radarTicks*(v: SeatView): int32 =
+  ## Rules 49: ticks until this seat's radar runs out (no attacks, slow until then); 0 without one.
+  if v.world.hasRadar(v.slot): v.world.radarUntil[v.slot]-v.world.tick else: 0
+proc radarBoost*(v: SeatView): int32 =
+  ## Rules 49: 1 while this seat stands within a working radar's reach (its damage doubles).
+  v.world.radarBoosted(v.slot).int32
+proc mistingTicks*(v: SeatView): int32 =
+  ## Rules 49: ticks until this seat's windex-mister runs out (no attacks until then); 0 when not misting.
+  if v.world.misting(v.slot): v.world.misterUntil[v.slot]-v.world.tick else: 0
 proc livesLeft*(v: SeatView): int32 = v.world.equipment[v.slot].lives
 proc grenadeCharge*(v: SeatView): int32 = v.world.equipment[v.slot].charge
 proc trenchId*(v: SeatView): int32 = v.world.trenchAt(v.world.cogs[v.slot].pos).int32
+
+type OwnTimers* = object
+  ## The seat's own TRUE timers on the view's world (raw engine ticks): gun cooldown and shield (cogs[slot]), gun
+  ## wind-up and spray cooldown (equipment[slot]).
+  cooldown*, shield*, windup*, sprayCooldown*: int32
+
+proc ownTimers*(v: SeatView): OwnTimers =
+  ## NOT BASIC perception: the one exported proc of this module that reads engine state a BASIC seat cannot see
+  ## (docs/neural/seat-view.md, "Engine state beyond BASIC: teams.view.1p"). It exists only for observation contract
+  ## teams.view.1p (206, neural_contract.encodeTeamsViewP), per the operator's decision "go with A for P1" (the engine
+  ## exposes each seat's own true timers as a raw observation). bots.nim registers no builtin for it, and
+  ## tests/test_paintbot_seat_view_boundary.nim checks that only neural_contract.nim names it.
+  let me = v.world.cogs[v.slot]
+  let gear = v.world.equipment[v.slot]
+  OwnTimers(cooldown: me.cooldown, shield: me.shield, windup: gear.windup, sprayCooldown: gear.sprayCooldown)
 
 proc dataValues*(v: SeatView): array[DataNames.len, int32] =
   ## The DATA variables a BASIC seat reads, in DataNames order.
@@ -308,6 +363,12 @@ proc soundKind*(v: SeatView, i: int): int32 = v.soundField(i, 0)
 proc soundDirection*(v: SeatView, i: int): int32 = v.soundField(i, 1)
 proc soundDistance*(v: SeatView, i: int): int32 = v.soundField(i, 2)
 proc soundAge*(v: SeatView, i: int): int32 = v.soundField(i, 3)
+iterator liveSounds*(v: SeatView): tuple[kind, direction, distance, age: int32] =
+  ## The seat's sounds in soundKind / soundDirection / soundDistance / soundAge index order
+  ## (index i is the i-th yielded; soundCount is how many), in one pass over the cues.
+  for cue in v.world.sounds:
+    if cue.listener != v.slot.int32 or v.world.tick-cue.tick > SoundLifetime: continue
+    yield (cue.kind, cue.direction, cue.distance, v.world.tick-cue.tick)
 
 proc heardCount*(v: SeatView): int32 = heard[v.slot].len.int32
 proc heardText*(v: SeatView, i: int): string =
@@ -342,6 +403,11 @@ proc pickupVisible*(v: SeatView, i: int): int32 = int32(v.pickupSeen(i))
 proc pickupX*(v: SeatView, i: int): int32 = (if v.pickupSeen(i): v.world.pickups[i].pos.x else: -1'i32)
 proc pickupY*(v: SeatView, i: int): int32 = (if v.pickupSeen(i): v.world.pickups[i].pos.z else: -1'i32)
 proc pickupKind*(v: SeatView, i: int): int32 = (if v.pickupSeen(i): v.world.pickups[i].kind.int32 else: -1'i32)
+proc pickupRow*(v: SeatView, i: int): tuple[visible: bool, x, z, kind: int32] =
+  ## pickupVisible, pickupX, pickupY and pickupKind of pickup i from one sight test.
+  if not v.pickupSeen(i): return (false, -1'i32, -1'i32, -1'i32)
+  let p = v.world.pickups[i]
+  (true, p.pos.x, p.pos.z, p.kind.int32)
 
 proc heartCount*(v: SeatView): int32 = v.world.controlHearts.len.int32
 proc glory*(v: SeatView, side: int): int32 =
@@ -464,5 +530,7 @@ proc trenchAt*(v: SeatView, x, z: int32): int32 = v.world.trenchAt(Point(x: x, z
 # the shortest way to a heart is the slowest one - and the most exposed.
 proc waterAt*(v: SeatView, x, z: int): int32 =
   let cx = clamp(x, minX(), maxX()); let cz = clamp(z, minZ(), maxZ())
-  int32(visionRulesVersion >= 30 and riverBlend(cx, cz) > 0 and terrainHeight(cx, cz) < RiverWaterHeight)
+  # Both tests are pure functions of the point; the tabled height goes first so the untabled
+  # riverBlend runs only for ground below the waterline (the same answer either way).
+  int32(visionRulesVersion >= 30 and terrainHeight(cx, cz) < RiverWaterHeight and riverBlend(cx, cz) > 0)
 

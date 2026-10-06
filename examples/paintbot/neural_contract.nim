@@ -39,9 +39,44 @@ const
   MoveOffsetCentre* = 11
   MoveOffsetTable* = [16, 28, 48, 84, 146, 253, 439, 763, 1326, 2303, 4000]
   MoveOffsetHeads* = 2
-  ExtraHeadsMax* = AimOffsetHeads + MoveOffsetHeads
+  ExtraHeadsMax* = AimOffsetHeads + 3   # contract 16's five extra heads (14 has four)
+  ExtraHeadsAbi4* = 4                   # pw_seat_policy_extra_choices' fixed width (heads 5 .. 8)
   ActionSizesMove* = [51, 25, 2, 2, 2, AimOffsetBins, AimOffsetBins, MoveOffsetBins, MoveOffsetBins]
   LogitSizeMove* = LogitSizeOffset + 2*MoveOffsetBins
+  ## Its target-conditioned aim-offset variant: the aim-offset contract's seven heads (the same choices, the same
+  ## decode), but heads 5 and 6 carry one row of 23 logits per identity (16 rows each, identity j's row at
+  ## LogitSize + (head - 5) * TargetRows * 23 + j * 23). The seat draws the aim head first; heads 5 and 6 are then
+  ## drawn from the row of the identity the aim head chose (no draw, the centre bin, when it chose keep or a compass
+  ## point), so the offset can depend on that target. Nothing native computes a lead.
+  ActionContractTeamsView1Target* = "paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16"
+  TargetRows* = 16
+  LogitSizeTarget* = LogitSize + AimOffsetHeads*TargetRows*AimOffsetBins
+  ## Its raw variant (16): contract 15's per-identity offset rows refined to 63 bins of 7 u (bin 31 = 0; offset =
+  ## (b - 31) * 7, mirrored for team 1), then three raw direction heads the reference decoder reads: walk direction
+  ## (256) and walk distance (8: 50, 100, 150, 250, 500, 1000, 2000, 4000 u) replace the movement head's compass
+  ## step (head 0 choices 43 .. 50), and look direction (128, 5000 u) replaces the aim head's compass aim (head 1
+  ## choices 17 .. 24). Direction i of N is the angle 2 pi i / N from +x toward +z in the team frame; the decoder
+  ## uses cos / sin x 10000 tables and rounds half away from zero. Nothing is computed for the network: every value
+  ## is a fixed grid point relative to the seat or the chosen identity.
+  ActionContractTeamsView1Raw* = "paintbot-pw.teams.view.1.action.51-25-2-2-2-63x16-63x16-256-8-128"
+  RawOffsetBins* = 63
+  RawOffsetCentre* = 31
+  RawOffsetStep* = 7
+  WalkDirections* = 256
+  WalkDistances* = [50, 100, 150, 250, 500, 1000, 2000, 4000]
+  LookDirections* = 128
+  LookDistance* = 5000
+  ActionSizesRaw* = [51, 25, 2, 2, 2, RawOffsetBins, RawOffsetBins, WalkDirections, WalkDistances.len, LookDirections]
+  LogitSizeRaw* = LogitSize + AimOffsetHeads*TargetRows*RawOffsetBins + WalkDirections + WalkDistances.len +
+    LookDirections
+  ## Action contract teams.view.1 self-destruct (17): teams.view.1's five heads, then head 5 = SELF-DESTRUCT, two
+  ## bins (0 no, 1 self-destruct; rules 49: the cog blows up with its current HP, mechanics.selfDestruct). The
+  ## reference decoder (players/neural_decode.bas) calls BASIC's selfDestruct() when head 5 chose 1; the engine
+  ## acts on it only where the rules do (rules >= 49, a live cog that is not disarmed). neuralLayout(21) = 2.
+  ActionContractTeamsView1SelfDestruct* = "paintbot-pw.teams.view.1.action.51-25-2-2-2-2"
+  SelfDestructHeads* = 1
+  ActionSizesSelfDestruct* = [51, 25, 2, 2, 2, 2]
+  LogitSizeSelfDestruct* = LogitSize + 2
   ## Observation contract ffa.view.1 (FFA-kin at any seat count; its width follows the match,
   ## ffaViewLayout) and its action contract, whose heads are sized by the same layout and
   ## point at the observation's rows of the same tick.
@@ -80,24 +115,159 @@ const
   ## encodeFfaView mask bit 0 (training ABI only, pw_set_obs_mask): zero every column that
   ## reads kin (cog column 37, heart column 5 of a heart another seat owns, header column 11).
   FfaObsMaskKin* = 1'u32
+const
+  ## Observation contract teams.view.1h (203): teams.view.1's 512 floats, then a RAW motion-history block the engine
+  ## keeps per seat (100 floats; encodeTeamsViewH): per identity j (16 x 6, at 512 + 6j) [x(t-1) - x(t)] * flip / 28,
+  ## [z(t-1) - z(t)] * flip / 28, seen(t-1), then the same for t-2, relative to the identity's CURRENT position in
+  ## move-step units (zeros unless visible(j) now and at that tick); then (4, at 608) the seat's own displacement
+  ## (self(t) - self(t-1)) * flip / 28 and (self(t-1) - self(t-2)) * flip / 28. A tick counts only when the seat was
+  ## observed alive at exactly t-1 / t-2 (a gap or a new life reads zeros). Everything comes from SeatView (playerX /
+  ## playerY of visible identities, selfX / selfY): what a BASIC seat could keep itself.
+  ObservationContractTeamsView1h* = "paintbot-pw.teams.view.1h"
+  HistoryIdentityWidth* = 6
+  HistoryWidth* = 16*HistoryIdentityWidth + 4
+  TeamsViewHSize* = 512 + HistoryWidth
+  HistoryStep* = 28'f32
+  ## Observation contract teams.view.1s (204): teams.view.1h's 612 floats, then a RAW per-identity "stop clock" block
+  ## the engine keeps per seat (128 floats; encodeTeamsViewS): per identity j (16 x 8, at 612 + 8j)
+  ##   0 stop_age   min(t - tStop, 32) / 32: ticks since the identity's last OBSERVED move -> still transition; 1 when
+  ##                none was observed or it is older than 32 ticks
+  ##   1 stop_valid 1 when columns 0, 2, 3 describe a stop (observed, at most 32 ticks old), else 0 (they read 1, 0, 0)
+  ##   2 stop_len   min(L, 8) / 8, L = ticks from tStop to the first fast step observed after it (while none: age + 1)
+  ##   3 stop_live  1 while no fast step has been observed since tStop
+  ##   4 stand_age  min(t - tStand, 32) / 32: tStand = the latest stop BEFORE the current one that had no fast step
+  ##                observed in its first 4 ticks (a stop that held); 1 when none or older than 32 ticks
+  ##   5 stand_valid
+  ##   6 gap        visible(j) now: the sight gap before the current run of sight (first tick of the run - the last tick
+  ##                it was visible before, held for the whole run); else ticks since it was last visible. min(., 32) / 32,
+  ##                1 when it was never visible before
+  ##   7 run        visible(j) now: ticks of the current unbroken run of sight, min(., 32) / 32; else 0
+  ## A step exists at tick u only when j was visible at u and u - 1; it is still when |pos(u) - pos(u-1)|^2 <= 64
+  ## (8 units; a move step is 28), else fast. A stop is a still step right after a fast step, so it takes three
+  ## consecutive visible ticks: nothing is inferred across a sight gap. Everything comes from SeatView (visible /
+  ## playerX / playerY of the identities) on the ticks the seat's observation is encoded: what a BASIC seat could keep
+  ## itself. No gun, cooldown or order state of another cog is read. Only ticks the seat is observed alive on count
+  ## (as in the history block); a dead seat's block is zeros.
+  ObservationContractTeamsView1s* = "paintbot-pw.teams.view.1s"
+  StopIdentityWidth* = 8
+  StopWidth* = 16*StopIdentityWidth
+  TeamsViewSSize* = TeamsViewHSize + StopWidth
+  StopStill2* = 64'i64     # a step is still when its squared length is at most this
+  StopAgeCap* = 32'i32
+  StopLenCap* = 8'i32
+  StandWindow* = 4'i32     # a stop held when no fast step was observed in its first StandWindow ticks
+  ## Observation contract teams.view.1t (205): teams.view.1s's 740 floats, then an 11-float "hunt clock" block the
+  ## engine keeps per seat (HuntClocks; encodeTeamsViewT):
+  ##   740         enemy_gap     min(t - E, 720) / 720: E = the last tick an enemy-parity identity j (j mod 2 !=
+  ##                             selfTeam, so a disguised enemy still counts) had visible(j) = 1 and playerHp(j) > 0;
+  ##                             0 while one is visible
+  ##   741 + r     heart_gap[r]  r = 0..9, heart h = r xor selfTeam (the team frame over the MAP heart index; hearts come
+  ##                             in mirrored pairs 2m / 2m + 1): min(t - N[h], 2760) / 2760, N[h] = the last tick THIS SEAT
+  ##                             (selfX / selfY, not a teammate) was within 600 u of controlX / controlY(h)
+  ##                             (|d|^2 <= 360000); 0 while within; 0 when h >= heartCount (base column 25 + 10h,
+  ##                             present, tells real hearts from padding). Hearts 0..9 only.
+  ## E and N start at 0 (a match start counts as the last sighting / visit). Only ticks the seat is encoded alive on
+  ## are taken in, each once (as the history and stop clocks); a dead seat's block reads zeros, and the clocks keep
+  ## counting across the death (no reset at respawn), as a BASIC seat's variables do. A tick before the last one
+  ## taken in (a new match on the same seat), or resetHistory, starts them over. Built from SeatView only (visible /
+  ## playerHp of the identities, selfX / selfY, controlX / controlY, heartCount): what a BASIC seat keeps itself
+  ## (policy.bas inputs 36..42 = 3 x these columns, one tick later).
+  ObservationContractTeamsView1t* = "paintbot-pw.teams.view.1t"
+  HuntHearts* = 10
+  HuntWidth* = 1 + HuntHearts
+  TeamsViewTSize* = TeamsViewSSize + HuntWidth
+  EnemyGapCap* = 720'i32
+  HeartGapCap* = 2760'i32
+  HeartNear2* = 360000'i64  # within 600 u of a heart, inclusive
+  ## Observation contract teams.view.1p (206): teams.view.1t's 751 floats, then a 4-float block of the seat's OWN TRUE
+  ## timers (TimerClocks; encodeTeamsViewP; seat_view.ownTimers):
+  ##   751  gun cooldown / 72     (cogs[slot].cooldown; 72 = the slow shot, armour / carrying / trench)
+  ##   752  shield / 36           (cogs[slot].shield; 36 = the spawn shield)
+  ##   753  gun wind-up / 5       (equipment[slot].windup; GunWindupTicks)
+  ##   754  spray cooldown / 60   (equipment[slot].sprayCooldown; 5 + 8 = 13 at rules >= 40, 25 before)
+  ## The divisors are the BASIC P1 user inputs' (pw-features L9b policy.bas: 91 = cd * 1000 / 72, 93 = shield *
+  ## 1000 / 36, 94 = windup * 200, 95 = spray cd * 1000 / 60, each / 1000 as a feature), so a P1 transplant is scale 1.
+  ## TIMING ("S2", pw PLAN-features 7c-132): the block on tick t holds the timers read on the PRE-STEP world of the
+  ## seat's previous alive encoded tick (t - 1 for a seat encoded alive on t - 1); held across a death and shown on the
+  ## respawn row; zeros before the seat's first alive encode of a match. It is NOT the tick's own timers (same-tick
+  ## truth: act-KL 0.505 vs BASIC's replay; S2: 0.0081). Only ticks the seat is encoded alive on are taken in, each
+  ## once; a dead seat's block reads zeros (teams.view.1t's dead-row convention; S2 was measured on alive rows only). A
+  ## tick before the last one taken in (a new match on the same seat), or resetHistory, starts it over.
+  ## ENGINE STATE BEYOND BASIC: unlike every other column, this block is not computable from BASIC's perception
+  ## surface (the operator's "go with A for P1": the engine exposes the seat's own true timers). It is NOT a retired
+  ## contract; docs/neural/seat-view.md records the exception.
+  ObservationContractTeamsView1p* = "paintbot-pw.teams.view.1p"
+  TimerWidth* = 4
+  TeamsViewPSize* = TeamsViewTSize + TimerWidth
+  TimerCooldownScale* = 72'f32
+  TimerShieldScale* = 36'f32
+  TimerWindupScale* = 5'f32
+  TimerSprayScale* = 60'f32
+  ## Observation contract teams.view.1i (207): teams.view.1p's 755 floats unchanged, then
+  ##   755  held true cooldown / 288 (the 206 block's own S2 value, TimerClocks.shown.cooldown: the gun's or the
+  ##        rules-49 sniper's; 288 = 3 x the sniper's 96-tick cadence, the slow shot; 751 keeps / 72 and reads up to 4)
+  ## and the 81-float ITEM BLOCK (encodeItemBlock, cols 756 ..< 837), all S0 (the tick's own pre-step world) and all
+  ## BASIC perception (the builtins of the same name):
+  ##   +0 hasSniper, +1 playerMisting(selfId), +2 mistingTicks / 1440, +3 misting ? (mistingTicks mod 360) / 360 : 0
+  ##   (the heal phase: 0 = it heals this step), +4 playerRadar(selfId), +5 radarTicks / 1440, +6 radarBoost
+  ##   (1440 = the mister's and radar's 60 s, 360 = the mister's 15 s heal period; a flag reads 1 with its ticks 0 on
+  ##   the item's last tick)
+  ##   identity j (0..15) at +7 + 2j: playerMisting(j), playerRadar(j) (zeros unless visible(j))
+  ##   late-pickup row r (0..5) at +39 + 7r: the r-th VISIBLE pickup of a rules-49 kind (pickupKind 5 windex-mister,
+  ##   6 sniper, 7 radar; teams.view.1's pickup rows hide them) in index order: 0 visible, 1 dx, 2 dz (teams.view.1's
+  ##   frame), 3 mister, 4 sniper, 5 radar, 6 i/31 (its pickup index: the movement head's choice 11 + i)
+  ## A dead seat's 756 ..< 837 read zeros, as its 755.
+  ObservationContractTeamsView1i* = "paintbot-pw.teams.view.1i"
+  ItemCooldownScale* = 288'f32
+  ItemTicksScale* = 1440'f32
+  MisterHealScale* = 360'i32
+  ItemOwnWidth* = 7
+  ItemIdentityWidth* = 2
+  LatePickupOffset* = ItemOwnWidth + LegacySeats*ItemIdentityWidth
+  LatePickupRows* = 6
+  LatePickupWidth* = 7
+  FirstLatePickupKind* = 5'i32   # PickupKind misterPickup (sim.nim; 5 mister, 6 sniper, 7 radar)
+  ItemBlockWidth* = LatePickupOffset + LatePickupRows*LatePickupWidth
+  TeamsViewISize* = TeamsViewPSize + 1 + ItemBlockWidth
 static:
   doAssert TeamsViewSize == 512
+  doAssert TeamsViewHSize == 612
+  doAssert TeamsViewSSize == 740
+  doAssert TeamsViewTSize == 751
+  doAssert TeamsViewPSize == 755
+  doAssert ItemBlockWidth == 81
+  doAssert TeamsViewISize == 837
+  doAssert HuntHearts == TeamsHeartRows
   doAssert FfaCogWidth == 1 + 2 + 1 + 1 + Loci + 1 + 1 + 1 + 1 + 2 + 1
 
 type
   ObservationContractVersion* = enum
     ## Version numbers are the native ABI's (pw_create_observation).
-    ocTeamsView1 = 201, ocFfaView1 = 202
+    ocTeamsView1 = 201, ocFfaView1 = 202, ocTeamsView1h = 203, ocTeamsView1s = 204, ocTeamsView1t = 205,
+    ocTeamsView1p = 206, ocTeamsView1i = 207
   ActionContractVersion* = enum
-    acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13, acTeamsView1Move = 14
+    acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13, acTeamsView1Move = 14, acTeamsView1Target = 15,
+    acTeamsView1Raw = 16, acTeamsView1SelfDestruct = 17
 
 const
   ObservationContractTeamsView1Hash* = sha256Hex(ObservationContractTeamsView1)
   ObservationContractFfaView1Hash* = sha256Hex(ObservationContractFfaView1)
+  ObservationContractTeamsView1hHash* = sha256Hex(ObservationContractTeamsView1h)
+  ObservationContractTeamsView1sHash* = sha256Hex(ObservationContractTeamsView1s)
+  ObservationContractTeamsView1tHash* = sha256Hex(ObservationContractTeamsView1t)
+  ObservationContractTeamsView1pHash* = sha256Hex(ObservationContractTeamsView1p)
+  ObservationContractTeamsView1iHash* = sha256Hex(ObservationContractTeamsView1i)
+  ## The teams game's contracts (teams.view.1 and its supersets) and the ones that keep a per-seat TeamsHistory.
+  TeamsObservationContracts* = {ocTeamsView1, ocTeamsView1h, ocTeamsView1s, ocTeamsView1t, ocTeamsView1p,
+    ocTeamsView1i}
+  HistoryObservationContracts* = {ocTeamsView1h, ocTeamsView1s, ocTeamsView1t, ocTeamsView1p, ocTeamsView1i}
   ActionContractTeamsView1Hash* = sha256Hex(ActionContractTeamsView1)
   ActionContractFfaView1PointerHash* = sha256Hex(ActionContractFfaView1Pointer)
   ActionContractTeamsView1OffsetHash* = sha256Hex(ActionContractTeamsView1Offset)
   ActionContractTeamsView1MoveHash* = sha256Hex(ActionContractTeamsView1Move)
+  ActionContractTeamsView1TargetHash* = sha256Hex(ActionContractTeamsView1Target)
+  ActionContractTeamsView1RawHash* = sha256Hex(ActionContractTeamsView1Raw)
+  ActionContractTeamsView1SelfDestructHash* = sha256Hex(ActionContractTeamsView1SelfDestruct)
 
 const
   ## Contracts retired for BASIC parity (docs/neural/seat-view.md): their observations read
@@ -113,11 +283,13 @@ const
   RetiredUserInputsMax* = 128
   UserInputLimit* = 1_000_000'i32
 
+proc observationContractId*(version: ObservationContractVersion): string
+
 proc userInputsContractId*(k: int, base = ocTeamsView1): string =
   ## Observation contract teams.view.1u<K> (teams.view.1's 512 floats, then K user inputs) or,
   ## with base ocFfaView1, ffa.view.1u<K> (the match's ffa.view.1 floats, then K user inputs).
   ## The user inputs are written only by the seat's policy.bas (neuralInput).
-  (if base == ocTeamsView1: ObservationContractTeamsView1 else: ObservationContractFfaView1) & "u" & $k
+  observationContractId(base) & "u" & $k
 
 var retiredHashes {.threadvar.}: seq[string]
 var userInputHashes {.threadvar.}: array[ObservationContractVersion, seq[string]]
@@ -163,18 +335,27 @@ proc actionContractHash*(version: ActionContractVersion): string =
   of acFfaView1Pointer: ActionContractFfaView1PointerHash
   of acTeamsView1Offset: ActionContractTeamsView1OffsetHash
   of acTeamsView1Move: ActionContractTeamsView1MoveHash
+  of acTeamsView1Target: ActionContractTeamsView1TargetHash
+  of acTeamsView1Raw: ActionContractTeamsView1RawHash
+  of acTeamsView1SelfDestruct: ActionContractTeamsView1SelfDestructHash
 proc actionContractId*(version: ActionContractVersion): string =
   case version
   of acTeamsView1: ActionContractTeamsView1
   of acFfaView1Pointer: ActionContractFfaView1Pointer
   of acTeamsView1Offset: ActionContractTeamsView1Offset
   of acTeamsView1Move: ActionContractTeamsView1Move
+  of acTeamsView1Target: ActionContractTeamsView1Target
+  of acTeamsView1Raw: ActionContractTeamsView1Raw
+  of acTeamsView1SelfDestruct: ActionContractTeamsView1SelfDestruct
 proc actionContractVersion*(hash: string): ActionContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ActionContractTeamsView1Hash: acTeamsView1
   elif hash == ActionContractFfaView1PointerHash: acFfaView1Pointer
   elif hash == ActionContractTeamsView1OffsetHash: acTeamsView1Offset
   elif hash == ActionContractTeamsView1MoveHash: acTeamsView1Move
+  elif hash == ActionContractTeamsView1TargetHash: acTeamsView1Target
+  elif hash == ActionContractTeamsView1RawHash: acTeamsView1Raw
+  elif hash == ActionContractTeamsView1SelfDestructHash: acTeamsView1SelfDestruct
   elif retiredContract(hash): raise newException(ValueError, "neural action contract " & RetiredMessage)
   else: raise newException(ValueError, "unknown neural action contract")
 
@@ -182,29 +363,50 @@ proc observationContractHash*(version: ObservationContractVersion): string =
   case version
   of ocTeamsView1: ObservationContractTeamsView1Hash
   of ocFfaView1: ObservationContractFfaView1Hash
+  of ocTeamsView1h: ObservationContractTeamsView1hHash
+  of ocTeamsView1s: ObservationContractTeamsView1sHash
+  of ocTeamsView1t: ObservationContractTeamsView1tHash
+  of ocTeamsView1p: ObservationContractTeamsView1pHash
+  of ocTeamsView1i: ObservationContractTeamsView1iHash
 proc observationContractId*(version: ObservationContractVersion): string =
   case version
   of ocTeamsView1: ObservationContractTeamsView1
   of ocFfaView1: ObservationContractFfaView1
+  of ocTeamsView1h: ObservationContractTeamsView1h
+  of ocTeamsView1s: ObservationContractTeamsView1s
+  of ocTeamsView1t: ObservationContractTeamsView1t
+  of ocTeamsView1p: ObservationContractTeamsView1p
+  of ocTeamsView1i: ObservationContractTeamsView1i
 proc observationSize*(version: ObservationContractVersion): int =
   ## The fixed width of a contract. ffa.view.1's width follows the match (ffaViewLayout):
   ## ValueError here, so no caller can mistake it for a constant.
   case version
   of ocTeamsView1: TeamsViewSize
+  of ocTeamsView1h: TeamsViewHSize
+  of ocTeamsView1s: TeamsViewSSize
+  of ocTeamsView1t: TeamsViewTSize
+  of ocTeamsView1p: TeamsViewPSize
+  of ocTeamsView1i: TeamsViewISize
   of ocFfaView1: raise newException(ValueError, "observation contract ffa.view.1 has a per-match width (ffaViewLayout)")
 proc observationContractVersion*(hash: string): ObservationContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ObservationContractTeamsView1Hash: ocTeamsView1
   elif hash == ObservationContractFfaView1Hash: ocFfaView1
+  elif hash == ObservationContractTeamsView1hHash: ocTeamsView1h
+  elif hash == ObservationContractTeamsView1sHash: ocTeamsView1s
+  elif hash == ObservationContractTeamsView1tHash: ocTeamsView1t
+  elif hash == ObservationContractTeamsView1pHash: ocTeamsView1p
+  elif hash == ObservationContractTeamsView1iHash: ocTeamsView1i
   elif retiredContract(hash): raise newException(ValueError, "neural observation contract " & RetiredMessage)
   else: raise newException(ValueError, "unknown neural observation contract")
 proc pairedAction*(version: ObservationContractVersion): ActionContractVersion =
   ## The observation contract's default action contract.
-  if version == ocTeamsView1: acTeamsView1 else: acFfaView1Pointer
+  if version in TeamsObservationContracts: acTeamsView1 else: acFfaView1Pointer
 proc pairs*(observation: ObservationContractVersion, action: ActionContractVersion): bool =
   ## Whether the two contracts go together: teams.view.1 with its five-head action contract
   ## or its aim-offset / movement-offset variants, ffa.view.1 with its pointer contract.
-  if observation == ocTeamsView1: action in {acTeamsView1, acTeamsView1Offset, acTeamsView1Move}
+  if observation in TeamsObservationContracts: action in {acTeamsView1, acTeamsView1Offset, acTeamsView1Move, acTeamsView1Target,
+    acTeamsView1Raw, acTeamsView1SelfDestruct}
   else: action == acFfaView1Pointer
 proc moveOffset*(bin: int): int =
   ## The movement offset (world units, before the team-1 mirror) of a movement-offset bin 0 .. 22:
@@ -216,16 +418,41 @@ proc extraHeads*(action: ActionContractVersion): int =
   ## The heads after the five main ones: 2 (aim offsets) under teams.view.1 aim-offset, 4 (aim
   ## then movement offsets) under movement-offset, 0 otherwise.
   case action
-  of acTeamsView1Offset: AimOffsetHeads
+  of acTeamsView1Offset, acTeamsView1Target: AimOffsetHeads
   of acTeamsView1Move: AimOffsetHeads + MoveOffsetHeads
+  of acTeamsView1Raw: AimOffsetHeads + 3
+  of acTeamsView1SelfDestruct: SelfDestructHeads
   else: 0
 proc actionHeadSizes*(action: ActionContractVersion): seq[int] =
   ## The head sizes of a fixed-size action contract (ffa.view.1 pointer: see pointerHeads).
   case action
   of acTeamsView1: @ActionSizes
-  of acTeamsView1Offset: @ActionSizesOffset
+  of acTeamsView1Offset, acTeamsView1Target: @ActionSizesOffset
   of acTeamsView1Move: @ActionSizesMove
+  of acTeamsView1Raw: @ActionSizesRaw
+  of acTeamsView1SelfDestruct: @ActionSizesSelfDestruct
   of acFfaView1Pointer: raise newException(ValueError, "action contract ffa.view.1 pointer is sized by the match (pointerHeads)")
+proc actionLogitSize*(action: ActionContractVersion): int =
+  ## Logits per seat of a fixed-size action contract: the sum of its head sizes, except the target-conditioned
+  ## contract (15), whose heads 5 and 6 carry TargetRows rows each.
+  case action
+  of acTeamsView1: LogitSize
+  of acTeamsView1Offset: LogitSizeOffset
+  of acTeamsView1Move: LogitSizeMove
+  of acTeamsView1Target: LogitSizeTarget
+  of acTeamsView1Raw: LogitSizeRaw
+  of acTeamsView1SelfDestruct: LogitSizeSelfDestruct
+  of acFfaView1Pointer: raise newException(ValueError, "action contract ffa.view.1 pointer is sized by the match (pointerHeads)")
+proc actionLogitHeads*(action: ActionContractVersion): seq[int] =
+  ## The logit segments of a fixed-size action contract, in order, as a model's header lists its heads: the head
+  ## sizes, except contract 15, whose heads 5 and 6 are TargetRows * 23 logits each (one 23-logit row per identity).
+  if action == acTeamsView1Target: @[51, 25, 2, 2, 2, TargetRows*AimOffsetBins, TargetRows*AimOffsetBins]
+  elif action == acTeamsView1Raw: @[51, 25, 2, 2, 2, TargetRows*RawOffsetBins, TargetRows*RawOffsetBins, WalkDirections,
+    WalkDistances.len, LookDirections]
+  else: actionHeadSizes(action)
+proc targetRows*(action: ActionContractVersion): bool =
+  ## Whether the contract draws its aim offsets from the chosen identity's row (contract 15).
+  action in {acTeamsView1Target, acTeamsView1Raw}
 
 proc mapFlip*(slot: int): int =
   ## The teams game mirrors odd seats' observations and compass heads (team 1 plays from
@@ -247,7 +474,7 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
   ## cx, cz = the map centre ((mapMinX + mapMaxX) / 2, likewise y); spanX = mapMaxX - mapMinX,
   ## spanZ likewise; dx = (x - selfX) * flip / spanX, dz = (y - selfY) * flip / spanZ; "wet" is
   ## waterAt, "dh" is (terrainHeight(point) - terrainHeight(self)) / 800.
-  ##   Self (0..24): 0 (selfX - cx) * flip / spanX, 1 (selfY - cz) * flip / spanZ, 2 selfHp/3,
+  ##   Self (0..24): 0 (selfX - cx) * flip / spanX, 1 (selfY - cz) * flip / spanZ, 2 selfHp/maxHp (3; 10 from rules 49),
   ##     3 armorHp/3, 4 livesLeft/4, 5 hasGrenade, 6 hasSpray, 7 grenadeCharge/24, 8 carrying,
   ##     9 hasUniform, 10 trenchId >= 0, 11 (selfId div 2)/7, 12 worldTick/14400, 13 self wet,
   ##     14 terrainHeight(self)/800, 15 glory(side)/1000, 16 glory(1-side)/1000,
@@ -259,9 +486,9 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
   ##     (controlCaptureTeam, relative), 5 controlCaptureTicks/72, 6 controlContested,
   ##     7 controlPoints/5, 8 wet, 9 dh
   ##   Identity j (0..15) at 125 + 10j (zeros unless visible(j)): 0 visible, 1 dx, 2 dz
-  ##     (playerX/Y), 3 playerTeam relative to side, 4 playerHp/3, 5 playerCarrying, 6 j = selfId,
+  ##     (playerX/Y), 3 playerTeam relative to side, 4 playerHp/maxHp, 5 playerCarrying, 6 j = selfId,
   ##     7 (j div 2)/7, 8 wet, 9 dh
-  ##   Pickup i (0..31) at 285 + 5i (zeros unless pickupVisible(i)): 0 visible, 1 dx, 2 dz,
+  ##   Pickup i (0..31) at 285 + 5i (zeros unless pickupVisible(i) and pickupKind(i) <= 4): 0 visible, 1 dx, 2 dz,
   ##     3 pickupKind/4, 4 i/31
   ##   Sound i (0..7) at 445 + 5i (zeros for i >= soundCount): 0 present, 1 soundKind/4,
   ##     2 ((soundDirection + (side = 0 ? 0 : 4)) mod 8)/7, 3 soundDistance/4, 4 soundAge/24
@@ -284,7 +511,7 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
   template dh(px, pz: int32): float32 = float32(v.terrainHeight(px.int, pz.int) - own) / hs
   output[0] = float32(sx - cx) * flip / spanX
   output[1] = float32(sz - cz) * flip / spanZ
-  output[2] = float32(v.selfHp) / 3
+  output[2] = float32(v.selfHp) / float32(maxHp())   # 3 before rules 49, 10 from them
   output[3] = float32(v.armorHp) / 3
   output[4] = float32(v.livesLeft) / 4
   output[5] = float32(v.hasGrenade)
@@ -322,35 +549,41 @@ proc encodeTeamsView*(v: SeatView, output: var openArray[float32]) =
     output[o+8] = float32(v.waterAt(x.int, z.int))
     output[o+9] = dh(x, z)
   for j in 0..<LegacySeats:
-    if v.visible(j) == 0: continue
+    let r = v.identityRow(j)   # visible / playerX / playerY / playerTeam / playerHp / playerCarrying
+    if not r.visible: continue
     let o = TeamsIdentityOffset + j*TeamsIdentityWidth
-    let x = v.playerX(j)
-    let z = v.playerY(j)
+    let x = r.x
+    let z = r.z
     output[o] = 1
     output[o+1] = dx(x)
     output[o+2] = dz(z)
-    output[o+3] = relative(v.playerTeam(j).int, side)
-    output[o+4] = float32(v.playerHp(j)) / 3
-    output[o+5] = float32(v.playerCarrying(j))
+    output[o+3] = relative(r.team.int, side)
+    output[o+4] = float32(r.hp) / float32(maxHp())
+    output[o+5] = float32(r.carrying)
     output[o+6] = float32((j == v.selfId.int).int)
     output[o+7] = float32(j div 2) / 7
     output[o+8] = float32(v.waterAt(x.int, z.int))
     output[o+9] = dh(x, z)
-  for i in 0..<TeamsPickupRows:
-    if v.pickupVisible(i) == 0: continue
+  for i in 0..<min(TeamsPickupRows, v.pickupCount.int):   # pickupVisible is 0 past pickupCount
+    let p = v.pickupRow(i)   # pickupVisible / pickupX / pickupY / pickupKind
+    # teams.view.1 knows the five original kinds; a later one (the rules-49 mister) reads as unseen.
+    if not p.visible or p.kind > 4: continue
     let o = TeamsPickupOffset + i*TeamsPickupWidth
     output[o] = 1
-    output[o+1] = dx(v.pickupX(i))
-    output[o+2] = dz(v.pickupY(i))
-    output[o+3] = float32(v.pickupKind(i)) / 4
+    output[o+1] = dx(p.x)
+    output[o+2] = dz(p.z)
+    output[o+3] = float32(p.kind) / 4
     output[o+4] = float32(i) / 31
-  for i in 0..<min(TeamsSoundRows, v.soundCount.int):
+  var i = 0
+  for s in v.liveSounds:   # soundKind / soundDirection / soundDistance / soundAge (i), i < soundCount
+    if i >= TeamsSoundRows: break
     let o = TeamsSoundOffset + i*TeamsSoundWidth
     output[o] = 1
-    output[o+1] = float32(v.soundKind(i)) / 4
-    output[o+2] = float32((v.soundDirection(i).int + (if side == 0: 0 else: 4)) mod 8) / 7
-    output[o+3] = float32(v.soundDistance(i)) / 4
-    output[o+4] = float32(v.soundAge(i)) / SoundLifetime
+    output[o+1] = float32(s.kind) / 4
+    output[o+2] = float32((s.direction.int + (if side == 0: 0 else: 4)) mod 8) / 7
+    output[o+3] = float32(s.distance) / 4
+    output[o+4] = float32(s.age) / SoundLifetime
+    inc i
   for k in 0..<TeamsProbeRows:
     let delta = if k == 0: (0, 0) else: Directions[k-1]
     let px = sx.int + int(flip) * delta[0] * 200
@@ -574,8 +807,271 @@ proc userInputFeature*(value: int32): float32 =
   float32(value) / 1000'f32
 proc clampUserInput*(value: int32): int32 = clamp(value, -UserInputLimit, UserInputLimit)
 
+type
+  HistoryRecord* = object
+    ## One observed tick of a seat (teams.view.1h): its own position and every visible identity's position.
+    tick*: int32           # the world tick; -1 = empty
+    selfPos*: Point
+    seen*: array[16, bool]
+    pos*: array[16, Point]
+  StopClock* = object
+    ## teams.view.1s: what the seat has observed of one identity's footwork (ticks; -1 = never).
+    seen*: int32       # the last tick it was visible
+    pos*: Point        # where, at that tick
+    fast*: bool        # a step existed at `seen` and it was fast
+    runStart*: int32   # first tick of the run of sight `seen` belongs to
+    runGap*: int32     # the sight gap before that run, capped at StopAgeCap (the cap when never seen before)
+    stop*: int32       # the last observed move -> still transition
+    brk*: int32        # the first fast step observed after `stop`
+    stand*: int32      # the latest stop before `stop` that held (no fast step in its first StandWindow ticks)
+  StopClocks* = object
+    tick*: int32       # the last tick the clocks took in; -1 = none
+    c*: array[16, StopClock]
+  HuntClocks* = object
+    ## teams.view.1t: the last tick an enemy was seen and the last tick the seat was near each heart (map index).
+    tick*: int32                      # the last tick the clocks took in; -1 = none
+    enemy*: int32                     # E; 0 at a match start
+    near*: array[HuntHearts, int32]   # N[h], h = map heart index 0..9; 0 at a match start
+  TimerClocks* = object
+    ## teams.view.1p: the seat's own true timers at its last alive encoded tick, and the ones the block shows (those of
+    ## the alive encoded tick before that: S2).
+    tick*: int32         # the last tick taken in; -1 = none
+    last*: OwnTimers     # read on `tick`'s pre-step world
+    shown*: OwnTimers    # read on the alive encoded tick before `tick` (zeros before there was one)
+  TeamsHistory* = object
+    ## The seat's last three observed alive ticks (a ring keyed by tick), kept by whoever encodes its observation
+    ## (the native env per slot, a hosted seat itself). Reset at a match start. teams.view.1s: the stop clocks too
+    ## (untouched under teams.view.1h). teams.view.1t: the hunt clocks too (untouched under 1h / 1s). teams.view.1p:
+    ## the own-timer hold too (untouched under 1h / 1s / 1t).
+    recs*: array[3, HistoryRecord]
+    stops*: StopClocks
+    hunt*: HuntClocks
+    timers*: TimerClocks
+
+proc resetStops(s: var StopClocks) =
+  s.tick = -1
+  for j in 0..<s.c.len: s.c[j] = StopClock(seen: -1, runStart: -1, runGap: StopAgeCap, stop: -1, brk: -1, stand: -1)
+
+proc resetHunt(c: var HuntClocks) =
+  c = HuntClocks(tick: -1)
+
+proc resetTimers(c: var TimerClocks) =
+  c = TimerClocks(tick: -1)
+
+proc resetHistory*(h: var TeamsHistory) =
+  for i in 0..<h.recs.len: h.recs[i] = HistoryRecord(tick: -1)
+  h.stops.resetStops()
+  h.hunt.resetHunt()
+  h.timers.resetTimers()
+
+proc findRec(h: TeamsHistory, tick: int32): int =
+  for i in 0..<h.recs.len:
+    if h.recs[i].tick == tick and tick >= 0: return i
+  -1
+
+proc historyBlock(v: SeatView, h: var TeamsHistory, output: var openArray[float32]): HistoryRecord =
+  ## Observation contract teams.view.1h: teams.view.1 (encodeTeamsView) into output[0 ..< 512], then the 100-float
+  ## history block (ObservationContractTeamsView1h's doc) from `h`, then this tick is recorded into `h` (an alive seat
+  ## only; a second encode in the same tick re-reads the same records and records the same values, so it is
+  ## idempotent).
+  if output.len != TeamsViewHSize: raise newException(ValueError, "invalid neural observation dimensions")
+  encodeTeamsView(v, output.toOpenArray(0, TeamsViewSize-1))
+  for i in TeamsViewSize..<TeamsViewHSize: output[i] = 0
+  let t = v.worldTick
+  let flip = mapFlip(v.slot).float32
+  let alive = v.selfHp > 0
+  var cur = HistoryRecord(tick: t, selfPos: Point(x: v.selfX, z: v.selfY))
+  for j in 0..<16:
+    if v.visible(j) == 1:
+      cur.seen[j] = true
+      cur.pos[j] = Point(x: v.playerX(j), z: v.playerY(j))
+  if alive:
+    let i1 = h.findRec(t - 1)
+    let i2 = h.findRec(t - 2)
+    for k, idx in [i1, i2]:
+      if idx < 0: continue
+      let r = h.recs[idx]
+      for j in 0..<16:
+        if cur.seen[j] and r.seen[j]:
+          let o = TeamsViewSize + j*HistoryIdentityWidth + k*3
+          output[o] = float32(r.pos[j].x - cur.pos[j].x) * flip / HistoryStep
+          output[o+1] = float32(r.pos[j].z - cur.pos[j].z) * flip / HistoryStep
+          output[o+2] = 1
+    let so = TeamsViewSize + 16*HistoryIdentityWidth
+    if i1 >= 0:
+      let r1 = h.recs[i1]
+      output[so] = float32(cur.selfPos.x - r1.selfPos.x) * flip / HistoryStep
+      output[so+1] = float32(cur.selfPos.z - r1.selfPos.z) * flip / HistoryStep
+      if i2 >= 0:
+        let r2 = h.recs[i2]
+        output[so+2] = float32(r1.selfPos.x - r2.selfPos.x) * flip / HistoryStep
+        output[so+3] = float32(r1.selfPos.z - r2.selfPos.z) * flip / HistoryStep
+    # record this tick (replace the same tick, else the oldest)
+    var slot = h.findRec(t)
+    if slot < 0:
+      slot = 0
+      for i in 1..<h.recs.len:
+        if h.recs[i].tick < h.recs[slot].tick: slot = i
+    h.recs[slot] = cur
+  cur
+
+proc encodeTeamsViewH*(v: SeatView, h: var TeamsHistory, output: var openArray[float32]) =
+  discard historyBlock(v, h, output)
+
+proc encodeTeamsViewS*(v: SeatView, h: var TeamsHistory, output: var openArray[float32]) =
+  ## Observation contract teams.view.1s: teams.view.1h (encodeTeamsViewH) into output[0 ..< 612], then the 128-float
+  ## stop-clock block (ObservationContractTeamsView1s's doc). The clocks take in only the ticks the seat is observed
+  ## alive on (a dead seat's block is zeros, and those ticks are a sight gap for every identity), each tick once (a
+  ## second encode in the same tick writes the same floats); a tick before the last one taken in (a new match on the
+  ## same seat) starts them over.
+  if output.len != TeamsViewSSize: raise newException(ValueError, "invalid neural observation dimensions")
+  let cur = historyBlock(v, h, output.toOpenArray(0, TeamsViewHSize-1))
+  for i in TeamsViewHSize..<TeamsViewSSize: output[i] = 0
+  if v.selfHp <= 0: return   # as the history: only a tick the seat is observed alive on counts, a dead seat reads zeros
+  let t = v.worldTick
+  if t < h.stops.tick: h.stops.resetStops()
+  if t != h.stops.tick:
+    for j in 0..<16:
+      if not cur.seen[j]: continue
+      template c: untyped = h.stops.c[j]
+      if c.seen >= 0 and c.seen == t - 1:
+        let fast = distance2(cur.pos[j], c.pos) > StopStill2
+        if fast:
+          if c.stop >= 0 and c.brk < 0: c.brk = t
+        elif c.fast:
+          if c.stop >= 0 and not (c.brk >= 0 and c.brk - c.stop <= StandWindow): c.stand = c.stop
+          c.stop = t
+          c.brk = -1
+        c.fast = fast
+      else:
+        c.fast = false
+        c.runGap = if c.seen < 0: StopAgeCap else: min(t - c.seen, StopAgeCap)
+        c.runStart = t
+      c.seen = t
+      c.pos = cur.pos[j]
+    h.stops.tick = t
+  for j in 0..<16:
+    let c = h.stops.c[j]
+    let o = TeamsViewHSize + j*StopIdentityWidth
+    if c.stop >= 0 and t - c.stop <= StopAgeCap:
+      output[o] = float32(t - c.stop) / float32(StopAgeCap)
+      output[o+1] = 1
+      output[o+2] = float32(min((if c.brk >= 0: c.brk else: t + 1) - c.stop, StopLenCap)) / float32(StopLenCap)
+      output[o+3] = float32(c.brk < 0)
+    else:
+      output[o] = 1
+      output[o+1] = 0
+      output[o+2] = 0
+      output[o+3] = 0
+    if c.stand >= 0 and t - c.stand <= StopAgeCap:
+      output[o+4] = float32(t - c.stand) / float32(StopAgeCap)
+      output[o+5] = 1
+    else:
+      output[o+4] = 1
+      output[o+5] = 0
+    if cur.seen[j]:
+      output[o+6] = float32(c.runGap) / float32(StopAgeCap)
+      output[o+7] = float32(min(t - c.runStart + 1, StopAgeCap)) / float32(StopAgeCap)
+    else:
+      output[o+6] = float32(if c.seen < 0: StopAgeCap else: min(t - c.seen, StopAgeCap)) / float32(StopAgeCap)
+      output[o+7] = 0
+
+proc encodeTeamsViewT*(v: SeatView, h: var TeamsHistory, output: var openArray[float32]) =
+  ## Observation contract teams.view.1t: teams.view.1s (encodeTeamsViewS) into output[0 ..< 740], then the 11-float
+  ## hunt-clock block (ObservationContractTeamsView1t's doc). The clocks take in only the ticks the seat is observed
+  ## alive on (a dead seat's block is zeros; E and N keep their ticks, so a death counts as time passing), each tick
+  ## once (a second encode in the same tick writes the same floats); a tick before the last one taken in (a new match
+  ## on the same seat) starts them over.
+  if output.len != TeamsViewTSize: raise newException(ValueError, "invalid neural observation dimensions")
+  encodeTeamsViewS(v, h, output.toOpenArray(0, TeamsViewSSize-1))
+  for i in TeamsViewSSize..<TeamsViewTSize: output[i] = 0
+  if v.selfHp <= 0: return   # as the history and stop clocks: only a tick the seat is observed alive on counts
+  let t = v.worldTick
+  let side = v.selfTeam.int
+  let hearts = min(HuntHearts, v.heartCount.int)
+  if t < h.hunt.tick: h.hunt.resetHunt()
+  if t != h.hunt.tick:
+    for j in 0..<16:
+      if j mod 2 != side and v.visible(j) == 1 and v.playerHp(j) > 0:
+        h.hunt.enemy = t
+        break
+    let me = Point(x: v.selfX, z: v.selfY)
+    for i in 0..<hearts:
+      if distance2(me, Point(x: v.controlX(i), z: v.controlY(i))) <= HeartNear2: h.hunt.near[i] = t
+    h.hunt.tick = t
+  output[TeamsViewSSize] = float32(min(t - h.hunt.enemy, EnemyGapCap)) / float32(EnemyGapCap)
+  for r in 0..<HuntHearts:
+    let i = r xor side
+    if i < hearts:
+      output[TeamsViewSSize + 1 + r] = float32(min(t - h.hunt.near[i], HeartGapCap)) / float32(HeartGapCap)
+
+proc encodeTeamsViewP*(v: SeatView, h: var TeamsHistory, output: var openArray[float32]) =
+  ## Observation contract teams.view.1p: teams.view.1t (encodeTeamsViewT) into output[0 ..< 751], then the 4-float
+  ## own-timer block (ObservationContractTeamsView1p's doc): the seat's true timers as they were on its previous alive
+  ## encoded tick (S2). Only ticks the seat is observed alive on are taken in (a dead seat's block is zeros; the held
+  ## value survives the death), each tick once (a second encode in the same tick writes the same floats); a tick
+  ## before the last one taken in (a new match on the same seat) starts it over.
+  if output.len != TeamsViewPSize: raise newException(ValueError, "invalid neural observation dimensions")
+  encodeTeamsViewT(v, h, output.toOpenArray(0, TeamsViewTSize-1))
+  for i in TeamsViewTSize..<TeamsViewPSize: output[i] = 0
+  if v.selfHp <= 0: return
+  let t = v.worldTick
+  if t < h.timers.tick: h.timers.resetTimers()
+  if t != h.timers.tick:
+    h.timers.shown = h.timers.last   # zeros on the first alive tick: resetTimers left `last` zero
+    h.timers.last = v.ownTimers()
+    h.timers.tick = t
+  let s = h.timers.shown
+  output[TeamsViewTSize] = float32(s.cooldown) / TimerCooldownScale
+  output[TeamsViewTSize + 1] = float32(s.shield) / TimerShieldScale
+  output[TeamsViewTSize + 2] = float32(s.windup) / TimerWindupScale
+  output[TeamsViewTSize + 3] = float32(s.sprayCooldown) / TimerSprayScale
+
+proc encodeItemBlock*(v: SeatView, output: var openArray[float32]) =
+  ## teams.view.1i's ITEM BLOCK (ItemBlockWidth = 81 floats; ObservationContractTeamsView1i's doc): the seat's own
+  ## rules-49 items, every visible identity's windex-mister and radar, and the visible rules-49 pickups. Stateless:
+  ## only the tick's SeatView, through BASIC's own builtins. Zeros for a dead seat.
+  if output.len != ItemBlockWidth: raise newException(ValueError, "invalid neural observation dimensions")
+  for i in 0..<output.len: output[i] = 0
+  if v.selfHp <= 0: return
+  let me = v.selfId.int
+  let misting = v.playerMisting(me)
+  output[0] = float32(v.hasSniper)
+  output[1] = float32(misting)
+  output[2] = float32(v.mistingTicks) / ItemTicksScale
+  output[3] = (if misting != 0: float32(v.mistingTicks mod MisterHealScale) / float32(MisterHealScale) else: 0'f32)
+  output[4] = float32(v.playerRadar(me))
+  output[5] = float32(v.radarTicks) / ItemTicksScale
+  output[6] = float32(v.radarBoost)
+  for j in 0..<LegacySeats:
+    output[ItemOwnWidth + j*ItemIdentityWidth] = float32(v.playerMisting(j))
+    output[ItemOwnWidth + j*ItemIdentityWidth + 1] = float32(v.playerRadar(j))
+  let flip = mapFlip(v.slot).float32
+  let spanX = float32(v.mapMaxX - v.mapMinX)
+  let spanZ = float32(v.mapMaxY - v.mapMinY)
+  var r = 0
+  for i in 0..<v.pickupCount.int:
+    if r >= LatePickupRows: break
+    let p = v.pickupRow(i)   # pickupVisible / pickupX / pickupY / pickupKind
+    if not p.visible or p.kind < FirstLatePickupKind: continue
+    let o = LatePickupOffset + r*LatePickupWidth
+    output[o] = 1
+    output[o+1] = float32(p.x - v.selfX) * flip / spanX
+    output[o+2] = float32(p.z - v.selfY) * flip / spanZ
+    output[o+3 + int(p.kind - FirstLatePickupKind)] = 1
+    output[o+6] = float32(i) / 31
+    inc r
+
+proc encodeTeamsViewI*(v: SeatView, h: var TeamsHistory, output: var openArray[float32]) =
+  ## Observation contract teams.view.1i: teams.view.1p (encodeTeamsViewP) into output[0 ..< 755], then the held true
+  ## cooldown / 288 at 755 (the same S2 value 751 shows / 72) and the ITEM BLOCK at 756 ..< 837 (encodeItemBlock).
+  if output.len != TeamsViewISize: raise newException(ValueError, "invalid neural observation dimensions")
+  encodeTeamsViewP(v, h, output.toOpenArray(0, TeamsViewPSize-1))
+  output[TeamsViewPSize] = (if v.selfHp > 0: float32(h.timers.shown.cooldown) / ItemCooldownScale else: 0'f32)
+  encodeItemBlock(v, output.toOpenArray(TeamsViewPSize + 1, TeamsViewISize - 1))
+
 proc encodeObservation*(v: SeatView, version: ObservationContractVersion, output: var openArray[float32],
-    inputs: openArray[int32] = [], rows = FfaViewRows(), mask = 0'u32) =
+    inputs: openArray[int32] = [], rows = FfaViewRows(), mask = 0'u32, history: ptr TeamsHistory = nil) =
   ## The observation of the given contract: teams.view.1 (then the K user inputs of
   ## teams.view.1u<K>, K = inputs.len) or ffa.view.1 against `rows` (ffaViewRows of the view;
   ## then the K user inputs of ffa.view.1u<K>). The user-input columns follow the base
@@ -586,6 +1082,31 @@ proc encodeObservation*(v: SeatView, version: ObservationContractVersion, output
       raise newException(ValueError, "invalid neural observation dimensions")
     encodeTeamsView(v, output.toOpenArray(0, TeamsViewSize-1))
     for i, value in inputs: output[TeamsViewSize+i] = userInputFeature(value)
+  of ocTeamsView1h:
+    if output.len != TeamsViewHSize + inputs.len or inputs.len > MaxUserInputs or history == nil:
+      raise newException(ValueError, "invalid neural observation dimensions")
+    encodeTeamsViewH(v, history[], output.toOpenArray(0, TeamsViewHSize-1))
+    for i, value in inputs: output[TeamsViewHSize+i] = userInputFeature(value)
+  of ocTeamsView1s:
+    if output.len != TeamsViewSSize + inputs.len or inputs.len > MaxUserInputs or history == nil:
+      raise newException(ValueError, "invalid neural observation dimensions")
+    encodeTeamsViewS(v, history[], output.toOpenArray(0, TeamsViewSSize-1))
+    for i, value in inputs: output[TeamsViewSSize+i] = userInputFeature(value)
+  of ocTeamsView1t:
+    if output.len != TeamsViewTSize + inputs.len or inputs.len > MaxUserInputs or history == nil:
+      raise newException(ValueError, "invalid neural observation dimensions")
+    encodeTeamsViewT(v, history[], output.toOpenArray(0, TeamsViewTSize-1))
+    for i, value in inputs: output[TeamsViewTSize+i] = userInputFeature(value)
+  of ocTeamsView1p:
+    if output.len != TeamsViewPSize + inputs.len or inputs.len > MaxUserInputs or history == nil:
+      raise newException(ValueError, "invalid neural observation dimensions")
+    encodeTeamsViewP(v, history[], output.toOpenArray(0, TeamsViewPSize-1))
+    for i, value in inputs: output[TeamsViewPSize+i] = userInputFeature(value)
+  of ocTeamsView1i:
+    if output.len != TeamsViewISize + inputs.len or inputs.len > MaxUserInputs or history == nil:
+      raise newException(ValueError, "invalid neural observation dimensions")
+    encodeTeamsViewI(v, history[], output.toOpenArray(0, TeamsViewISize-1))
+    for i, value in inputs: output[TeamsViewISize+i] = userInputFeature(value)
   of ocFfaView1:
     let size = output.len - inputs.len
     if size < 0 or inputs.len > MaxUserInputs: raise newException(ValueError, "invalid neural observation dimensions")
@@ -643,6 +1164,26 @@ proc samplingRng*(matchSeed: int32, slot: int): Rng =
 proc samplingSeed*(matchSeed: int32, slot: int): uint64 =
   ## The stream's initial state, for telemetry.
   samplingRng(matchSeed, slot).state
+
+# Sampling salt (training library only: native pw_set_sampling_salt; a hosted seat never has
+# one): lets two byte-identical bundles on the same (match seed, slot) draw independent
+# samples, for an identical-policy null. The salt's 64 bits go through the SplitMix64 output
+# finalizer (polyworld/rngs' mix constants), a bijection that maps 0 to 0 and every other salt
+# to a non-zero, well-spread word, which is xor-ed into samplingRng's initRng salt. Salt 0 is
+# samplingRng itself, so a library that never sets a salt draws exactly as before.
+proc mixSamplingSalt*(salt: int64): uint64 =
+  ## z = salt bits; z = (z xor z shr 30) * 0xBF58476D1CE4E5B9; z = (z xor z shr 27) *
+  ## 0x94D049BB133111EB; z xor z shr 31.
+  var z = cast[uint64](salt)
+  z = (z xor (z shr 30)) * 0xBF58476D1CE4E5B9'u64
+  z = (z xor (z shr 27)) * 0x94D049BB133111EB'u64
+  z xor (z shr 31)
+
+proc samplingRngSalted*(matchSeed: int32, slot: int, salt: int64): Rng =
+  ## samplingRng for a salted seat: initRng(matchSeed, SamplingSalt xor (slot+1) shl 32 xor
+  ## mixSamplingSalt(salt)). Salt 0 returns samplingRng(matchSeed, slot) unchanged.
+  if salt == 0: return samplingRng(matchSeed, slot)
+  initRng(matchSeed, SamplingSalt xor (uint64(slot+1) shl 32) xor mixSamplingSalt(salt))
 
 proc uniform53(rng: var Rng): float64 =
   float64(rng.next() shr 11) * (1.0 / 9007199254740992.0)

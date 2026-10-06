@@ -61,6 +61,24 @@ suite "SeatView boundary":
     check not body.hasWord("World")
     check not body.hasWord("active")
 
+  test "ownTimers (engine state beyond BASIC, teams.view.1p only) is named by neural_contract alone, never by BASIC":
+    # docs/neural/seat-view.md, "Engine state beyond BASIC": the one SeatView proc outside the BASIC surface.
+    var users: seq[string]
+    for path in walkDirRec(Root / "examples"):
+      if not path.endsWith(".nim") or path.extractFilename == "seat_view.nim": continue
+      if readFile(path).hasWord("ownTimers"): users.add path.extractFilename
+    check users == @["neural_contract.nim"]
+    let bots = readFile(Paintbot / "bots.nim")
+    check not bots.hasWord("ownTimers") and not bots.hasWord("OwnTimers")
+    let contract = readFile(Paintbot / "neural_contract.nim")
+    let start = contract.find("proc encodeTeamsViewP*(")
+    require start >= 0
+    # every call of it sits inside encodeTeamsViewP
+    var at = contract.find("ownTimers()")
+    while at >= 0:
+      check at > start and contract.find("\nproc ", start + 1) > at
+      at = contract.find("ownTimers()", at + 1)
+
   test "the probe itself catches a violation":
     check "sim" in imports("import std/math\nimport sim, kinship\n")
     check "sim" in imports("import ../examples/paintbot/[sim, bots]\n")

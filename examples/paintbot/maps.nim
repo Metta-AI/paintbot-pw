@@ -23,6 +23,11 @@ type
     pickups*: seq[tuple[x, z, kind: int]] # kind is sim.nim's PickupKind order
     trenches*: seq[tuple[x, z, w, h: int]] # top-left corner and size
     cover*: seq[tuple[x, z, w: int, kind: MapCoverKind]] # round: top-left corner and diameter
+    # Per grid cell (i, j) (i < nx-1, j < nz-1, index j*(nx-1)+i): the highest height and the
+    # lowest margin of the four grid points sampleGrid interpolates between there. Bilinear
+    # weights are non-negative and sum to step^2, and the division truncates an integer bound
+    # past no integer, so every height (margin) sampled in the cell is <= (>=) its bound.
+    cellMaxHeight*, cellMinMargin*: seq[int16]
 
 proc parseMap(name, blob: string): PaintbotMap =
   doAssert blob.len >= 52 and blob[0..7] == "PBMAP001", "bad map " & name
@@ -48,6 +53,16 @@ proc parseMap(name, blob: string): PaintbotMap =
   for k in 0..<counts[2]: result.trenches.add (i32(), i32(), i32(), i32())
   for k in 0..<counts[3]: result.cover.add (i32(), i32(), i32(), MapCoverKind(i32()))
   doAssert at == blob.len, "trailing bytes in map " & name
+  let cx = result.nx-1
+  result.cellMaxHeight = newSeq[int16](cx*(result.nz-1))
+  result.cellMinMargin = newSeq[int16](cx*(result.nz-1))
+  for j in 0..<result.nz-1:
+    for i in 0..<cx:
+      let k = j*result.nx+i
+      result.cellMaxHeight[j*cx+i] = max(max(result.heights[k], result.heights[k+1]),
+        max(result.heights[k+result.nx], result.heights[k+result.nx+1]))
+      result.cellMinMargin[j*cx+i] = min(min(result.margins[k], result.margins[k+1]),
+        min(result.margins[k+result.nx], result.margins[k+result.nx+1]))
 
 # Parsed once at startup, before any thread runs, and never written again.
 var paintbotMaps: seq[PaintbotMap] = block:
@@ -91,6 +106,18 @@ proc sampleGrid(m: PaintbotMap, margins: bool, x, z: int, outside: int): int =
   let h01 = at(k+m.nx); let h11 = at(k+m.nx+1)
   int((h00*(s-tx)*(s-tz)+h10*tx*(s-tz)+h01*(s-tx)*tz+h11*tx*tz) div (s*s))
 
+proc mapCell*(x, z: int): int =
+  ## The active map's grid cell that sampleGrid interpolates (x, z) in (cellMaxHeight /
+  ## cellMinMargin index), or -1 when the point lies outside the grid.
+  {.cast(gcsafe).}:
+    let m = paintbotMaps[activeMap()].addr
+    let fx = x-m.x0; let fz = z-m.z0
+    if fx < 0 or fz < 0 or fx > (m.nx-1)*m.step or fz > (m.nz-1)*m.step: return -1
+    min(fz div m.step, m.nz-2)*(m.nx-1)+min(fx div m.step, m.nx-2)
+proc mapCellMaxHeight*(cell: int): int =
+  {.cast(gcsafe).}: paintbotMaps[activeMap()].cellMaxHeight[cell].int
+proc mapCellMinMargin*(cell: int): int =
+  {.cast(gcsafe).}: paintbotMaps[activeMap()].cellMinMargin[cell].int
 proc mapHeight*(x, z: int): int =
   {.cast(gcsafe).}: paintbotMaps[activeMap()].sampleGrid(false, x, z, -600)
 proc mapMargin*(x, z: int): int =

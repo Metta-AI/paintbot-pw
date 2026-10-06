@@ -4,6 +4,11 @@ import sim
 var pending: seq[Command]
 var charging = false
 var sneaking = false
+var destructing = false
+
+proc queueSelfDestruct*() =
+  ## Rules 49: blow up on the next command flush.
+  destructing = true
 
 proc setSneaking*(held: bool) =
   sneaking = held
@@ -23,6 +28,9 @@ proc flushPlayerCommands*(commands: var openArray[Command], slot: int) =
     return
   commands[slot].chargeGrenade = charging
   commands[slot].sneak = sneaking
+  if destructing:
+    commands[slot].selfDestruct = true
+    destructing = false
   for command in pending:
     if command.walk:
       commands[slot].walk = true

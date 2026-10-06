@@ -150,6 +150,11 @@ if me.tick mod 72 = 0 then
   progressY = me.y
 end if
 
+' Our HP cap is the most we have seen (spawn HP): 3 before rules 49, 10 from them.
+if me.hp > hpCap then
+  hpCap = me.hp
+end if
+
 ' Opponents and teammates in view. Every query is fog gated.
 best = -1
 bestCost = 2147483647
@@ -171,7 +176,7 @@ while i < rosterLimit
         cost = cost - 2500000
         thief = i
       end if
-      if cost < bestCost and d2 <= 27562500 then
+      if cost < bestCost and d2 <= gunRange() * gunRange() then
         best = i
         bestCost = cost
       end if
@@ -308,6 +313,30 @@ if heartCount() > 0 then
   end if
 end if
 
+' Rules 49: a misting or radar cog cannot attack, so it keeps beside its nearest teammate,
+' inside the mister's heal (500) or the radar's boost (800).
+if (mistingTicks() > 0 or radarTicks() > 0) and me.carrying = 0 then
+  mate = -1
+  mateD = 2147483647
+  i = 0
+  while i < rosterLimit
+    if i <> me.id and i mod 2 = me.team and agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
+      if dx * dx + dy * dy < mateD then
+        mate = i
+        mateD = dx * dx + dy * dy
+      end if
+    end if
+    i = i + 1
+  wend
+  if mate >= 0 and mateD > 90000 then
+    goalX = agents(mate).x
+    goalY = agents(mate).y
+    holding = 0
+  end if
+end if
+
 ' Remember seen supplies for ten seconds and equip when it is safe to.
 i = 0
 while i < pickupCount() and i < 32
@@ -326,12 +355,18 @@ if (me.carrying = 0) and thief < 0 then
   while j < pickupCount() and j < 32
     if supplies(j).tick > 0 and me.tick - supplies(j).tick < 240 then
       kind = supplies(j).kind
-      wanted = (kind = 0 and (me.hasGrenade = 0)) or (kind = 2 and me.hp < 3) or (kind = 3 and me.armorHp < 3 and me.hp = 3)
+      wanted = (kind = 0 and (me.hasGrenade = 0)) or (kind = 2 and me.hp < hpCap) or (kind = 3 and me.armorHp < 3 and me.hp = hpCap)
+      ' Rules 49 items: a sniper when we carry no spray, the mister when half hurt, the radar
+      ' among friends. Any pickup ends a radar, so its carrier takes only a medkit it needs.
+      wanted = wanted or (kind = 6 and hasSniper() = 0 and me.hasSpray = 0) or (kind = 5 and me.hp * 2 <= hpCap and mistingTicks() = 0) or (kind = 7 and friendsNear >= 3 and radarTicks() = 0)
+      if radarTicks() > 0 and not (kind = 2 and me.hp * 3 <= hpCap) then
+        wanted = 0
+      end if
       if wanted then
         dx = supplies(j).x - me.x
         dy = supplies(j).y - me.y
         cost = dx * dx + dy * dy
-        if kind = 2 and me.hp = 1 then
+        if kind = 2 and me.hp > 0 and me.hp * 3 <= hpCap then
           ' A medkit is worth a whole life to a cog on one hit point.
           cost = cost \ 4
         end if
@@ -347,7 +382,7 @@ if (me.carrying = 0) and thief < 0 then
     end if
     j = j + 1
   wend
-  if nearest >= 0 and (best < 0 or bestCost > 1440000 or me.hp = 1) then
+  if nearest >= 0 and (best < 0 or bestCost > 1440000 or (me.hp > 0 and me.hp * 3 <= hpCap)) then
     goalX = supplies(nearest).x
     goalY = supplies(nearest).y
     holding = 0
@@ -681,6 +716,31 @@ if best < 0 and soundCount() > 0 and objective >= 0 then
   dy = controlY(objective) - me.y
   if dx * dx + dy * dy < 810000 then
     sneak(1)
+  end if
+end if
+
+' Rules 49 self-destruct: a dying cog with no teammate in the blast (270) takes a foe it can kill.
+if me.hp > 0 and me.hp * 3 <= hpCap and mistingTicks() = 0 and radarTicks() = 0 then
+  kills = 0
+  i = 0
+  while i < rosterLimit
+    if i <> me.id and agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
+      if dx * dx + dy * dy <= 72900 then
+        if i mod 2 = me.team then
+          kills = -100
+        else
+          if agents(i).hp <= me.hp then
+            kills = kills + 1
+          end if
+        end if
+      end if
+    end if
+    i = i + 1
+  wend
+  if kills > 0 then
+    selfDestruct()
   end if
 end if
 

@@ -44,7 +44,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  COWORLD_CLI_VERSION: "0.1.47" # PyPI `coworld`; pinned so CI never depends on a metta checkout
+  COWORLD_CLI_VERSION: "0.1.56" # PyPI `coworld`; pinned so CI never depends on a metta checkout
   COWORLD_NAME: heartland
   COWORLD_PROJECT: coworld/heartland
   NIM_VERSION: "2.2.10" # matches coworld/paintbot/Dockerfile and coworld/integration.md

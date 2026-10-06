@@ -32,6 +32,7 @@ type Scenario = object
   ffa: bool
   rules: int32  # 0 = the library default
   map: int32    # -1 = the rules' own island
+  ticks: int32  # the first episode's length; 0 = 360 (the second is always 120 shorter than the default, 240)
 
 type Tick = object
   ## What the trainer saw and did on one native tick.
@@ -48,9 +49,9 @@ proc script(ffa: bool): string =
   readFile(Root / "coworld/paintbot/players" / (if ffa: "ffa.bas" else: "base.bas"))
 
 proc observationHash(s: Scenario): string =
-  if s.obs == ocFfaView1.int32: ObservationContractFfaView1Hash
-  elif s.inputs > 0: userInputsContractHash(s.inputs.int)
-  else: ObservationContractTeamsView1Hash
+  let version = ObservationContractVersion(s.obs)
+  if s.inputs > 0 and version != ocFfaView1: userInputsContractHash(s.inputs.int, version)
+  else: observationContractHash(version)
 
 proc manifest(s: Scenario): string =
   result = """{"schema": "paintbot-neural-basic/2", "observation_contract": """" & s.observationHash &
@@ -74,7 +75,8 @@ proc train(s: Scenario, h: pointer): seq[Episode] =
   let source = script(s.ffa)
   var rng = 0x9E3779B97F4A7C15'u64
   for episode in 0..1:
-    doAssert pw_reset(h, int32(2026 + episode), int32(360 - 120*episode)) == 0
+    let length = if episode == 0 and s.ticks > 0: s.ticks else: int32(360 - 120*episode)
+    doAssert pw_reset(h, int32(2026 + episode), length) == 0
     if episode == 0:
       doAssert pw_set_seat_script(h, ScriptedSeat, cast[ptr UncheckedArray[char]](unsafeAddr source[0]),
         source.len.int32) == 0
@@ -85,7 +87,7 @@ proc train(s: Scenario, h: pointer): seq[Episode] =
     var rewards = newSeq[float32](LegacySeats)
     var terminals = newSeq[float32](LegacySeats)
     var resets = newSeq[float32](LegacySeats)
-    for tick in 0..<400:
+    for tick in 0..<length.int + 40:
       var t = Tick(rows: newSeq[float32](LegacySeats*width), actions: newSeq[int32](LegacySeats*ActionSizes.len))
       doAssert pw_observe(h, fp(t.rows), fp(resets)) == 0
       for slot in 0..<LegacySeats:
@@ -159,6 +161,19 @@ const Scenarios = [
   Scenario(name: "teams.view.1, teams, rules 47", obs: 201, rules: 47, map: -1),
   Scenario(name: "teams.view.1, teams, rules 47, crater", obs: 201, rules: 47, map: 3),
   Scenario(name: "teams.view.1u4, teams", obs: 201, inputs: 4, map: -1),
+  Scenario(name: "teams.view.1h, teams, rules 48", obs: 203, rules: 48, map: -1),
+  Scenario(name: "teams.view.1s, teams, rules 48", obs: 204, rules: 48, map: -1),
+  Scenario(name: "teams.view.1su4, teams, rules 47, crater", obs: 204, inputs: 4, rules: 47, map: 3),
+  Scenario(name: "teams.view.1t, teams, rules 48", obs: 205, rules: 48, map: -1),
+  Scenario(name: "teams.view.1tu4, teams, rules 47, crater", obs: 205, inputs: 4, rules: 47, map: 3),
+  # 2900 ticks: past both hunt-clock caps (720 and 2760 ticks)
+  Scenario(name: "teams.view.1t, teams, rules 48, 2900 ticks", obs: 205, rules: 48, map: -1, ticks: 2900),
+  Scenario(name: "teams.view.1p, teams, rules 48", obs: 206, rules: 48, map: -1),
+  Scenario(name: "teams.view.1pu4, teams, rules 47, crater", obs: 206, inputs: 4, rules: 47, map: 3),
+  Scenario(name: "teams.view.1p, teams, rules 48, twin-mesas, 1500 ticks", obs: 206, rules: 48, map: 0, ticks: 1500),
+  Scenario(name: "teams.view.1i, teams, rules 49", obs: 207, rules: 49, map: -1),
+  Scenario(name: "teams.view.1iu4, teams, rules 49, crater", obs: 207, inputs: 4, rules: 49, map: 3),
+  Scenario(name: "teams.view.1i, teams, rules 49, twin-mesas, 1500 ticks", obs: 207, rules: 49, map: 0, ticks: 1500),
   Scenario(name: "ffa.view.1, FFA-kin", obs: 202, ffa: true, map: -1),
   Scenario(name: "ffa.view.1, FFA-kin, rules 48 (fog of war)", obs: 202, ffa: true, rules: 48, map: -1),
   Scenario(name: "ffa.view.1, FFA-kin, rules 47, twin-mesas", obs: 202, ffa: true, rules: 47, map: 0)]

@@ -62,18 +62,52 @@ int pw_seat_script_status(void *handle, int seat, char *message, int32_t capacit
  * a visible body's position or pos+5000*compass (clamped); anything else has no exact
  * candidate. */
 int pw_seat_orders(void *handle, int seat, int32_t *ten);
+/* pw_seat_orders plus the rules-49 self-destruct order: eleven = pw_seat_orders' ten, then
+ * self_destruct (1 when the command issued or given on the last pw_step ordered one: BASIC's
+ * selfDestruct() or pw_set_seat_command_ex). A pure read. Returns 0, -1 bad args. */
+int pw_seat_orders_ex(void *handle, int seat, int32_t *eleven);
 /* Raw command (additive; command-space opponents and replayed recordings). The seat
  * executes nine = {walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak,
  * direct} (flags 0/1) on the NEXT pw_step only, built as BASIC's orders build a command:
  * the goal verbatim (walkTo; the world clamps where it walks and stores the point), the aim
  * clamped to the map (lookAt/shootAt; (0,0) = no aim order). For that step the seat's
  * action heads are neither decoded nor checked against its forbid mask; a scripted seat's
- * script still runs but its order is replaced. A harness tool, not a seat. The fire period
+ * script still runs but its order is replaced, and a policy seat still runs its policy.bas on
+ * the caller's logits (pw_step_logits): its BASIC state, user inputs and sampling advance. A harness tool, not a seat. The fire period
  * applies only if already set on the seat (off by default). pw_seat_orders echoes the executed command (an
  * unscripted seat reports zeros again after a step without one). A second call before the
  * step replaces the first; pw_reset drops it. A library whose caller never calls it is
  * byte-identical to one without it. Returns 0, -1 bad args. */
 int pw_set_seat_command(void *handle, int seat, const int32_t *nine);
+/* pw_set_seat_command plus the rules-49 self-destruct order (additive): ten = the nine above, then
+ * self_destruct (0/1; BASIC's selfDestruct()). Same pending slot as pw_set_seat_command (either call
+ * replaces the other); self_destruct 0 is byte-identical to pw_set_seat_command. The order acts only
+ * where the world's rules act on it (rules >= 49, a live cog that is not disarmed), as a recording's
+ * command does. Returns 0, -1 bad args (self_destruct not 0/1 included). */
+int pw_set_seat_command_ex(void *handle, int seat, const int32_t *ten);
+/* The order the seat's own BASIC program (script, or policy.bas on the caller's logits)
+ * decided on the last pw_step, ten = {walk, goal_x, goal_z, shoot, aim_x, aim_z,
+ * charge_grenade, sneak, direct, ran}, whatever the seat executed (a pending raw command or
+ * an override mask replaces the executed order, never this one). ran = 1 when the program
+ * ran on that step; otherwise zeros with ran = 0 (no program, or no step since the last reset
+ * or script change). With pw_set_seat_command this lets a teacher's program shadow a seat
+ * while a student's command plays. With a shadow script on the seat (below) it reports the
+ * shadow's decision instead, with ran = 2. A pure read. Returns 0, -1 bad args. */
+int pw_seat_decided_orders(void *handle, int seat, int32_t *ten);
+/* Shadow script (training library only, default-off): a second BASIC program on the seat, with
+ * its own runtime, globals and rnd stream (built and limited as pw_set_seat_script builds a
+ * seat). Every step it decides on the pre-step world through the seat's SeatView and hears what
+ * the seat hears, but its order is never executed and its shouts are never delivered: the seat
+ * (caller-driven, scripted, or a policy seat whose policy.bas keeps running and writing its user
+ * inputs) and the world play exactly as without it. Its decision is pw_seat_decided_orders'
+ * (ran = 2). It hears the speech its seat hears, never its own or another shadow's (a seated teacher's
+ * shouts would reach its listeners; shadows on several seats do not hear one another). It decides before
+ * the tick's speech is delivered, also when pw_script_decide takes the tick's decision ahead of pw_step.
+ * Fresh runtime here and at every pw_reset; saved / loaded with the world; length 0
+ * removes it. Returns 0 running, 1 compile failed (nothing shadows the seat), -1 bad args.
+ * pw_seat_shadow_status: 0 none, 1 running, 2 compile failed, 3 disabled by a runtime error. */
+int pw_set_seat_shadow_script(void *handle, int seat, const char *source, int32_t length);
+int pw_seat_shadow_status(void *handle, int seat);
 /* Curriculum knobs (additive to v1), kept across pw_reset; defaults 1 and 1000 leave
  * every world byte-identical to a library without them.
  * pw_set_seat_fire_period: the seat's shoot order (script, Nim bot or caller) is honoured
@@ -113,14 +147,23 @@ int pw_set_seat_starts_out(void *handle, int seat, int32_t starts_out);
  * "paintbot-pw.teams.view.1.action.51-25-2-2-2-23-23-23-23": those seven heads, then two 23-bin
  * heads dx, dz; the reference decode adds symmetric log-spaced offsets (bin 11 = 0, bin 11 +- j =
  * +-{16, 28, 48, 84, 146, 253, 439, 763, 1326, 2303, 4000}[j-1]), mirrored for
- * team 1, to the movement goal and clamps it to the map) and ffa.view.1 pointer (12,
+ * team 1, to the movement goal and clamps it to the map), its target-conditioned aim-offset
+ * variant (15, "paintbot-pw.teams.view.1.action.51-25-2-2-2-23x16-23x16": contract 13's seven heads
+ * and decode, but heads 5 and 6 carry one 23-logit row per identity, 818 logits per seat, and are
+ * drawn from the row of the identity the aim head chose; no draw, the centre bin, for keep or a
+ * compass aim), its raw variant (16, "paintbot-pw.teams.view.1.action.51-25-2-2-2-63x16-63x16-256-8-128":
+ * 63 x 7 u identity offset rows, then walk direction 256, walk distance 8 and look direction 128 heads the
+ * reference decoder reads in place of the compass step and the compass aim; 2490 logits per seat) and ffa.view.1
+ * pointer (12,
  * "paintbot-pw.ffa.view.1.action.pointer"). pw_set_action_contract selects the contract
- * pw_step reads the caller's heads under: 11 (default), 13 or 14 on a 201 handle, 12 only on a
+ * pw_step reads the caller's heads under: 11 (default), 13, 14, 15 or 16 on a 201 handle, 12 only on a
  * 202 handle; kept across pw_reset; 0, or -1 bad args. Under 13 a seat's action row is seven
  * int32 and pw_action_layout returns -1: use pw_action_layout_ext (int32[10] = {heads, seven
  * head-size slots, logits per seat, 0}). Under 14 it is nine int32 and pw_action_layout_ext
  * returns -1 too: use pw_action_layout_ext2 (int32[12] = {heads, nine head-size slots, logits
- * per seat, 0}). pw_action_contract returns the handle's;
+ * per seat, 0}). Under 16 it is ten int32 and pw_action_layout_ext2 returns -1 too: use
+ * pw_action_layout_ext3 (int32[13] = {heads, ten head-size slots, logits per seat, 0}). pw_action_contract returns
+ * the handle's;
  * pw_action_contract_hash writes the 64-hex SHA-256 an actor and manifest carry
  * (NUL-terminated, capacity >= 65; -1 for another version). What each head index means is
  * the seat's policy.bas's to decide; pw_step decodes a caller-driven seat's heads with the
@@ -129,6 +172,7 @@ int pw_set_seat_starts_out(void *handle, int seat, int32_t starts_out);
 int pw_set_action_contract(void *handle, int32_t version);
 int pw_action_layout_ext(void *handle, int32_t *ten);
 int pw_action_layout_ext2(void *handle, int32_t *twelve);
+int pw_action_layout_ext3(void *handle, int32_t *thirteen);
 int pw_action_contract(void *handle);
 int pw_action_contract_hash(int32_t version, char *sixty_five_bytes, int32_t capacity);
 /* Mapping-ceiling diagnostics (pw-bc). pw_script_decide runs the scripted seats'
@@ -157,6 +201,16 @@ int pw_set_seat_override(void *handle, int seat, int32_t mask);
 int pw_set_seat_sampling(void *handle, int seat, int32_t temperature_permille, int32_t head_mask);
 int pw_sample_actions(void *handle, int seat, const float *logits, int32_t *actions);
 int pw_seat_sample_draws(void *handle, int seat);
+/* Sampling salt (additive, training library only; a hosted seat has none). Non-zero salt
+ * seeds every seat's sampling stream (pw_sample_actions' and each policy seat's own) from
+ * neural_contract.samplingRngSalted(match seed, slot, salt) = SplitMix64 initRng(seed,
+ * 0x53414d504c450000 ^ (slot+1) << 32 ^ mix(salt)), mix = the SplitMix64 output finalizer
+ * (mix(0) = 0), so byte-identical bundles on the same (seed, slot) draw independent samples:
+ * an identical-policy null. 0 (the default) is the unsalted stream exactly: a library that
+ * never makes the call, or makes it with 0, is byte-identical to one without it. Kept across
+ * pw_reset, applied from the next pw_reset and to policy seats installed after the call. The
+ * world, its hash and pw_step are untouched. Returns 0, -1 for a nil handle. */
+int pw_set_sampling_salt(void *handle, int64_t salt);
 /* A hosted seat decides, and so draws, only on ticks it is alive on the pre-step world: a
  * probe that wants the hosted seat's exact draws calls pw_sample_actions for live seats only. */
 /* Decoder objective forbid (additive; the hosted bundle option decoder.forbid_objectives).
@@ -209,6 +263,73 @@ int pw_world_load_error(char *output, int32_t capacity);
  * and everything else (own / teammate weapon, map). The hit counts sum to pw_seat_stats'
  * hits_taken; health lost is after armor. -1 bad args. */
 int pw_seat_damage_taken_stats(void *handle, int seat, int32_t *eight);
+/* Hit attribution (training library only; pure telemetry, default off). pw_set_hit_log(h, 1)
+ * makes every following pw_step record its damage events (kept across pw_reset; 0 = off);
+ * pw_hit_events writes the last step's events, PW_HIT_EVENT_INTS int32 each, in the order the
+ * engine dealt them: {attacker (-1 the map), victim, health removed (after armor), armor
+ * absorbed, weapon (0 other, 1 gun, 2 grenade, 3 spray), killed, final (the victim's last life:
+ * out of the match), disguised (the attacker wore a uniform at the tick it ORDERED the shot: gun
+ * wind-up start, grenade throw, spray trigger; 0 for the map)}. It writes min(count, capacity) events and returns the count (output may
+ * be NULL with capacity 0); none after a reset. Events count a damage event past the shield
+ * and life checks, so a match's events by victim sum to pw_seat_damage_taken_stats and
+ * pw_seat_stats' hits_taken / deaths. -1 bad args. */
+#define PW_HIT_EVENT_INTS 8
+int pw_set_hit_log(void *handle, int enabled);
+int pw_hit_events(void *handle, int32_t *events, int32_t capacity);
+/* Kill log (training library only; pure telemetry, always recorded, no switch). Every death
+ * since the last drain, oldest first, PW_KILL_EVENT_INTS int32 each: {tick (the world tick the
+ * pw_step that dealt it started from; pw_results' tick before that step), attacker (-1 the map),
+ * victim, weapon (0 other, 1 gun, 2 grenade, 3 spray; a rules-49 self-destruct is 2), final (the
+ * victim's last life: out of the match)}. A death is pw_seat_stats' death, so a match's events by
+ * victim count its deaths; the kill is credited to the attacker (its tags; the replay feed's "tag")
+ * iff attacker >= 0 and attacker != victim. pw_kill_events DRAINS: it writes the oldest
+ * min(pending, capacity) events, removes them and returns how many it wrote (the rest stay
+ * queued); capacity 0 (events may be NULL) drains nothing and returns the pending count.
+ * Create, pw_reset and pw_world_load (the blob's queue) replace the queue. The world, its hash
+ * and every decision are the same whether or not it is called. -1 bad args. */
+#define PW_KILL_EVENT_INTS 5
+int pw_kill_events(void *handle, int32_t *events, int32_t capacity);
+/* pw_damage_events (training library only; always recorded): every damage event since the last drain, oldest
+ * first, PW_DAMAGE_EVENT_INTS = 8 int32 each {tick, attacker (-1 map), victim, weapon (0 other/map, 1 gun,
+ * 2 grenade, 3 spray, 4 sniper, 5 self-destruct), health removed, armor absorbed, killed, final}. Drains like
+ * pw_kill_events (capacity 0 = pending count). Pure telemetry. -1 bad args. */
+#define PW_DAMAGE_EVENT_INTS 8
+int pw_damage_events(void *handle, int32_t *output, int32_t capacity);
+/* pw_seat_shot_orders (training library only; pure read, cumulative since create/reset): int32[6] =
+ * {gun wind-ups started, grenades thrown, sprays triggered, and the same three counted only when
+ * the seat wore a uniform at that tick}. Every shot ordered, whether or not it hits. -1 bad args. */
+int pw_seat_shot_orders(void *handle, int seat, int32_t *six);
+/* Teacher class masks (training library only; teams game; pure read). For a teacher's decided
+ * command for `seat` (ten int32 in pw_seat_orders' layout), on the CURRENT (pre-step) world: the
+ * action contract 16 (raw) bins whose reference decode reproduces it (walk: the same engine
+ * movement this tick; aim: within one shot SD on a gun-order tick, else the same vision-cone
+ * answer for every other live cog; keep from the seat's own decoder program; fire / grenade /
+ * sneak: the teacher's value). The walk class sets only bins provable without a path search (a
+ * goal walked straight with the teacher's step, or routed to the teacher's own target cell);
+ * pw_teacher_classes_exact runs the path search for every goal (exact class, tens of ms).
+ * PW_TEACHER_CLASS_BYTES bytes, each section byte-aligned, bit i =
+ * byte i>>3, bit i&7: [0,7) head 0 (51; 43..50 = any grid), [7,263) walk dir*8+dist (2048),
+ * [263,267) head 1 (25; 17..24 = any look), [267,8205) offsets identity*3969+bin5*63+bin6,
+ * [8205,8221) look (128), 8221 fire, 8222 grenade, 8223 sneak (bit v = value v). Returns the
+ * byte count; -1 bad args; -2 dead seat. pw_teacher_classes_reference(..., exact): the same masks
+ * (exact 0: pw_teacher_classes', 1: pw_teacher_classes_exact's) by brute force through the reference
+ * decoder script, for gates (slow). */
+#define PW_TEACHER_CLASS_BYTES 8224
+int pw_teacher_classes(void *handle, int seat, const int32_t *command10, uint8_t *out, int32_t capacity);
+int pw_teacher_classes_info(void *handle, int seat, const int32_t *command10, int32_t *two);
+/* In-step teacher classes (training library only; default-off). pw_set_teacher_classes(h, seats, exact): from the
+ * next pw_step on, each live seat in `seats` (bits 0..31) gets pw_teacher_classes computed INSIDE the step for the
+ * order it decided that step (its shadow's, ran = 2, else its own program's, ran = 1), on the pre-step world after
+ * all decisions, with the keep its decoder held before deciding; seats also in `exact` use the exact walk class.
+ * Kept across steps and resets; (0, 0) = off. pw_teacher_classes_last(h, seat, out, cap): 8224, or 0 when none was
+ * computed for the seat on the last step. pw_teacher_classes_last_info(h, seat, int32[4]): {state 1 / 0 / -2 dead,
+ * mode 0 / 1 exact, teacher routed, teacher moves}. */
+int pw_set_teacher_classes(void *handle, uint32_t seats, uint32_t exact);
+int pw_teacher_classes_last(void *handle, int seat, uint8_t *out, int32_t capacity);
+int pw_teacher_classes_last_info(void *handle, int seat, int32_t *four);
+int pw_teacher_classes_exact(void *handle, int seat, const int32_t *command10, uint8_t *out, int32_t capacity);
+int pw_teacher_classes_reference(void *handle, int seat, const int32_t *command10, uint8_t *out, int32_t capacity,
+                                 int exact);
 /* pw_seat_privileged_labels (TRAINING-ONLY supervision labels; training_labels.nim): float[21]
  * for the seat on the current pre-step world = {gun cooldown, gun windup, spray cooldown,
  * shield, respawn (ticks), aim x, aim z, own heart meter, enemy heart meter (scoreTicks; 0 in
@@ -229,6 +350,38 @@ int pw_seat_privileged_labels(void *handle, int seat, float *twenty_one);
  * args. */
 int pw_seat_state(void *handle, float *sixteen_seats_times_eight);
 
+/* Rules-49 item state (training library only; pure reads; rows follow pw_seats).
+ * pw_seat_items: float[n * PW_SEAT_ITEM_FLOATS], per seat in seat order, raw engine units (exact
+ * integers), on the current pre-step world: {has sniper, misting, mister ticks left (0..1439; 0 on
+ * its final tick while misting is still 1), mister heal in (ticks left mod 360; 0 = heals this
+ * step), has radar, radar ticks left (0..1439; 0 on its final tick while has radar is still 1),
+ * radar boosted (within 800 of a living carrier, the carrier included), disarmed (misting or
+ * radar), cooldown (the shared gun / sniper cooldown: 0..72 gun, 0..288 sniper), gun reach (4800
+ * sniper, else 2133 teams rules 49 / 2000 FFA-kin / 5250 before), spray can, self-destruct ready
+ * (rules >= 49, alive, not disarmed; the engine keeps no armed state)}. A dead seat's row is
+ * zeros; before rules 49 the item fields read 0.
+ * pw_seat_pickups: int32[n * PW_PICKUP_KINDS], pickups each seat took since create / pw_reset, by
+ * kind {grenade, spray, medkit, armor, uniform, windex-mister, sniper, radar} (kinds 0..4 equal
+ * pw_seat_equip_stats' counts; pw_world_load restores the blob's).
+ * pw_pickups: every pickup (privileged: no sight test), PW_PICKUP_FLOATS each, {x, z, kind 0..7,
+ * ready (readyAt <= tick), ticks until ready}; row i is engine pickup i, the index of
+ * teams.view.1's pickup row i, BASIC pickupX/pickupY/pickupKind(i) and the movement head's
+ * "walk to pickup i" (choice 11 + i). Writes min(count, capacity) rows and returns the count;
+ * capacity 0 (output may be NULL) sizes it. Each: -1 bad args; the world and its hash are
+ * unchanged. */
+#define PW_SEAT_ITEM_FLOATS 12
+#define PW_PICKUP_KINDS 8
+#define PW_PICKUP_FLOATS 5
+int pw_seat_items(void *handle, float *seats_times_twelve);
+int pw_seat_pickups(void *handle, int32_t *seats_times_eight);
+int pw_pickups(void *handle, float *output, int32_t capacity);
+/* pw_seat_pickup_visible: which pickups each seat sees now (pre-step world), n seats x `words` uint32
+ * bitsets in seat order: bit (i % 32) of word (i / 32) = seat sees engine pickup i (pw_pickups row i,
+ * BASIC pickupVisible(i), movement choice 11 + i), by the one test BASIC and teams.view.1 / 1i's pickup
+ * rows use (SeatView.pickupVisible = pickupSeen). Returns the pickup count; words 0 (output may be NULL) sizes the
+ * buffer (ceil(count / 32) words per seat). A pure read. -1 bad args. */
+int pw_seat_pickup_visible(void *handle, uint32_t *seats_times_words, int32_t words);
+
 /* pw_world_json (training library only): the whole world as one JSON object, {"rulesVersion": R,
  * "heard": {}, then every World field} -- the object the engine streamed to PW_POLICY_FD each tick
  * before seats stopped acting through the host (#51) -- for external controllers that plan from
@@ -245,11 +398,45 @@ int pw_elevation(void *handle, int32_t x, int32_t z);
  * contract chosen, kept across pw_reset: 201 = teams.view.1 "paintbot-pw.teams.view.1"
  * (identical to pw_create; 512 floats; the teams game only: pw_set_game_mode refuses FFA-kin
  * on the handle), 202 = ffa.view.1 "paintbot-pw.ffa.view.1" (FFA-kin at any seat count; see
- * below). neural_contract.nim encodeTeamsView / encodeFfaView document every column; each
- * is computed from the seat's SeatView. NULL for any other version (1, 2, 3, 101 and 102
+ * below), 203 = teams.view.1h "paintbot-pw.teams.view.1h" (teams.view.1's 512 floats, then a 100-float RAW
+ * motion-history block the engine keeps per seat: per identity t-1 / t-2 displacement relative to its current
+ * position in 28 u steps plus seen flags, then the seat's own t-1 / t-2 displacement; 612 floats; the teams game only;
+ * pw_create_observation_inputs_v(..., 203, K) adds K user inputs, "paintbot-pw.teams.view.1hu<K>"; pw_reset starts
+ * every history over, pw_world_save / pw_world_load carry it), 204 = teams.view.1s "paintbot-pw.teams.view.1s"
+ * (teams.view.1h's 612 floats, then a 128-float RAW stop-clock block the engine keeps per seat: per identity j, 8
+ * floats at 612 + 8j: stop_age/32, stop_valid, stop_len/8, stop_live, stand_age/32, stand_valid, gap/32, run/32,
+ * from the seat's own sightings of that identity only (a stop = a still step, <= 8 u, right after a fast one, on three
+ * consecutive visible ticks); 740 floats; the teams game only; pw_create_observation_inputs_v(..., 204, K) adds K
+ * user inputs, "paintbot-pw.teams.view.1su<K>"; reset and saved with the history), 205 = teams.view.1t
+ * "paintbot-pw.teams.view.1t" (teams.view.1s's 740 floats, then an 11-float hunt-clock block the engine keeps per
+ * seat: at 740 enemy_gap = min(ticks since an enemy-parity identity was visible to this seat with hp > 0, 720) / 720;
+ * at 741 + r, r = 0..9, heart_gap[r] for map heart h = r xor selfTeam = min(ticks since THIS seat was within 600 u
+ * of heart h, 2760) / 2760, 0 when h >= the heart count; clocks start at 0 at a match start, count only the ticks the
+ * seat is encoded alive on and run on across a death (a dead seat's block reads zeros); 751 floats; the teams game
+ * only; pw_create_observation_inputs_v(..., 205, K) adds K user inputs at 751, "paintbot-pw.teams.view.1tu<K>"; reset
+ * and saved with the history), 206 = teams.view.1p "paintbot-pw.teams.view.1p" (teams.view.1t's 751 floats, then a
+ * 4-float block of the seat's OWN TRUE timers: at 751 gun cooldown / 72, 752 shield / 36, 753 gun wind-up / 5, 754
+ * spray cooldown / 60, as read on the pre-step world of the seat's PREVIOUS alive encoded tick ("S2": t - 1 for a seat
+ * encoded alive on t - 1; held across a death and shown on the respawn row; zeros before the first alive encode of a
+ * match; a dead seat's block reads zeros); 755 floats; the teams game only; pw_create_observation_inputs_v(..., 206,
+ * K) adds K user inputs at 755, "paintbot-pw.teams.view.1pu<K>"; reset and saved with the history. Unlike every other
+ * column this block is engine state a BASIC seat cannot read: seat_view.ownTimers, docs/neural/seat-view.md), 207 =
+ * teams.view.1i "paintbot-pw.teams.view.1i" (teams.view.1p's 755 floats unchanged, then at 755 the same held true
+ * cooldown / 288 (the rules-49 sniper's slow shot is 3 x 96; 751's / 72 reads up to 4), then an 81-float rules-49 ITEM
+ * BLOCK read on the tick's own pre-step world through BASIC's builtins: 756 hasSniper, 757 playerMisting(self), 758
+ * mistingTicks / 1440, 759 misting ? (mistingTicks mod 360) / 360 : 0, 760 playerRadar(self), 761 radarTicks / 1440,
+ * 762 radarBoost; 763 + 2j, 764 + 2j playerMisting(j), playerRadar(j) for identities j = 0..15; 795 + 7r for r =
+ * 0..5 the r-th visible pickup of kind 5..7 (windex-mister, sniper, radar; hidden by teams.view.1's pickup rows) in
+ * index order: visible, dx, dz, mister, sniper, radar, index / 31; a dead seat's 755 .. 836 read zeros; 837 floats;
+ * the teams game only; pw_create_observation_inputs_v(..., 207, K) adds K user inputs at 837,
+ * "paintbot-pw.teams.view.1iu<K>"; reset and saved with the history).
+ * neural_contract.nim encodeTeamsView / encodeTeamsViewH / encodeTeamsViewS / encodeTeamsViewT / encodeTeamsViewP /
+ * encodeTeamsViewI (encodeItemBlock) /
+ * encodeFfaView document every column; each
+ * is computed from the seat's SeatView (206's timer block through seat_view.ownTimers). NULL for any other version (1, 2, 3, 101 and 102
  * were retired for BASIC parity) or a bad max_ticks. pw_observe / pw_observe_seats rows are
  * then that many floats apart. pw_observation_size() = 512; pw_observation_size_for(201) =
- * 512 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
+ * 512, (203) = 612, (204) = 740, (205) = 751, (206) = 755, (207) = 837 (-1 otherwise, 202 included: its width follows the match); pw_handle_observation_size
  * and pw_observation_contract read a handle (-1 for NULL); pw_observation_contract_hash
  * writes the 64-hex SHA-256 an actor and manifest carry (NUL-terminated, capacity >= 65;
  * 0, or -1 bad args). */
@@ -321,6 +508,9 @@ int pw_seat_policy_choices(void *handle, int seat, int32_t *twenty_two);
  * decoder.joint_sampling). */
 int pw_seat_policy_offset_choices(void *handle, int seat, int32_t *six);
 int pw_seat_policy_extra_choices(void *handle, int seat, int32_t *twelve);
+/* pw_seat_policy_extra_choices2: the same for up to five extra heads (heads 5 .. 9, action contract 16 raw), fifteen
+ * int32 {selected5..9, final5..9, temperature_milli5..9}; pw_seat_policy_extra_choices returns -1 for such a seat. */
+int pw_seat_policy_extra_choices2(void *handle, int seat, int32_t *fifteen);
 int pw_set_seat_conditionals(void *handle, int seat, int32_t count, const int32_t *heads,
                              const float *weights, int32_t weight_count);
 /* Diagnostic: resident 64x64 terrain-cache blocks (16 KiB each) in this process. */

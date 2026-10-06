@@ -3,7 +3,8 @@ import std/[math, times, algorithm, strutils]
 when defined(emscripten) and defined(workerReplayIndex): import flatty
 import windy, opengl, vmath, chroma, jsony, gltf
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam, selectionoutlines]
-import game, sim, analysis, camdirector, scenery, villagegraphics, controls, celebration, projection, kinhue
+import game, sim, analysis, camdirector, scenery, villagegraphics, controls, celebration, projection, kinhue, watershader, sky
+when not defined(emscripten): import devpanel
 from kinship import activeKinship, rPercent
 import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
@@ -94,6 +95,9 @@ var
   insetSize = 0.25'f32
   bars = true
   trails = false
+  healHp: seq[int32] ## every cog's HP at healTick, to spot heals as playback advances
+  healTick = -1'i32
+  heals: seq[tuple[seat, tick, amount: int32]] ## recent heals, each floating a green "+N"
   camX = 0'f32
   camZ = 0'f32
   distance = 60'f32
@@ -123,6 +127,9 @@ proc chargeGrenade(held: cint) {.exportc: "pw_charge", cdecl,
 proc sneak(held: cint) {.exportc: "pw_sneak", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   setSneaking(held != 0 and options.playerSlot > 0 and not replayMode and not transport.inHistory)
+proc destruct() {.exportc: "pw_destruct", cdecl,
+    codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
+  if options.playerSlot > 0 and not replayMode and not transport.inHistory: queueSelfDestruct()
 proc issueOrder(x, y: cfloat, kind, seat: cint) {.exportc: "pw_order", cdecl,
     codegenDecl: "EMSCRIPTEN_KEEPALIVE $# $#$#".} =
   if options.playerSlot > 0 and not replayMode and not transport.inHistory:
@@ -632,6 +639,8 @@ proc runGraphics*() =
   let window = newWindow("Paintbot · Heartwick", ivec2(1440, 900))
   makeContextCurrent(window)
   loadExtensions()
+  when not defined(emscripten):
+    var panel = initDevPanel(window)
   # Keep only a narrow scenic strip around the playable arena.
   const border = 3
   let terrainWidth = (maxX()-minX()) div 100+2*border
@@ -777,7 +786,10 @@ proc runGraphics*() =
   amplitude = 1.2
   treeHeight = 5.5
   startupPhase("Loading terrain textures")
+  installPaintbotWater()
   initTerrain(NoTrees, GeneratedTerrain, NoRocks)
+  initPaintbotWater()
+  initSky()
   let scenery = createScenery()
   scenery.placeForest()
   computeWalkable()
@@ -837,6 +849,9 @@ proc runGraphics*() =
     for m in paintMaterials: m.baseColorFactor = c
   var occlusionOutline = initSelectionOutline(OccludedOutline)
   var shapes = initShapeRenderer()
+  # In-game UI drawn in the world (team discs, bars, aim lines, capture rings); unlike
+  # `shapes`, the water does not reflect it.
+  var overlay = initShapeRenderer()
   var last = epochTime()
   var heartAnimationTime = 0'f32
   var previous = world.cogs
@@ -849,6 +864,9 @@ proc runGraphics*() =
     let now = epochTime(); let frameDt = max(0.0, now-last)
     when defined(pwViewerProfile): profT = epochTime()
     let dt = min(frameDt, 0.1); last = now
+    if window.size.x <= 0 or window.size.y <= 0: return
+    # Clouds follow real frame time so every camera sees the same sky, even when paused.
+    advanceSky(dt.float32)
     # Decorative hearts keep turning while playback is paused or slowed.
     heartAnimationTime = (heartAnimationTime+dt.float32)
     let restore = transport.takeRestore()
@@ -941,8 +959,9 @@ proc runGraphics*() =
     if not paused: orbitPhase += dt.float32*2*PI/30
     let viewYaw = yaw+0.07'f32*orbitAmount*sin(orbitPhase)
 
-    let (eye, view, projection) = spectatorCamera(target, distance, viewYaw, tilt,
+    var (eye, view, projection) = spectatorCamera(target, distance, viewYaw, tilt,
         window.size.x, window.size.y)
+    when not defined(emscripten): panel.updateCamera(eye, view, target)
     profMark(1)
     let vp = projection*view
     # Highlights the camera did not show become instant-replay candidates.
@@ -1057,7 +1076,7 @@ proc runGraphics*() =
     glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
     glClearColor(0.08, 0.13, 0.15, 1)
     glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
-    scene.toon.drawBackground()
+    drawSky(vp, eye)
     drawTerrain(vp)
     profMark(4)
     # Reuse the visible actors and their exact animated poses. Only scenery is
@@ -1072,6 +1091,7 @@ proc runGraphics*() =
     actors(); finishCharacters(scene)
     profMark(6)
     shapes.clear()
+    overlay.clear()
     for trench in world.trenches:
       if onScreen(position(point(trench.x.int+trench.w.int div 2, trench.z.int+trench.h.int div 2)), 1.4):
         shapes.trenchCover(trench)
@@ -1138,7 +1158,7 @@ proc runGraphics*() =
       if item.readyAt > world.tick: continue
       if not pointSeen(item.pos) or not onScreen(position(item.pos), 1.3): continue
       if inspectedKind == 2 and inspectedId == itemId:
-        shapes.addCircle(position(item.pos, 0.025), 1.25, rgbx(250,226,140,180))
+        overlay.addCircle(position(item.pos, 0.025), 1.25, rgbx(250,226,140,180))
       let special = item.kind in {grenadePickup,sprayPickup}
       let spin = heartAnimationTime*1.08
       let p = position(item.pos, if special: 0.7+0.15*sin(spin*1.7) else: 0.28)
@@ -1148,7 +1168,10 @@ proc runGraphics*() =
         of uniformPickup: rgbx(192, 126, 245, 255)
         of armorPickup: rgbx(96, 191, 241, 255)
         of medkitPickup: rgbx(243, 238, 207, 255)
-      shapes.addCircle(position(item.pos, 0.04), if special: 1.0 else: 0.55, color)
+        of misterPickup: rgbx(64, 196, 255, 255)
+        of sniperPickup: rgbx(214, 160, 70, 255)
+        of radarPickup: rgbx(255, 120, 60, 255)
+      overlay.addCircle(position(item.pos, 0.04), if special: 1.0 else: 0.55, color)
       if special:
         shapes.equipmentPickup(p,eye,spin,item.kind == grenadePickup)
       else:
@@ -1162,6 +1185,18 @@ proc runGraphics*() =
       if item.kind == medkitPickup:
         shapes.box(p.x, p.y+0.49, p.z, 0.26, 0.03, 0.08, rgbx(215, 69, 66, 255), spin)
         shapes.box(p.x, p.y+0.49, p.z, 0.08, 0.03, 0.26, rgbx(215, 69, 66, 255), spin)
+      if item.kind == sniperPickup:
+        # A long rifle: dark barrel and a scope on top.
+        shapes.box(p.x, p.y+0.55, p.z, 0.9, 0.07, 0.07, rgbx(52, 56, 60, 255), spin)
+        shapes.box(p.x, p.y+0.68, p.z, 0.25, 0.07, 0.07, rgbx(20, 22, 24, 255), spin)
+      if item.kind == radarPickup:
+        # A radar mast with a spinning dish.
+        shapes.box(p.x, p.y+0.5, p.z, 0.06, 0.25, 0.06, rgbx(200, 205, 210, 255), 0)
+        shapes.box(p.x, p.y+0.8, p.z, 0.35, 0.05, 0.12, rgbx(255, 120, 60, 255), spin*3)
+      if item.kind == misterPickup:
+        # A spray bottle: blue body, white trigger head and nozzle.
+        shapes.box(p.x, p.y+0.62, p.z, 0.22, 0.16, 0.22, rgbx(240, 248, 255, 255), spin)
+        shapes.box(p.x+0.22, p.y+0.66, p.z, 0.2, 0.06, 0.06, rgbx(240, 248, 255, 255), spin)
 
     # Rules 38 glory hearts: small spinning gold hearts that blink out in their last five seconds.
     for heart in world.gloryHearts:
@@ -1169,7 +1204,7 @@ proc runGraphics*() =
       let left = heart.expiresAt-world.tick
       if left < 5*TickRate and int(heartAnimationTime*6) mod 2 == 0: continue
       let pulse = 0.5+0.5*sin(heartAnimationTime*4)
-      shapes.addCircle(position(heart.pos, 0.04), 0.7+0.12*pulse, rgbx(255, 214, 92, 120))
+      overlay.addCircle(position(heart.pos, 0.04), 0.7+0.12*pulse, rgbx(255, 214, 92, 120))
       shapes.heartSculpture(position(heart.pos, 1.1+0.18*sin(heartAnimationTime*2.2)), eye,
         rgbx(255, 196, 60, 255), heartAnimationTime*3, 0.32)
     for g in world.grenades:
@@ -1178,7 +1213,7 @@ proc runGraphics*() =
       let p = mix(position(g.start, if g.owner < 0: 14 else: 1), position(g.target, 0.1), f)+vec3(0, sin(
           f*PI.float32)*3, 0)
       shapes.gem(p, 0.4, rgbx(190, 211, 79, 254))
-      shapes.addCircle(position(g.target, 0.05), 0.24, rgbx(192, 161, 85, 160))
+      overlay.addCircle(position(g.target, 0.05), 0.24, rgbx(192, 161, 85, 160))
     for b in world.blasts:
       if not onScreen(position(b.pos), 1.4): continue
       let age=clamp((world.tick.float32+alpha-b.tick.float32)/24,0'f32,1'f32)
@@ -1214,16 +1249,22 @@ proc runGraphics*() =
     profMark(12)
     for i, e in world.equipment:
       if world.cogs[i].hp <= 0 or not shown(i) or victory.active or not onScreen(poses[i], 1.4): continue
-      if e.charge > 0: shapes.addCircle(position(world.grenadeTarget(i), 0.08),
+      if e.charge > 0: overlay.addCircle(position(world.grenadeTarget(i), 0.08),
           grenadeBlastRadius().float32/100, rgbx(229, 199, 88, 255))
       if e.burst > 0:
         let spread = if replayRulesVersion >= 17: 0.6'f32 else: 0.25'f32
         shapes.sprayCloud(world, i, world.tick.float32+alpha, spread, nearRank[i] >= CrowdDetail)
-      if e.grenade: shapes.gem(poses[i]+vec3(-0.45, 1.0, -0.3), 0.19, rgbx(157,
+      if e.grenade: overlay.gem(poses[i]+vec3(-0.45, 1.0, -0.3), 0.19, rgbx(157,
           175, 66, 255))
       if e.sprayCan:
         shapes.sprayCan(poses[i]+vec3(0.72, 0.65, 0))
-      for hp in 0..<e.armor: shapes.box(poses[i].x-0.3+hp.float32*0.25, poses[
+      if world.hasSniper(i):
+        # Rules 49 sniper rifle: a long barrel with a scope, pointing along the cog's aim.
+        let c = world.cogs[i]
+        let yaw = arctan2(-(c.aim.z-c.pos.z).float32, (c.aim.x-c.pos.x).float32)
+        shapes.box(poses[i].x, poses[i].y+1.0, poses[i].z, 1.1, 0.07, 0.07, rgbx(52, 56, 60, 255), yaw)
+        shapes.box(poses[i].x, poses[i].y+1.12, poses[i].z, 0.3, 0.07, 0.07, rgbx(20, 22, 24, 255), yaw)
+      for hp in 0..<e.armor: overlay.box(poses[i].x-0.3+hp.float32*0.25, poses[
           i].y+2.1, poses[i].z, 0.16, 0.09, 0.09, rgbx(65, 203, 245, 255))
     when defined(pwViewerProfile): profMark(15)
     if world.controlHearts.len>0:
@@ -1256,12 +1297,12 @@ proc runGraphics*() =
             # FFA-kin owners are seats, coloured by family.
             let color=if owner<0:rgbx(150,155,160,55) elif ffa():kinColor(owner.int,85)
               elif owner notin 0..1:rgbx(150,155,160,55) else:rgbx(teamColors[owner].r,teamColors[owner].g,teamColors[owner].b,85)
-            shapes.addQuad(position(point(x,z),0.09),position(point(x,z+200),0.09),
+            overlay.addQuad(position(point(x,z),0.09),position(point(x,z+200),0.09),
               position(point(x+200,z+200),0.09),position(point(x+200,z),0.09),color)
       for index, heart in world.controlHearts:
         if not onScreen(position(heart.pos), 1.6): continue
         if inspectedKind == 1 and inspectedId == index:
-          shapes.addCircle(position(heart.pos, 0.025), 1.8, rgbx(250,226,140,180))
+          overlay.addCircle(position(heart.pos, 0.025), 1.8, rgbx(250,226,140,180))
         let color=if heart.owner<0:rgbx(220,229,238,255)
           elif ffa():kinColor(heart.owner.int)
           elif heart.owner==0:rgbx(255,75,99,255) else:rgbx(65,221,255,255)
@@ -1274,15 +1315,15 @@ proc runGraphics*() =
             let right = normalize(cross(vec3(0,1,0), normalize(eye-center)))
             let start = center-right*1.4
             let finish = center+right*1.4
-            shapes.addLine(start, finish, rgbx(28,35,43,255), halfWidth=0.18)
+            overlay.addLine(start, finish, rgbx(28,35,43,255), halfWidth=0.18)
             if capture.ticks > 0:
               let progressColor = if ffa(): kinColor(capture.team.int)
                 elif capture.team == 0: rgbx(255,75,99,255)
                 else: rgbx(65,221,255,255)
-              shapes.addLine(start, start+right*(2.8*capture.ticks.float32/HeartCaptureTicks.float32),
+              overlay.addLine(start, start+right*(2.8*capture.ticks.float32/HeartCaptureTicks.float32),
                 progressColor, halfWidth=0.12)
             if capture.contested:
-              shapes.addLine(start+vec3(0,0.3,0),finish+vec3(0,0.3,0),
+              overlay.addLine(start+vec3(0,0.3,0),finish+vec3(0,0.3,0),
                 rgbx(255,214,82,255),halfWidth=0.06)
     else:
       for side in 0..1:
@@ -1305,7 +1346,7 @@ proc runGraphics*() =
           for n in 0..<segments:
             let a = -PI.float32/2+2*PI.float32*fraction*n.float32/segments.float32
             let b = -PI.float32/2+2*PI.float32*fraction*(n+1).float32/segments.float32
-            shapes.addLine(base+vec3(cos(a)*radius, y, sin(a)*radius),
+            overlay.addLine(base+vec3(cos(a)*radius, y, sin(a)*radius),
               base+vec3(cos(b)*radius, y, sin(b)*radius), color, halfWidth = width)
         ring(1, (if dormant: rgbx(120, 125, 130, 200) else: rgbx(255, 214, 92, 170)), 0.05, 0.07)
         if not dormant and g.progress > 0:
@@ -1314,40 +1355,119 @@ proc runGraphics*() =
         shapes.heartTower(base, eye, (if dormant: rgbx(128, 132, 138, 255) else: rgbx(255, 196, 60, 255)),
           heartAnimationTime, big = true)
     profMark(13)
+    # Heals (the windex-mister's, a medkit's) float a green "+N" over the cog for HealPopupTicks.
+    # Spotted from the HP the cogs had when the previous tick was drawn: a respawn (from 0) is not
+    # a heal, and a seek (backwards, or a long jump) clears the popups instead of inventing heals.
+    const HealPopupTicks = 36'i32
+    if world.tick != healTick:
+      let advanced = world.tick - healTick
+      if healTick >= 0 and advanced > 0 and advanced <= TickRate*2 and healHp.len == world.cogs.len:
+        for i, c in world.cogs:
+          if healHp[i] > 0 and c.hp > healHp[i]:
+            heals.add (i.int32, world.tick, c.hp - healHp[i])
+      else:
+        heals.setLen 0
+      healHp.setLen world.cogs.len
+      for i, c in world.cogs: healHp[i] = c.hp
+      healTick = world.tick
+      var kept: seq[tuple[seat, tick, amount: int32]]
+      for h in heals:
+        if world.tick - h.tick < HealPopupTicks: kept.add h
+      heals = kept
+    for h in heals:
+      let i = h.seat.int
+      if i >= world.cogs.len or world.cogs[i].hp <= 0 or not shown(i) or not onScreen(poses[i]): continue
+      let age = clamp(((world.tick - h.tick).float32 + alpha) / HealPopupTicks.float32, 0, 1)
+      let base = poses[i] + vec3(0, 3.2 + 1.8*age, 0)
+      # A billboard: right and up both lie in the screen plane, so the steep spectator camera
+      # does not squash the glyphs' vertical strokes.
+      let toEye = normalize(eye - base)
+      let right = normalize(cross(vec3(0, 1, 0), toEye))
+      let up = cross(toEye, right)
+      let green = rgbx(90, 255, 120, uint8(255*(1 - age*age)))
+      # Sized by distance, so the popup reads the same at every zoom.
+      let s = clamp(0.022'f32*length(eye - base), 0.5'f32, 2.4'f32)
+      proc stroke(x0, y0, x1, y1: float32) =
+        shapes.addLine(base + right*(x0*s) + up*(y0*s), base + right*(x1*s) + up*(y1*s), green,
+          halfWidth = 0.2*s)
+      # The text is centred on the cog: a plus, then the amount in seven-segment digits.
+      let digits = $h.amount
+      var x = -(1.4 + 1.3*digits.len.float32) / 2
+      stroke(x, 1, x + 1, 1)
+      stroke(x + 0.5, 0.5, x + 0.5, 1.5)
+      x += 1.4
+      for ch in digits:
+        # Segments a..g over a 0.9-wide, 2-tall cell.
+        const segs = [(0'f32, 2'f32, 0.9'f32, 2'f32), (0.9'f32, 2'f32, 0.9'f32, 1'f32),
+          (0.9'f32, 1'f32, 0.9'f32, 0'f32), (0'f32, 0'f32, 0.9'f32, 0'f32), (0'f32, 1'f32, 0'f32, 0'f32),
+          (0'f32, 2'f32, 0'f32, 1'f32), (0'f32, 1'f32, 0.9'f32, 1'f32)]
+        const lit = ["abcdef", "bc", "abged", "abgcd", "fgbc", "afgcd", "afgedc", "abc", "abcdefg", "abfgcd"]
+        for k, seg in segs:
+          if chr(ord('a') + k) in lit[ord(ch) - ord('0')]:
+            stroke(x + seg[0], seg[1], x + seg[2], seg[3])
+        x += 1.3
     for i, c in world.cogs:
       if c.hp <= 0 or not shown(i) or not onScreen(poses[i]): continue
       let p = poses[i]
+      if world.hasRadar(i):
+        # Rules 49 radar: an orange ring exactly RadarRadius wide; every cog inside deals double
+        # damage. A sweep line turns once a second.
+        let radius = RadarRadius.float32/100
+        shapes.addCircle(p+vec3(0, 0.012, 0), radius, rgbx(255, 120, 60, 28))
+        for n in 0..<64:
+          let a = 2*PI.float32*n.float32/64
+          let b = 2*PI.float32*(n+1).float32/64
+          shapes.addLine(p+vec3(cos(a)*radius, 0.07, sin(a)*radius),
+            p+vec3(cos(b)*radius, 0.07, sin(b)*radius), rgbx(255, 150, 80, 190), halfWidth = 0.05)
+        let sweep = 2*PI.float32*((world.tick.float32+alpha)/TickRate.float32)
+        shapes.addLine(p+vec3(0, 0.08, 0), p+vec3(cos(sweep)*radius, 0.08, sin(sweep)*radius),
+          rgbx(255, 200, 140, 170), halfWidth = 0.04)
+        shapes.box(p.x, p.y+1.6, p.z, 0.35, 0.05, 0.12, rgbx(255, 120, 60, 255), sweep)
+      if world.misting(i):
+        # Rules 49 windex-mister: a blue halo exactly MisterRadius wide marks every cog it heals.
+        # It brightens for half a second after each heal.
+        let radius = MisterRadius.float32/100
+        let sinceHeal = (MisterTicks-(world.misterUntil[i]-world.tick)) mod MisterHealTicks
+        let flash = if sinceHeal < TickRate div 2 and world.misterUntil[i]-world.tick < MisterTicks:
+            1-sinceHeal.float32/(TickRate div 2).float32 else: 0'f32
+        shapes.addCircle(p+vec3(0, 0.015, 0), radius, rgbx(64, 196, 255, uint8(38+70*flash)))
+        for n in 0..<64:
+          let a = 2*PI.float32*n.float32/64
+          let b = 2*PI.float32*(n+1).float32/64
+          shapes.addLine(p+vec3(cos(a)*radius, 0.06, sin(a)*radius),
+            p+vec3(cos(b)*radius, 0.06, sin(b)*radius), rgbx(150, 225, 255, uint8(170+85*flash)),
+            halfWidth = 0.05+0.06*flash)
       if ffa():
         # Kin view: kin of the selected cog get a halo as bright as their relatedness; with
         # families picked in the header, their cogs get the halo. Everyone else fades to 40%.
         let (dim, halo) = kinEmphasis(i)
         if halo > 0:
-          shapes.addCircle(p+vec3(0, 0.02, 0), 1.3, rgbx(255, 240, 170, uint8(halo)))
-        shapes.addCircle(p+vec3(0, 0.04, 0), 0.65, kinColor(i, if dim: 102'u8 else: 255'u8))
-        shapes.addCircle(p+vec3(0, 0.05, 0), 0.48, rgbx(43, 68, 55, if dim: 102'u8 else: 255'u8))
+          overlay.addCircle(p+vec3(0, 0.02, 0), 1.3, rgbx(255, 240, 170, uint8(halo)))
+        overlay.addCircle(p+vec3(0, 0.04, 0), 0.65, kinColor(i, if dim: 102'u8 else: 255'u8))
+        overlay.addCircle(p+vec3(0, 0.05, 0), 0.48, rgbx(43, 68, 55, if dim: 102'u8 else: 255'u8))
       else:
-        shapes.addCircle(p+vec3(0, 0.04, 0), 0.65, teamColors[world.apparentTeam(i)])
-        shapes.addCircle(p+vec3(0, 0.05, 0), 0.48, rgbx(43, 68, 55, 255))
-      if i == selected: shapes.addCircle(p+vec3(0, 0.03, 0), 0.9, rgbx(250, 226,
+        overlay.addCircle(p+vec3(0, 0.04, 0), 0.65, teamColors[world.apparentTeam(i)])
+        overlay.addCircle(p+vec3(0, 0.05, 0), 0.48, rgbx(43, 68, 55, 255))
+      if i == selected: overlay.addCircle(p+vec3(0, 0.03, 0), 0.9, rgbx(250, 226,
           140, 180))
       if victory.active: continue
       let d = direction(c.pos, c.aim, 105)
-      shapes.addLine(p+vec3(0, 1.05, 0), p+vec3(d.x.float32/100, 1.05,
+      overlay.addLine(p+vec3(0, 1.05, 0), p+vec3(d.x.float32/100, 1.05,
           d.z.float32/100), rgbx(49, 60, 66, 255), halfWidth = 0.13)
       if c.cooldown >= (if replayRulesVersion >=
-          3: FireCooldownTicks-1 else: 7): shapes.gem(p+vec3(d.x.float32/100,
+          3: FireCooldownTicks-1 else: 7): overlay.gem(p+vec3(d.x.float32/100,
           1.05, d.z.float32/100), 0.23, rgbx(255, 239, 177, 255))
       if c.shield > 0:
         let spawnProgress = clamp((36-c.shield.float32+alpha)/36,0'f32,1'f32)
         shapes.spawnBeam(p,(if ffa(): kinColor(i) else: teamColors[world.apparentTeam(i)]),spawnProgress,i)
       if trails:
-        shapes.addLine(p+vec3(0, 0.08, 0), position(c.goal, 0.08), seatColor(i),
+        overlay.addLine(p+vec3(0, 0.08, 0), position(c.goal, 0.08), seatColor(i),
             halfWidth = 0.035)
       if bars:
         # Three pips in the teams game; FFA-kin's ten squeeze into the same 0.84-wide bar.
         let pitch = (if maxHp() > 3: 0.84'f32 / maxHp().float32 else: 0.28'f32)
         let pip = (if maxHp() > 3: 0.035'f32 else: 0.1'f32)
-        for hp in 0..<c.hp: shapes.box(p.x-0.35+hp.float32*pitch, p.y+2.5, p.z,
+        for hp in 0..<c.hp: overlay.box(p.x-0.35+hp.float32*pitch, p.y+2.5, p.z,
             pip, 0.09, 0.09, rgbx(221, 253, 180, 255))
     profMark(14)
     for b in world.balls:
@@ -1365,9 +1485,33 @@ proc runGraphics*() =
         let color=if ffa():kinColor(b.owner.int) elif team(b.owner.int)==0:rgbx(255,108,74,255) else:rgbx(89,220,255,255)
         shapes.paintball(ball,0.32-bead.float32*0.035,color)
         shapes.paintball(ball+vec3(-0.07,0.12,-0.04),0.085,rgbx(255,250,214,255))
-    if islandTerrain: drawWater(vp, eye, (world.tick.float32+alpha)/24)
+      if world.hasSniper(b.owner.int):
+        # A sniper shot also leaves a thin bright trail, so long-range fire reads at a glance.
+        shapes.addLine(position(start,1.05), mix(position(start,1.05),position(b.pos,1.05),f),
+          rgbx(255,244,200,200), halfWidth = 0.04)
+    # Every view reflects the same sky phase and world geometry; the in-game UI overlay
+    # is drawn afterward so it does not appear in the water.
+    proc renderReflection(v, proj: Mat4, eyeAt: Vec3, exclude = -1): bool =
+      result = islandTerrain and reflecting()
+      if not result: return
+      # The water mirrors the river's surface; the sea, lower, reflects from the same plane.
+      let mirrored = reflectedCamera(eyeAt, v, proj, waterParams.height)
+      let mirroredVp = mirrored.projection*mirrored.view
+      beginWaterReflection(window.size)
+      drawSky(mirroredVp, mirrored.eye)
+      drawTerrain(mirroredVp)
+      beginCharacters(scene, window, mirrored.view, mirrored.projection, mirrored.eye)
+      actors(exclude = exclude, view = mirroredVp); finishCharacters(scene)
+      shapes.draw(mirroredVp)
+      endWaterReflection()
+      glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
+    let reflected = renderReflection(view, projection, eye)
+    if islandTerrain:
+      drawMurkyWater(vp, eye, (world.tick.float32+alpha)/24, window.size,
+        scene.toon.highlightColor, reflected = reflected)
     profMark(7)
     shapes.draw(vp)
+    overlay.draw(vp)
     profMark(8)
     # A second 3D view in the corner: the selected bot's eyes.
     proc drawInset(v, proj: Mat4, eyeAt: Vec3, exclude: int) =
@@ -1377,20 +1521,29 @@ proc runGraphics*() =
         {.emit: "`ratio`=emscripten_get_device_pixel_ratio();".}
       let right = (24*ratio).int
       let top = (100*ratio).int
+      # The reflection target covers its whole framebuffer. Apply the inset's scissor
+      # only after rendering it, then restore the inset viewport after character setup.
+      glDisable(GL_SCISSOR_TEST)
+      let reflected = renderReflection(v, proj, eyeAt, exclude)
       glEnable(GL_SCISSOR_TEST)
       glScissor((window.size.x-wi-right).GLint, (window.size.y-he-top).GLint,
           wi.GLsizei, he.GLsizei)
       glViewport((window.size.x-wi-right).GLint, (window.size.y-he-top).GLint,
           wi.GLsizei, he.GLsizei)
       glClear(GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT)
-      scene.toon.drawBackground()
+      drawSky(proj*v, eyeAt)
       drawTerrain(proj*v)
       beginCharacters(scene, window, v, proj, eyeAt)
       glViewport((window.size.x-wi-right).GLint, (window.size.y-he-top).GLint,
           wi.GLsizei, he.GLsizei)
       actors(exclude, view = proj*v); finishCharacters(scene)
-      if islandTerrain: drawWater(proj*v, eyeAt, (world.tick.float32+alpha)/24)
+      if islandTerrain:
+        drawMurkyWater(proj*v, eyeAt, (world.tick.float32+alpha)/24, window.size,
+          scene.toon.highlightColor,
+          ivec4((window.size.x-wi-right).int32, (window.size.y-he-top).int32, wi.int32, he.int32),
+          reflected = reflected)
       shapes.draw(proj*v)
+      overlay.draw(proj*v)
       glDisable(GL_SCISSOR_TEST)
     if firstPerson and selected >= 0 and world.cogs[selected].hp > 0 and shown(selected):
       let c = world.cogs[selected]
@@ -1400,6 +1553,8 @@ proc runGraphics*() =
       drawInset(lookAt(p, p+forward, vec3(0, 1, 0)),
         perspective(78'f32, 1.6'f32, 0.15'f32, 180'f32), p, selected)
     profMark(9)
+    when not defined(emscripten):
+      if panel.draw(window, paused): setPlaying(cint(paused))
     window.swapBuffers()
     profMark(10)
     when defined(emscripten):

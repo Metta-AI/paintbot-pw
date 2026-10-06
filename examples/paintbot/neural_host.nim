@@ -50,6 +50,10 @@ type
     sampleRng: Rng
     sampleSeeded: bool
     sampleDraws*: int
+    # Training library only (native pw_set_sampling_salt, on a policy seat): a salt mixed into
+    # the stream's seed (neural_contract.samplingRngSalted). A hosted seat never sets it: 0 =
+    # samplingRng exactly.
+    sampleSalt*: int64
     # decoder.forbid_objectives: movement-head indices never selected (argmax or draw);
     # forbidHits counts decisions whose unmasked argmax objective was one of them.
     forbidden*: ObjectiveMask
@@ -78,6 +82,12 @@ type
     # head order, and read back with neuralChoice(h). extraHeads = how many (0, 2 or 4).
     offsetHeads*: bool
     extraHeads*: int
+    # Action contract 15: heads 5 and 6 are drawn from the 23-logit row of the identity the aim head chose (rows at
+    # LogitSize + (head - 5) * TargetRows * 23 + j * 23); no draw (the centre bin) when it chose keep or a compass point.
+    targetRows*: bool
+    # teams.view.1h / 1s / 1t / 1p: this seat's motion history, stop and hunt clocks and own-timer hold
+    # (encodeTeamsViewH/S/T/P; 1p's own timers are read off the seat's own view by encodeTeamsViewP)
+    history*: TeamsHistory
     offsetTemperatures: array[ExtraHeadsMax, float32]
     offsetTemperatureSet: array[ExtraHeadsMax, bool]
     offsetSelected*, offsetChoices*: array[ExtraHeadsMax, int32]
@@ -101,11 +111,17 @@ type
     rows: FfaViewRows
     rowsReady: bool
 
+proc streamStart(seat: NeuralSeat): Rng =
+  ## The seat's stream at match start: samplingRng from the match seed and slot (salted only
+  ## on a training policy seat given pw_set_sampling_salt).
+  if seat.sampleSalt == 0: samplingRng(seat.matchSeed, seat.slot)
+  else: samplingRngSalted(seat.matchSeed, seat.slot, seat.sampleSalt)
+
 proc samplingLogSeed(seat: NeuralSeat): uint64 =
   ## The stream's initial state for the log (the state before any draw), recomputed from
   ## the match seed so the line does not depend on how far the stream has advanced; 0
   ## until the seat has drawn.
-  if seat.sampleSeeded: samplingSeed(seat.matchSeed, seat.slot) else: 0
+  if seat.sampleSeeded: seat.streamStart.state else: 0
 
 proc samplingTelemetry*(options: SamplingOptions, seed: uint64, draws: int): string =
   ## The sampling part of the seat log line: mode, temperature, the heads sampled, the
@@ -193,8 +209,9 @@ proc parseSamplingOptions*(value: JsonNode): SamplingOptions =
       for head in 0..<ActionSizes.len: result.heads[head] = false
       for e in 0..<ExtraHeadsMax: result.offsetHeads[e] = false
       for item in field:
-        if item.kind != JInt or item.getInt notin 0..<ActionSizesMove.len:
-          raise newException(ValueError, "decoder.sampling.heads entries must be head indices 0 .. " & $(ActionSizesMove.len-1))
+        if item.kind != JInt or item.getInt notin 0..<(ActionSizes.len + ExtraHeadsMax):
+          raise newException(ValueError, "decoder.sampling.heads entries must be head indices 0 .. " &
+            $(ActionSizes.len + ExtraHeadsMax - 1))
         let h = item.getInt
         if h >= ActionSizes.len:
           if result.offsetHeads[h - ActionSizes.len]: raise newException(ValueError, "decoder.sampling.heads repeats a head")
@@ -309,7 +326,7 @@ const RetiredDecoderOptions* = ["fire_hold_teammates", "strafe_legs", "aim_snap"
   ## Native decoder rules retired for BASIC parity (docs/neural/seat-view.md): a manifest
   ## naming one is refused; write the rule in policy.bas instead.
 
-proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointer = false, extra = 0) =
+proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointer = false, extra = 0, target = false) =
   ## The manifest's selection options and user inputs onto the seat (nil manifest = none).
   ## `userInputs` is the K the actor's (or handle's) observation contract names.
   var sampling: SamplingOptions
@@ -329,10 +346,14 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
         case key
         of "sampling":
           sampling = parseSamplingOptions(value)
-          if sampling.offsetListed and extra < AimOffsetHeads:
+          if sampling.offsetListed and extra < AimOffsetHeads and extra != SelfDestructHeads:   # 17: head 5 is its own
             raise newException(ValueError, "decoder.sampling.heads 5 and 6 need action contract teams.view.1 aim-offset")
           if sampling.moveListed and extra < AimOffsetHeads + MoveOffsetHeads:
             raise newException(ValueError, "decoder.sampling.heads 7 and 8 need action contract teams.view.1 movement-offset")
+          for e in extra..<ExtraHeadsMax:
+            if sampling.offsetHeads[e] and value.hasKey("heads"):
+              raise newException(ValueError, "decoder.sampling.heads " & $(ActionSizes.len + e) &
+                " is not a head of this action contract")
         of "joint_sampling":
           joint = parseJointSampling(value)
         of "forbid_objectives":
@@ -370,12 +391,17 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
   seat.extraHeads = extra
   seat.heads = case extra
     of 0: @ActionSizes
+    of SelfDestructHeads: @ActionSizesSelfDestruct   # contract 17: one self-destruct head
     of AimOffsetHeads: @ActionSizesOffset
-    else: @ActionSizesMove
-  seat.logits = newSeq[float32](case extra
-    of 0: LogitSize
-    of AimOffsetHeads: LogitSizeOffset
-    else: LogitSizeMove)
+    of AimOffsetHeads + MoveOffsetHeads: @ActionSizesMove
+    else: @ActionSizesRaw   # contract 16 (raw): five extra heads
+  seat.targetRows = target
+  seat.logits = newSeq[float32](if target: (if extra > AimOffsetHeads: LogitSizeRaw else: LogitSizeTarget)
+    else: (case extra
+      of 0: LogitSize
+      of SelfDestructHeads: LogitSizeSelfDestruct
+      of AimOffsetHeads: LogitSizeOffset
+      else: LogitSizeMove))
 
 proc observationFor(hash: string): (ObservationContractVersion, int) =
   ## The encoder and user-input count an observation contract hash names: teams.view.1,
@@ -387,7 +413,7 @@ proc observationFor(hash: string): (ObservationContractVersion, int) =
 
 proc requireMode(observationContract: ObservationContractVersion) =
   ## teams.view.1 is the teams game's 16-seat contract, ffa.view.1 FFA-kin's.
-  if observationContract == ocTeamsView1:
+  if observationContract in TeamsObservationContracts:
     if ffa(): raise newException(ValueError, "observation contract teams.view.1 is for the teams game only")
     if Seats != LegacySeats:
       raise newException(ValueError, "observation contract teams.view.1 needs a 16-seat match; this match has " &
@@ -465,18 +491,19 @@ proc loadNeuralSeat*(sourcePath: string, slot: int): NeuralSeat =
     result.state = newSeq[float32](actor.stateSize)
     return
   let actor = loadActor(data)
-  let heads = actionHeadSizes(contract)
-  var outputs = 0
-  for h in heads: outputs += h
-  if actor.inputSize != TeamsViewSize + userInputs or actor.outputSize != outputs or actor.headSizes != heads:
+  let heads = actionLogitHeads(contract)
+  if actor.inputSize != observationSize(observationContract) + userInputs or actor.outputSize != actionLogitSize(contract) or
+      actor.headSizes != heads:
     raise newException(ValueError, "neural actor dimensions do not match Paintbot contract")
   budgetCheck(actor)
-  result.configureSeat(readManifest(sourcePath, actor), userInputs, extra = extraHeads(contract))
+  result.configureSeat(readManifest(sourcePath, actor), userInputs, extra = extraHeads(contract),
+    target = targetRows(contract))
   result.setConditionals(actor.conditionals)
   result.actor = actor
   result.contract = contract
   result.observationContract = observationContract
-  result.observation = newSeq[float32](TeamsViewSize + userInputs)
+  result.observation = newSeq[float32](observationSize(observationContract) + userInputs)
+  result.history.resetHistory()
   result.state = newSeq[float32](actor.stateSize)
 
 proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string): NeuralSeat =
@@ -498,7 +525,7 @@ proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string)
   requirePairing(observationContract, contract)
   requireMode(observationContract)
   let pointer = contract == acFfaView1Pointer
-  result.configureSeat(manifest, userInputs, pointer, extra = extraHeads(contract))
+  result.configureSeat(manifest, userInputs, pointer, extra = extraHeads(contract), target = targetRows(contract))
   result.contract = contract
   result.observationContract = observationContract
   if pointer:
@@ -506,7 +533,8 @@ proc policyNeuralSeat*(manifestText: string, slot: int, observationHash: string)
     result.observation = newSeq[float32](result.layout.size + userInputs)
     result.fedLogits = newSeq[float32](result.logits.len)
     return
-  result.observation = newSeq[float32](TeamsViewSize + userInputs)
+  result.observation = newSeq[float32](observationSize(observationContract) + userInputs)
+  result.history.resetHistory()
   result.fedLogits = newSeq[float32](result.logits.len)
 
 proc decoderNeuralSeat*(slot: int, observationHash: string, contract: ActionContractVersion): NeuralSeat =
@@ -519,7 +547,7 @@ proc decoderNeuralSeat*(slot: int, observationHash: string, contract: ActionCont
   requireMode(observationContract)
   requirePairing(observationContract, contract)
   let pointer = observationContract == ocFfaView1
-  result.configureSeat(nil, 0, pointer, extra = extraHeads(contract))
+  result.configureSeat(nil, 0, pointer, extra = extraHeads(contract), target = targetRows(contract))
   result.contract = contract
   result.observationContract = observationContract
   if pointer: result.pointerSetup(matchLayout())
@@ -567,7 +595,7 @@ proc seedStream(seat: NeuralSeat) =
   ## One stream per seat per match, from the match seed: its position depends only on the
   ## decisions taken, and it survives death and respawn.
   if not seat.sampleSeeded:
-    seat.sampleRng = samplingRng(seat.matchSeed, seat.slot)
+    seat.sampleRng = seat.streamStart
     seat.sampleSeeded = true
 
 proc headSize(seat: NeuralSeat, head: int): int =
@@ -596,7 +624,8 @@ proc ensureObservation(seat: NeuralSeat) =
       raise newException(ValueError, "the match's ffa.view.1 layout differs from the one the seat was loaded for")
     encodeObservation(seat.view, ocFfaView1, seat.observation, seat.userInputView, rows = seat.rowsFor())
   else:
-    encodeObservation(seat.view, ocTeamsView1, seat.observation, seat.userInputView)
+    encodeObservation(seat.view, seat.observationContract, seat.observation, seat.userInputView,
+      history = addr seat.history)
   seat.observationFresh = true
 
 proc selectConditionals(seat: NeuralSeat, actions: var array[ActionSizes.len, int32],
@@ -668,6 +697,43 @@ proc selectOffsets(seat: NeuralSeat) =
     seat.appliedOffsetTemperatures[e] =
       if temperatures[e] > 0: int32(round(float64(temperatures[e]) * 1000)) else: 0'i32
     if temperatures[e] > 0: anyDraw = true
+  if seat.targetRows:
+    # Contract 15: each offset head draws from the chosen identity's row; with keep or a compass aim there is no
+    # target, so no draw and the centre bin (its applied temperature reads 0).
+    # Contract 16 (raw): its rows are 63 bins, and its heads 7 .. 9 (walk direction, walk distance, look direction)
+    # follow as plain heads from their own logits after the rows (LogitSize + 2 * TargetRows * 63 ..).
+    let a = seat.selected[1]
+    let j = a - 1
+    let nOff = min(n, AimOffsetHeads)
+    let rb = sizes[0]                 # bins per identity row: 23 (15) or 63 (16)
+    var rowsLen = nOff*rb
+    for e in nOff..<n: rowsLen += sizes[e]
+    var rows = newSeq[float32](rowsLen)
+    if j in 0'i32..<TargetRows.int32:
+      for e in 0..<nOff:
+        let base = LogitSize + e*TargetRows*rb + j.int*rb
+        for b in 0..<rb: rows[e*rb+b] = seat.logits[base+b]
+    else:
+      for e in 0..<nOff:
+        temperatures[e] = 0'f32
+        seat.appliedOffsetTemperatures[e] = 0'i32
+        rows[e*rb + rb div 2] = 1'f32   # argmax = the centre bin
+      anyDraw = false
+      for e in nOff..<n:
+        if temperatures[e] > 0: anyDraw = true
+    var at = nOff*rb
+    var src = LogitSize + nOff*TargetRows*rb
+    for e in nOff..<n:
+      for b in 0..<sizes[e]: rows[at+b] = seat.logits[src+b]
+      at += sizes[e]
+      src += sizes[e]
+    if anyDraw: seat.seedStream()
+    var draws = 0
+    let picked = pointerSelect(rows, sizes, temperatures, seat.sampleRng, draws)
+    for e in 0..<n:
+      seat.offsetSelected[e] = picked[e]
+      seat.offsetChoices[e] = picked[e]
+    return
   if anyDraw: seat.seedStream()
   var draws = 0
   let picked = pointerSelect(seat.logits.toOpenArray(LogitSize, seat.logits.len-1), sizes,
@@ -861,7 +927,7 @@ proc addNeuralFunctions*(h: var Host, seat: NeuralSeat) =
   # sizes at 16 .. 24, 0 for a head the seat's action contract lacks): neuralLayout(i).
   # ffa.view.1 seats only for the section words; any seat for its width and head sizes.
   discard h.addFunction("neuralLayout", 1, proc(a: openArray[int32]): int32 =
-    seat.require(a[0] in 0'i32..24'i32, "neuralLayout index out of range")
+    seat.require(a[0] in 0'i32..int32(16 + ActionSizes.len + ExtraHeadsMax - 1), "neuralLayout index out of range")
     let i = a[0].int
     if i >= 16:
       let head = i-16
