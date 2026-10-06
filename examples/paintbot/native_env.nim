@@ -2577,6 +2577,31 @@ proc pw_pickups*(handle: pointer, output: FloatBuffer, capacity: int32): cint {.
     output[o+4] = float32(max(0'i32, p.readyAt - tick))
   env.world.pickups.len.cint
 
+proc pw_seat_pickup_visible*(handle: pointer, output: ptr UncheckedArray[uint32], words: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Which pickups each seat SEES now (training library only), as bitsets on the current (pre-step)
+  ## world: n seats (pw_seats) x `words` uint32 in seat order; bit (i mod 32) of word (i div 32) of
+  ## seat s is 1 when seat s sees engine pickup i (pw_pickups row i, BASIC pickupVisible(i), the
+  ## movement head's "walk to pickup i", choice 11 + i). The test is the seat's SeatView.pickupVisible,
+  ## i.e. seat_view's pickupSeen: the one BASIC's pickupVisible / pickupKind and teams.view.1 / 1i's
+  ## pickup rows (pickupRow) use: on the ground and canSeePoint (a dead seat sees nothing). Views are
+  ## begun on the current world as pw_observe begins them (beginViews: memo caches only). Bits past the pickup count are 0; pickups past
+  ## 32 x words are not written. Returns the pickup count; words 0 (output may be NULL) sizes the
+  ## buffer (ceil(count / 32) words per seat). A pure read: the world and its hash are unchanged.
+  ## -1 for bad arguments.
+  if handle == nil or words < 0 or (words > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  template w: untyped = env.world
+  if words > 0:
+    beginViews(w)
+    for slot in 0..<env.n:
+      for k in 0..<words.int: output[slot*words.int+k] = 0
+      let view = seatView(slot)
+      for i in 0..<min(w.pickups.len, 32*words.int):
+        if view.pickupVisible(i) == 1:
+          output[slot*words.int + i div 32] = output[slot*words.int + i div 32] or (1'u32 shl (i mod 32))
+  w.pickups.len.cint
+
 proc pw_world_json*(handle: pointer, output: ptr UncheckedArray[char], capacity: int32): cint {.exportc, cdecl, dynlib.} =
   ## The whole world as one JSON object (training library only): {"rulesVersion": R,
   ## "heard": {}, then every World field}, the object the engine streamed to PW_POLICY_FD
