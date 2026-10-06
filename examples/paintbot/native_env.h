@@ -289,6 +289,12 @@ int pw_hit_events(void *handle, int32_t *events, int32_t capacity);
  * and every decision are the same whether or not it is called. -1 bad args. */
 #define PW_KILL_EVENT_INTS 5
 int pw_kill_events(void *handle, int32_t *events, int32_t capacity);
+/* pw_damage_events (training library only; always recorded): every damage event since the last drain, oldest
+ * first, PW_DAMAGE_EVENT_INTS = 8 int32 each {tick, attacker (-1 map), victim, weapon (0 other/map, 1 gun,
+ * 2 grenade, 3 spray, 4 sniper, 5 self-destruct), health removed, armor absorbed, killed, final}. Drains like
+ * pw_kill_events (capacity 0 = pending count). Pure telemetry. -1 bad args. */
+#define PW_DAMAGE_EVENT_INTS 8
+int pw_damage_events(void *handle, int32_t *output, int32_t capacity);
 /* pw_seat_shot_orders (training library only; pure read, cumulative since create/reset): int32[6] =
  * {gun wind-ups started, grenades thrown, sprays triggered, and the same three counted only when
  * the seat wore a uniform at that tick}. Every shot ordered, whether or not it hits. -1 bad args. */

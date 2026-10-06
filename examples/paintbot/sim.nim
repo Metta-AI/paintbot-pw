@@ -1660,4 +1660,22 @@ when defined(pwTraining):
     if kind == misterPickup: return s.misterPickups
     if kind == sniperPickup: return s.sniperPickups
     s.radarPickups
+  # Damage log (native pw_damage_events): the host points this at its per-handle queue for one step and damage()
+  # appends every damage event past the shield and life checks, with a weapon code finer than DamageWeapon:
+  # 0 other / map, 1 gun, 2 grenade, 3 spray, 4 sniper, 5 self-destruct. Telemetry only; never part of World,
+  # its hash or any decision. damageSource overrides ord(damageWeapon) while nonzero (the gun loop: 1 / 4 per
+  # target, latched at target selection in gunSniper; selfDestruct: 5); gunCursor walks gunSniper.
+  type DamageEvent* = object
+    tick*, attacker*, victim*, weapon*, health*, armor*, killed*, final*: int32
+  var damageLog* {.threadvar.}: ptr seq[DamageEvent]
+  var damageSource* {.threadvar.}: int32
+  var gunSniper* {.threadvar.}: seq[bool]
+  var gunCursor* {.threadvar.}: int
+  proc noteDamage*(w: World, victim, attacker: int, health, armor: int32): int =
+    ## Appends one damage event (killed from the victim's hp now) and returns its index; -1 when nobody listens.
+    if damageLog == nil: return -1
+    damageLog[].add DamageEvent(tick: w.tick, attacker: attacker.int32, victim: victim.int32,
+      weapon: (if damageSource != 0: damageSource else: ord(damageWeapon).int32), health: health, armor: armor,
+      killed: int32(w.cogs[victim].hp == 0))
+    damageLog[].len - 1
 include mechanics

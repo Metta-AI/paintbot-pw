@@ -500,7 +500,7 @@ proc damage*(w: var World, victim, attacker, baseAmount: int) =
   w.cogs[victim].hp = max(0'i32, w.cogs[victim].hp-(amount.int32-absorbed))
   when defined(pwTraining):
     # Hit attribution (telemetry only): this event; `final` is set below once the lives are known.
-    let hitIndex = if hitLog != nil: hitLog[].len else: -1
+    let hitIndex = (if hitLog != nil: hitLog[].len else: -1); let damageIndex = w.noteDamage(victim, attacker, hpBefore-w.cogs[victim].hp, absorbed)
     if hitLog != nil:
       hitLog[].add HitEvent(attacker: attacker.int32, victim: victim.int32, health: hpBefore-w.cogs[victim].hp,
         armor: absorbed, weapon: ord(damageWeapon).int32, killed: int32(w.cogs[victim].hp == 0),
@@ -582,7 +582,7 @@ proc damage*(w: var World, victim, attacker, baseAmount: int) =
   if victim < w.misterUntil.len: w.misterUntil[victim] = 0
   if victim < w.radarUntil.len: w.radarUntil[victim] = 0
   when defined(pwTraining):
-    if hitIndex >= 0: hitLog[][hitIndex].final = int32(lives <= 0)
+    if hitIndex >= 0: hitLog[][hitIndex].final = int32(lives <= 0); (if damageIndex >= 0: damageLog[][damageIndex].final = int32(lives <= 0))
     if killLog != nil:
       killLog[].add KillEvent(tick: w.tick, attacker: attacker.int32, victim: victim.int32,
         weapon: ord(damageWeapon).int32, final: int32(lives <= 0))
@@ -655,7 +655,7 @@ proc selfDestruct*(w: var World, i: int) =
   let reach = grenadeBlastRadius()+Radius
   when defined(pwTraining):
     let weapon = damageWeapon
-    damageWeapon = dwGrenade
+    damageWeapon = dwGrenade; damageSource = 5
   for j in 0..<Seats:
     if j == i or w.cogs[j].hp <= 0 or distance2(w.cogs[j].pos, p) > reach.int64*reach: continue
     w.damage(j, i, amount)
@@ -663,7 +663,7 @@ proc selfDestruct*(w: var World, i: int) =
   w.cogs[i].shield = 0
   w.equipment[i].armor = 0
   w.damage(i, i, w.cogs[i].hp)
-  when defined(pwTraining): damageWeapon = weapon
+  when defined(pwTraining): (damageWeapon = weapon; damageSource = 0)
 
 proc sprayTouches*(w: World, slot, victim: int): bool =
   if victim == slot or w.cogs[victim].hp <= 0: return false
@@ -828,7 +828,7 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
     for cue in w.sounds:
       if w.tick-cue.tick < SoundLifetime and w.cogs[cue.listener].hp > 0: recent.add cue
     w.sounds = recent
-  var gunTargets: seq[tuple[attacker, victim: int]]
+  var gunTargets: seq[tuple[attacker, victim: int]]; (when defined(pwTraining): gunSniper.setLen(0))
   var visual: seq[Paintball]
   for b in w.balls:
     if b.life > 1:
@@ -994,7 +994,7 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
                 # Rules 49: the ball stops at the cog it reached, but may not burst.
                 let dud = if sniper: 0 else: gunDudPercent(isqrt(distance2(origin, w.cogs[j].pos)))
                 if dud > 0 and w.rng.between(0, 99) < dud: break trace
-                gunTargets.add (i, j)
+                gunTargets.add (i, j); (when defined(pwTraining): gunSniper.add sniper)
                 break trace
           w.balls.add Paintball(pos: endPoint, velocity: Point(
               x: endPoint.x-origin.x, z: endPoint.z-origin.z), owner: i.int32, life: (if visionRulesVersion >= 9: 6 else: 2))
@@ -1022,10 +1022,10 @@ proc stepEquipment(w: var World, commands: openArray[Command]) =
         w.uniforms[i] = false
         w.selfDestruct(i)
   # Targets were selected before damage, allowing simultaneous mutual kills.
-  when defined(pwTraining): damageWeapon = dwGun
-  for hit in gunTargets: w.damage(hit.victim, hit.attacker, 1)
+  when defined(pwTraining): (damageWeapon = dwGun; gunCursor = 0)
+  for hit in gunTargets: (when defined(pwTraining): (damageSource = (if gunSniper[gunCursor]: 4'i32 else: 1'i32); inc gunCursor)); w.damage(hit.victim, hit.attacker, 1)
   when defined(pwTraining):
-    damageWeapon = dwSpray
+    damageWeapon = dwSpray; damageSource = 0
     sprayDamagePhase = true
   for i in w.seatOrder():
     if w.equipment[i].burst > 0 and w.cogs[i].hp > 0:
