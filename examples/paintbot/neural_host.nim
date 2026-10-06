@@ -346,7 +346,7 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
         case key
         of "sampling":
           sampling = parseSamplingOptions(value)
-          if sampling.offsetListed and extra < AimOffsetHeads:
+          if sampling.offsetListed and extra < AimOffsetHeads and extra != SelfDestructHeads:   # 17: head 5 is its own
             raise newException(ValueError, "decoder.sampling.heads 5 and 6 need action contract teams.view.1 aim-offset")
           if sampling.moveListed and extra < AimOffsetHeads + MoveOffsetHeads:
             raise newException(ValueError, "decoder.sampling.heads 7 and 8 need action contract teams.view.1 movement-offset")
@@ -391,6 +391,7 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
   seat.extraHeads = extra
   seat.heads = case extra
     of 0: @ActionSizes
+    of SelfDestructHeads: @ActionSizesSelfDestruct   # contract 17: one self-destruct head
     of AimOffsetHeads: @ActionSizesOffset
     of AimOffsetHeads + MoveOffsetHeads: @ActionSizesMove
     else: @ActionSizesRaw   # contract 16 (raw): five extra heads
@@ -398,6 +399,7 @@ proc configureSeat(seat: NeuralSeat, manifest: JsonNode, userInputs: int, pointe
   seat.logits = newSeq[float32](if target: (if extra > AimOffsetHeads: LogitSizeRaw else: LogitSizeTarget)
     else: (case extra
       of 0: LogitSize
+      of SelfDestructHeads: LogitSizeSelfDestruct
       of AimOffsetHeads: LogitSizeOffset
       else: LogitSizeMove))
 

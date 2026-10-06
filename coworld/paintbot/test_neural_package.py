@@ -32,7 +32,9 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             OBSERVATION_CONTRACT_TEAMS_VIEW_1T_HASH, TEAMS_VIEW_1T_SIZE,
                             OBSERVATION_CONTRACT_TEAMS_VIEW_1P, OBSERVATION_CONTRACT_TEAMS_VIEW_1P_HASH,
                             TEAMS_VIEW_1P_SIZE, OBSERVATION_CONTRACT_TEAMS_VIEW_1I,
-                            OBSERVATION_CONTRACT_TEAMS_VIEW_1I_HASH, TEAMS_VIEW_1I_SIZE)
+                            OBSERVATION_CONTRACT_TEAMS_VIEW_1I_HASH, TEAMS_VIEW_1I_SIZE,
+                            ACTION_CONTRACT_TEAMS_VIEW_1_SELF_DESTRUCT,
+                            ACTION_CONTRACT_TEAMS_VIEW_1_SELF_DESTRUCT_HASH)
 
 ROOT = Path(__file__).parents[2]
 TEAMS, FFA = OBSERVATION_CONTRACT_TEAMS_VIEW_1_HASH, OBSERVATION_CONTRACT_FFA_VIEW_1_HASH
@@ -805,6 +807,27 @@ class Pwnet2Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "heads 9 needs action contract teams.view.1 raw"):
             unpack_package(package({**SCHEMA2, "action_contract": MOVE, "decoder": {"sampling": {
                 "mode": "categorical", "heads": [9]}}}, model=MOVE_MODEL))
+
+    def test_self_destruct_contract(self):
+        """Action contract 17 (self-destruct): teams.view.1's five heads, then head 5 (2 bins); sampling head 5 only."""
+        source = (ROOT / "examples/paintbot/neural_contract.nim").read_text()
+        ids = dict(re.findall(r'^  (\w+)\* = "([^"]*)"', source, re.M))
+        self.assertEqual(ids["ActionContractTeamsView1SelfDestruct"], ACTION_CONTRACT_TEAMS_VIEW_1_SELF_DESTRUCT)
+        self.assertEqual(sha(ACTION_CONTRACT_TEAMS_VIEW_1_SELF_DESTRUCT), ACTION_CONTRACT_TEAMS_VIEW_1_SELF_DESTRUCT_HASH)
+        sd = {**SCHEMA2, "action_contract": ACTION_CONTRACT_TEAMS_VIEW_1_SELF_DESTRUCT_HASH}
+        model = pwnet2(TEAMS_VIEW_1_SIZE, [51, 25, 2, 2, 2, 2],
+                       [(1, [TEAMS_VIEW_1_SIZE, 84, 1, 0], [], TEAMS_VIEW_1_SIZE * 84 + 84)],
+                       act=ACTION_CONTRACT_TEAMS_VIEW_1_SELF_DESTRUCT_HASH)
+        _, _, manifest = unpack_package(package(sd, model=model))
+        self.assertEqual(manifest["action_contract"], ACTION_CONTRACT_TEAMS_VIEW_1_SELF_DESTRUCT_HASH)
+        for heads in ([5], [0, 1, 2, 3, 4], [0, 1, 2, 3, 4, 5]):
+            _, _, manifest = unpack_package(package({**sd, "decoder": {"sampling": {"mode": "categorical",
+                                                                                   "heads": heads}}}, model=model))
+            self.assertEqual(manifest["decoder"]["sampling"]["heads"], heads)
+        for heads in ([6], [5, 6], [9]):
+            with self.assertRaisesRegex(ValueError, "past 5 are not heads of action contract teams.view.1 self-destruct"):
+                unpack_package(package({**sd, "decoder": {"sampling": {"mode": "categorical", "heads": heads}}},
+                                       model=model))
 
     def test_token_layer_norm_cost_and_structure(self):
         # Params 6 = norm (0 or 1) and 7 = eps (FP32 bits) of TOKEN_MLP and TOKEN_MIX: a LayerNorm (gain, shift)

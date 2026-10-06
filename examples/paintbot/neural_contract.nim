@@ -69,6 +69,14 @@ const
   ActionSizesRaw* = [51, 25, 2, 2, 2, RawOffsetBins, RawOffsetBins, WalkDirections, WalkDistances.len, LookDirections]
   LogitSizeRaw* = LogitSize + AimOffsetHeads*TargetRows*RawOffsetBins + WalkDirections + WalkDistances.len +
     LookDirections
+  ## Action contract teams.view.1 self-destruct (17): teams.view.1's five heads, then head 5 = SELF-DESTRUCT, two
+  ## bins (0 no, 1 self-destruct; rules 49: the cog blows up with its current HP, mechanics.selfDestruct). The
+  ## reference decoder (players/neural_decode.bas) calls BASIC's selfDestruct() when head 5 chose 1; the engine
+  ## acts on it only where the rules do (rules >= 49, a live cog that is not disarmed). neuralLayout(21) = 2.
+  ActionContractTeamsView1SelfDestruct* = "paintbot-pw.teams.view.1.action.51-25-2-2-2-2"
+  SelfDestructHeads* = 1
+  ActionSizesSelfDestruct* = [51, 25, 2, 2, 2, 2]
+  LogitSizeSelfDestruct* = LogitSize + 2
   ## Observation contract ffa.view.1 (FFA-kin at any seat count; its width follows the match,
   ## ffaViewLayout) and its action contract, whose heads are sized by the same layout and
   ## point at the observation's rows of the same tick.
@@ -239,7 +247,7 @@ type
     ocTeamsView1p = 206, ocTeamsView1i = 207
   ActionContractVersion* = enum
     acTeamsView1 = 11, acFfaView1Pointer = 12, acTeamsView1Offset = 13, acTeamsView1Move = 14, acTeamsView1Target = 15,
-    acTeamsView1Raw = 16
+    acTeamsView1Raw = 16, acTeamsView1SelfDestruct = 17
 
 const
   ObservationContractTeamsView1Hash* = sha256Hex(ObservationContractTeamsView1)
@@ -259,6 +267,7 @@ const
   ActionContractTeamsView1MoveHash* = sha256Hex(ActionContractTeamsView1Move)
   ActionContractTeamsView1TargetHash* = sha256Hex(ActionContractTeamsView1Target)
   ActionContractTeamsView1RawHash* = sha256Hex(ActionContractTeamsView1Raw)
+  ActionContractTeamsView1SelfDestructHash* = sha256Hex(ActionContractTeamsView1SelfDestruct)
 
 const
   ## Contracts retired for BASIC parity (docs/neural/seat-view.md): their observations read
@@ -328,6 +337,7 @@ proc actionContractHash*(version: ActionContractVersion): string =
   of acTeamsView1Move: ActionContractTeamsView1MoveHash
   of acTeamsView1Target: ActionContractTeamsView1TargetHash
   of acTeamsView1Raw: ActionContractTeamsView1RawHash
+  of acTeamsView1SelfDestruct: ActionContractTeamsView1SelfDestructHash
 proc actionContractId*(version: ActionContractVersion): string =
   case version
   of acTeamsView1: ActionContractTeamsView1
@@ -336,6 +346,7 @@ proc actionContractId*(version: ActionContractVersion): string =
   of acTeamsView1Move: ActionContractTeamsView1Move
   of acTeamsView1Target: ActionContractTeamsView1Target
   of acTeamsView1Raw: ActionContractTeamsView1Raw
+  of acTeamsView1SelfDestruct: ActionContractTeamsView1SelfDestruct
 proc actionContractVersion*(hash: string): ActionContractVersion =
   ## The contract an actor or manifest hash names; ValueError for anything else.
   if hash == ActionContractTeamsView1Hash: acTeamsView1
@@ -344,6 +355,7 @@ proc actionContractVersion*(hash: string): ActionContractVersion =
   elif hash == ActionContractTeamsView1MoveHash: acTeamsView1Move
   elif hash == ActionContractTeamsView1TargetHash: acTeamsView1Target
   elif hash == ActionContractTeamsView1RawHash: acTeamsView1Raw
+  elif hash == ActionContractTeamsView1SelfDestructHash: acTeamsView1SelfDestruct
   elif retiredContract(hash): raise newException(ValueError, "neural action contract " & RetiredMessage)
   else: raise newException(ValueError, "unknown neural action contract")
 
@@ -394,7 +406,7 @@ proc pairs*(observation: ObservationContractVersion, action: ActionContractVersi
   ## Whether the two contracts go together: teams.view.1 with its five-head action contract
   ## or its aim-offset / movement-offset variants, ffa.view.1 with its pointer contract.
   if observation in TeamsObservationContracts: action in {acTeamsView1, acTeamsView1Offset, acTeamsView1Move, acTeamsView1Target,
-    acTeamsView1Raw}
+    acTeamsView1Raw, acTeamsView1SelfDestruct}
   else: action == acFfaView1Pointer
 proc moveOffset*(bin: int): int =
   ## The movement offset (world units, before the team-1 mirror) of a movement-offset bin 0 .. 22:
@@ -409,6 +421,7 @@ proc extraHeads*(action: ActionContractVersion): int =
   of acTeamsView1Offset, acTeamsView1Target: AimOffsetHeads
   of acTeamsView1Move: AimOffsetHeads + MoveOffsetHeads
   of acTeamsView1Raw: AimOffsetHeads + 3
+  of acTeamsView1SelfDestruct: SelfDestructHeads
   else: 0
 proc actionHeadSizes*(action: ActionContractVersion): seq[int] =
   ## The head sizes of a fixed-size action contract (ffa.view.1 pointer: see pointerHeads).
@@ -417,6 +430,7 @@ proc actionHeadSizes*(action: ActionContractVersion): seq[int] =
   of acTeamsView1Offset, acTeamsView1Target: @ActionSizesOffset
   of acTeamsView1Move: @ActionSizesMove
   of acTeamsView1Raw: @ActionSizesRaw
+  of acTeamsView1SelfDestruct: @ActionSizesSelfDestruct
   of acFfaView1Pointer: raise newException(ValueError, "action contract ffa.view.1 pointer is sized by the match (pointerHeads)")
 proc actionLogitSize*(action: ActionContractVersion): int =
   ## Logits per seat of a fixed-size action contract: the sum of its head sizes, except the target-conditioned
@@ -427,6 +441,7 @@ proc actionLogitSize*(action: ActionContractVersion): int =
   of acTeamsView1Move: LogitSizeMove
   of acTeamsView1Target: LogitSizeTarget
   of acTeamsView1Raw: LogitSizeRaw
+  of acTeamsView1SelfDestruct: LogitSizeSelfDestruct
   of acFfaView1Pointer: raise newException(ValueError, "action contract ffa.view.1 pointer is sized by the match (pointerHeads)")
 proc actionLogitHeads*(action: ActionContractVersion): seq[int] =
   ## The logit segments of a fixed-size action contract, in order, as a model's header lists its heads: the head

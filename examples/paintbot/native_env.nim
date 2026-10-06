@@ -894,7 +894,8 @@ proc pw_set_action_contract*(handle: pointer, version: int32): cint {.exportc, c
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32,
-      acTeamsView1Move.int32, acTeamsView1Target.int32, acTeamsView1Raw.int32]: return -1
+      acTeamsView1Move.int32, acTeamsView1Target.int32, acTeamsView1Raw.int32,
+      acTeamsView1SelfDestruct.int32]: return -1
   let contract = ActionContractVersion(version)
   if not pairs(env.obsVersion, contract): return -1
   env.actionContract = contract
@@ -2064,7 +2065,8 @@ proc pw_action_contract_hash*(version: int32, output: ptr UncheckedArray[char],
   ## `version` (11, 12, 13, 14, 15 or 16), NUL-terminated into output (capacity >= 65). Returns 0, -1
   ## for a bad version (the contracts before these were retired for BASIC parity) or buffer.
   if version notin [acTeamsView1.int32, acFfaView1Pointer.int32, acTeamsView1Offset.int32,
-      acTeamsView1Move.int32, acTeamsView1Target.int32, acTeamsView1Raw.int32] or
+      acTeamsView1Move.int32, acTeamsView1Target.int32, acTeamsView1Raw.int32,
+      acTeamsView1SelfDestruct.int32] or
       output == nil or capacity < 65: return -1
   let hash = actionContractHash(ActionContractVersion(version))
   copyMem(output, unsafeAddr hash[0], hash.len)

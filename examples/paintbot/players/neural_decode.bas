@@ -29,6 +29,8 @@
 '   round(5000 * (cos, sin)(2 pi k / 128)), k = head 9, clamped. cos / sin are integer tables x 10000
 '   and every product is rounded half away from zero. Fixed grid points only: nothing is computed for
 '   the network.
+' Its self-destruct variant (17; heads 51, 25, 2, 2, 2, 2; neuralLayout(21) = 2): head 5 = 1 calls selfDestruct()
+'   (the engine acts on it from rules 49, for a live cog that is not disarmed).
 ' fire, grenade and sneak: 1 = on. "Keep" re-issues the aim this script last left the seat
 ' with (its last order, or its walking goal when it gave none), known from the second tick of
 ' a life on; with none known the seat is given no aim and a shot waits for one.
@@ -755,3 +757,9 @@ else
 end if
 chargeGrenade(neuralChoice(3))
 sneak(neuralChoice(4))
+' Action contract 17 (teams.view.1 self-destruct; neuralLayout(21) = 2): head 5 = 1 orders a self-destruct.
+if neuralLayout(21) = 2 then
+  if neuralChoice(5) = 1 then
+    selfDestruct()
+  end if
+end if
