@@ -84,9 +84,9 @@ end sub
 sub rnd10k(v)
   ' v / 10000 rounded half away from zero
   if v >= 0 then
-    rq = (v + 5000) / 10000
+    rq = (v + 5000) \ 10000
   else
-    rq = 0 - ((0 - v + 5000) / 10000)
+    rq = 0 - ((0 - v + 5000) \ 10000)
   end if
 end sub
 

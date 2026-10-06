@@ -8,8 +8,9 @@
 ## BASIC decisions arrive through `onHeroDecision`. This module owns the
 ## VM type on `Game` but never runs a program.
 
+from bassy import Runtime, PrintProc, Limits
 import
-  polyworld/[basic, bodies, fixed, hashes, pathing, profiles, rngs, tapes,
+  polyworld/[bodies, fixed, hashes, pathing, profiles, rngs, tapes,
     visions],
   content,
   maps,

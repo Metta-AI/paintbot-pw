@@ -8,8 +8,9 @@
 ## nothing a villager can see changes while its decision runs, because
 ## commands only queue orders.
 
+import bassy
 import
-  polyworld/[basic, profiles],
+  polyworld/[profiles],
   content,
   sim
 

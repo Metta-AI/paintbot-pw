@@ -1,6 +1,7 @@
 ## Bounded, persistent BASIC players: every seat is a BASIC script with typed observations.
-import polyworld/[basic, cli, controllers, rngs, annotations]
-import sim, oracle, neural_host, seat_view
+import bassy
+import polyworld/[cli, controllers, rngs, annotations]
+import sim, oracle, neural_host, seat_view, observations
 from neural_contract import ActionContractVersion
 export oracle, seat_view
 when defined(coworld): import polyworld/coworld
@@ -13,6 +14,7 @@ type
     seeded: bool
   Bot* = ref object
     runtime*: Runtime
+    observations: Observations
     failed*: bool
     error*: string ## The BasicError that disabled the seat, if any.
     output*: PrintProc
@@ -32,6 +34,7 @@ proc rndRng*(matchSeed: int32, slot: int): Rng =
   ## with the slot), under its own salt.
   initRng(matchSeed, RndSalt xor (uint64(slot+1) shl 32))
 proc limits*(): Limits =
+  ## Returns the bounded compiler and decision budgets for one seat.
   # An advised seat drafts a structured request and, with the terrain prompt on, probes water
   # along three routes and scans every trench and remembered supply for three candidates on the
   # ask tick. That peaked at 19,000 of the old 20,000 instructions and disabled seats late in a
@@ -49,7 +52,9 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat, rnd:RndStream): Host 
   ## The seat's builtins. Perception reads only the seat's SeatView for the tick (seatView,
   ## after decide's beginViews); actions write only the seat's command, shouts and strings.
   result=initHost()
-  proc view(): SeatView = seatView(slot)
+  proc view(): SeatView =
+    ## Reads this seat's current observation boundary.
+    seatView(slot)
   result.addNeuralFunctions(neural)
   result.addStringFunctions(strings)
   when defined(coworld): result.addAnnotationFunctions(strings, playerAnnotations(slot))
@@ -58,102 +63,102 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat, rnd:RndStream): Host 
   discard result.addFunction("shout",1,proc(a:openArray[int32]):int32 =
     if shouts[slot].len>=4:return 0
     shouts[slot].add strings.getString(a[0])[0..<min(256,strings.getString(a[0]).len)];1,68)
-  discard result.addFunction("heardCount",0,proc(a:openArray[int32]):int32 = view().heardCount,4)
+  discard result.addQuery("heardCount",0,proc(a:openArray[int32]):int32 = view().heardCount,4)
   discard result.addFunction("heardText",1,proc(a:openArray[int32]):int32 =
     strings.putString(view().heardText(a[0].int)),4)
-  discard result.addFunction("heardSlot",1,proc(a:openArray[int32]):int32 = view().heardSlot(a[0].int),4)
-  discard result.addFunction("heardX",1,proc(a:openArray[int32]):int32 = view().heardX(a[0].int),4)
-  discard result.addFunction("heardY",1,proc(a:openArray[int32]):int32 = view().heardY(a[0].int),4)
+  discard result.addQuery("heardSlot",1,proc(a:openArray[int32]):int32 = view().heardSlot(a[0].int),4)
+  discard result.addQuery("heardX",1,proc(a:openArray[int32]):int32 = view().heardX(a[0].int),4)
+  discard result.addQuery("heardY",1,proc(a:openArray[int32]):int32 = view().heardY(a[0].int),4)
   discard result.addFunction("sneak",1,proc(a:openArray[int32]):int32 =
     commands[slot].sneak=a[0]!=0;1,4)
   discard result.addFunction("selfDestruct",0,proc(a:openArray[int32]):int32 =
     commands[slot].selfDestruct=true;1,4)
-  discard result.addFunction("soundCount",0,proc(a:openArray[int32]):int32 = view().soundCount,4)
-  discard result.addFunction("soundKind",1,proc(a:openArray[int32]):int32 = view().soundKind(a[0].int),4)
-  discard result.addFunction("soundDirection",1,proc(a:openArray[int32]):int32 = view().soundDirection(a[0].int),4)
-  discard result.addFunction("soundDistance",1,proc(a:openArray[int32]):int32 = view().soundDistance(a[0].int),4)
-  discard result.addFunction("soundAge",1,proc(a:openArray[int32]):int32 = view().soundAge(a[0].int),4)
+  discard result.addQuery("soundCount",0,proc(a:openArray[int32]):int32 = view().soundCount,4)
+  discard result.addQuery("soundKind",1,proc(a:openArray[int32]):int32 = view().soundKind(a[0].int),4)
+  discard result.addQuery("soundDirection",1,proc(a:openArray[int32]):int32 = view().soundDirection(a[0].int),4)
+  discard result.addQuery("soundDistance",1,proc(a:openArray[int32]):int32 = view().soundDistance(a[0].int),4)
+  discard result.addQuery("soundAge",1,proc(a:openArray[int32]):int32 = view().soundAge(a[0].int),4)
   for name in DataNames:discard result.addData(name)
-  discard result.addFunction("visible",1,proc(a:openArray[int32]):int32 = view().visible(a[0].int),4)
-  discard result.addFunction("playerTeam",1,proc(a:openArray[int32]):int32 = view().playerTeam(a[0].int),4)
+  discard result.addQuery("visible",1,proc(a:openArray[int32]):int32 = view().visible(a[0].int),4)
+  discard result.addQuery("playerTeam",1,proc(a:openArray[int32]):int32 = view().playerTeam(a[0].int),4)
   # Nearby agents: nearAgents(radius) lists the agents this seat can see within radius
   # (clamped to 20000), nearest first, at most 64; nearAgentId/X/Y/Hp/Team(k) read entry k,
   # -1 (Hp 0) past the end. Cost follows the neighbourhood, so large games stay cheap.
   discard result.addFunction("nearAgents",1,proc(a:openArray[int32]):int32 = view().nearAgents(a[0].int),16)
-  discard result.addFunction("nearAgentId",1,proc(a:openArray[int32]):int32 = view().nearAgentId(a[0].int),4)
-  discard result.addFunction("nearAgentX",1,proc(a:openArray[int32]):int32 = view().nearAgentX(a[0].int),4)
-  discard result.addFunction("nearAgentY",1,proc(a:openArray[int32]):int32 = view().nearAgentY(a[0].int),4)
-  discard result.addFunction("nearAgentHp",1,proc(a:openArray[int32]):int32 = view().nearAgentHp(a[0].int),4)
-  discard result.addFunction("nearAgentTeam",1,proc(a:openArray[int32]):int32 = view().nearAgentTeam(a[0].int),4)
-  discard result.addFunction("hasUniform",0,proc(a:openArray[int32]):int32 = view().hasUniform,4)
-  discard result.addFunction("playerX",1,proc(a:openArray[int32]):int32 = view().playerX(a[0].int),4)
-  discard result.addFunction("playerY",1,proc(a:openArray[int32]):int32 = view().playerY(a[0].int),4)
-  discard result.addFunction("playerHp",1,proc(a:openArray[int32]):int32 = view().playerHp(a[0].int),4)
-  discard result.addFunction("playerCarrying",1,proc(a:openArray[int32]):int32 = view().playerCarrying(a[0].int),4)
-  discard result.addFunction("playerMisting",1,proc(a:openArray[int32]):int32 = view().playerMisting(a[0].int),4)
-  discard result.addFunction("mistingTicks",0,proc(a:openArray[int32]):int32 = view().mistingTicks,4)
-  discard result.addFunction("gunRange",0,proc(a:openArray[int32]):int32 = view().gunRange,4)
-  discard result.addFunction("hasSniper",0,proc(a:openArray[int32]):int32 = view().hasSniper,4)
-  discard result.addFunction("playerRadar",1,proc(a:openArray[int32]):int32 = view().playerRadar(a[0].int),4)
-  discard result.addFunction("radarTicks",0,proc(a:openArray[int32]):int32 = view().radarTicks,4)
-  discard result.addFunction("radarBoost",0,proc(a:openArray[int32]):int32 = view().radarBoost,4)
+  discard result.addQuery("nearAgentId",1,proc(a:openArray[int32]):int32 = view().nearAgentId(a[0].int),4)
+  discard result.addQuery("nearAgentX",1,proc(a:openArray[int32]):int32 = view().nearAgentX(a[0].int),4)
+  discard result.addQuery("nearAgentY",1,proc(a:openArray[int32]):int32 = view().nearAgentY(a[0].int),4)
+  discard result.addQuery("nearAgentHp",1,proc(a:openArray[int32]):int32 = view().nearAgentHp(a[0].int),4)
+  discard result.addQuery("nearAgentTeam",1,proc(a:openArray[int32]):int32 = view().nearAgentTeam(a[0].int),4)
+  discard result.addQuery("hasUniform",0,proc(a:openArray[int32]):int32 = view().hasUniform,4)
+  discard result.addQuery("playerX",1,proc(a:openArray[int32]):int32 = view().playerX(a[0].int),4)
+  discard result.addQuery("playerY",1,proc(a:openArray[int32]):int32 = view().playerY(a[0].int),4)
+  discard result.addQuery("playerHp",1,proc(a:openArray[int32]):int32 = view().playerHp(a[0].int),4)
+  discard result.addQuery("playerCarrying",1,proc(a:openArray[int32]):int32 = view().playerCarrying(a[0].int),4)
+  discard result.addQuery("playerMisting",1,proc(a:openArray[int32]):int32 = view().playerMisting(a[0].int),4)
+  discard result.addQuery("mistingTicks",0,proc(a:openArray[int32]):int32 = view().mistingTicks,4)
+  discard result.addQuery("gunRange",0,proc(a:openArray[int32]):int32 = view().gunRange,4)
+  discard result.addQuery("hasSniper",0,proc(a:openArray[int32]):int32 = view().hasSniper,4)
+  discard result.addQuery("playerRadar",1,proc(a:openArray[int32]):int32 = view().playerRadar(a[0].int),4)
+  discard result.addQuery("radarTicks",0,proc(a:openArray[int32]):int32 = view().radarTicks,4)
+  discard result.addQuery("radarBoost",0,proc(a:openArray[int32]):int32 = view().radarBoost,4)
   discard result.addFunction("chargeGrenade",1,proc(a:openArray[int32]):int32 =
     commands[slot].chargeGrenade=a[0]!=0;1,4)
-  discard result.addFunction("pickupCount",0,proc(a:openArray[int32]):int32 = view().pickupCount,4)
-  discard result.addFunction("pickupVisible",1,proc(a:openArray[int32]):int32 = view().pickupVisible(a[0].int),4)
-  discard result.addFunction("pickupX",1,proc(a:openArray[int32]):int32 = view().pickupX(a[0].int),4)
-  discard result.addFunction("pickupY",1,proc(a:openArray[int32]):int32 = view().pickupY(a[0].int),4)
-  discard result.addFunction("pickupKind",1,proc(a:openArray[int32]):int32 = view().pickupKind(a[0].int),4)
-  discard result.addFunction("heartCount",0,proc(a:openArray[int32]):int32 = view().heartCount,4)
-  discard result.addFunction("glory",1,proc(a:openArray[int32]):int32 = view().glory(a[0].int),4)
-  discard result.addFunction("teamLives",1,proc(a:openArray[int32]):int32 = view().teamLives(a[0].int),4)
-  discard result.addFunction("awardBehind",0,proc(a:openArray[int32]):int32 = view().awardBehind,4)
-  discard result.addFunction("awardBehindSeconds",0,proc(a:openArray[int32]):int32 = view().awardBehindSeconds,4)
-  discard result.addFunction("teamCogsOut",1,proc(a:openArray[int32]):int32 = view().teamCogsOut(a[0].int),4)
-  discard result.addFunction("awardBehindCogs",0,proc(a:openArray[int32]):int32 = view().awardBehindCogs,4)
-  discard result.addFunction("awardBehindCogsSeconds",0,proc(a:openArray[int32]):int32 = view().awardBehindCogsSeconds,4)
-  discard result.addFunction("gloryHeartCount",0,proc(a:openArray[int32]):int32 = view().gloryHeartCount,4)
-  discard result.addFunction("gloryHeartX",1,proc(a:openArray[int32]):int32 = view().gloryHeartX(a[0].int),4)
-  discard result.addFunction("gloryHeartY",1,proc(a:openArray[int32]):int32 = view().gloryHeartY(a[0].int),4)
-  discard result.addFunction("gloryHeartTicksLeft",1,proc(a:openArray[int32]):int32 = view().gloryHeartTicksLeft(a[0].int),4)
-  discard result.addFunction("controlX",1,proc(a:openArray[int32]):int32 = view().controlX(a[0].int),4)
-  discard result.addFunction("controlY",1,proc(a:openArray[int32]):int32 = view().controlY(a[0].int),4)
-  discard result.addFunction("controlOwner",1,proc(a:openArray[int32]):int32 = view().controlOwner(a[0].int),4)
-  discard result.addFunction("controlCaptureTeam",1,proc(a:openArray[int32]):int32 = view().controlCaptureTeam(a[0].int),4)
-  discard result.addFunction("controlCaptureTicks",1,proc(a:openArray[int32]):int32 = view().controlCaptureTicks(a[0].int),4)
-  discard result.addFunction("controlContested",1,proc(a:openArray[int32]):int32 = view().controlContested(a[0].int),4)
-  discard result.addFunction("controlPoints",1,proc(a:openArray[int32]):int32 = view().controlPoints(a[0].int),4)
+  discard result.addQuery("pickupCount",0,proc(a:openArray[int32]):int32 = view().pickupCount,4)
+  discard result.addQuery("pickupVisible",1,proc(a:openArray[int32]):int32 = view().pickupVisible(a[0].int),4)
+  discard result.addQuery("pickupX",1,proc(a:openArray[int32]):int32 = view().pickupX(a[0].int),4)
+  discard result.addQuery("pickupY",1,proc(a:openArray[int32]):int32 = view().pickupY(a[0].int),4)
+  discard result.addQuery("pickupKind",1,proc(a:openArray[int32]):int32 = view().pickupKind(a[0].int),4)
+  discard result.addQuery("heartCount",0,proc(a:openArray[int32]):int32 = view().heartCount,4)
+  discard result.addQuery("glory",1,proc(a:openArray[int32]):int32 = view().glory(a[0].int),4)
+  discard result.addQuery("teamLives",1,proc(a:openArray[int32]):int32 = view().teamLives(a[0].int),4)
+  discard result.addQuery("awardBehind",0,proc(a:openArray[int32]):int32 = view().awardBehind,4)
+  discard result.addQuery("awardBehindSeconds",0,proc(a:openArray[int32]):int32 = view().awardBehindSeconds,4)
+  discard result.addQuery("teamCogsOut",1,proc(a:openArray[int32]):int32 = view().teamCogsOut(a[0].int),4)
+  discard result.addQuery("awardBehindCogs",0,proc(a:openArray[int32]):int32 = view().awardBehindCogs,4)
+  discard result.addQuery("awardBehindCogsSeconds",0,proc(a:openArray[int32]):int32 = view().awardBehindCogsSeconds,4)
+  discard result.addQuery("gloryHeartCount",0,proc(a:openArray[int32]):int32 = view().gloryHeartCount,4)
+  discard result.addQuery("gloryHeartX",1,proc(a:openArray[int32]):int32 = view().gloryHeartX(a[0].int),4)
+  discard result.addQuery("gloryHeartY",1,proc(a:openArray[int32]):int32 = view().gloryHeartY(a[0].int),4)
+  discard result.addQuery("gloryHeartTicksLeft",1,proc(a:openArray[int32]):int32 = view().gloryHeartTicksLeft(a[0].int),4)
+  discard result.addQuery("controlX",1,proc(a:openArray[int32]):int32 = view().controlX(a[0].int),4)
+  discard result.addQuery("controlY",1,proc(a:openArray[int32]):int32 = view().controlY(a[0].int),4)
+  discard result.addQuery("controlOwner",1,proc(a:openArray[int32]):int32 = view().controlOwner(a[0].int),4)
+  discard result.addQuery("controlCaptureTeam",1,proc(a:openArray[int32]):int32 = view().controlCaptureTeam(a[0].int),4)
+  discard result.addQuery("controlCaptureTicks",1,proc(a:openArray[int32]):int32 = view().controlCaptureTicks(a[0].int),4)
+  discard result.addQuery("controlContested",1,proc(a:openArray[int32]):int32 = view().controlContested(a[0].int),4)
+  discard result.addQuery("controlPoints",1,proc(a:openArray[int32]):int32 = view().controlPoints(a[0].int),4)
   # FFA-kin (Heartland) functions exist only in that mode: the teams game keeps exactly its
   # old host names, so submitted scripts using kin, gene, seatScore... as variables still compile.
   # gameMode is set before any seat is built (coworld config, replay header, native reset).
   # Their fog rules are SeatView's (seat_view.nim).
   if ffa():
-    discard result.addFunction("gameMode",0,proc(a:openArray[int32]):int32 = view().gameModeValue,4)
-    discard result.addFunction("seatCount",0,proc(a:openArray[int32]):int32 = view().seatCount,4)
-    discard result.addFunction("kin",1,proc(a:openArray[int32]):int32 = view().kin(a[0].int),4)
-    discard result.addFunction("gene",2,proc(a:openArray[int32]):int32 = view().gene(a[0].int,a[1].int),4)
-    discard result.addFunction("seatScore",1,proc(a:openArray[int32]):int32 = view().seatScore(a[0].int),4)
-    discard result.addFunction("seatAlive",1,proc(a:openArray[int32]):int32 = view().seatAlive(a[0].int),4)
-    discard result.addFunction("heartOwner",1,proc(a:openArray[int32]):int32 = view().heartOwner(a[0].int),4)
-    discard result.addFunction("territoryBoost",0,proc(a:openArray[int32]):int32 = view().territoryBoost,4)
-    discard result.addFunction("greatHeartCount",0,proc(a:openArray[int32]):int32 = view().greatHeartCount,4)
-    discard result.addFunction("greatHeartX",1,proc(a:openArray[int32]):int32 = view().greatHeartX(a[0].int),4)
-    discard result.addFunction("greatHeartY",1,proc(a:openArray[int32]):int32 = view().greatHeartY(a[0].int),4)
-    discard result.addFunction("greatHeartPresent",1,proc(a:openArray[int32]):int32 = view().greatHeartPresent(a[0].int),4)
-    discard result.addFunction("greatHeartProgress",1,proc(a:openArray[int32]):int32 = view().greatHeartProgress(a[0].int),4)
-    discard result.addFunction("greatHeartDormant",1,proc(a:openArray[int32]):int32 = view().greatHeartDormant(a[0].int),4)
-  discard result.addFunction("mapMinX",0,proc(a:openArray[int32]):int32 = view().mapMinX,4)
-  discard result.addFunction("mapMinY",0,proc(a:openArray[int32]):int32 = view().mapMinY,4)
-  discard result.addFunction("mapMaxX",0,proc(a:openArray[int32]):int32 = view().mapMaxX,4)
-  discard result.addFunction("mapMaxY",0,proc(a:openArray[int32]):int32 = view().mapMaxY,4)
-  discard result.addFunction("terrainHeight",2,proc(a:openArray[int32]):int32 = view().terrainHeight(a[0].int,a[1].int),4)
-  discard result.addFunction("trenchCount",0,proc(a:openArray[int32]):int32 = view().trenchCount,4)
-  discard result.addFunction("trenchX",1,proc(a:openArray[int32]):int32 = view().trenchX(a[0].int),4)
-  discard result.addFunction("trenchY",1,proc(a:openArray[int32]):int32 = view().trenchY(a[0].int),4)
-  discard result.addFunction("trenchW",1,proc(a:openArray[int32]):int32 = view().trenchW(a[0].int),4)
-  discard result.addFunction("trenchH",1,proc(a:openArray[int32]):int32 = view().trenchH(a[0].int),4)
-  discard result.addFunction("trenchAt",2,proc(a:openArray[int32]):int32 = view().trenchAt(a[0],a[1]),8)
-  discard result.addFunction("waterAt",2,proc(a:openArray[int32]):int32 = view().waterAt(a[0].int,a[1].int),8)
+    discard result.addQuery("gameMode",0,proc(a:openArray[int32]):int32 = view().gameModeValue,4)
+    discard result.addQuery("seatCount",0,proc(a:openArray[int32]):int32 = view().seatCount,4)
+    discard result.addQuery("kin",1,proc(a:openArray[int32]):int32 = view().kin(a[0].int),4)
+    discard result.addQuery("gene",2,proc(a:openArray[int32]):int32 = view().gene(a[0].int,a[1].int),4)
+    discard result.addQuery("seatScore",1,proc(a:openArray[int32]):int32 = view().seatScore(a[0].int),4)
+    discard result.addQuery("seatAlive",1,proc(a:openArray[int32]):int32 = view().seatAlive(a[0].int),4)
+    discard result.addQuery("heartOwner",1,proc(a:openArray[int32]):int32 = view().heartOwner(a[0].int),4)
+    discard result.addQuery("territoryBoost",0,proc(a:openArray[int32]):int32 = view().territoryBoost,4)
+    discard result.addQuery("greatHeartCount",0,proc(a:openArray[int32]):int32 = view().greatHeartCount,4)
+    discard result.addQuery("greatHeartX",1,proc(a:openArray[int32]):int32 = view().greatHeartX(a[0].int),4)
+    discard result.addQuery("greatHeartY",1,proc(a:openArray[int32]):int32 = view().greatHeartY(a[0].int),4)
+    discard result.addQuery("greatHeartPresent",1,proc(a:openArray[int32]):int32 = view().greatHeartPresent(a[0].int),4)
+    discard result.addQuery("greatHeartProgress",1,proc(a:openArray[int32]):int32 = view().greatHeartProgress(a[0].int),4)
+    discard result.addQuery("greatHeartDormant",1,proc(a:openArray[int32]):int32 = view().greatHeartDormant(a[0].int),4)
+  discard result.addQuery("mapMinX",0,proc(a:openArray[int32]):int32 = view().mapMinX,4)
+  discard result.addQuery("mapMinY",0,proc(a:openArray[int32]):int32 = view().mapMinY,4)
+  discard result.addQuery("mapMaxX",0,proc(a:openArray[int32]):int32 = view().mapMaxX,4)
+  discard result.addQuery("mapMaxY",0,proc(a:openArray[int32]):int32 = view().mapMaxY,4)
+  discard result.addQuery("terrainHeight",2,proc(a:openArray[int32]):int32 = view().terrainHeight(a[0].int,a[1].int),4)
+  discard result.addQuery("trenchCount",0,proc(a:openArray[int32]):int32 = view().trenchCount,4)
+  discard result.addQuery("trenchX",1,proc(a:openArray[int32]):int32 = view().trenchX(a[0].int),4)
+  discard result.addQuery("trenchY",1,proc(a:openArray[int32]):int32 = view().trenchY(a[0].int),4)
+  discard result.addQuery("trenchW",1,proc(a:openArray[int32]):int32 = view().trenchW(a[0].int),4)
+  discard result.addQuery("trenchH",1,proc(a:openArray[int32]):int32 = view().trenchH(a[0].int),4)
+  discard result.addQuery("trenchAt",2,proc(a:openArray[int32]):int32 = view().trenchAt(a[0],a[1]),8)
+  discard result.addQuery("waterAt",2,proc(a:openArray[int32]):int32 = view().waterAt(a[0].int,a[1].int),8)
   # rnd(n): 0 .. n-1 from the seat's own stream (seeded from the match seed and the slot;
   # never the world's stream). n must be at least 1.
   discard result.addFunction("rnd",1,proc(a:openArray[int32]):int32 =
@@ -167,6 +172,7 @@ proc host(slot:int, strings:StringPool, neural:NeuralSeat, rnd:RndStream): Host 
   discard result.addFunction("shootAt",2,proc(a:openArray[int32]):int32 =
     commands[slot].shoot=true;commands[slot].aim=Point(x:clamp(a[0],minX().int32,maxX().int32),z:clamp(a[1],minZ().int32,maxZ().int32));1,4)
 proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):seq[Bot] =
+  ## Loads seats, binds record observations, and compiles native execution.
   result = newSeq[Bot](Seats)
   # A hosted game journals every advisor request and answer to the asking seat's own log:
   # it is the only record of a decision's exact state that leaves the pod.
@@ -202,10 +208,12 @@ proc loadBots*(groups:seq[BotGroup], playerSlot = 0'i32):seq[Bot] =
       else: echo "seat ", slot, " neural package failed: ", e.msg
     let rnd=RndStream()
     let h=host(slot,strings,neural,rnd)
-    let p=when defined(coworld):compilePlayer(sources[slot],h,limits(),slot)
-      else:compile(sources[slot],h,limits())
+    let p=when defined(coworld):compilePlayer(recordSource() & sources[slot],h,limits(),slot)
+      else:compile(recordSource() & sources[slot],h,limits())
     strings.bindProgram(p)
     result[slot]=Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural,failed:neuralFailed,rnd:rnd)
+    result[slot].observations = bindObservations(result[slot].runtime, p, slot)
+    discard result[slot].runtime.compileNative()
     when defined(coworld):result[slot].output=playerPrinter(slot)
 when defined(pwTraining):
   var peakInstructions* {.threadvar.}: array[MaxSeats, int64]
@@ -221,9 +229,11 @@ when defined(pwTraining):
     let strings=initStringPool(stringLimits)
     let rnd=RndStream()
     let h=host(slot,strings,neural,rnd)
-    let p=compile(source,h,limits())
+    let p=compile(recordSource() & source,h,limits())
     strings.bindProgram(p)
-    Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural,rnd:rnd)
+    result = Bot(runtime:initRuntime(p,h,limits()),strings:strings,neural:neural,rnd:rnd)
+    result.observations = bindObservations(result.runtime, p, slot)
+    discard result.runtime.compileNative()
   proc loadScriptBot*(source: string, slot: int): Bot =
     ## One seat from BASIC source text, as loadBots builds a file seat without a neural package.
     scriptBot(source, slot, loadNeuralSeat("/nonexistent/paintbot-pw-script-seat", slot))
@@ -263,9 +273,10 @@ proc runSeat(b: Bot, slot: int, w: World) =
     b.rnd.seeded = true
   let values = view.dataValues
   b.runtime.restart()
+  b.runtime.invalidateArrays()
+  b.observations.refresh(b.runtime, values)
   b.strings.reset()
   try:
-    for j,name in DataNames:b.runtime.setData(name,values[j])
     let stats = b.runtime.run(b.output)
     peakNativeWork[slot] = max(peakNativeWork[slot], b.neural.nativeWork)
     peakInstructions[slot] = max(peakInstructions[slot], stats.instructions)

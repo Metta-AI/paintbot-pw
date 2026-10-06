@@ -2,8 +2,9 @@
 ## policy.bas and manifest drive a seat with the trainer's logits, and play exactly as the
 ## hosted seat plays the same bundle. Synthetic actor (seeded random weights) only.
 ## Build with --mm:arc --threads:on -d:pwTraining.
+import bassy
 import std/[unittest, os, random, strutils]
-import polyworld/[cli, basic]
+import polyworld/[cli]
 import ../examples/paintbot/[sim, neural_contract, neural_actor, native_env, bots]
 
 when not defined(pwTraining): {.error: "native policy scripts exist only under -d:pwTraining".}

@@ -6,7 +6,8 @@
 ## which the teacher bot decides on the same world and its order is then replaced by the student's.
 ## Synthetic actor (seeded random weights). Build with --mm:arc --threads:on -d:pwTraining.
 import std/[unittest, os, random, strutils]
-import polyworld/[cli, basic]
+import bassy
+import polyworld/[cli]
 import ../examples/paintbot/[sim, neural_contract, neural_actor, native_env, bots]
 
 when not defined(pwTraining): {.error: "native policy scripts exist only under -d:pwTraining".}

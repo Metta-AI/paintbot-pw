@@ -1,5 +1,5 @@
 ## Optional policy telemetry, buffered per seat like PRINT output.
-import std/[json, math, os, tables], basic, jsony
+import std/[json, math, os, tables], bassy, jsony
 
 const
   AnnotationEventLimit* = 2 * 1024

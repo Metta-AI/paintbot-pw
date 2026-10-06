@@ -1,5 +1,5 @@
 ## The same policy surface with absent, bounded, and failing output destinations.
-import std/[json, os, strutils, tempfiles], polyworld/basic
+import std/[json, os, strutils, tempfiles], bassy
 import polyworld/annotations
 
 const Source = """

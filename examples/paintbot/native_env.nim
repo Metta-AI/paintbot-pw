@@ -7,8 +7,8 @@ import jsony
 import sim, kinship, neural_contract, bots, neural_actor, match_config, training_labels
 from neural_host import MaxNeuralOperations, neuralOperationBudget, setConditionals, NeuralSeat
 import polyworld/rngs
-import polyworld/basic
-import snapshot, contract_hash
+import bassy
+import snapshot, basic_states, contract_hash
 import teacher_classes
 
 when not defined(pwTraining): {.error: "native_env requires -d:pwTraining".}
@@ -2840,7 +2840,7 @@ proc pw_net_infer*(net: pointer, observation, state, logits: ptr UncheckedArray[
 # ---- World snapshots (pw_world_save / pw_world_load; training library only, default-off) ----
 # A blob = header (magic, format, build id, observation version, seats) + every NativeEnv field in declaration order
 # through snapshot.nim's codec, the world included, except the BASIC bots: per slot, a scripted or decoder bot is
-# saved as its runtime and string-pool state (polyworld basic saveState), its failure flags, its neural seat and its
+# saved as its runtime and string-pool state (Bassy state adapter), its failure flags, its neural seat and its
 # rnd stream, and on load is rebuilt from the blob's own script / manifest (installScript, decoderFor) before that
 # state is restored. Nothing here runs unless the caller saves or loads.
 const
@@ -2850,7 +2850,9 @@ const
   SnapBuildId = sha256Hex(staticRead("sim.nim") & staticRead("mechanics.nim") & staticRead("native_env.nim") &
     staticRead("neural_host.nim") & staticRead("neural_contract.nim") & staticRead("seat_view.nim") &
     staticRead("bots.nim") & staticRead("kinship.nim") &
-    staticRead("training_labels.nim") & staticRead("snapshot.nim") & staticRead("../../src/polyworld/basic.nim") &
+    staticRead("training_labels.nim") & staticRead("snapshot.nim") &
+    staticRead("basic_states.nim") & staticRead("observations.nim") &
+    staticRead("../../coworld/dependencies.lock") &
     staticRead("../../src/polyworld/rngs.nim"))
 
 var snapLastError {.threadvar.}: string  # pw_world_load_error: why the calling thread's last load was refused

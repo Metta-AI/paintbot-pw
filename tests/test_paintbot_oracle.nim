@@ -1,5 +1,6 @@
+import bassy
 import std/[unittest, os, json, tables, strutils]
-import polyworld/[cli, basic]
+import polyworld/[cli]
 import ../examples/paintbot/[sim, bots, game]
 
 proc arena(): World =

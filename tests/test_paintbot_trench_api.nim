@@ -1,8 +1,9 @@
 ## BASIC can see trench geometry: count, centre, extent, and whether a point is inside one.
 ## Trenches are public map geometry (the tactical map outlines them), so none of this is
 ## fog-gated; testing an enemy's position still needs that enemy to be visible.
+import bassy
 import std/[unittest, os, strutils]
-import polyworld/[cli, basic]
+import polyworld/[cli]
 import ../examples/paintbot/[sim, bots, oracle, game, topography]
 
 proc run(source: string, w: var World): seq[string] =

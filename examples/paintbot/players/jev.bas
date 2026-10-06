@@ -7,22 +7,29 @@
 ' file used to have). The retreat choice, survival dial and wider list are drafted but switched
 ' off below. Without an oracle this file plays exactly like the baseline.
 ' Baseline notes follow. Every cog runs this file on its own: no shared memory, fog-gated
-' vision, int32 only. Territory play is built from four habits that measurably win fights:
+' Vision uses typed integer records and explicit integer division.
+' Territory play is built from four habits that measurably win fights:
 '   1. lead the target by the full gun windup and cancel out our own movement,
 '   2. never walk in a straight line while an opponent can see us,
 '   3. move in squads of four that agree on a heart without talking,
 '   4. refuse a fight we are visibly losing.
-' Budget: 20,000 instructions per decision; an overrun disables the cog, so every loop here
+' Budget: 50,000 instructions per decision; an overrun disables the cog, so every loop here
 ' is bounded by the 16 seats, the heart count, or a fixed iteration count.
-dim avoidUntil(64)
-dim pickupMemoryX(64)
-dim pickupMemoryY(64)
-dim pickupMemoryKind(64)
-dim pickupMemoryTick(64)
+dim avoidUntil(16)
+TYPE SupplyMemory
+  x AS INTEGER
+  y AS INTEGER
+  kind AS INTEGER
+  tick AS INTEGER
+END TYPE
+TYPE MotionMemory
+  x AS INTEGER
+  y AS INTEGER
+  seen AS INTEGER
+END TYPE
+DIM supplies(32) AS SupplyMemory
+DIM motion(16) AS MotionMemory
 dim drF(6)
-dim oldX(16)
-dim oldY(16)
-dim lastSeen(16)
 ' Jev layer knowledge: enemy sighting map (16 x 10 cells of 5 m), heart history, candidates
 ' that outlive an ask until its answer lands, retreat points.
 dim enemyCellTick(160)
@@ -50,11 +57,11 @@ sub isqrt(n)
     exit sub
   end if
   root = 23170
-  guess = (root + n / root) / 2
+  guess = (root + n \ root) \ 2
   iterations = 0
   while guess < root and iterations < 24
     root = guess
-    guess = (root + n / root) / 2
+    guess = (root + n \ root) \ 2
     iterations = iterations + 1
   wend
 end sub
@@ -64,7 +71,7 @@ sub wetLine(ax, ay, bx, by)
   wet = 0
   s3 = 1
   while s3 <= 10
-    if waterAt(ax + (bx - ax) * s3 / 10, ay + (by - ay) * s3 / 10) then
+    if waterAt(ax + (bx - ax) * s3 \ 10, ay + (by - ay) * s3 \ 10) then
       wet = wet + 1
     end if
     s3 = s3 + 1
@@ -75,7 +82,7 @@ end sub
 sub legTime(ax, ay, bx, by)
   wetLine(ax, ay, bx, by)
   isqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
-  legCost = root / 100 + root / 100 * wet * (kWetCost - 1) / 10
+  legCost = root \ 100 + root \ 100 * wet * (kWetCost - 1) \ 10
 end sub
 
 ' Small linear congruential generator; every product stays far inside int32.
@@ -95,29 +102,29 @@ sub planLeg(minTicks, maxTicks)
   end if
   nextRandom()
   legTicks = minTicks + rngState mod (maxTicks - minTicks + 1)
-  tx = threatX - selfX
-  ty = threatY - selfY
+  tx = threatX - me.x
+  ty = threatY - me.y
   isqrt(tx * tx + ty * ty)
   legX = 0
   legY = 0
   if root > 0 then
     ' Perpendicular to the threat, scaled to 100.
-    legX = (0 - ty) * 100 * zig / root
-    legY = tx * 100 * zig / root
+    legX = (0 - ty) * 100 * zig \ root
+    legY = tx * 100 * zig \ root
   end if
   if holding = 0 then
-    fx = goalX - selfX
-    fy = goalY - selfY
+    fx = goalX - me.x
+    fy = goalY - me.y
     isqrt(fx * fx + fy * fy)
     if root > 60 then
-      legX = legX * 3 / 4 + fx * 100 / root
-      legY = legY * 3 / 4 + fy * 100 / root
+      legX = legX * 3 \ 4 + fx * 100 \ root
+      legY = legY * 3 \ 4 + fy * 100 \ root
     end if
   end if
   isqrt(legX * legX + legY * legY)
   if root > 0 then
-    legX = legX * 28 / root
-    legY = legY * 28 / root
+    legX = legX * 28 \ root
+    legY = legY * 28 \ root
   end if
 end sub
 
@@ -163,7 +170,7 @@ sub whereLine(bx, by)
   isqrt(bx * bx + by * by)
   whereD = root
   bearingOf(bx, by)
-  line = strCat(strCat(strCatInt(strNew(""), root / 100), strNew(" m ")), bear)
+  line = strCat(strCat(strCatInt(strNew(""), root \ 100), strNew(" m ")), bear)
 end sub
 
 ' Squad callout by shout, into line: "<Squad>, push <Heart>." (kind 0), "<Squad>, hold <Heart>."
@@ -198,29 +205,29 @@ sub heartFacts(j, kind)
     fAction = strNew("defend")
   end if
   fOwner = strNew("neutral")
-  if controlOwner(j) = selfTeam then
+  if controlOwner(j) = me.team then
     fOwner = strNew("ours")
   else
     if controlOwner(j) >= 0 then
       fOwner = strNew("enemy")
     end if
   end if
-  fx = controlX(j) - selfX
-  fy = controlY(j) - selfY
+  fx = controlX(j) - me.x
+  fy = controlY(j) - me.y
   isqrt(fx * fx + fy * fy)
   fRaw = root
-  fDist = root / 100
+  fDist = root \ 100
   ' Walking speed is 28 units a tick, 24 ticks a second.
-  fReach = root / 672 + 1
+  fReach = root \ 672 + 1
   fThreat = heartThreat(j)
   ' Did an enemy we saw in the last five seconds stand closer to it than we do?
   fCloser = 0
-  e = 1 - selfTeam
-  while e < 16
-    if lastSeen(e) > 0 then
-      if worldTick - lastSeen(e) < 120 then
-        ex = oldX(e) - controlX(j)
-        ey = oldY(e) - controlY(j)
+  e = 1 - me.team
+  while e < rosterLimit
+    if motion(e).seen > 0 then
+      if me.tick - motion(e).seen < 120 then
+        ex = motion(e).x - controlX(j)
+        ey = motion(e).y - controlY(j)
         if ex * ex + ey * ey < fRaw * fRaw then
           fCloser = 1
         end if
@@ -230,7 +237,7 @@ sub heartFacts(j, kind)
   wend
   fCapture = strNew("nobody")
   if controlCaptureTeam(j) >= 0 then
-    if controlCaptureTeam(j) = selfTeam then
+    if controlCaptureTeam(j) = me.team then
       fCapture = strNew("us")
     else
       fCapture = strNew("the enemy")
@@ -239,7 +246,7 @@ sub heartFacts(j, kind)
   fPoints = controlPoints(j)
   fOther = 0
   if j = otherSquadObj then
-    if worldTick - otherSquadTick < 240 then
+    if me.tick - otherSquadTick < 240 then
       fOther = 1
     end if
   end if
@@ -268,37 +275,37 @@ sub terrainFacts(j)
   tTrench = -1
   if tBest < 2147483647 then
     isqrt(tBest)
-    tTrench = root / 100
+    tTrench = root \ 100
   end if
   tFoesNear = 0
   tFoesTrenched = 0
-  e = 1 - selfTeam
-  while e < 16
-    if visible(e) then
-      ex = playerX(e) - hx
-      ey = playerY(e) - hy
+  e = 1 - me.team
+  while e < rosterLimit
+    if agents(e).visible then
+      ex = agents(e).x - hx
+      ey = agents(e).y - hy
       if ex * ex + ey * ey < 2250000 then
         tFoesNear = tFoesNear + 1
-        if trenchAt(playerX(e), playerY(e)) >= 0 then
+        if trenchAt(agents(e).x, agents(e).y) >= 0 then
           tFoesTrenched = tFoesTrenched + 1
         end if
       end if
     end if
     e = e + 2
   wend
-  ex = hx - selfX
-  ey = hy - selfY
+  ex = hx - me.x
+  ey = hy - me.y
   isqrt(ex * ex + ey * ey)
   tLen = root
   tWet = 0
   s2 = 1
   while s2 <= 24
-    if waterAt(selfX + ex * s2 / 24, selfY + ey * s2 / 24) then
+    if waterAt(me.x + ex * s2 \ 24, me.y + ey * s2 \ 24) then
       tWet = tWet + 1
     end if
     s2 = s2 + 1
   wend
-  tWater = tWet * tLen / 24 / 100
+  tWater = tWet * tLen \ 24 \ 100
   ' Squared distances until the end: a square root is a Newton loop, and taking one per
   ' remembered pickup per candidate cost more than the rest of the draft together.
   pG = -1
@@ -307,11 +314,11 @@ sub terrainFacts(j)
   pA = -1
   k2 = 0
   while k2 < pickupCount() and k2 < 32
-    if pickupMemoryTick(k2) > 0 then
-      ex = pickupMemoryX(k2) - hx
-      ey = pickupMemoryY(k2) - hy
+    if supplies(k2).tick > 0 then
+      ex = supplies(k2).x - hx
+      ey = supplies(k2).y - hy
       d2p = ex * ex + ey * ey
-      pk = pickupMemoryKind(k2)
+      pk = supplies(k2).kind
       if pk = 0 then
         if pG < 0 or d2p < pG then
           pG = d2p
@@ -338,41 +345,41 @@ sub terrainFacts(j)
   tGrenade = -1
   if pG >= 0 then
     isqrt(pG)
-    tGrenade = root / 100
+    tGrenade = root \ 100
   end if
   tSpray = -1
   if pS >= 0 then
     isqrt(pS)
-    tSpray = root / 100
+    tSpray = root \ 100
   end if
   tMedkit = -1
   if pM >= 0 then
     isqrt(pM)
-    tMedkit = root / 100
+    tMedkit = root \ 100
   end if
   tArmor = -1
   if pA >= 0 then
     isqrt(pA)
-    tArmor = root / 100
+    tArmor = root \ 100
   end if
 end sub
 
 ' One retreat option: its distance out as a field, and "R<k>" into retLabel for the criterion.
 sub retOption(k, bx, by)
   isqrt(bx * bx + by * by)
-  oracleState(strCat(strCatInt(strNew("retreat_options["), k), strNew("].distance_m")), root / 100)
+  oracleState(strCat(strCatInt(strNew("retreat_options["), k), strNew("].distance_m")), root \ 100)
   retLabel = strCatInt(strNew("R"), k)
 end sub
 
 ' One enemy in view as plain numbers, into the view arrays at slot `n`.
 sub enemyFacts(i, n)
-  ex = playerX(i) - selfX
-  ey = playerY(i) - selfY
+  ex = agents(i).x - me.x
+  ey = agents(i).y - me.y
   isqrt(ex * ex + ey * ey)
-  viewD(n) = root / 100
-  viewHp(n) = playerHp(i)
+  viewD(n) = root \ 100
+  viewHp(n) = agents(i).hp
   viewCarry(n) = 0
-  if playerCarrying(i) then
+  if agents(i).carrying then
     viewCarry(n) = 1
   end if
   ' -1 moving away, 0 holding range, 1 closing on me.
@@ -389,6 +396,10 @@ end sub
 
 if started = 0 then
   started = 1
+  rosterLimit = 16
+  if me.seats < rosterLimit then
+    rosterLimit = me.seats
+  end if
   ' Detour offsets beside a wet route, as tenths of the route's length (see Dry route below).
   drF(0) = -10
   drF(1) = -6
@@ -397,16 +408,16 @@ if started = 0 then
   drF(4) = 6
   drF(5) = 10
   kWetCost = 6
-  rngState = selfId * 4099 + 977
+  rngState = me.id * 4099 + 977
   zig = 1
-  if selfId mod 4 >= 2 then
+  if me.id mod 4 >= 2 then
     zig = -1
   end if
-  lastX = selfX
-  lastY = selfY
+  lastX = me.x
+  lastY = me.y
 end if
-myVX = selfX - lastX
-myVY = selfY - lastY
+myVX = me.x - lastX
+myVY = me.y - lastY
 if myVX > 60 or myVX < -60 or myVY > 60 or myVY < -60 then
   ' A respawn teleports us; that is not a velocity.
   myVX = 0
@@ -418,23 +429,23 @@ if gunWait > 0 then
 end if
 
 ' Drop an unreachable assignment after three seconds without meaningful progress.
-if worldTick mod 72 = 0 then
-  dxProgress = selfX - progressX
-  dyProgress = selfY - progressY
-  if dxProgress * dxProgress + dyProgress * dyProgress < 40000 and objective >= 0 and objective < 64 then
-    dxHeart = controlX(objective) - selfX
-    dyHeart = controlY(objective) - selfY
+if me.tick mod 72 = 0 then
+  dxProgress = me.x - progressX
+  dyProgress = me.y - progressY
+  if dxProgress * dxProgress + dyProgress * dyProgress < 40000 and objective >= 0 and objective < 16 then
+    dxHeart = controlX(objective) - me.x
+    dyHeart = controlY(objective) - me.y
     if dxHeart * dxHeart + dyHeart * dyHeart > 160000 then
-      avoidUntil(objective) = worldTick + 360
+      avoidUntil(objective) = me.tick + 360
     end if
   end if
-  progressX = selfX
-  progressY = selfY
+  progressX = me.x
+  progressY = me.y
 end if
 
 ' Our HP cap is the most we have seen (spawn HP): 3 before rules 49, 10 from them.
-if selfHp > hpCap then
-  hpCap = selfHp
+if me.hp > hpCap then
+  hpCap = me.hp
 end if
 
 ' Opponents and teammates in view. Every query is fog gated.
@@ -447,19 +458,19 @@ foeSumX = 0
 foeSumY = 0
 foesSeen = 0
 i = 0
-while i < 16
-  if i <> selfId and visible(i) then
-    dx = playerX(i) - selfX
-    dy = playerY(i) - selfY
+while i < rosterLimit
+  if i <> me.id and agents(i).visible then
+    dx = agents(i).x - me.x
+    dy = agents(i).y - me.y
     d2 = dx * dx + dy * dy
-    if i mod 2 <> selfTeam then
-      cost = d2 - (3 - playerHp(i)) * kHpBias
-      if kStillBias > 0 and lastSeen(i) = worldTick - 1 then
-        if playerX(i) = oldX(i) and playerY(i) = oldY(i) then
+    if i mod 2 <> me.team then
+      cost = d2 - (3 - agents(i).hp) * kHpBias
+      if kStillBias > 0 and motion(i).seen = me.tick - 1 then
+        if agents(i).x = motion(i).x and agents(i).y = motion(i).y then
           cost = cost - kStillBias
         end if
       end if
-      if playerCarrying(i) then
+      if agents(i).carrying then
         cost = cost - 2500000
         thief = i
       end if
@@ -468,8 +479,8 @@ while i < 16
         bestCost = cost
       end if
       foesSeen = foesSeen + 1
-      foeSumX = foeSumX + playerX(i)
-      foeSumY = foeSumY + playerY(i)
+      foeSumX = foeSumX + agents(i).x
+      foeSumY = foeSumY + agents(i).y
       if d2 < 6760000 then
         foesNear = foesNear + 1
       end if
@@ -483,17 +494,17 @@ while i < 16
 wend
 
 ' ---- How the enemy stands: share of visible enemies with another within 3 m. ----
-if (kLeadSpread > 0 or kSpreadBall or kWantGrenade = 2) and foesSeen > 1 and worldTick mod 6 = 0 then
-  i = 1 - selfTeam
-  while i < 16
-    if visible(i) then
+if (kLeadSpread > 0 or kSpreadBall or kWantGrenade = 2) and foesSeen > 1 and me.tick mod 6 = 0 then
+  i = 1 - me.team
+  while i < rosterLimit
+    if agents(i).visible then
       clD = clD + 1
-      e = 1 - selfTeam
+      e = 1 - me.team
       clHit = 0
-      while e < 16
-        if e <> i and visible(e) then
-          dx = playerX(e) - playerX(i)
-          dy = playerY(e) - playerY(i)
+      while e < rosterLimit
+        if e <> i and agents(e).visible then
+          dx = agents(e).x - agents(i).x
+          dy = agents(e).y - agents(i).y
           if dx * dx + dy * dy <= 90000 then
             clHit = 1
           end if
@@ -507,7 +518,7 @@ if (kLeadSpread > 0 or kSpreadBall or kWantGrenade = 2) and foesSeen > 1 and wor
 end if
 clSpread = 0
 if clD >= 40 then
-  if clN * 1000 / clD < kClumpT then
+  if clN * 1000 \ clD < kClumpT then
     clSpread = 1
   end if
 end if
@@ -518,36 +529,36 @@ end if
 
 ' ---- Focus fire. ----
 if useFocus and foesSeen > 0 then
-  fcX = selfX
-  fcY = selfY
+  fcX = me.x
+  fcY = me.y
   fcN = 1
-  i = selfTeam
-  while i < 16
-    if i <> selfId and visible(i) then
-      dx = playerX(i) - selfX
-      dy = playerY(i) - selfY
+  i = me.team
+  while i < rosterLimit
+    if i <> me.id and agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
       if dx * dx + dy * dy < 2250000 then
-        fcX = fcX + playerX(i)
-        fcY = fcY + playerY(i)
+        fcX = fcX + agents(i).x
+        fcY = fcY + agents(i).y
         fcN = fcN + 1
       end if
     end if
     i = i + 2
   wend
-  fcX = fcX / fcN
-  fcY = fcY / fcN
+  fcX = fcX \ fcN
+  fcY = fcY \ fcN
   fcBest = -1
   fcCost = 2147483647
-  i = 1 - selfTeam
-  while i < 16
-    if visible(i) then
-      dx = playerX(i) - selfX
-      dy = playerY(i) - selfY
+  i = 1 - me.team
+  while i < rosterLimit
+    if agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
       if dx * dx + dy * dy <= gunRange() * gunRange() then
-        ex = playerX(i) - fcX
-        ey = playerY(i) - fcY
-        cost = ex * ex + ey * ey - (3 - playerHp(i)) * kFocusHp
-        if playerCarrying(i) then
+        ex = agents(i).x - fcX
+        ey = agents(i).y - fcY
+        cost = ex * ex + ey * ey - (3 - agents(i).hp) * kFocusHp
+        if agents(i).carrying then
           cost = cost - 2500000
         end if
         if cost < fcCost then
@@ -561,10 +572,10 @@ if useFocus and foesSeen > 0 then
   if fcBest >= 0 then
     ' bestCost keeps its meaning (distance from this cog) for the spray and pickup rules.
     best = fcBest
-    dx = playerX(best) - selfX
-    dy = playerY(best) - selfY
-    bestCost = dx * dx + dy * dy - (3 - playerHp(best)) * 160000
-    if playerCarrying(best) then
+    dx = agents(best).x - me.x
+    dy = agents(best).y - me.y
+    bestCost = dx * dx + dy * dy - (3 - agents(best).hp) * 160000
+    if agents(best).carrying then
       bestCost = bestCost - 2500000
     end if
   end if
@@ -738,8 +749,8 @@ if jevInit = 0 then
   lastAskTick = -1000
   lastAnswerTick = -1000
   lastDirectiveTick = 0
-  hpPrev = selfHp
-  livesPrev = livesLeft
+  hpPrev = me.hp
+  livesPrev = me.livesLeft
   j = 0
   while j < 16
     heartOwnerPrev(j) = -2
@@ -748,21 +759,21 @@ if jevInit = 0 then
 end if
 jevEvent = 0
 selfEvent = 0
-mySquad = ((selfId / 2) mod 8) / 4
-mySeat = ((selfId / 2) mod 8) mod 4
+mySquad = ((me.id \ 2) mod 8) \ 4
+mySeat = ((me.id \ 2) mod 8) mod 4
 ' Enemy sighting map, nearest enemy and its closing speed.
 nearSeat = -1
 nearD2 = 2147483647
-i = 1 - selfTeam
-while i < 16
-  if visible(i) then
-    cx = (playerX(i) + 800) / 500
-    cy = (playerY(i) + 400) / 500
+i = 1 - me.team
+while i < rosterLimit
+  if agents(i).visible then
+    cx = (agents(i).x + 800) \ 500
+    cy = (agents(i).y + 400) \ 500
     if cx >= 0 and cx < 16 and cy >= 0 and cy < 10 then
-      enemyCellTick(cy * 16 + cx) = worldTick + 1
+      enemyCellTick(cy * 16 + cx) = me.tick + 1
     end if
-    dx = playerX(i) - selfX
-    dy = playerY(i) - selfY
+    dx = agents(i).x - me.x
+    dy = agents(i).y - me.y
     if dx * dx + dy * dy < nearD2 then
       nearD2 = dx * dx + dy * dy
       nearSeat = i
@@ -772,9 +783,9 @@ while i < 16
 wend
 closing = 0
 if nearSeat >= 0 then
-  if lastSeen(nearSeat) = worldTick - 1 then
-    ox = oldX(nearSeat) - lastX
-    oy = oldY(nearSeat) - lastY
+  if motion(nearSeat).seen = me.tick - 1 then
+    ox = motion(nearSeat).x - lastX
+    oy = motion(nearSeat).y - lastY
     isqrt(ox * ox + oy * oy)
     prevD = root
     isqrt(nearD2)
@@ -788,23 +799,23 @@ if useTerrain or useSmartGrenade or useSpray then
   trenchFoeD2 = 2147483647
   clusterSize = 0
   clusterSlot = -1
-  i = 1 - selfTeam
-  while i < 16
-    if visible(i) then
-      if trenchAt(playerX(i), playerY(i)) >= 0 then
-        dx = playerX(i) - selfX
-        dy = playerY(i) - selfY
+  i = 1 - me.team
+  while i < rosterLimit
+    if agents(i).visible then
+      if trenchAt(agents(i).x, agents(i).y) >= 0 then
+        dx = agents(i).x - me.x
+        dy = agents(i).y - me.y
         if dx * dx + dy * dy < trenchFoeD2 then
           trenchFoeD2 = dx * dx + dy * dy
           trenchFoe = i
         end if
       end if
       cNear = 0
-      cO = 1 - selfTeam
-      while cO < 16
-        if visible(cO) then
-          cfx = playerX(cO) - playerX(i)
-          cfy = playerY(cO) - playerY(i)
+      cO = 1 - me.team
+      while cO < rosterLimit
+        if agents(cO).visible then
+          cfx = agents(cO).x - agents(i).x
+          cfy = agents(cO).y - agents(i).y
           if cfx * cfx + cfy * cfy < 360000 then
             cNear = cNear + 1
           end if
@@ -819,13 +830,13 @@ if useTerrain or useSmartGrenade or useSpray then
     i = i + 2
   wend
   wantSpray = 0
-  if useSpray and not hasSpray and not carrying then
+  if useSpray and (me.hasSpray = 0) and (me.carrying = 0) then
     if trenchFoe >= 0 and trenchFoeD2 < 4000000 then
       wantSpray = 1
     end if
     if clusterSize >= 3 then
-      cfx = playerX(clusterSlot) - selfX
-      cfy = playerY(clusterSlot) - selfY
+      cfx = agents(clusterSlot).x - me.x
+      cfy = agents(clusterSlot).y - me.y
       if cfx * cfx + cfy * cfy < 4000000 then
         wantSpray = 1
       end if
@@ -839,7 +850,7 @@ neutralCount = 0
 j = 0
 while j < heartCount() and j < 16
   own = controlOwner(j)
-  if own = selfTeam then
+  if own = me.team then
     ourScore24 = ourScore24 + controlPoints(j)
     ownedCount = ownedCount + 1
   else
@@ -853,29 +864,29 @@ while j < heartCount() and j < 16
   if heartOwnerPrev(j) <> own then
     if heartOwnerPrev(j) <> -2 then
       jevEvent = 1
-      lastFlipTick = worldTick + 1
+      lastFlipTick = me.tick + 1
     end if
     heartOwnerPrev(j) = own
   end if
   j = j + 1
 wend
 ' Territory once a second from one seat per team, for scoring decisions offline.
-if useTrace and worldTick mod 24 = 0 and mySquad = 0 and mySeat = 0 then
-  print "terr t="; worldTick; " ours="; ownedCount; " enemy="; enemyCount; " neutral="; neutralCount; " s_ours="; ourScore24 / 24; " s_enemy="; theirScore24 / 24
+if useTrace and me.tick mod 24 = 0 and mySquad = 0 and mySeat = 0 then
+  print "terr t="; me.tick; " ours="; ownedCount; " enemy="; enemyCount; " neutral="; neutralCount; " s_ours="; ourScore24 \ 24; " s_enemy="; theirScore24 \ 24
 end if
 ' Threat near each heart from the sighting map, refreshed twice a second.
-if worldTick mod 12 = selfId mod 12 then
+if me.tick mod 12 = me.id mod 12 then
   j = 0
   while j < heartCount() and j < 16
     heartThreat(j) = 0
-    cx = (controlX(j) + 800) / 500
-    cy = (controlY(j) + 400) / 500
+    cx = (controlX(j) + 800) \ 500
+    cy = (controlY(j) + 400) \ 500
     ny = cy - 1
     while ny <= cy + 1
       nx = cx - 1
       while nx <= cx + 1
         if nx >= 0 and nx < 16 and ny >= 0 and ny < 10 then
-          if enemyCellTick(ny * 16 + nx) > 0 and enemyCellTick(ny * 16 + nx) > worldTick - 120 then
+          if enemyCellTick(ny * 16 + nx) > 0 and enemyCellTick(ny * 16 + nx) > me.tick - 120 then
             heartThreat(j) = 1
           end if
         end if
@@ -891,19 +902,19 @@ end if
 if foesSeen > 0 and foesSeenPrev = 0 then
   jevEvent = 1
   if firstContact = 0 then
-    firstContact = worldTick + 1
+    firstContact = me.tick + 1
   end if
 end if
 if foesSeen = 0 and foesSeenPrev > 0 then
   jevEvent = 1
 end if
-if selfHp < hpPrev then
+if me.hp < hpPrev then
   selfEvent = 1
-  dmgTick = worldTick + 1
+  dmgTick = me.tick + 1
 end if
-if livesLeft < livesPrev then
+if me.livesLeft < livesPrev then
   jevEvent = 1
-  deathTick = worldTick + 1
+  deathTick = me.tick + 1
 end if
 if foesNear > friendsNear and outnumberedPrev = 0 then
   selfEvent = 1
@@ -916,14 +927,14 @@ end if
 if best >= 0 then
   if fightOn = 0 then
     fightOn = 1
-    fightHp = selfHp
+    fightHp = me.hp
   end if
-  fightLast = worldTick
+  fightLast = me.tick
 else
-  if fightOn = 1 and worldTick - fightLast > 48 then
+  if fightOn = 1 and me.tick - fightLast > 48 then
     fightOn = 0
     won = 0
-    if selfHp >= fightHp then
+    if me.hp >= fightHp then
       won = 1
     end if
     fightsWon = fightsWon + won
@@ -931,15 +942,15 @@ else
   end if
 end if
 foesSeenPrev = foesSeen
-hpPrev = selfHp
-livesPrev = livesLeft
+hpPrev = me.hp
+livesPrev = me.livesLeft
 ' Squad callouts (see callout above): "<Squad>, push <Heart>.", "<Squad>, hold <Heart>." or
 ' "<Squad>, carry on.". Three words; the squad word, the verb's first letter (p, h, c) and the
 ' heart's first letter (A + index) carry everything. My own squad's callout is adopted; the
 ' other squad's tells me where they are going.
 h = 0
 while h < heardCount() and h < 4
-  if heardSlot(h) mod 2 = selfTeam then
+  if heardSlot(h) mod 2 = me.team then
     t = heardText(h)
     if strWordCount(t) = 3 then
       hSquad = -1
@@ -966,24 +977,24 @@ while h < heardCount() and h < 4
           hObj = -1
         end if
         if hSquad = mySquad then
-          lastDirectiveTick = worldTick
-          if useRelay and worldTick - lastAnswerTick > 24 and hObj >= 0 and hObj < 16 then
-            print "relay t="; worldTick; " from="; heardSlot(h); " obj="; hObj; " kind="; hKind
+          lastDirectiveTick = me.tick
+          if useRelay and me.tick - lastAnswerTick > 24 and hObj >= 0 and hObj < 16 then
+            print "relay t="; me.tick; " from="; heardSlot(h); " obj="; hObj; " kind="; hKind
             ' Someone else is this squad's voice now: adopt quietly unless useEcho says otherwise.
             amSpeaker = 0
             if hKind = 1 then
               jevGuard = hObj
-              jevGuardUntil = worldTick + kHold
+              jevGuardUntil = me.tick + kHold
               jevObjective = -1
             else
               jevObjective = hObj
-              jevObjectiveUntil = worldTick + kHold
+              jevObjectiveUntil = me.tick + kHold
               jevGuard = -1
             end if
           end if
         else
           otherSquadObj = hObj
-          otherSquadTick = worldTick
+          otherSquadTick = me.tick
         end if
       end if
     end if
@@ -994,32 +1005,32 @@ wend
 ' seconds, and each applied objective fifteen seconds after it was applied. Journaled for
 ' off-policy scoring of prompt variants and for a Brier score against the base rate.
 if survId > 0 then
-  if worldTick - survTick >= 240 then
+  if me.tick - survTick >= 240 then
     lost = 0
-    if livesLeft < survLives then
+    if me.livesLeft < survLives then
       lost = 1
     end if
-    print "out t="; worldTick; " id="; survId; " plose="; survP; " lost="; lost
+    print "out t="; me.tick; " id="; survId; " plose="; survP; " lost="; lost
     survId = 0
   end if
 end if
 if fallId > 0 then
-  if worldTick - fallTick >= 240 then
+  if me.tick - fallTick >= 240 then
     fell = 0
     if ownedCount < fallOwned then
       fell = 1
     end if
-    print "fout t="; worldTick; " id="; fallId; " pfall="; fallP; " fell="; fell
+    print "fout t="; me.tick; " id="; fallId; " pfall="; fallP; " fell="; fell
     fallId = 0
   end if
 end if
 if objOutId > 0 then
-  if worldTick - objOutTick >= 360 then
+  if me.tick - objOutTick >= 360 then
     captured = 0
-    if controlOwner(objOutHeart) = selfTeam then
+    if controlOwner(objOutHeart) = me.team then
       captured = 1
     end if
-    print "objout t="; worldTick; " id="; objOutId; " k="; objOutK; " n="; objOutN; " heart="; objOutHeart; " kind="; objOutKind; " captured="; captured; " lost="; objOutLives - livesLeft; " ours="; ownedCount - objOutOwned
+    print "objout t="; me.tick; " id="; objOutId; " k="; objOutK; " n="; objOutN; " heart="; objOutHeart; " kind="; objOutKind; " captured="; captured; " lost="; objOutLives - me.livesLeft; " ours="; ownedCount - objOutOwned
     objOutId = 0
   end if
 end if
@@ -1027,11 +1038,11 @@ end if
 if jevReq > 0 then
   st = oraclePoll(jevReq)
   if st < 0 then
-    print "fail t="; worldTick; " id="; jevReq
+    print "fail t="; me.tick; " id="; jevReq
     jevReq = 0
   end if
   if st > 0 then
-    lastAnswerTick = worldTick
+    lastAnswerTick = me.tick
     ansObj = oracleAnswer(jevReq, strNew("objective"))
     ansConf = oracleConfidence(jevReq, strNew("objective"))
     rawObj = ansObj
@@ -1041,7 +1052,7 @@ if jevReq > 0 then
     pc1 = oracleProbability(jevReq, strNew("objective"), strNew("C1"))
     pc2 = oracleProbability(jevReq, strNew("objective"), strNew("C2"))
     pCur = oracleProbability(jevReq, strNew("objective"), strNew("current"))
-    print "probs t="; worldTick; " id="; jevReq; " n="; candN; " p0="; pc0; " p1="; pc1; " p2="; pc2; " pcur="; pCur
+    print "probs t="; me.tick; " id="; jevReq; " n="; candN; " p0="; pc0; " p1="; pc1; " p2="; pc2; " pcur="; pCur
     ' Score arm: each candidate valued on its own ordered scale, and code takes the best.
     if useScore then
       sv0 = oracleAnswer(jevReq, strNew("value_C0"))
@@ -1067,7 +1078,7 @@ if jevReq > 0 then
           svBest = 2
         end if
       end if
-      print "score t="; worldTick; " id="; jevReq; " v0="; sv0; " v1="; sv1; " v2="; sv2; " pick="; svBest
+      print "score t="; me.tick; " id="; jevReq; " v0="; sv0; " v1="; sv1; " v2="; sv2; " pick="; svBest
       if svBest >= 0 then
         ansObj = svBest
         ansConf = 1000
@@ -1089,8 +1100,8 @@ if jevReq > 0 then
     end if
     applied = 0
     if ansObj >= 0 then
-      lastDirectiveTick = worldTick
-      shoutTick = worldTick
+      lastDirectiveTick = me.tick
+      shoutTick = me.tick
       amSpeaker = 1
       if useShuffle then
         nextRandom()
@@ -1111,7 +1122,7 @@ if jevReq > 0 then
         ansConf = 1000
       end if
       fresh = 0
-      if worldTick - lastAskTick <= kStale then
+      if me.tick - lastAskTick <= kStale then
         fresh = 1
       end if
       if ansObj < candN and ansConf >= kConf and fresh then
@@ -1131,15 +1142,15 @@ if jevReq > 0 then
         if apply and useObjective then
           if candKind(ansObj) = 1 then
             jevGuard = candHeart(ansObj)
-            jevGuardUntil = worldTick + kHold
+            jevGuardUntil = me.tick + kHold
             jevObjective = -1
           else
             jevObjective = candHeart(ansObj)
-            jevObjectiveUntil = worldTick + kHold
+            jevObjectiveUntil = me.tick + kHold
             jevGuard = -1
           end if
-          lastDirectiveTick = worldTick
-          shoutTick = worldTick
+          lastDirectiveTick = me.tick
+          shoutTick = me.tick
           amSpeaker = 1
           applied = 1
         end if
@@ -1150,8 +1161,8 @@ if jevReq > 0 then
         objOutN = candN + 1
         objOutHeart = candHeart(ansObj)
         objOutKind = candKind(ansObj)
-        objOutTick = worldTick
-        objOutLives = livesLeft
+        objOutTick = me.tick
+        objOutLives = me.livesLeft
         objOutOwned = ownedCount
       end if
     end if
@@ -1160,7 +1171,7 @@ if jevReq > 0 then
     if ansRet > 0 and ansRet < retSent and ansConf >= kConf and useRetreat then
       jevRetX = retX(ansRet)
       jevRetY = retY(ansRet)
-      jevRetUntil = worldTick + kRetreatHold
+      jevRetUntil = me.tick + kRetreatHold
     end if
     if ansRet = 0 then
       jevRetUntil = 0
@@ -1169,12 +1180,12 @@ if jevReq > 0 then
     nFall = oracleAnswer(jevReq, strNew("heart_falling"))
     nTog = oracleAnswer(jevReq, strNew("squad_together"))
     v = oracleAnswer(jevReq, strNew("lose_life"))
-    print "nouls t="; worldTick; " id="; jevReq; " outnum="; nOut; " falling="; nFall; " together="; nTog; " lose="; v
+    print "nouls t="; me.tick; " id="; jevReq; " outnum="; nOut; " falling="; nFall; " together="; nTog; " lose="; v
     if nFall >= 0 then
       if fallId = 0 then
         fallId = jevReq
         fallP = nFall
-        fallTick = worldTick
+        fallTick = me.tick
         fallOwned = ownedCount
       end if
     end if
@@ -1188,20 +1199,20 @@ if jevReq > 0 then
         if v < kDialLow then
           retreatDial = 2
         end if
-        dialUntil = worldTick + 96
+        dialUntil = me.tick + 96
       end if
       if survId = 0 then
         survId = jevReq
         survP = v
-        survTick = worldTick
-        survLives = livesLeft
+        survTick = me.tick
+        survLives = me.livesLeft
       end if
     end if
-    print "ans t="; worldTick; " id="; jevReq; " obj="; jevObjective; " guard="; jevGuard; " ansobj="; ansObj; " rawobj="; rawObj; " n="; candN + 1; " ret="; ansRet; " plose="; v; " dial="; retreatDial; " fresh="; fresh; " greedy="; greedyObj; " explored="; explored; " applied="; applied; " conf="; ansConf
+    print "ans t="; me.tick; " id="; jevReq; " obj="; jevObjective; " guard="; jevGuard; " ansobj="; ansObj; " rawobj="; rawObj; " n="; candN + 1; " ret="; ansRet; " plose="; v; " dial="; retreatDial; " fresh="; fresh; " greedy="; greedyObj; " explored="; explored; " applied="; applied; " conf="; ansConf
     jevReq = 0
   end if
 end if
-if worldTick >= dialUntil then
+if me.tick >= dialUntil then
   retreatDial = 1
 end if
 ' Relay: the cog whose own ask was answered repeats its squad's callout every two seconds while
@@ -1211,14 +1222,14 @@ mayRepeat = amSpeaker
 if useEcho then
   mayRepeat = 1
 end if
-if useRelay and mayRepeat and worldTick - shoutTick >= 0 and (worldTick - shoutTick) mod 48 = 0 then
-  if jevObjective >= 0 and worldTick < jevObjectiveUntil then
+if useRelay and mayRepeat and me.tick - shoutTick >= 0 and (me.tick - shoutTick) mod 48 = 0 then
+  if jevObjective >= 0 and me.tick < jevObjectiveUntil then
     callout(0, jevObjective)
   end if
-  if jevGuard >= 0 and worldTick < jevGuardUntil then
+  if jevGuard >= 0 and me.tick < jevGuardUntil then
     callout(1, jevGuard)
   end if
-  if worldTick = shoutTick and shoutTick > 0 and worldTick >= jevObjectiveUntil and worldTick >= jevGuardUntil then
+  if me.tick = shoutTick and shoutTick > 0 and me.tick >= jevObjectiveUntil and me.tick >= jevGuardUntil then
     ' "Carry on": nothing to adopt, but squadmates should know their asker is alive.
     ' (shoutTick > 0: only after an answer; at tick 0 every cog would otherwise shout and the
     ' baseline's turn-to-speech habit would make the file play differently without an oracle.)
@@ -1227,24 +1238,24 @@ if useRelay and mayRepeat and worldTick - shoutTick >= 0 and (worldTick - shoutT
 end if
 
 ' Where we want to be. Later rules override earlier ones; one walkTo is issued at the end.
-goalX = selfX
-goalY = selfY
+goalX = me.x
+goalY = me.y
 holding = 0
-if carrying then
-  if ownHeartStolen and thief >= 0 then
-    goalX = playerX(thief)
-    goalY = playerY(thief)
+if me.carrying then
+  if me.ownHeartStolen and thief >= 0 then
+    goalX = agents(thief).x
+    goalY = agents(thief).y
   else
-    goalX = homeX
-    goalY = homeY
+    goalX = me.homeX
+    goalY = me.homeY
   end if
 else
   if thief >= 0 then
-    goalX = playerX(thief)
-    goalY = playerY(thief)
+    goalX = agents(thief).x
+    goalY = agents(thief).y
   else
-    goalX = heartX
-    goalY = heartY
+    goalX = me.heartX
+    goalY = me.heartY
   end if
 end if
 
@@ -1254,8 +1265,8 @@ end if
 ' (mirrored for blue, so the two teams play the half turn of each other).
 objective = -1
 if heartCount() > 0 then
-  member = (selfId / 2) mod 8
-  squad = member / 4
+  member = (me.id \ 2) mod 8
+  squad = member \ 4
   seat = member mod 4
   otherTarget = -1
   candCount = 0
@@ -1264,26 +1275,26 @@ if heartCount() > 0 then
   candCost2 = 2147483647
   pass = 0
   while pass < 2
-    refY = homeY - 1500
+    refY = me.homeY - 1500
     if pass = 1 then
-      refY = homeY + 1500
+      refY = me.homeY + 1500
     end if
-    if selfTeam = 1 then
+    if me.team = 1 then
       ' Mirror play: blue's first squad works from below home, the half turn of red's.
       refY = 4000 - refY
     end if
     choice = -1
     choiceCost = 2147483647
     j = 0
-    while j < heartCount() and j < 64
-      if controlOwner(j) <> selfTeam and j <> otherTarget then
-        dx = (controlX(j) - homeX) / 8
-        dy = (controlY(j) - refY) / 8
+    while j < heartCount() and j < 16
+      if controlOwner(j) <> me.team and j <> otherTarget then
+        dx = (controlX(j) - me.homeX) \ 8
+        dy = (controlY(j) - refY) \ 8
         cost = dx * dx + dy * dy
         if controlOwner(j) = -1 then
           cost = cost - 20000
         end if
-        if pass = squad and avoidUntil(j) > worldTick then
+        if pass = squad and avoidUntil(j) > me.tick then
           cost = cost + 4000000
         end if
         if pass = squad then
@@ -1331,9 +1342,9 @@ if heartCount() > 0 then
   ' Ball: squad 1 takes squad 0's objective - the one squad 0 announced, when heard in the last
   ' ten seconds, else the one every cog computes for it - so all eight arrive together.
   if useBall and squad = 1 then
-    if otherSquadObj >= 0 and worldTick - otherSquadTick < 240 then
+    if otherSquadObj >= 0 and me.tick - otherSquadTick < 240 then
       if otherSquadObj < heartCount() then
-        if controlOwner(otherSquadObj) <> selfTeam then
+        if controlOwner(otherSquadObj) <> me.team then
           objective = otherSquadObj
         end if
       end if
@@ -1344,9 +1355,9 @@ if heartCount() > 0 then
     end if
   end if
   ' Jev's objective wins while it is fresh and still not ours.
-  if jevObjective >= 0 and useObjective and worldTick < jevObjectiveUntil then
+  if jevObjective >= 0 and useObjective and me.tick < jevObjectiveUntil then
     if jevObjective < heartCount() then
-      if controlOwner(jevObjective) <> selfTeam then
+      if controlOwner(jevObjective) <> me.team then
         objective = jevObjective
       end if
     end if
@@ -1359,14 +1370,14 @@ if heartCount() > 0 then
     ' Seats 0 and 1 stand in the ring (capturer and backup). Seats 2 and 3 cover from outside
     ' it on the opposing side, and step in if nobody on our team is capturing.
     if seat >= 2 then
-      capturing = controlCaptureTeam(objective) = selfTeam
+      capturing = controlCaptureTeam(objective) = me.team
       if capturing then
         idleCapture = 0
       else
         idleCapture = idleCapture + 1
       end if
-      dx = hx - selfX
-      dy = hy - selfY
+      dx = hx - me.x
+      dy = hy - me.y
       if dx * dx + dy * dy > 640000 or idleCapture < 96 then
         side = 1
         if seat = 3 then
@@ -1374,20 +1385,20 @@ if heartCount() > 0 then
         end if
         ax = 3200 - hx
         ay = 2000 - hy
-        if selfTeam = 0 then
+        if me.team = 0 then
           ax = ax + 1200
         else
           ax = ax - 1200
         end if
         isqrt(ax * ax + ay * ay)
         if root > 0 then
-          goalX = hx + (ax * 3 - ay * 2 * side) * 90 / root
-          goalY = hy + (ay * 3 + ax * 2 * side) * 90 / root
+          goalX = hx + (ax * 3 - ay * 2 * side) * 90 \ root
+          goalY = hy + (ay * 3 + ax * 2 * side) * 90 \ root
         end if
       end if
     end if
-    dx = goalX - selfX
-    dy = goalY - selfY
+    dx = goalX - me.x
+    dy = goalY - me.y
     if dx * dx + dy * dy < 8100 then
       holding = 1
     end if
@@ -1396,14 +1407,14 @@ end if
 
 ' Rules 49: a misting or radar cog cannot attack, so it keeps beside its nearest teammate,
 ' inside the mister's heal (500) or the radar's boost (800).
-if (mistingTicks() > 0 or radarTicks() > 0) and not carrying then
+if (mistingTicks() > 0 or radarTicks() > 0) and me.carrying = 0 then
   mate = -1
   mateD = 2147483647
   i = 0
-  while i < 16
-    if i <> selfId and i mod 2 = selfTeam and visible(i) then
-      dx = playerX(i) - selfX
-      dy = playerY(i) - selfY
+  while i < rosterLimit
+    if i <> me.id and i mod 2 = me.team and agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
       if dx * dx + dy * dy < mateD then
         mate = i
         mateD = dx * dx + dy * dy
@@ -1412,14 +1423,14 @@ if (mistingTicks() > 0 or radarTicks() > 0) and not carrying then
     i = i + 1
   wend
   if mate >= 0 and mateD > 90000 then
-    goalX = playerX(mate)
-    goalY = playerY(mate)
+    goalX = agents(mate).x
+    goalY = agents(mate).y
     holding = 0
   end if
 end if
 
 ' ---- Cover spot: a cover cog stands on the high point beside its post. ----
-if useCoverSpot and objective >= 0 and seat >= 2 and not carrying then
+if useCoverSpot and objective >= 0 and seat >= 2 and (me.carrying = 0) then
   if goalX <> controlX(objective) or goalY <> controlY(objective) then
     if hiDX(0) = 0 then
       hiDX(0) = 100
@@ -1443,8 +1454,8 @@ if useCoverSpot and objective >= 0 and seat >= 2 and not carrying then
     csX = -1
     k = 0
     while k < 8
-      px = goalX + hiDX(k) * kCoverR / 100
-      py = goalY + hiDY(k) * kCoverR / 100
+      px = goalX + hiDX(k) * kCoverR \ 100
+      py = goalY + hiDY(k) * kCoverR \ 100
       if px > mapMinX() + 200 and px < mapMaxX() - 200 and py > mapMinY() + 200 and py < mapMaxY() - 200 then
         if waterAt(px, py) = 0 then
           h = terrainHeight(px, py)
@@ -1460,8 +1471,8 @@ if useCoverSpot and objective >= 0 and seat >= 2 and not carrying then
     if csX >= 0 then
       goalX = csX
       goalY = csY
-      dx = goalX - selfX
-      dy = goalY - selfY
+      dx = goalX - me.x
+      dy = goalY - me.y
       holding = 0
       if dx * dx + dy * dy < 8100 then
         holding = 1
@@ -1472,39 +1483,39 @@ end if
 
 ' Remember seen supplies for ten seconds and equip when it is safe to.
 i = 0
-while i < pickupCount() and i < 64
+while i < pickupCount() and i < 32
   if pickupVisible(i) then
-    pickupMemoryX(i) = pickupX(i)
-    pickupMemoryY(i) = pickupY(i)
-    pickupMemoryKind(i) = pickupKind(i)
-    pickupMemoryTick(i) = worldTick + 1
+    supplies(i).x = pickupX(i)
+    supplies(i).y = pickupY(i)
+    supplies(i).kind = pickupKind(i)
+    supplies(i).tick = me.tick + 1
   end if
   i = i + 1
 wend
-if not carrying and thief < 0 then
+if (me.carrying = 0) and thief < 0 then
   nearest = -1
   nearestCost = 4840000
   j = 0
-  while j < pickupCount() and j < 64
-    if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
-      kind = pickupMemoryKind(j)
-      wanted = (kind = 0 and not hasGrenade and (kWantGrenade = 1 or (kWantGrenade = 2 and clSpread))) or (kind = 2 and selfHp < hpCap) or (kind = 3 and armorHp < 3 and selfHp = hpCap) or (kind = 1 and wantSpray)
+  while j < pickupCount() and j < 32
+    if supplies(j).tick > 0 and me.tick - supplies(j).tick < 240 then
+      kind = supplies(j).kind
+      wanted = (kind = 0 and (me.hasGrenade = 0) and (kWantGrenade = 1 or (kWantGrenade = 2 and clSpread))) or (kind = 2 and me.hp < hpCap) or (kind = 3 and me.armorHp < 3 and me.hp = hpCap) or (kind = 1 and wantSpray)
       ' Rules 49 items: a sniper when we carry no spray, the mister when half hurt, the radar
       ' among friends. Any pickup ends a radar, so its carrier takes only a medkit it needs.
-      wanted = wanted or (kind = 6 and hasSniper() = 0 and hasSpray = 0) or (kind = 5 and selfHp * 2 <= hpCap and mistingTicks() = 0) or (kind = 7 and friendsNear >= 3 and radarTicks() = 0)
-      if radarTicks() > 0 and not (kind = 2 and selfHp * 3 <= hpCap) then
+      wanted = wanted or (kind = 6 and hasSniper() = 0 and me.hasSpray = 0) or (kind = 5 and me.hp * 2 <= hpCap and mistingTicks() = 0) or (kind = 7 and friendsNear >= 3 and radarTicks() = 0)
+      if radarTicks() > 0 and not (kind = 2 and me.hp * 3 <= hpCap) then
         wanted = 0
       end if
       if wanted then
-        dx = pickupMemoryX(j) - selfX
-        dy = pickupMemoryY(j) - selfY
+        dx = supplies(j).x - me.x
+        dy = supplies(j).y - me.y
         cost = dx * dx + dy * dy
-        if kind = 2 and selfHp > 0 and selfHp * 3 <= hpCap then
+        if kind = 2 and me.hp > 0 and me.hp * 3 <= hpCap then
           ' A medkit is worth a whole life to a cog on one hit point.
-          cost = cost / 4
+          cost = cost \ 4
         end if
-        if cost < 10000 and not pickupVisible(j) then
-          pickupMemoryTick(j) = 0
+        if cost < 10000 and (pickupVisible(j) = 0) then
+          supplies(j).tick = 0
         else
           if cost < nearestCost then
             nearest = j
@@ -1515,27 +1526,27 @@ if not carrying and thief < 0 then
     end if
     j = j + 1
   wend
-  if nearest >= 0 and (best < 0 or bestCost > 1440000 or (selfHp > 0 and selfHp * 3 <= hpCap)) then
-    goalX = pickupMemoryX(nearest)
-    goalY = pickupMemoryY(nearest)
+  if nearest >= 0 and (best < 0 or bestCost > 1440000 or (me.hp > 0 and me.hp * 3 <= hpCap)) then
+    goalX = supplies(nearest).x
+    goalY = supplies(nearest).y
     holding = 0
   end if
 end if
 
 ' Refuse a fight we are visibly losing: head for the heart that is far from them and near us.
 ' Jev's survival estimate moves the bar: 0 breaks off when even, 1 is the baseline, 2 is bolder.
-if foesSeen > 0 and foesNear - friendsNear >= retreatDial and not carrying then
-  cx = foeSumX / foesSeen
-  cy = foeSumY / foesSeen
+if foesSeen > 0 and foesNear - friendsNear >= retreatDial and (me.carrying = 0) then
+  cx = foeSumX \ foesSeen
+  cy = foeSumY \ foesSeen
   away = -1
   awayScore = -2147483647
   j = 0
-  while j < heartCount() and j < 64
-    ex = (controlX(j) - cx) / 16
-    ey = (controlY(j) - cy) / 16
-    mx = (controlX(j) - selfX) / 16
-    my = (controlY(j) - selfY) / 16
-    score = ex * ex + ey * ey - (mx * mx + my * my) / 2
+  while j < heartCount() and j < 16
+    ex = (controlX(j) - cx) \ 16
+    ey = (controlY(j) - cy) \ 16
+    mx = (controlX(j) - me.x) \ 16
+    my = (controlY(j) - me.y) \ 16
+    score = ex * ex + ey * ey - (mx * mx + my * my) \ 2
     if score > awayScore then
       away = j
       awayScore = score
@@ -1550,32 +1561,32 @@ if foesSeen > 0 and foesNear - friendsNear >= retreatDial and not carrying then
 end if
 
 ' ---- Tight: keep within kTightR of the visible squad's centre while an enemy is in view. ----
-if useTight and best >= 0 and not carrying then
-  tgX = selfX
-  tgY = selfY
+if useTight and best >= 0 and (me.carrying = 0) then
+  tgX = me.x
+  tgY = me.y
   tgN = 1
-  i = selfTeam
-  while i < 16
-    if i <> selfId and visible(i) then
-      dx = playerX(i) - selfX
-      dy = playerY(i) - selfY
+  i = me.team
+  while i < rosterLimit
+    if i <> me.id and agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
       if dx * dx + dy * dy < 4000000 then
-        tgX = tgX + playerX(i)
-        tgY = tgY + playerY(i)
+        tgX = tgX + agents(i).x
+        tgY = tgY + agents(i).y
         tgN = tgN + 1
       end if
     end if
     i = i + 2
   wend
   if tgN > 1 then
-    tgX = tgX / tgN
-    tgY = tgY / tgN
+    tgX = tgX \ tgN
+    tgY = tgY \ tgN
     dx = goalX - tgX
     dy = goalY - tgY
     isqrt(dx * dx + dy * dy)
     if root > kTightR then
-      goalX = tgX + dx * kTightR / root
-      goalY = tgY + dy * kTightR / root
+      goalX = tgX + dx * kTightR \ root
+      goalY = tgY + dy * kTightR \ root
       holding = 0
     end if
   end if
@@ -1583,14 +1594,14 @@ end if
 ' ---- Regroup. ----
 ' A cog with no ally within 15 m, while an enemy was seen in the last two seconds, walks to its
 ' nearest visible ally (up to 40 m away) instead of on toward the objective.
-if useRegroup and not carrying then
+if useRegroup and (me.carrying = 0) then
   rgBest = 2147483647
   rgMate = -1
-  i = selfTeam
-  while i < 16
-    if i <> selfId and visible(i) then
-      dx = playerX(i) - selfX
-      dy = playerY(i) - selfY
+  i = me.team
+  while i < rosterLimit
+    if i <> me.id and agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
       if dx * dx + dy * dy < rgBest then
         rgBest = dx * dx + dy * dy
         rgMate = i
@@ -1599,10 +1610,10 @@ if useRegroup and not carrying then
     i = i + 2
   wend
   rgDanger = 0
-  e = 1 - selfTeam
-  while e < 16
-    if lastSeen(e) > 0 then
-      if worldTick - lastSeen(e) < 48 then
+  e = 1 - me.team
+  while e < rosterLimit
+    if motion(e).seen > 0 then
+      if me.tick - motion(e).seen < 48 then
         rgDanger = 1
       end if
     end if
@@ -1610,22 +1621,22 @@ if useRegroup and not carrying then
   wend
   if rgMate >= 0 and rgDanger then
     if rgBest > 2250000 and rgBest < 16000000 then
-      goalX = playerX(rgMate)
-      goalY = playerY(rgMate)
+      goalX = agents(rgMate).x
+      goalY = agents(rgMate).y
       holding = 0
     end if
   end if
 end if
 ' ---- Jev overrides on the goal. ----
 ' Guard: stand on one of our hearts that is under threat until the hold runs out.
-if jevGuard >= 0 and useObjective and worldTick < jevGuardUntil and not carrying then
+if jevGuard >= 0 and useObjective and me.tick < jevGuardUntil and (me.carrying = 0) then
   if jevGuard < heartCount() then
-    if controlOwner(jevGuard) = selfTeam then
+    if controlOwner(jevGuard) = me.team then
       goalX = controlX(jevGuard)
       goalY = controlY(jevGuard)
       holding = 0
-      dx = goalX - selfX
-      dy = goalY - selfY
+      dx = goalX - me.x
+      dy = goalY - me.y
       if dx * dx + dy * dy < 8100 then
         holding = 1
       end if
@@ -1633,7 +1644,7 @@ if jevGuard >= 0 and useObjective and worldTick < jevGuardUntil and not carrying
   end if
 end if
 ' Retreat: go where Jev chose for a few seconds.
-if useRetreat and worldTick < jevRetUntil and not carrying then
+if useRetreat and me.tick < jevRetUntil and (me.carrying = 0) then
   goalX = jevRetX
   goalY = jevRetY
   holding = 0
@@ -1641,13 +1652,13 @@ end if
 
 ' ---- Kite. ----
 ktOn = 0
-if useKite and not carrying and foesSeen > 0 then
+if useKite and (me.carrying = 0) and foesSeen > 0 then
   ktFoes = 0
-  e = 1 - selfTeam
-  while e < 16
-    if visible(e) then
-      dx = playerX(e) - selfX
-      dy = playerY(e) - selfY
+  e = 1 - me.team
+  while e < rosterLimit
+    if agents(e).visible then
+      dx = agents(e).x - me.x
+      dy = agents(e).y - me.y
       if dx * dx + dy * dy <= kKiteFoeR2 then
         ktFoes = ktFoes + 1
       end if
@@ -1655,11 +1666,11 @@ if useKite and not carrying and foesSeen > 0 then
     e = e + 2
   wend
   ktMates = 1
-  i = selfTeam
-  while i < 16
-    if i <> selfId and visible(i) then
-      dx = playerX(i) - selfX
-      dy = playerY(i) - selfY
+  i = me.team
+  while i < rosterLimit
+    if i <> me.id and agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
       if dx * dx + dy * dy < kKiteMateR2 then
         ktMates = ktMates + 1
       end if
@@ -1668,17 +1679,17 @@ if useKite and not carrying and foesSeen > 0 then
   wend
   if ktFoes - ktMates >= kKiteMargin then
     ktOn = 1
-    cx = foeSumX / foesSeen
-    cy = foeSumY / foesSeen
+    cx = foeSumX \ foesSeen
+    cy = foeSumY \ foesSeen
     away = -1
     awayScore = -2147483647
     j = 0
     while j < heartCount() and j < 16
-      ex = (controlX(j) - cx) / 16
-      ey = (controlY(j) - cy) / 16
-      mx = (controlX(j) - selfX) / 16
-      my = (controlY(j) - selfY) / 16
-      score = ex * ex + ey * ey - (mx * mx + my * my) / 2
+      ex = (controlX(j) - cx) \ 16
+      ey = (controlY(j) - cy) \ 16
+      mx = (controlX(j) - me.x) \ 16
+      my = (controlY(j) - me.y) \ 16
+      score = ex * ex + ey * ey - (mx * mx + my * my) \ 2
       if score > awayScore then
         away = j
         awayScore = score
@@ -1694,7 +1705,7 @@ if useKite and not carrying and foesSeen > 0 then
 end if
 
 ' ---- High ground. ----
-if useHigh and best >= 0 and not carrying and ktOn = 0 then
+if useHigh and best >= 0 and (me.carrying = 0) and ktOn = 0 then
   if hiDX(0) = 0 then
     hiDX(0) = 100
     hiDY(0) = 0
@@ -1713,12 +1724,12 @@ if useHigh and best >= 0 and not carrying and ktOn = 0 then
     hiDX(7) = 71
     hiDY(7) = -71
   end if
-  hiBest = terrainHeight(selfX, selfY) + kHighMin
+  hiBest = terrainHeight(me.x, me.y) + kHighMin
   hiX = -1
   k = 0
   while k < 8
-    px = selfX + hiDX(k) * kHighR / 100
-    py = selfY + hiDY(k) * kHighR / 100
+    px = me.x + hiDX(k) * kHighR \ 100
+    py = me.y + hiDY(k) * kHighR \ 100
     if px > mapMinX() + 200 and px < mapMaxX() - 200 and py > mapMinY() + 200 and py < mapMaxY() - 200 then
       if waterAt(px, py) = 0 then
         h = terrainHeight(px, py)
@@ -1737,30 +1748,30 @@ if useHigh and best >= 0 and not carrying and ktOn = 0 then
     holding = 0
   else
     if kHighHold then
-      goalX = selfX
-      goalY = selfY
+      goalX = me.x
+      goalY = me.y
       holding = 1
     end if
   end if
 end if
 
 ' ---- Rush a cluster with a grenade. ----
-if useRush and hasGrenade and not carrying and foesSeen > 1 then
+if useRush and me.hasGrenade and (me.carrying = 0) and foesSeen > 1 then
   ruBest = 0
   ruD2 = 2147483647
-  i = 1 - selfTeam
-  while i < 16
-    if visible(i) then
-      dx = playerX(i) - selfX
-      dy = playerY(i) - selfY
+  i = 1 - me.team
+  while i < rosterLimit
+    if agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
       d2 = dx * dx + dy * dy
       if d2 <= kRushR2 then
         ruN = 0
-        e = 1 - selfTeam
-        while e < 16
-          if visible(e) then
-            cfx = playerX(e) - playerX(i)
-            cfy = playerY(e) - playerY(i)
+        e = 1 - me.team
+        while e < rosterLimit
+          if agents(e).visible then
+            cfx = agents(e).x - agents(i).x
+            cfy = agents(e).y - agents(i).y
             if cfx * cfx + cfy * cfy < 108900 then
               ruN = ruN + 1
             end if
@@ -1770,8 +1781,8 @@ if useRush and hasGrenade and not carrying and foesSeen > 1 then
         if ruN > ruBest or (ruN = ruBest and d2 < ruD2) then
           ruBest = ruN
           ruD2 = d2
-          ruX = playerX(i)
-          ruY = playerY(i)
+          ruX = agents(i).x
+          ruY = agents(i).y
         end if
       end if
     end if
@@ -1793,7 +1804,7 @@ if jevReq = 0 and oracleReady() = 0 and askCount < 220 then
   canSquadAsk = 1
   if useLeader then
     canSquadAsk = 0
-    if worldTick - lastDirectiveTick > kLeaderWait * mySeat then
+    if me.tick - lastDirectiveTick > kLeaderWait * mySeat then
       canSquadAsk = 1
     end if
     if mySeat = 0 then
@@ -1805,11 +1816,11 @@ if jevReq = 0 and oracleReady() = 0 and askCount < 220 then
     if jevEvent then
       wantSquad = 1
     end if
-    if worldTick - lastSquadAsk >= kAskDelay then
+    if me.tick - lastSquadAsk >= kAskDelay then
       if fp <> lastFp then
         wantSquad = 1
       end if
-      if worldTick - lastSquadAsk >= 240 then
+      if me.tick - lastSquadAsk >= 240 then
         wantSquad = 1
       end if
     end if
@@ -1818,22 +1829,22 @@ if jevReq = 0 and oracleReady() = 0 and askCount < 220 then
     if selfEvent then
       wantSelf = 1
     end if
-    if foesNear > friendsNear and worldTick - lastSelfAsk >= 72 then
+    if foesNear > friendsNear and me.tick - lastSelfAsk >= 72 then
       wantSelf = 1
     end if
   end if
 end if
 if wantSquad or wantSelf then
   ' Shared facts as fields. State carries what is true; the questions carry the judgment.
-  oracleState(strNew("match.seconds_elapsed"), worldTick / 24)
-  oracleState(strNew("match.our_score"), ourScore24 / 24)
-  oracleState(strNew("match.enemy_score"), theirScore24 / 24)
+  oracleState(strNew("match.seconds_elapsed"), me.tick \ 24)
+  oracleState(strNew("match.our_score"), ourScore24 \ 24)
+  oracleState(strNew("match.enemy_score"), theirScore24 \ 24)
   oracleState(strNew("match.score_to_win"), 900)
   oracleState(strNew("board.hearts_ours"), ownedCount)
   oracleState(strNew("board.hearts_enemy"), enemyCount)
   oracleState(strNew("board.hearts_neutral"), neutralCount)
-  oracleState(strNew("me.hp_of_3"), selfHp)
-  oracleState(strNew("me.lives_left"), livesLeft)
+  oracleState(strNew("me.hp_of_3"), me.hp)
+  oracleState(strNew("me.lives_left"), me.livesLeft)
   oracleState(strNew("me.squadmates_within_12m"), friendsNear - 1)
   oracleState(strNew("me.enemies_within_26m"), foesNear)
   oracleState(strNew("me.fights_won"), fightsWon)
@@ -1841,7 +1852,7 @@ if wantSquad or wantSelf then
   if firstContact = 0 then
     oracleStateText(strNew("match.phase"), strNew("opening: no enemy contact yet"))
   else
-    if worldTick - firstContact < 360 then
+    if me.tick - firstContact < 360 then
       oracleStateText(strNew("match.phase"), strNew("first contact"))
     else
       oracleStateText(strNew("match.phase"), strNew("midgame"))
@@ -1850,16 +1861,16 @@ if wantSquad or wantSelf then
   oracleStateText(strNew("rules"), strNew("Owned hearts keep scoring with nobody standing on them. The first team to 900 points wins. A team with no lives left loses on the spot. Hearts are named by index: a heart's distance and reach time are measured from the cog being asked."))
   oracleStateText(strNew("me.limits"), strNew("I see only my forward cone; enemies not listed may exist. Teammates share nothing except shouts within 12 m. Hearts and scores are public."))
   if useTerrain then
-    oracleState(strNew("me.has_grenade"), hasGrenade)
-    oracleState(strNew("me.has_spray"), hasSpray)
-    oracleState(strNew("me.armor"), armorHp)
+    oracleState(strNew("me.has_grenade"), me.hasGrenade)
+    oracleState(strNew("me.has_spray"), me.hasSpray)
+    oracleState(strNew("me.armor"), me.armorHp)
     oracleStateText(strNew("rules"), strNew("Owned hearts keep scoring with nobody standing on them. The first team to 900 points wins. A team with no lives left loses on the spot. Hearts are named by index. A heart's distance, reach time and water on the route are measured from the cog being asked; the other distances are measured from the heart. Water in the lake slows a cog to a quarter of its speed and leaves it exposed. Trenches are pits: 70% of gunfire from outside passes over a cog standing in one, and climbing out is five times slower. A grenade flies over walls and deals two damage to every cog in its blast, and six to each cog in the trench it lands in, which kills through full armour; grenades refill five seconds after pickup. A spray can hits every cog in a short cone for three damage and ignores trench cover, but it replaces the gun until the carrier dies. A tight enemy group is where one grenade or one spray burst hurts the most cogs. Medkits, armour and spray refill thirty seconds after pickup. A value of -1 means none is known."))
   end if
 end if
 if wantSquad then
   candCount = 0
   lastFp = fp
-  lastSquadAsk = worldTick
+  lastSquadAsk = me.tick
   ' Candidates: the cheapest capture targets, a guard option, the big heart, a strike.
   if candCost0 < 2147483647 then
     candHeart(0) = cheap0
@@ -1883,13 +1894,13 @@ if wantSquad then
   strikeD2 = 2147483647
   j = 0
   while j < heartCount() and j < 16
-    dx = controlX(j) - selfX
-    dy = controlY(j) - selfY
-    d2 = (dx / 8) * (dx / 8) + (dy / 8) * (dy / 8)
-    if controlOwner(j) = selfTeam then
+    dx = controlX(j) - me.x
+    dy = controlY(j) - me.y
+    d2 = (dx \ 8) * (dx \ 8) + (dy \ 8) * (dy \ 8)
+    if controlOwner(j) = me.team then
       danger = heartThreat(j)
       if controlCaptureTeam(j) >= 0 then
-        if controlCaptureTeam(j) <> selfTeam then
+        if controlCaptureTeam(j) <> me.team then
           danger = 1
         end if
       end if
@@ -2061,27 +2072,27 @@ end if
 end if
 retCount = 0
 if wantSelf then
-  lastSelfAsk = worldTick
+  lastSelfAsk = me.tick
   oracleState(strNew("me.gun_ready"), 1)
   if gunWait > 0 then
     oracleState(strNew("me.gun_ready"), 0)
   end if
   oracleState(strNew("me.armored"), 0)
-  if armorHp > 0 then
+  if me.armorHp > 0 then
     oracleState(strNew("me.armored"), 1)
   end if
   oracleState(strNew("me.has_grenade"), 0)
-  if hasGrenade then
+  if me.hasGrenade then
     oracleState(strNew("me.has_grenade"), 1)
   end if
   oracleState(strNew("me.damage_seconds_ago"), 0 - 1)
   if dmgTick > 0 then
-    oracleState(strNew("me.damage_seconds_ago"), (worldTick + 1 - dmgTick) / 24)
+    oracleState(strNew("me.damage_seconds_ago"), (me.tick + 1 - dmgTick) \ 24)
   end if
   viewCount = 0
-  i = 1 - selfTeam
-  while i < 16
-    if visible(i) then
+  i = 1 - me.team
+  while i < rosterLimit
+    if agents(i).visible then
       if viewCount < 3 then
         enemyFacts(i, viewCount)
         viewCount = viewCount + 1
@@ -2118,10 +2129,10 @@ end if
   medD2 = 2147483647
   j = 0
   while j < pickupCount() and j < 32
-    if pickupMemoryKind(j) = 2 and pickupMemoryTick(j) > 0 then
-      if worldTick - pickupMemoryTick(j) < 600 then
-        dx = pickupMemoryX(j) - selfX
-        dy = pickupMemoryY(j) - selfY
+    if supplies(j).kind = 2 and supplies(j).tick > 0 then
+      if me.tick - supplies(j).tick < 600 then
+        dx = supplies(j).x - me.x
+        dy = supplies(j).y - me.y
         if dx * dx + dy * dy < medD2 then
           medD2 = dx * dx + dy * dy
           medkit = j
@@ -2130,20 +2141,20 @@ end if
     end if
     j = j + 1
   wend
-  if medkit >= 0 and selfHp < hpCap then
-    retX(retCount) = pickupMemoryX(medkit)
-    retY(retCount) = pickupMemoryY(medkit)
-    retOption(retCount, pickupMemoryX(medkit) - selfX, pickupMemoryY(medkit) - selfY)
+  if medkit >= 0 and me.hp < hpCap then
+    retX(retCount) = supplies(medkit).x
+    retY(retCount) = supplies(medkit).y
+    retOption(retCount, supplies(medkit).x - me.x, supplies(medkit).y - me.y)
     oracleCriterion(strNew("retreat"), retLabel, strNew("Go to the medkit I remember, which restores my hp."))
     retCount = retCount + 1
   end if
   mate = -1
   mateD2 = 2147483647
-  i = selfTeam
-  while i < 16
-    if i <> selfId and visible(i) then
-      dx = playerX(i) - selfX
-      dy = playerY(i) - selfY
+  i = me.team
+  while i < rosterLimit
+    if i <> me.id and agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
       if dx * dx + dy * dy < mateD2 and dx * dx + dy * dy > 90000 then
         mateD2 = dx * dx + dy * dy
         mate = i
@@ -2152,9 +2163,9 @@ end if
     i = i + 2
   wend
   if mate >= 0 then
-    retX(retCount) = playerX(mate)
-    retY(retCount) = playerY(mate)
-    retOption(retCount, playerX(mate) - selfX, playerY(mate) - selfY)
+    retX(retCount) = agents(mate).x
+    retY(retCount) = agents(mate).y
+    retOption(retCount, agents(mate).x - me.x, agents(mate).y - me.y)
     oracleCriterion(strNew("retreat"), retLabel, strNew("Fall back to my nearest squadmate so we fight together."))
     retCount = retCount + 1
   end if
@@ -2162,9 +2173,9 @@ end if
   ownD2 = 2147483647
   j = 0
   while j < heartCount() and j < 16
-    if controlOwner(j) = selfTeam then
-      dx = (controlX(j) - selfX) / 8
-      dy = (controlY(j) - selfY) / 8
+    if controlOwner(j) = me.team then
+      dx = (controlX(j) - me.x) \ 8
+      dy = (controlY(j) - me.y) \ 8
       if dx * dx + dy * dy < ownD2 then
         ownD2 = dx * dx + dy * dy
         ownHeart = j
@@ -2175,7 +2186,7 @@ end if
   if ownHeart >= 0 then
     retX(retCount) = controlX(ownHeart)
     retY(retCount) = controlY(ownHeart)
-    retOption(retCount, controlX(ownHeart) - selfX, controlY(ownHeart) - selfY)
+    retOption(retCount, controlX(ownHeart) - me.x, controlY(ownHeart) - me.y)
     oracleCriterion(strNew("retreat"), retLabel, strNew("Fall back to the nearest heart we own, where teammates respawn."))
     oracleState(strNew("retreat_threatened"), heartThreat(ownHeart))
     retCount = retCount + 1
@@ -2187,35 +2198,35 @@ if wantSquad or wantSelf then
   oracleCriterion(strNew("lose_life"), strNew("false"), strNew("It is out of contact, or in a fight it is likely to win, or it can disengage if the fight turns."))
   jevReq = oracleAsk()
   if jevReq > 0 then
-    lastAskTick = worldTick
+    lastAskTick = me.tick
     askCount = askCount + 1
     retSent = retCount
-    print "ask t="; worldTick; " id="; jevReq; " squad="; wantSquad; " self="; wantSelf; " cand="; candCount; " ret="; retCount; " seat="; mySeat
+    print "ask t="; me.tick; " id="; jevReq; " squad="; wantSquad; " self="; wantSelf; " cand="; candCount; " ret="; retCount; " seat="; mySeat
   else
-    print "refused t="; worldTick
+    print "refused t="; me.tick
   end if
 end if
 
 ' Facing with nothing to shoot: sweep, then turn to speech and sound.
 if best < 0 then
-  scan = (worldTick / 24 + selfId) mod 4
+  scan = (me.tick \ 24 + me.id) mod 4
   lookX = goalX
   lookY = goalY
   if holding or scan = 1 then
     ' Sweep toward the enemy side first; blue's sweep is the half turn of red's.
-    facing = 1 - 2 * selfTeam
-    lookX = selfX + 2000 * facing
-    lookY = selfY
+    facing = 1 - 2 * me.team
+    lookX = me.x + 2000 * facing
+    lookY = me.y
     if scan = 1 then
-      lookX = selfX
-      lookY = selfY + 2000 * facing
+      lookX = me.x
+      lookY = me.y + 2000 * facing
     end if
     if scan = 2 then
-      lookX = selfX - 2000 * facing
+      lookX = me.x - 2000 * facing
     end if
     if scan = 3 then
-      lookX = selfX
-      lookY = selfY - 2000 * facing
+      lookX = me.x
+      lookY = me.y - 2000 * facing
     end if
   end if
   if heardCount() > 0 then
@@ -2253,14 +2264,14 @@ if best < 0 then
       if bearing = 5 or bearing = 6 or bearing = 7 then
         dySound = -1000
       end if
-      lookX = selfX + dxSound
-      lookY = selfY + dySound
+      lookX = me.x + dxSound
+      lookY = me.y + dySound
     end if
   end if
   lookAt(lookX, lookY)
 end if
 
-if worldTick mod 360 = selfId * 21 then
+if me.tick mod 360 = me.id * 21 then
   if best >= 0 then
     shout(strNew("Contact! Cover this lane."))
   else
@@ -2276,10 +2287,10 @@ end if
 ' ordered at the start of a leg that lasts the whole windup, so our own movement is known.
 moveX = goalX
 moveY = goalY
-inContact = best >= 0 and trenchId < 0
+inContact = best >= 0 and me.trenchId < 0
 if inContact then
-  threatX = playerX(best)
-  threatY = playerY(best)
+  threatX = agents(best).x
+  threatY = agents(best).y
   ' Blocked for three ticks: let the engine's pathing take over for a second.
   if legTicks > 0 and myVX * myVX + myVY * myVY < 64 then
     stalled = stalled + 1
@@ -2287,12 +2298,12 @@ if inContact then
     stalled = 0
   end if
   if stalled >= 3 then
-    pathUntil = worldTick + 24
+    pathUntil = me.tick + 24
     stalled = 0
     legTicks = 0
   end if
-  wantShot = gunWait = 0 and (hasSpray = 0 or bestCost < 640000)
-  if worldTick >= pathUntil then
+  wantShot = gunWait = 0 and (me.hasSpray = 0 or bestCost < 640000)
+  if me.tick >= pathUntil then
     if legTicks <= 0 or (wantShot and legTicks < 6) then
       if wantShot then
         planLeg(6, 9)
@@ -2301,12 +2312,12 @@ if inContact then
       end if
     end if
     legTicks = legTicks - 1
-    moveX = selfX + legX * 4
-    moveY = selfY + legY * 4
+    moveX = me.x + legX * 4
+    moveY = me.y + legY * 4
     if holding then
       ' Stay inside the ring: turn back toward its centre when the leg would leave it.
-      dx = selfX + legX * 2 - goalX
-      dy = selfY + legY * 2 - goalY
+      dx = me.x + legX * 2 - goalX
+      dy = me.y + legY * 2 - goalY
       if dx * dx + dy * dy > 9000 then
         moveX = goalX
         moveY = goalY
@@ -2327,8 +2338,8 @@ end if
 drWalk = 0
 drTx = moveX
 drTy = moveY
-drDx = drTx - selfX
-drDy = drTy - selfY
+drDx = drTx - me.x
+drDy = drTy - me.y
 if drDx * drDx + drDy * drDy > 640000 then
   if drActive then
     drEx = drTx - drGx
@@ -2336,30 +2347,30 @@ if drDx * drDx + drDy * drDy > 640000 then
     if drEx * drEx + drEy * drEy > 1000000 then
       drActive = 0
     end if
-    drEx = drWx - selfX
-    drEy = drWy - selfY
+    drEx = drWx - me.x
+    drEy = drWy - me.y
     if drEx * drEx + drEy * drEy < 90000 then
       drActive = 0
     end if
-    if worldTick - drTick > 240 then
+    if me.tick - drTick > 240 then
       drActive = 0
     end if
   end if
-  if drActive = 0 and worldTick - drTick >= 12 then
-    drTick = worldTick
-    legTime(selfX, selfY, drTx, drTy)
+  if drActive = 0 and me.tick - drTick >= 12 then
+    drTick = me.tick
+    legTime(me.x, me.y, drTx, drTy)
     if wet > 0 then
       drBest = legCost
       drBestK = -1
-      drMx = selfX + drDx / 2
-      drMy = selfY + drDy / 2
+      drMx = me.x + drDx \ 2
+      drMy = me.y + drDy \ 2
       drK = 0
       while drK < 6
-        drCx = drMx - drDy * drF(drK) / 10
-        drCy = drMy + drDx * drF(drK) / 10
+        drCx = drMx - drDy * drF(drK) \ 10
+        drCy = drMy + drDx * drF(drK) \ 10
         if drCx > mapMinX() + 200 and drCx < mapMaxX() - 200 and drCy > mapMinY() + 200 and drCy < mapMaxY() - 200 then
           if waterAt(drCx, drCy) = 0 then
-            legTime(selfX, selfY, drCx, drCy)
+            legTime(me.x, me.y, drCx, drCy)
             drSc = legCost
             legTime(drCx, drCy, drTx, drTy)
             drSc = drSc + legCost
@@ -2393,33 +2404,33 @@ end if
 ' Gun: the ray leaves six moves after the order, from wherever we then stand, along the
 ' direction locked one move from now. Aim where they will be, minus our own drift.
 if best >= 0 then
-  tx = playerX(best)
-  ty = playerY(best)
-  if lastSeen(best) = worldTick - 1 then
+  tx = agents(best).x
+  ty = agents(best).y
+  if motion(best).seen = me.tick - 1 then
     ldK = kLead
     if kLeadSpread > 0 and clD >= 40 then
-      if clN * 1000 / clD < kClumpT then
+      if clN * 1000 \ clD < kClumpT then
         ldK = kLeadSpread
       end if
     end if
-    if kLeadMove > 0 and lastSeen2(best) = worldTick - 2 then
-      if (tx - oldX(best)) * (oldX(best) - oldX2(best)) + (ty - oldY(best)) * (oldY(best) - oldY2(best)) > 0 then
+    if kLeadMove > 0 and lastSeen2(best) = me.tick - 2 then
+      if (tx - motion(best).x) * (motion(best).x - oldX2(best)) + (ty - motion(best).y) * (motion(best).y - oldY2(best)) > 0 then
         ldK = kLeadMove
       end if
     end if
-    tx = tx + (tx - oldX(best)) * ldK
-    ty = ty + (ty - oldY(best)) * ldK
+    tx = tx + (tx - motion(best).x) * ldK
+    ty = ty + (ty - motion(best).y) * ldK
   end if
   stFar = 0
   if kSteadyR2 > 0 then
-    dx = playerX(best) - selfX
-    dy = playerY(best) - selfY
+    dx = agents(best).x - me.x
+    dy = agents(best).y - me.y
     if dx * dx + dy * dy > kSteadyR2 then
       stFar = 1
     end if
   end if
   if useSteady = 0 or stFar then
-    if inContact and worldTick >= pathUntil then
+    if inContact and me.tick >= pathUntil then
       tx = tx - legX * 5
       ty = ty - legY * 5
     else
@@ -2429,18 +2440,18 @@ if best >= 0 then
   end if
   ' Hold fire when a visible teammate stands in the line.
   clear = 1
-  sx = tx - selfX
-  sy = ty - selfY
+  sx = tx - me.x
+  sy = ty - me.y
   isqrt(sx * sx + sy * sy)
   reach = root
   if reach > 0 then
     i = 0
-    while i < 16
-      if i <> selfId and i mod 2 = selfTeam and visible(i) then
-        ox = playerX(i) - selfX
-        oy = playerY(i) - selfY
-        along = (ox * sx + oy * sy) / reach
-        across = (ox * sy - oy * sx) / reach
+    while i < rosterLimit
+      if i <> me.id and i mod 2 = me.team and agents(i).visible then
+        ox = agents(i).x - me.x
+        oy = agents(i).y - me.y
+        along = (ox * sx + oy * sy) \ reach
+        across = (ox * sy - oy * sx) \ reach
         if across < 0 then
           across = 0 - across
         end if
@@ -2451,14 +2462,14 @@ if best >= 0 then
       i = i + 1
     wend
   end if
-  if hasSpray = 0 or bestCost < 640000 then
+  if me.hasSpray = 0 or bestCost < 640000 then
     if clear and gunWait = 0 then
       shootAt(tx, ty)
       gunWait = 25
-      if armorHp > 0 or trenchId >= 0 or carrying then
+      if me.armorHp > 0 or me.trenchId >= 0 or me.carrying then
         gunWait = 73
       end if
-      if hasSpray then
+      if me.hasSpray then
         gunWait = 25
       end if
     else
@@ -2470,31 +2481,31 @@ if best >= 0 then
 end if
 
 i = 0
-while i < 16
-  if visible(i) then
-    oldX2(i) = oldX(i)
-    oldY2(i) = oldY(i)
-    lastSeen2(i) = lastSeen(i)
-    oldX(i) = playerX(i)
-    oldY(i) = playerY(i)
-    lastSeen(i) = worldTick
+while i < rosterLimit
+  if agents(i).visible then
+    oldX2(i) = motion(i).x
+    oldY2(i) = motion(i).y
+    lastSeen2(i) = motion(i).seen
+    motion(i).x = agents(i).x
+    motion(i).y = agents(i).y
+    motion(i).seen = me.tick
   end if
   i = i + 1
 wend
 
 ' Grenade: match the charge to the distance, never onto a visible teammate.
-if hasGrenade and best >= 0 then
-  nx = playerX(best)
-  ny = playerY(best)
-  dx = nx - selfX
-  dy = ny - selfY
+if me.hasGrenade and best >= 0 then
+  nx = agents(best).x
+  ny = agents(best).y
+  dx = nx - me.x
+  dy = ny - me.y
   d2 = dx * dx + dy * dy
   safe = 1
   i = 0
-  while i < 16
-    if i mod 2 = selfTeam and visible(i) then
-      fx = playerX(i) - nx
-      fy = playerY(i) - ny
+  while i < rosterLimit
+    if i mod 2 = me.team and agents(i).visible then
+      fx = agents(i).x - nx
+      fy = agents(i).y - ny
       if fx * fx + fy * fy < 202500 then
         safe = 0
       end if
@@ -2503,13 +2514,13 @@ if hasGrenade and best >= 0 then
   wend
   if safe and d2 > 160000 and d2 < 1562500 then
     isqrt(d2)
-    need = (root - 150) * 24 / 1130 + 1
+    need = (root - 150) * 24 \ 1130 + 1
     if need < 1 then
       need = 1
     end if
     lookAt(nx, ny)
-    chargeGrenade(grenadeCharge < need)
-    if grenadeCharge >= need then
+    chargeGrenade(me.grenadeCharge < need)
+    if me.grenadeCharge >= need then
       shout(strNew("Grenade out!"))
     end if
   end if
@@ -2520,33 +2531,33 @@ end if
 ' does the enemy the most damage - two to every cog in it, six to each in the trench it lands in -
 ' so a cluster or a trench beats a lone cog in the open. Once charging, the target is kept: a
 ' charge sized for one distance overshoots another.
-if useSmartGrenade and hasGrenade and not carrying then
-  if grenadeCharge = 0 then
+if useSmartGrenade and me.hasGrenade and (me.carrying = 0) then
+  if me.grenadeCharge = 0 then
     sgScore = 0
-    i = 1 - selfTeam
-    while i < 16
+    i = 1 - me.team
+    while i < rosterLimit
       spLen(i) = -2
-      if visible(i) then
-        spLen(i) = trenchAt(playerX(i), playerY(i))
+      if agents(i).visible then
+        spLen(i) = trenchAt(agents(i).x, agents(i).y)
       end if
       i = i + 2
     wend
-    i = 1 - selfTeam
-    while i < 16
-      if visible(i) then
-        sgLx = playerX(i)
-        sgLy = playerY(i)
-        dx = sgLx - selfX
-        dy = sgLy - selfY
+    i = 1 - me.team
+    while i < rosterLimit
+      if agents(i).visible then
+        sgLx = agents(i).x
+        sgLy = agents(i).y
+        dx = sgLx - me.x
+        dy = sgLy - me.y
         d2 = dx * dx + dy * dy
         if d2 > 202500 and d2 < 1562500 then
           sgLt = spLen(i)
           sgS = 0
-          sgO = 1 - selfTeam
-          while sgO < 16
-            if visible(sgO) then
-              cfx = playerX(sgO) - sgLx
-              cfy = playerY(sgO) - sgLy
+          sgO = 1 - me.team
+          while sgO < rosterLimit
+            if agents(sgO).visible then
+              cfx = agents(sgO).x - sgLx
+              cfy = agents(sgO).y - sgLy
               if cfx * cfx + cfy * cfy < 108900 then
                 sgOt = spLen(sgO)
                 if sgOt >= 0 and sgOt = sgLt then
@@ -2563,11 +2574,11 @@ if useSmartGrenade and hasGrenade and not carrying then
             sgO = sgO + 2
           wend
           ' Never onto a teammate, with the baseline's own margin.
-          sgO = selfTeam
-          while sgO < 16
-            if sgO <> selfId and visible(sgO) then
-              cfx = playerX(sgO) - sgLx
-              cfy = playerY(sgO) - sgLy
+          sgO = me.team
+          while sgO < rosterLimit
+            if sgO <> me.id and agents(sgO).visible then
+              cfx = agents(sgO).x - sgLx
+              cfy = agents(sgO).y - sgLy
               if cfx * cfx + cfy * cfy < 202500 then
                 sgS = 0
               end if
@@ -2585,17 +2596,17 @@ if useSmartGrenade and hasGrenade and not carrying then
     wend
   end if
   if sgScore > 0 then
-    dx = sgX - selfX
-    dy = sgY - selfY
+    dx = sgX - me.x
+    dy = sgY - me.y
     isqrt(dx * dx + dy * dy)
-    need = (root - 150) * 24 / 1130 + 1
+    need = (root - 150) * 24 \ 1130 + 1
     if need < 1 then
       need = 1
     end if
     lookAt(sgX, sgY)
-    chargeGrenade(grenadeCharge < need)
-    if grenadeCharge >= need then
-      print "gren t="; worldTick; " score="; sgScore
+    chargeGrenade(me.grenadeCharge < need)
+    if me.grenadeCharge >= need then
+      print "gren t="; me.tick; " score="; sgScore
       sgScore = 0
     end if
   end if
@@ -2603,13 +2614,13 @@ end if
 ' ---- Spray down the line that holds the most enemies. ----
 ' A burst hits every cog in a ~62 degree cone within 8.5 m for three damage, so aimed down the
 ' line with the most enemies in it one burst can drop several. The baseline aims at its gun target.
-if useSpray and hasSpray and not carrying then
-  i = 1 - selfTeam
-  while i < 16
+if useSpray and me.hasSpray and (me.carrying = 0) then
+  i = 1 - me.team
+  while i < rosterLimit
     spLen(i) = 0
-    if visible(i) then
-      dx = playerX(i) - selfX
-      dy = playerY(i) - selfY
+    if agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
       d2 = dx * dx + dy * dy
       if d2 < 810000 then
         isqrt(d2)
@@ -2619,16 +2630,16 @@ if useSpray and hasSpray and not carrying then
     i = i + 2
   wend
   spBest = 0
-  i = 1 - selfTeam
-  while i < 16
+  i = 1 - me.team
+  while i < rosterLimit
     if spLen(i) > 0 then
-      spAx = playerX(i) - selfX
-      spAy = playerY(i) - selfY
+      spAx = agents(i).x - me.x
+      spAy = agents(i).y - me.y
       spN = 0
-      sgO = 1 - selfTeam
-      while sgO < 16
+      sgO = 1 - me.team
+      while sgO < rosterLimit
         if spLen(sgO) > 0 then
-          spDot = spAx * (playerX(sgO) - selfX) + spAy * (playerY(sgO) - selfY)
+          spDot = spAx * (agents(sgO).x - me.x) + spAy * (agents(sgO).y - me.y)
           ' cos 31 degrees is 0.857: inside the cone when the angle between them is smaller.
           if spDot > 0 then
             if spDot * 1000 >= 857 * spLen(i) * spLen(sgO) then
@@ -2640,8 +2651,8 @@ if useSpray and hasSpray and not carrying then
       wend
       if spN > spBest then
         spBest = spN
-        spX = playerX(i)
-        spY = playerY(i)
+        spX = agents(i).x
+        spY = agents(i).y
       end if
     end if
     i = i + 2
@@ -2651,43 +2662,43 @@ if useSpray and hasSpray and not carrying then
     if gunWait = 0 then
       shootAt(spX, spY)
       gunWait = 25
-      print "spray t="; worldTick; " cone="; spBest
+      print "spray t="; me.tick; " cone="; spBest
     end if
   end if
 end if
 
 ' ---- Steady: stand still from a gun order until its ray leaves. ----
-if useSteady and hasSpray = 0 then
+if useSteady and me.hasSpray = 0 then
   if (gunWait = 25 or gunWait = 73) and stFar = 0 then
-    stUntil = worldTick + 6
+    stUntil = me.tick + 6
   end if
-  if worldTick < stUntil then
-    walkTo(selfX, selfY)
+  if me.tick < stUntil then
+    walkTo(me.x, me.y)
   end if
 end if
 
 ' Quiet approach to the objective when nothing is in sight but something was heard.
 if best < 0 and soundCount() > 0 and objective >= 0 then
-  dx = controlX(objective) - selfX
-  dy = controlY(objective) - selfY
+  dx = controlX(objective) - me.x
+  dy = controlY(objective) - me.y
   if dx * dx + dy * dy < 810000 then
     sneak(1)
   end if
 end if
 
 ' Rules 49 self-destruct: a dying cog with no teammate in the blast (270) takes a foe it can kill.
-if selfHp > 0 and selfHp * 3 <= hpCap and mistingTicks() = 0 and radarTicks() = 0 then
+if me.hp > 0 and me.hp * 3 <= hpCap and mistingTicks() = 0 and radarTicks() = 0 then
   kills = 0
   i = 0
-  while i < 16
-    if i <> selfId and visible(i) then
-      dx = playerX(i) - selfX
-      dy = playerY(i) - selfY
+  while i < rosterLimit
+    if i <> me.id and agents(i).visible then
+      dx = agents(i).x - me.x
+      dy = agents(i).y - me.y
       if dx * dx + dy * dy <= 72900 then
-        if i mod 2 = selfTeam then
+        if i mod 2 = me.team then
           kills = -100
         else
-          if playerHp(i) <= selfHp then
+          if agents(i).hp <= me.hp then
             kills = kills + 1
           end if
         end if
@@ -2700,5 +2711,5 @@ if selfHp > 0 and selfHp * 3 <= hpCap and mistingTicks() = 0 and radarTicks() = 
   end if
 end if
 
-lastX = selfX
-lastY = selfY
+lastX = me.x
+lastY = me.y

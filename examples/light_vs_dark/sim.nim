@@ -4,8 +4,9 @@
 ## rings, and replay integers stay on tiles derived from `cell(body.pos)`.
 ## This module must not import anything that returns a float.
 
+from bassy import Runtime, PrintProc, Limits
 import
-  polyworld/[basic, bodies, fixed, hashes, pathing, profiles, rngs, tapes,
+  polyworld/[bodies, fixed, hashes, pathing, profiles, rngs, tapes,
     visions],
   content,
   maps,

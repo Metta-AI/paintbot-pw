@@ -15,7 +15,8 @@
 ## copy playing identically; pw_world_save / load.
 ## Build with --mm:arc --threads:on -d:pwTraining.
 import std/[unittest, random, importutils, os]
-import polyworld/[cli, basic]
+import bassy
+import polyworld/[cli]
 import ../examples/paintbot/[sim, neural_contract, neural_actor, native_env, seat_view, bots, oracle, contract_hash]
 
 when not defined(pwTraining): {.error: "the native ABI exists only under -d:pwTraining".}

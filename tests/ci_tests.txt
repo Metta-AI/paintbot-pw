@@ -99,6 +99,8 @@ nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_spray.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_weapon_stats.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_training_telemetry.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_save_load.nim
+nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_bassy_snapshots.nim
+nim r --mm:arc --threads:on -d:pwTraining -d:bassyNoJit tests/test_paintbot_bassy_snapshots.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_damage_taken.nim
 nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_hit_log.nim
 nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_kill_log.nim
@@ -162,6 +164,8 @@ python coworld/paintbot/tools/make_jev_baseline.py --check
 nim r tests/test_paintbot_art.nim
 python tests/test_paintbot_art.py
 
+nim r -d:headless -d:pwTraining tests/test_paintbot_bassy.nim
+nim r -d:headless -d:pwTraining -d:bassyNoJit tests/test_paintbot_bassy.nim
 nim r tests/test_annotations.nim
 
 [posix-only] python coworld/paintbot/test_annotations.py

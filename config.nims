@@ -13,6 +13,8 @@ if dependencyRoot.len > 0:
     let directory = dependencyRoot / name
     switch("path", if dirExists(directory / "src"): directory / "src" else: directory)
 else:
+  --path:"../bassy/src"
+  --path:"../fixxy/src"
   switch("path", getEnv("SILKY_PATH", "../silky/src"))
   --path:"../shady/src"
   --path:"../noisy/src"

@@ -3,8 +3,9 @@
 ## an unscripted handle matches the reference engine exactly, and errors disable a seat
 ## the way the host does, and the mapping-ceiling diagnostics (pw_script_decide /
 ## pw_set_seat_override) reproduce exact scripted play with mask 0. Build with --mm:arc --threads:on -d:pwTraining.
+import bassy
 import std/[unittest, os]
-import polyworld/[cli, basic]
+import polyworld/[cli]
 import ../examples/paintbot/[sim, neural_contract, native_env, bots]
 
 when not defined(pwTraining): {.error: "native scripts exist only under -d:pwTraining".}

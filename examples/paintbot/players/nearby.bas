@@ -28,11 +28,11 @@ sub isqrt(n)
     exit sub
   end if
   root = 23170
-  guess = (root + n / root) / 2
+  guess = (root + n \ root) \ 2
   iterations = 0
   while guess < root and iterations < 24
     root = guess
-    guess = (root + n / root) / 2
+    guess = (root + n \ root) \ 2
     iterations = iterations + 1
   wend
 end sub
@@ -42,7 +42,7 @@ sub wetLine(ax, ay, bx, by)
   wet = 0
   s3 = 1
   while s3 <= 10
-    if waterAt(ax + (bx - ax) * s3 / 10, ay + (by - ay) * s3 / 10) then
+    if waterAt(ax + (bx - ax) * s3 \ 10, ay + (by - ay) * s3 \ 10) then
       wet = wet + 1
     end if
     s3 = s3 + 1
@@ -53,7 +53,7 @@ end sub
 sub legTime(ax, ay, bx, by)
   wetLine(ax, ay, bx, by)
   isqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay))
-  legCost = root / 100 + root / 100 * wet * (kWetCost - 1) / 10
+  legCost = root \ 100 + root \ 100 * wet * (kWetCost - 1) \ 10
 end sub
 
 ' Small linear congruential generator; every product stays far inside int32.
@@ -80,22 +80,22 @@ sub planLeg(minTicks, maxTicks)
   legY = 0
   if root > 0 then
     ' Perpendicular to the threat, scaled to 100.
-    legX = (0 - ty) * 100 * zig / root
-    legY = tx * 100 * zig / root
+    legX = (0 - ty) * 100 * zig \ root
+    legY = tx * 100 * zig \ root
   end if
   if holding = 0 then
     fx = goalX - selfX
     fy = goalY - selfY
     isqrt(fx * fx + fy * fy)
     if root > 60 then
-      legX = legX * 3 / 4 + fx * 100 / root
-      legY = legY * 3 / 4 + fy * 100 / root
+      legX = legX * 3 \ 4 + fx * 100 \ root
+      legY = legY * 3 \ 4 + fy * 100 \ root
     end if
   end if
   isqrt(legX * legX + legY * legY)
   if root > 0 then
-    legX = legX * 28 / root
-    legY = legY * 28 / root
+    legX = legX * 28 \ root
+    legY = legY * 28 \ root
   end if
 end sub
 
@@ -219,8 +219,8 @@ end if
 ' (mirrored for blue, so the two teams play the half turn of each other).
 objective = -1
 if heartCount() > 0 then
-  member = (selfId / 2) mod 8
-  squad = member / 4
+  member = (selfId \ 2) mod 8
+  squad = member \ 4
   seat = member mod 4
   otherTarget = -1
   pass = 0
@@ -238,8 +238,8 @@ if heartCount() > 0 then
     j = 0
     while j < heartCount() and j < 16
       if controlOwner(j) <> selfTeam and j <> otherTarget then
-        dx = (controlX(j) - homeX) / 8
-        dy = (controlY(j) - refY) / 8
+        dx = (controlX(j) - homeX) \ 8
+        dy = (controlY(j) - refY) \ 8
         cost = dx * dx + dy * dy
         if controlOwner(j) = -1 then
           cost = cost - 20000
@@ -296,8 +296,8 @@ if heartCount() > 0 then
         end if
         isqrt(ax * ax + ay * ay)
         if root > 0 then
-          goalX = hx + (ax * 3 - ay * 2 * side) * 90 / root
-          goalY = hy + (ay * 3 + ax * 2 * side) * 90 / root
+          goalX = hx + (ax * 3 - ay * 2 * side) * 90 \ root
+          goalY = hy + (ay * 3 + ax * 2 * side) * 90 \ root
         end if
       end if
     end if
@@ -311,7 +311,7 @@ end if
 
 ' Rules 49: a misting or radar cog cannot attack, so it keeps beside its nearest teammate,
 ' inside the mister's heal (500) or the radar's boost (800).
-if (mistingTicks() > 0 or radarTicks() > 0) and not carrying then
+if (mistingTicks() > 0 or radarTicks() > 0) and carrying = 0 then
   mate = -1
   mateD = 2147483647
   i = 0
@@ -344,14 +344,14 @@ while i < pickupCount() and i < 32
   end if
   i = i + 1
 wend
-if not carrying and thief < 0 then
+if (carrying = 0) and thief < 0 then
   nearest = -1
   nearestCost = 4840000
   j = 0
   while j < pickupCount() and j < 32
     if pickupMemoryTick(j) > 0 and worldTick - pickupMemoryTick(j) < 240 then
       kind = pickupMemoryKind(j)
-      wanted = (kind = 0 and not hasGrenade) or (kind = 2 and selfHp < hpCap) or (kind = 3 and armorHp < 3 and selfHp = hpCap)
+      wanted = (kind = 0 and (hasGrenade = 0)) or (kind = 2 and selfHp < hpCap) or (kind = 3 and armorHp < 3 and selfHp = hpCap)
       ' Rules 49 items: a sniper when we carry no spray, the mister when half hurt, the radar
       ' among friends. Any pickup ends a radar, so its carrier takes only a medkit it needs.
       wanted = wanted or (kind = 6 and hasSniper() = 0 and hasSpray = 0) or (kind = 5 and selfHp * 2 <= hpCap and mistingTicks() = 0) or (kind = 7 and friendsNear >= 3 and radarTicks() = 0)
@@ -364,9 +364,9 @@ if not carrying and thief < 0 then
         cost = dx * dx + dy * dy
         if kind = 2 and selfHp > 0 and selfHp * 3 <= hpCap then
           ' A medkit is worth a whole life to a cog on one hit point.
-          cost = cost / 4
+          cost = cost \ 4
         end if
-        if cost < 10000 and not pickupVisible(j) then
+        if cost < 10000 and (pickupVisible(j) = 0) then
           pickupMemoryTick(j) = 0
         else
           if cost < nearestCost then
@@ -386,18 +386,18 @@ if not carrying and thief < 0 then
 end if
 
 ' Refuse a fight we are visibly losing: head for the heart that is far from them and near us.
-if foesNear - friendsNear >= 1 and not carrying then
-  cx = foeSumX / foesSeen
-  cy = foeSumY / foesSeen
+if foesNear - friendsNear >= 1 and (carrying = 0) then
+  cx = foeSumX \ foesSeen
+  cy = foeSumY \ foesSeen
   away = -1
   awayScore = -2147483647
   j = 0
   while j < heartCount() and j < 16
-    ex = (controlX(j) - cx) / 16
-    ey = (controlY(j) - cy) / 16
-    mx = (controlX(j) - selfX) / 16
-    my = (controlY(j) - selfY) / 16
-    score = ex * ex + ey * ey - (mx * mx + my * my) / 2
+    ex = (controlX(j) - cx) \ 16
+    ey = (controlY(j) - cy) \ 16
+    mx = (controlX(j) - selfX) \ 16
+    my = (controlY(j) - selfY) \ 16
+    score = ex * ex + ey * ey - (mx * mx + my * my) \ 2
     if score > awayScore then
       away = j
       awayScore = score
@@ -413,7 +413,7 @@ end if
 
 ' Facing with nothing to shoot: sweep, then turn to speech and sound.
 if best < 0 then
-  scan = (worldTick / 24 + selfId) mod 4
+  scan = (worldTick \ 24 + selfId) mod 4
   lookX = goalX
   lookY = goalY
   if holding or scan = 1 then
@@ -566,12 +566,12 @@ if drDx * drDx + drDy * drDy > 640000 then
     if wet > 0 then
       drBest = legCost
       drBestK = -1
-      drMx = selfX + drDx / 2
-      drMy = selfY + drDy / 2
+      drMx = selfX + drDx \ 2
+      drMy = selfY + drDy \ 2
       drK = 0
       while drK < 6
-        drCx = drMx - drDy * drF(drK) / 10
-        drCy = drMy + drDx * drF(drK) / 10
+        drCx = drMx - drDy * drF(drK) \ 10
+        drCy = drMy + drDx * drF(drK) \ 10
         if drCx > mapMinX() + 200 and drCx < mapMaxX() - 200 and drCy > mapMinY() + 200 and drCy < mapMaxY() - 200 then
           if waterAt(drCx, drCy) = 0 then
             legTime(selfX, selfY, drCx, drCy)
@@ -634,8 +634,8 @@ if best >= 0 then
       if i <> selfId and i mod 2 = selfTeam then
         ox = nearAgentX(nk) - selfX
         oy = nearAgentY(nk) - selfY
-        along = (ox * sx + oy * sy) / reach
-        across = (ox * sy - oy * sx) / reach
+        along = (ox * sx + oy * sy) \ reach
+        across = (ox * sy - oy * sx) \ reach
         if across < 0 then
           across = 0 - across
         end if
@@ -697,7 +697,7 @@ if hasGrenade and best >= 0 then
   wend
   if safe and d2 > 160000 and d2 < 1562500 then
     isqrt(d2)
-    need = (root - 150) * 24 / 1130 + 1
+    need = (root - 150) * 24 \ 1130 + 1
     if need < 1 then
       need = 1
     end if

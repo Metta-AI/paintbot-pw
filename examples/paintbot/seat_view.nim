@@ -45,7 +45,7 @@ const
   NearMaxAgents* = 64
   DataNames* = ["selfId","selfTeam","selfX","selfY","selfHp","carrying","homeX","homeY","heartX",
     "heartY","worldTick","ownHeartX","ownHeartY","ownHeartStolen","hasGrenade","hasSpray","armorHp",
-    "livesLeft","grenadeCharge","trenchId"]
+    "livesLeft","grenadeCharge","trenchId","worldSeats"]
 
 # One tick's scratch (the world every view reads, the vision cache, the near grid and lists)
 # and the speech carried between decisions. Training builds run many worlds on many threads:
@@ -335,7 +335,7 @@ proc dataValues*(v: SeatView): array[DataNames.len, int32] =
   let h = v.homeHeart()
   [v.selfId, v.selfTeam, v.selfX, v.selfY, v.selfHp, v.carrying, h.home.x, h.home.z, h.heart.x,
    h.heart.z, v.worldTick, h.ownPos.x, h.ownPos.z, int32(h.ownStolen), v.hasGrenade, v.hasSpray,
-   v.armorHp, v.livesLeft, v.grenadeCharge, v.trenchId]
+   v.armorHp, v.livesLeft, v.grenadeCharge, v.trenchId, Seats.int32]
 
 proc hasUniform*(v: SeatView): int32 = v.world.uniforms[v.slot].int32
 

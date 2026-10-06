@@ -1,8 +1,9 @@
 ## FFA-kin BASIC host functions: kinship, genes, raw scores, who is still in the match, heart
 ## owners, great hearts and the territory boost; selfTeam and playerTeam read the seat. In the teams game the new
 ## functions read "no FFA" and the old data is unchanged.
+import bassy
 import std/[unittest, os, strutils]
-import polyworld/[cli, basic]
+import polyworld/[cli]
 import ../examples/paintbot/[sim, bots, kinship]
 
 const Root = currentSourcePath().parentDir.parentDir
