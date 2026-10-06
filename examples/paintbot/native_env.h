@@ -62,6 +62,10 @@ int pw_seat_script_status(void *handle, int seat, char *message, int32_t capacit
  * a visible body's position or pos+5000*compass (clamped); anything else has no exact
  * candidate. */
 int pw_seat_orders(void *handle, int seat, int32_t *ten);
+/* pw_seat_orders plus the rules-49 self-destruct order: eleven = pw_seat_orders' ten, then
+ * self_destruct (1 when the command issued or given on the last pw_step ordered one: BASIC's
+ * selfDestruct() or pw_set_seat_command_ex). A pure read. Returns 0, -1 bad args. */
+int pw_seat_orders_ex(void *handle, int seat, int32_t *eleven);
 /* Raw command (additive; command-space opponents and replayed recordings). The seat
  * executes nine = {walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak,
  * direct} (flags 0/1) on the NEXT pw_step only, built as BASIC's orders build a command:
@@ -75,6 +79,12 @@ int pw_seat_orders(void *handle, int seat, int32_t *ten);
  * step replaces the first; pw_reset drops it. A library whose caller never calls it is
  * byte-identical to one without it. Returns 0, -1 bad args. */
 int pw_set_seat_command(void *handle, int seat, const int32_t *nine);
+/* pw_set_seat_command plus the rules-49 self-destruct order (additive): ten = the nine above, then
+ * self_destruct (0/1; BASIC's selfDestruct()). Same pending slot as pw_set_seat_command (either call
+ * replaces the other); self_destruct 0 is byte-identical to pw_set_seat_command. The order acts only
+ * where the world's rules act on it (rules >= 49, a live cog that is not disarmed), as a recording's
+ * command does. Returns 0, -1 bad args (self_destruct not 0/1 included). */
+int pw_set_seat_command_ex(void *handle, int seat, const int32_t *ten);
 /* The order the seat's own BASIC program (script, or policy.bas on the caller's logits)
  * decided on the last pw_step, ten = {walk, goal_x, goal_z, shoot, aim_x, aim_z,
  * charge_grenade, sneak, direct, ran}, whatever the seat executed (a pending raw command or
