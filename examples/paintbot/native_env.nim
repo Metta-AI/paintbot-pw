@@ -1940,6 +1940,16 @@ proc pw_seat_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int
   output[9] = int32(env.scripts[seat].len > 0)
   0
 
+proc pw_seat_orders_ex*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## pw_seat_orders plus the rules-49 self-destruct order: eleven int32 = pw_seat_orders' ten,
+  ## then self_destruct (1 when the command the seat issued or was given on the last pw_step
+  ## ordered a self-destruct: BASIC's selfDestruct() or pw_set_seat_command_ex). A pure read.
+  ## Returns 0, -1 for bad arguments.
+  let rc = pw_seat_orders(handle, seat, output)
+  if rc != 0: return rc
+  output[10] = cast[ptr NativeEnv](handle).scriptOrders[seat].selfDestruct.int32
+  0
+
 proc pw_seat_decided_orders*(handle: pointer, seat: cint, output: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## The order the seat's own BASIC program (its script, or its policy.bas on the caller's
   ## logits) decided on the last pw_step, ten int32 in pw_seat_orders' layout:
@@ -1986,6 +1996,19 @@ proc pw_seat_shadow_status*(handle: pointer, seat: cint): cint {.exportc, cdecl,
   ready(handle)
   cast[ptr NativeEnv](handle).shadowStatus[seat].cint
 
+proc setSeatCommand(handle: pointer, seat: cint, nine: ptr UncheckedArray[int32], selfDestruct: bool): cint =
+  ## pw_set_seat_command / pw_set_seat_command_ex: validate and queue one raw command.
+  if handle == nil or seat notin 0..<seatsOf(handle) or nine == nil: return -1
+  for i in [0, 3, 6, 7, 8]:
+    if nine[i] notin 0'i32..1'i32: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  env.commandNext[seat] = Command(walk: nine[0] == 1, goal: Point(x: nine[1], z: nine[2]), shoot: nine[3] == 1,
+    aim: Point(x: clamp(nine[4], minX().int32, maxX().int32), z: clamp(nine[5], minZ().int32, maxZ().int32)),
+    chargeGrenade: nine[6] == 1, sneak: nine[7] == 1, direct: nine[8] == 1, selfDestruct: selfDestruct)
+  env.commandPending[seat] = true
+  0
+
 proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
   ## A raw command for one seat on the next pw_step only, nine int32 in pw_seat_orders'
   ## layout: [walk, goal_x, goal_z, shoot, aim_x, aim_z, charge_grenade, sneak, direct],
@@ -2004,16 +2027,19 @@ proc pw_set_seat_command*(handle: pointer, seat: cint, nine: ptr UncheckedArray[
   ## again after a step without one). A later call before the step replaces it; pw_reset
   ## drops it. Never calling it is byte-identical to a library without it. Returns 0, -1
   ## for bad arguments.
-  if handle == nil or seat notin 0..<seatsOf(handle) or nine == nil: return -1
-  for i in [0, 3, 6, 7, 8]:
-    if nine[i] notin 0'i32..1'i32: return -1
-  ready(handle)
-  let env = cast[ptr NativeEnv](handle)
-  env.commandNext[seat] = Command(walk: nine[0] == 1, goal: Point(x: nine[1], z: nine[2]), shoot: nine[3] == 1,
-    aim: Point(x: clamp(nine[4], minX().int32, maxX().int32), z: clamp(nine[5], minZ().int32, maxZ().int32)),
-    chargeGrenade: nine[6] == 1, sneak: nine[7] == 1, direct: nine[8] == 1)
-  env.commandPending[seat] = true
-  0
+  setSeatCommand(handle, seat, nine, false)
+
+proc pw_set_seat_command_ex*(handle: pointer, seat: cint, ten: ptr UncheckedArray[int32]): cint {.exportc, cdecl, dynlib.} =
+  ## pw_set_seat_command plus the rules-49 self-destruct order: ten int32 = pw_set_seat_command's
+  ## nine, then self_destruct (0 or 1; BASIC's selfDestruct()). Everything else is exactly
+  ## pw_set_seat_command (one pending raw command per seat: either call replaces the other's;
+  ## self_destruct 0 is byte-identical to pw_set_seat_command). The order acts only where the
+  ## world's rules act on it (rules >= 49, a live cog that is not disarmed), as a recording's
+  ## command does. A harness tool for replaying rules-49 recordings and probes. Additive: a
+  ## library whose caller never calls it is byte-identical to one without it. Returns 0, -1 for
+  ## bad arguments (self_destruct not 0 or 1 included).
+  if ten == nil or ten[9] notin 0'i32..1'i32: return -1
+  setSeatCommand(handle, seat, ten, ten[9] == 1)
 
 proc pw_action_contract*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   ## The handle's action contract version: 11 (teams.view.1), 12 (ffa.view.1 pointer) or 13
