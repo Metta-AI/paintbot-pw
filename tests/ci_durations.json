@@ -61,6 +61,7 @@
     "nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_seat_command_ex.nim": 60.0,
     "nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_pickup_visible.nim": 90.0,
     "nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_damage_log.nim": 120.0,
+    "nim r --mm:arc --threads:on -d:pwTraining -d:headless tests/test_paintbot_native_self_destruct_head.nim": 90.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_sampling.nim": 2.3,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_river_strafe.nim": 21.0,
     "nim r --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_spray.nim": 50.5,
