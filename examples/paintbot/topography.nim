@@ -233,7 +233,7 @@ when defined(pwTraining):
       key: int
       blocks: array[TerrainCacheBlocksX*TerrainCacheBlocksZ, Atomic[ptr TerrainBlock]]
   # One per flag combination and map (the island's own terrain is map slot 0).
-  var terrainTables: array[2048*(MapNames.len+1), Atomic[ptr TerrainTable]]
+  var terrainTables: array[2048*(MapNames.len+1+MaxTrainingMaps), Atomic[ptr TerrainTable]]
   var terrainCurrent {.threadvar.}: ptr TerrainTable
   proc terrainFlagsKey(): int =
     for i, flag in [wideRamps, wilderness, deepWilderness, organicTerrain, islandTerrain,

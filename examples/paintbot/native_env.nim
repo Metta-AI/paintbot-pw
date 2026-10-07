@@ -1,7 +1,7 @@
 ## In-process training ABI. Build with --app:lib --mm:arc --threads:on -d:pwTraining.
 ## A handle may migrate between threads but must never be used concurrently.
 ## The caller owns flat buffers; no Nim-managed values cross the C boundary.
-import std/[strutils, options]
+import std/[strutils, options, atomics]
 from std/json import parseJson
 import jsony
 import sim, kinship, neural_contract, bots, neural_actor, match_config, training_labels
@@ -274,7 +274,7 @@ proc ready(handle: pointer = nil) =
   ## the rules' own island with the default awards. The map goes first so configureRules binds the
   ## terrain table once, for the right key (a key compare when nothing changed).
   setupForeignThreadGc()
-  setActiveMap(if handle == nil: -1 else: cast[ptr NativeEnv](handle).mapSlot.int-1)
+  setActiveMapAny(if handle == nil: -1 else: cast[ptr NativeEnv](handle).mapSlot.int-1)
   if handle == nil:
     configureRules(NativeRules)
     configureGlory(DefaultGloryConfig)
@@ -326,7 +326,7 @@ proc newEnvWorld(env: ptr NativeEnv, seed, maxTicks: int32) =
   let seats = if env.nextSeats > 0: env.nextSeats else: env.n
   gameMode = mode
   configureSeats(seats)
-  setActiveMap(env.nextMapSlot.int-1)
+  setActiveMapAny(env.nextMapSlot.int-1)
   configureRules(if env.nextRules == 0: NativeRules else: env.nextRules.int)
   configureGlory(env.nextGlory)
   teamVision = env.nextVision
@@ -657,7 +657,10 @@ proc logitWidth(env: ptr NativeEnv): int =
   if env.obsVersion != ocFfaView1 and env.actionContract == acTeamsView1Raw: return LogitSizeRaw
   for h in env.actionHeads: result += h
 
+var handleCreated: Atomic[bool] # pw_register_map: set by the first create, never cleared
+
 proc createEnv(seed, maxTicks: int32, obsVersion: ObservationContractVersion): pointer =
+  handleCreated.store(true)
   ready()
   if maxTicks < 0 or maxTicks > HeartMeterMatchTicks: return nil
   let env = cast[ptr NativeEnv](allocShared0(sizeof(NativeEnv)))
@@ -1316,14 +1319,28 @@ proc pw_game_mode*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   cast[ptr NativeEnv](handle).mode.cint
 
 proc pw_map_count*(): cint {.exportc, cdecl, dynlib.} =
-  ## The number of maps pw_set_map accepts (MapNames), besides -1 for the rules' own island.
-  MapNames.len.cint
+  ## The number of maps pw_set_map accepts (MapNames, then any pw_register_map maps), besides -1
+  ## for the rules' own island.
+  mapCount().cint
+
+proc pw_register_map*(name: cstring, blob: pointer, length: int32): cint {.exportc, cdecl, dynlib.} =
+  ## Training only: adds a PBMAP001 map (mapgen --engine output, e.g. a train-* arena) after the
+  ## compiled maps and returns its pw_set_map index (pw_map_count()-1 after the call). It must be
+  ## called before any handle exists in the process: -2 once any pw_create* has run (the maps
+  ## are read by every thread without a lock). -1 bad args: nil, an empty or taken name, longer
+  ## than 31 bytes, a malformed blob, or MaxTrainingMaps (8) already registered. The hosted game
+  ## and the config "map" names are untouched: a registered map is reachable only by index.
+  if handleCreated.load: return -2
+  if name == nil or blob == nil or length <= 0: return -1
+  var bytes = newString(length.int)
+  copyMem(addr bytes[0], blob, length.int)
+  registerTrainingMap($name, bytes).cint
 
 proc pw_map_name*(index: cint, output: ptr UncheckedArray[char], capacity: cint): cint {.exportc, cdecl, dynlib.} =
-  ## MapNames[index], NUL-terminated ("" for -1, the rules' own island); capacity must hold the
-  ## name and its NUL (32 always does). 0, or -1 bad args.
-  if output == nil or index notin -1'i32..MapNames.high.int32: return -1
-  let name = if index < 0: "" else: MapNames[index]
+  ## The map's name (MapNames[index], or a registered map's), NUL-terminated ("" for -1, the rules'
+  ## own island); capacity must hold the name and its NUL (32 always does). 0, or -1 bad args.
+  if output == nil or index notin -1'i32..<mapCount().int32: return -1
+  let name = if index < 0: "" else: mapNameAt(index)
   if capacity <= name.len: return -1
   for i, c in name: output[i] = c
   output[name.len] = '\0'
@@ -1334,7 +1351,7 @@ proc pw_set_map*(handle: pointer, index: cint): cint {.exportc, cdecl, dynlib.} 
   ## (the default), 0 .. pw_map_count()-1 = MapNames[index]. Kept across resets; the current
   ## world keeps its map until then. Handles on one thread may play different maps. 0, or -1
   ## bad args.
-  if handle == nil or index notin -1'i32..MapNames.high.int32: return -1
+  if handle == nil or index notin -1'i32..<mapCount().int32: return -1
   cast[ptr NativeEnv](handle).nextMapSlot = index+1
   0
 

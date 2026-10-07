@@ -64,6 +64,13 @@ def set_scale(scale: float):
 SCALE = 1.0
 # Land (m2, as stats' landM2) per control heart; None keeps the rules-40 ten hearts.
 HEART_AREA = None
+# --layout-scale: the archetype's layout shrinks by this factor about the half-turn centre while
+# the world span (the bounds above) stays put, so a training arena keeps the standard bounds the
+# observation normalises by and only its land shrinks (everything off the shrunk island is sea).
+LAYOUT = 1.0
+# --extra-weapons: this many more mirrored grenade pairs and spray pairs, drawn after the rules-40
+# items and before the rules-49 ones (training arenas; the catalogue maps use 0).
+EXTRA_WEAPONS = 0
 
 
 def mirror(p):
@@ -480,7 +487,7 @@ class Placer:
         # Spacing relaxes in two steps before a map is rejected.
         for k in (1.0, 0.8, 0.65):
             try:
-                return self._pick(lo, hi, score, sep * k, self_sep * k, need_pad, area)
+                return self._pick(lo, hi, score, sep * k * LAYOUT, self_sep * k * LAYOUT, need_pad, area)
             except RuntimeError as e:
                 err = e
         raise err
@@ -531,7 +538,7 @@ def place_homes(m: Map, P: Placer):
     if best is None:
         raise RuntimeError("no flat home")
     m.home = best[1]
-    P.taken += [(m.home[0], m.home[1], 400), (*mirror(m.home), 400)]
+    P.taken += [(m.home[0], m.home[1], 400 * LAYOUT), (*mirror(m.home), 400 * LAYOUT)]
 
 
 def place_cover(m: Map, rng, P: Placer, lanes):
@@ -592,12 +599,13 @@ def build(name, title, fn, blurb, seed) -> Map:
         m = Map(name, title, fn.__name__[2:], blurb, seed * 101 + attempt)
         global X, Z
         real = (X, Z)
-        X, Z = CX + (real[0] - CX) / SCALE, CZ + (real[1] - CZ) / SCALE
+        stretch = SCALE * LAYOUT
+        X, Z = CX + (real[0] - CX) / stretch, CZ + (real[1] - CZ) / stretch
         try:
             fn(m, rng)
         finally:
             X, Z = real
-        grow = lambda p: (int(CX + (p[0] - CX) * SCALE), int(CZ + (p[1] - CZ) * SCALE))
+        grow = lambda p: (int(CX + (p[0] - CX) * stretch), int(CZ + (p[1] - CZ) * stretch))
         m.home = grow(m.home)
         m.village = [grow(v) for v in m.village]
         try:
@@ -641,6 +649,7 @@ def cover_clear(m: Map, clearance: int):
 
 def spread_pick(P: Placer, lo, hi, same, sep, self_sep, clear, need_pad=False):
     """Another copy of an item: the open spot in its ratio band farthest from its own kind."""
+    sep, self_sep = sep * LAYOUT, self_sep * LAYOUT
     base = (P.ok & P.clear & P.flat & P.dry & P.inland & np.isfinite(P.ratio)
             & (P.ratio >= lo) & (P.ratio <= hi) & clear)
     if need_pad:
@@ -682,7 +691,7 @@ def place_extra_hearts(m: Map, P: Placer, hearts, pairs: int):
             if not first_half(p):
                 p = mirror(p)
             q = mirror(p)
-            if math.hypot(p[0] - q[0], p[1] - q[1]) < 900 or not (P.free(p, 350) and P.free(q, 350)):
+            if math.hypot(p[0] - q[0], p[1] - q[1]) < 900 * LAYOUT or not (P.free(p, 350 * LAYOUT) and P.free(q, 350 * LAYOUT)):
                 continue
             P.taken += [(p[0], p[1], 0), (q[0], q[1], 0)]
             hearts += [(p[0], p[1], -1, "extra"), (*q, -1, "extra")]
@@ -713,7 +722,7 @@ def populate(m: Map, rng):
     place_extra_hearts(m, P, hearts, (heart_target(m) - len(hearts)) // 2)
     m.hearts = hearts
     for x, z, _, _ in hearts:
-        P.taken.append((x, z, 300))
+        P.taken.append((x, z, 300 * LAYOUT))
     lanes = []
     for x, z, _, _ in hearts[2:10]:  # the role hearts; extra hearts would clear every tree
         lanes += [(m.home, (x, z)), (mirror(m.home), (x, z))]
@@ -749,6 +758,14 @@ def populate(m: Map, rng):
         for _ in range(3):
             p = spread_pick(P, 0.22, 0.48, m.trenches, sep=520, self_sep=900, clear=trench_clear, need_pad=True)
             m.trenches += [p, mirror(p)]
+    # --extra-weapons: more grenade and spray pairs, each spread from its own kind in its kind's band.
+    if EXTRA_WEAPONS:
+        extra_clear = cover_clear(m, 110)
+    for _ in range(EXTRA_WEAPONS):
+        for kind, lo, hi in (("grenade", 0.10, 0.34), ("spray", 0.32, 0.48)):
+            same = [(x, z) for x, z, k, _ in m.pickups if k == kind]
+            p = spread_pick(P, lo, hi, same, sep=380, self_sep=700, clear=extra_clear)
+            m.pickups += [(p[0], p[1], kind, "extra"), (*mirror(p), kind, "extra")]
     # Rules 49 items, drawn after everything above so the rules 41-48 content stays byte-identical
     # (the engine skips these kinds below rules 49).
     spec49 = [
@@ -777,6 +794,8 @@ def validate(m: Map):
     copies = item_copies(m)
     want = {k: v * copies for k, v in {"grenade": 4, "spray": 2, "armor": 2, "medkit": 4, "uniform": 2,
                                            "sniper": 2, "mister": 2, "radar": 2}.items()}
+    want["grenade"] += 2 * EXTRA_WEAPONS
+    want["spray"] += 2 * EXTRA_WEAPONS
     if kinds != want:
         bad.append(f"pickup counts {kinds}")
     if len(m.hearts) != heart_target(m) or len(m.trenches) != 6 * copies:
@@ -921,20 +940,28 @@ def main():
     ap.add_argument("--scale", type=float, default=1.0, help="span multiplier (sqrt(10) for 10x area)")
     ap.add_argument("--prefix", default="", help="name prefix, e.g. big-")
     ap.add_argument("--heart-area", type=float, help="land m2 per control heart (default: ten hearts)")
+    ap.add_argument("--layout-scale", type=float, default=1.0,
+                    help="shrink the layout inside the standard bounds (0.5 = a quarter of the land; training arenas)")
+    ap.add_argument("--extra-weapons", type=int, default=0, help="extra mirrored grenade and spray pairs")
+    ap.add_argument("--name", help="with --only: the output map's name (e.g. train-arena-9)")
     ap.add_argument("--no-png", action="store_true")
     ap.add_argument("--engine", help="also write <name>.pbmap files here (examples/paintbot/maps)")
     args = ap.parse_args()
     set_scale(args.scale)
-    global HEART_AREA
+    global HEART_AREA, LAYOUT, EXTRA_WEAPONS
     HEART_AREA = args.heart_area
+    LAYOUT = args.layout_scale
+    EXTRA_WEAPONS = args.extra_weapons
+    if args.name and not args.only:
+        raise SystemExit("--name needs --only")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     index = []
     for i, (name, title, fn, blurb) in enumerate(CATALOGUE):
         if args.only and args.only not in (name, args.prefix + name):
             continue
-        m = build(args.prefix + name, title, fn, blurb, args.seed * 1000 + i)
-        name = args.prefix + name
+        name = args.name or args.prefix + name
+        m = build(name, title, fn, blurb, args.seed * 1000 + i)
         doc = to_json(m)
         (out / f"{name}.json").write_text(json.dumps(doc, separators=(",", ":")))
         if not args.no_png:

@@ -622,6 +622,13 @@ int pw_map_count(void);
 int pw_map_name(int32_t index, char *out, int32_t capacity);
 int pw_set_map(void *handle, int32_t index);
 int pw_map(void *handle);
+/* Training map registration (additive; training library only). pw_register_map adds a PBMAP001
+ * map (coworld/paintbot/tools/mapgen --engine output, e.g. the train-* arenas made with
+ * --layout-scale) after the compiled maps and returns its pw_set_map index; pw_map_count and
+ * pw_map_name then include it. Call it before any pw_create* in the process: -2 after one has run.
+ * -1 bad args (NULL, an empty / taken / > 31-byte name, a malformed blob, 8 already registered).
+ * A process that never calls it plays exactly as before; the hosted game has no such maps. */
+int pw_register_map(const char *name, const void *blob, int32_t length);
 /* Rules and game config (additive; training library only). With neither called a handle plays
  * NativeRules (40) with the default awards byte for byte as before. pw_rules_latest: the rules
  * live games play. pw_set_rules: NativeRules .. pw_rules_latest(), 0 or -1 bad args; pw_rules:
