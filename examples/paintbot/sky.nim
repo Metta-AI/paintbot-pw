@@ -3,7 +3,7 @@
 ## Periodic sampling closes both tile seams exactly, including imperfect art edges.
 import std/math
 import opengl, pixie, shady, vmath
-import polyworld/shadows
+import polyworld/[quadterrain, shadows, toon]
 
 const
   ShaderTarget =
@@ -12,17 +12,16 @@ const
   CloudPng = staticRead("textures/sunny-clouds.png")
 
 type SkyParams* = object
-  sunFromShadows*: bool
   sunAzimuth*, sunElevation*: float32 ## manual sun position, in degrees
   sunRotation*: float32 ## rotates only the sun layer around the vertical axis
   sunSize*, sunBrightness*: float32
   glowStrength*, glowSharpness*, gradientPower*, exposure*: float32
   cloudSpeed*: float32 ## 1 = gentle wind, 0 = still; negative reverses the wind
 
-const DefaultSkyParams* = SkyParams(sunFromShadows: true, sunAzimuth: 48,
-  sunElevation: 53, sunRotation: 0, sunSize: 1.2, sunBrightness: 4,
+const DefaultSkyParams* = SkyParams(sunAzimuth: -149.1,
+  sunElevation: 34.78, sunRotation: -3.13, sunSize: 1.2, sunBrightness: 4,
   glowStrength: 0.22, glowSharpness: 24, gradientPower: 0.55, exposure: 1,
-  cloudSpeed: 1)
+  cloudSpeed: 2.5)
 
 var
   skyParams* = DefaultSkyParams
@@ -141,18 +140,32 @@ proc advanceSky*(dt: float32) =
   cloudPhase = cloudPhase - floor(cloudPhase / 5.0) * 5.0
 
 proc sunToward*(): Vec3 =
-  ## Rotate the sun independently of cloud motion and the shadow direction.
+  ## Unit direction toward the sun: its azimuth and elevation, turned by the rotation.
   let
     a = skyParams.sunAzimuth * PI.float32 / 180
     e = skyParams.sunElevation * PI.float32 / 180
-    base = if skyParams.sunFromShadows: sunDirection
-      else: vec3(cos(e) * sin(a), sin(e), cos(e) * cos(a))
+    base = vec3(cos(e) * sin(a), sin(e), cos(e) * cos(a))
     r = skyParams.sunRotation * PI.float32 / 180
   vec3(base.x * cos(r) + base.z * sin(r), base.y,
     -base.x * sin(r) + base.z * cos(r))
 
-proc drawSky*(viewProjection: Mat4, eye: Vec3) =
-  ## Draw first in the active viewport, without writing depth.
+var litFrom = vec3(0, 0, 0) # the sun direction the shadows and light last took
+
+proc shadowsFollowSun*(toon: ToonContext) =
+  ## Aims the shadow maps and the scene's light (characters and terrain) at the sky's
+  ## sun whenever it moves; call once a frame before the shadow pass.
+  let s = sunToward()
+  if s == litFrom: return
+  litFrom = s
+  shadows.sunAzimuth = arctan2(s.x, s.z) * 180 / PI.float32
+  shadows.sunElevation = arcsin(clamp(s.y, -1, 1)) * 180 / PI.float32
+  updateSunMatrix()
+  toon.lightDirection = -sunDirection
+  setEnvironmentPalette(toon)
+
+proc drawSky*(viewProjection: Mat4, eye: Vec3, sun = true) =
+  ## Draw first in the active viewport, without writing depth. `sun = false` leaves out
+  ## the sun's disc and glow: the water's reflection draws the sun from its ripples.
   var inverse = viewProjection.inverse
   let s = sunToward()
   glUseProgram(skyProgram)
@@ -161,8 +174,10 @@ proc drawSky*(viewProjection: Mat4, eye: Vec3) =
   glUniform3f(glGetUniformLocation(skyProgram, "skyEye"), eye.x, eye.y, eye.z)
   glUniform3f(glGetUniformLocation(skyProgram, "skySunDirection"), s.x, s.y, s.z)
   glUniform1f(glGetUniformLocation(skyProgram, "skySunCosine"), cos(skyParams.sunSize * PI.float32 / 180))
-  glUniform1f(glGetUniformLocation(skyProgram, "skySunBrightness"), skyParams.sunBrightness)
-  glUniform1f(glGetUniformLocation(skyProgram, "skyGlowStrength"), skyParams.glowStrength)
+  glUniform1f(glGetUniformLocation(skyProgram, "skySunBrightness"),
+    if sun: skyParams.sunBrightness else: 0)
+  glUniform1f(glGetUniformLocation(skyProgram, "skyGlowStrength"),
+    if sun: skyParams.glowStrength else: 0)
   glUniform1f(glGetUniformLocation(skyProgram, "skyGlowSharpness"), skyParams.glowSharpness)
   glUniform1f(glGetUniformLocation(skyProgram, "skyGradientPower"), skyParams.gradientPower)
   glUniform1f(glGetUniformLocation(skyProgram, "skyExposure"), skyParams.exposure)
