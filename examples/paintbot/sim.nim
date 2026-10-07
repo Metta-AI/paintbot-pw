@@ -495,7 +495,7 @@ when IndexedGeometry:
     # thread is on another. Switching maps swaps rather than rebuilds, and one map's index is
     # never taken for another's cover (two maps may share a cover count, and a freed world's
     # cover address may be reused).
-    var coverIndexParked {.threadvar.}: array[MapNames.len+1, CoverIndex]
+    var coverIndexParked {.threadvar.}: array[MapNames.len+1+MaxTrainingMaps, CoverIndex]
     var coverIndexMap {.threadvar.}: int # 1 + the map coverIndex belongs to (0 = the island)
   proc coverSpan(c: Cover): tuple[x0, x1, z0, z1: int] =
     let depth = if c.h == 0: c.w else: c.h
@@ -1312,7 +1312,7 @@ when defined(pwTraining):
   var nav {.threadvar.}: NavCache
   var navCompleteFields* {.threadvar.}: bool
   # Per map, as coverIndex above: the grid, water and fields describe one map's geometry.
-  var navParked {.threadvar.}: array[MapNames.len+1, NavCache]
+  var navParked {.threadvar.}: array[MapNames.len+1+MaxTrainingMaps, NavCache]
   var navMap {.threadvar.}: int # 1 + the map nav belongs to (0 = the island)
 else:
   var nav: NavCache

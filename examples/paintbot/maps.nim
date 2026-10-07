@@ -122,3 +122,53 @@ proc mapHeight*(x, z: int): int =
   {.cast(gcsafe).}: paintbotMaps[activeMap()].sampleGrid(false, x, z, -600)
 proc mapMargin*(x, z: int): int =
   {.cast(gcsafe).}: paintbotMaps[activeMap()].sampleGrid(true, x, z, -1000)
+
+when defined(pwTraining):
+  # Training-only map registration (native pw_register_map). A training process may append
+  # up to MaxTrainingMaps maps (training arenas, mapgen --layout-scale) after MapNames, from
+  # PBMAP001 blobs, before it creates any world: paintbotMaps is read by every thread without
+  # a lock, so it may only grow while nothing reads it. Registered maps take indices
+  # MapNames.len ..< mapCount() everywhere an activeMap() index is used (terrain tables, the
+  # parked cover and nav caches size for them); the hosted MapNames, mapIndex and config
+  # "map" names are unchanged, so a registered map is reachable only by index (pw_set_map).
+  const MaxTrainingMaps* = 8
+  proc mapCount*(): int =
+    ## Compiled maps plus registered ones: the indices setActiveMapAny accepts (besides -1).
+    {.cast(gcsafe).}: paintbotMaps.len
+  proc mapNameAt*(index: int): string =
+    {.cast(gcsafe).}: paintbotMaps[index].name
+  proc validMapBlob(blob: string): bool =
+    ## The structural checks parseMap asserts, as a predicate: the header, an exact length for
+    ## its counts, and every enum field in range.
+    if blob.len < 52 or blob[0..7] != "PBMAP001": return false
+    proc at32(k: int): int =
+      int(cast[int32](uint32(blob[k].uint8) or (uint32(blob[k+1].uint8) shl 8) or
+        (uint32(blob[k+2].uint8) shl 16) or (uint32(blob[k+3].uint8) shl 24)))
+    let nx = at32(8); let nz = at32(12); let step = at32(24)
+    let counts = [at32(36), at32(40), at32(44), at32(48)]
+    if nx < 2 or nz < 2 or nx > 4096 or nz > 4096 or step <= 0: return false
+    for c in counts:
+      if c < 0 or c > 100_000: return false
+    let pickupsAt = 52+nx*nz*4+counts[0]*12
+    let coverAt = pickupsAt+counts[1]*12+counts[2]*16
+    if blob.len != coverAt+counts[3]*16: return false
+    for k in 0..<counts[1]:
+      if at32(pickupsAt+k*12+8) notin 0..7: return false
+    for k in 0..<counts[3]:
+      if at32(coverAt+k*16+12) notin ord(MapCoverKind.low)..ord(MapCoverKind.high): return false
+    true
+  proc registerTrainingMap*(name, blob: string): int =
+    ## Appends a PBMAP001 map after the compiled ones and returns its index; -1 for an empty or
+    ## taken name, a malformed blob, or a full registry. The caller guarantees that no thread
+    ## reads the maps meanwhile (native_env: before any handle exists).
+    {.cast(gcsafe).}:
+      if name.len == 0 or name.len > 31 or paintbotMaps.len >= MapNames.len+MaxTrainingMaps or
+          not validMapBlob(blob): return -1
+      for m in paintbotMaps:
+        if m.name == name: return -1
+      paintbotMaps.add parseMap(name, blob)
+      paintbotMaps.high
+  proc setActiveMapAny*(index: int) =
+    ## setActiveMap over compiled and registered maps.
+    doAssert index in -1..<mapCount()
+    mapSlot = index+1
