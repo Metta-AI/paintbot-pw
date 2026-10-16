@@ -298,7 +298,7 @@ class LayoutDependent(Exception):
     """A layout word: the model is validated by the engine against the match's layout."""
 PWNET2_LIMITS = dict(parameters=4_194_304, layers=64, width=4096, state=4096, mingru_hidden=1024, groups=8,
                      tokens=256, d_model=256, blocks=8, ff=1024, token_segments=8, token_input=1024, token_model=256,
-                     token_mlp_layers=4, pool_heads=32, pool_width=1024)
+                     token_mlp_layers=4, pool_heads=32, pool_width=1024, sparse_nonzeros=4_194_304)
 TRANSCENDENTAL_OPS, MINGRU_UNIT_OPS = 8, 32
 ATTN_ALWAYS_VALID = 0xFFFFFFFF
 
@@ -371,6 +371,12 @@ def token_pair_ops(tokens, d, p, width):
 def segment_near_ops(inputs, tokens):
     """SEGMENT_NEAR's published cost: the copy of the input, 12 per token pair, 8 per token."""
     return inputs + tokens * tokens * 12 + tokens * 8
+
+
+def sparse_dense_ops(outputs, nonzeros, bias, relu):
+    """SPARSE_DENSE's published cost (neural_actor.sparseDenseOps): 2 per stored entry, 1 per output row, and DENSE's
+    bias and relu terms."""
+    return 2 * nonzeros + outputs + (outputs if bias else 0) + (outputs if relu else 0)
 
 
 def validate_pwnet2(model, observation_contract=None, action_contract=None, seats=16):
@@ -523,6 +529,41 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
             unused(4)
             weights(width * out + (out if bias else 0))
             operations += 2 * width * out + (out if bias else 0) + (out if relu else 0)
+        elif code == 17:  # SPARSE_DENSE: DENSE over a CSR matrix (neural_actor.nim lkSparseDense)
+            out, nnz = q[1], q[4]
+            if q[0] != width:
+                bad(where + "SPARSE_DENSE input %d != width %d" % (q[0], width))
+            if not 1 <= out <= lim["width"]:
+                bad(where + "SPARSE_DENSE output must be 1..%d" % lim["width"])
+            bias, relu = flag(2), flag(3)
+            if nnz > lim["sparse_nonzeros"]:
+                bad(where + "SPARSE_DENSE nnz must be 0..%d" % lim["sparse_nonzeros"])
+            unused(5)
+            if pos + 4 * (out + 1 + nnz) > len(model):
+                raise ValueError("truncated neural actor")
+            index = array.array("I")
+            index.frombytes(model[pos:pos + 4 * (out + 1 + nnz)])
+            if sys.byteorder != "little":
+                index.byteswap()
+            pos += 4 * (out + 1 + nnz)
+            starts, cols = index[:out + 1], index[out + 1:]
+            for i, s in enumerate(starts):
+                if s > nnz:
+                    bad(where + "SPARSE_DENSE rowStart %d exceeds nnz %d" % (i, nnz))
+                if i > 0 and s < starts[i - 1]:
+                    bad(where + "SPARSE_DENSE rowStart must not decrease (row %d)" % (i - 1))
+            if starts[0] != 0:
+                bad(where + "SPARSE_DENSE rowStart[0] must be 0")
+            if starts[out] != nnz:
+                bad(where + "SPARSE_DENSE rowStart[out] %d != nnz %d" % (starts[out], nnz))
+            if nnz and max(cols) >= width:
+                bad(where + "SPARSE_DENSE column %d outside the input width %d" % (max(cols), width))
+            for row in range(out):
+                for e in range(starts[row] + 1, starts[row + 1]):
+                    if cols[e] <= cols[e - 1]:
+                        bad(where + "SPARSE_DENSE columns must strictly increase within row %d" % row)
+            weights(nnz + (out if bias else 0))
+            operations += sparse_dense_ops(out, nnz, bias, relu)
         elif code == 2:  # RMSNORM
             if q[0] != width:
                 bad(where + "RMSNORM dim %d != width %d" % (q[0], width))

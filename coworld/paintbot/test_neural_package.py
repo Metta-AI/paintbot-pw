@@ -14,7 +14,7 @@ from neural_package import (layer_norm_ops, token_norm_ops, token_pair_ops, unpa
                             validate_user_inputs, user_inputs_contract_id, MAX_USER_INPUTS, USER_INPUT_LIMIT, RETIRED_USER_INPUTS,
                             validate_pwnet2, attention_ops, MAX_NEURAL_OPERATIONS, PWNET2_LIMITS,
                             USER_INPUTS_CONTRACT_HASHES, FFA_USER_INPUTS_CONTRACT_HASHES, user_input_feature,
-                            user_inputs_row, segment_near_ops, neural_budget, attn_pool_ops,
+                            user_inputs_row, segment_near_ops, sparse_dense_ops, neural_budget, attn_pool_ops,
                             LAYOUT_WORD_PREFIX, TEAMS_VIEW_1_SIZE, ACTION_SIZES, ACTION_SIZES_OFFSET, ACTION_SIZES_MOVE,
                             ACTION_CONTRACT_TEAMS_VIEW_1_MOVE, ACTION_CONTRACT_TEAMS_VIEW_1_MOVE_HASH,
                             OBSERVATION_CONTRACT_TEAMS_VIEW_1, OBSERVATION_CONTRACT_FFA_VIEW_1,
@@ -1029,6 +1029,71 @@ class Pwnet2Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "trailing bytes"):
             validate_pwnet2(good + bytes(4))
 
+    @staticmethod
+    def sparse(inputs, outputs, starts, cols, bias, relu, params=None):
+        """SPARSE_DENSE (17): params in, out, bias, act, nnz; rowStart [out + 1] and col [nnz]; val [nnz], b [out]."""
+        return (17, params or [inputs, outputs, int(bias), int(relu), len(cols)], list(starts) + list(cols),
+                len(cols) + (outputs if bias else 0))
+
+    @staticmethod
+    def pattern_csr(inputs, outputs):
+        """test_paintbot_neural_layers' patternCsr: row o stores the columns i with (i + 2*o) % 5 == 0, rows with
+        o % 7 == 6 store nothing."""
+        starts, cols = [0], []
+        for o in range(outputs):
+            if o % 7 != 6:
+                cols += [i for i in range(inputs) if (i + 2 * o) % 5 == 0]
+            starts.append(len(cols))
+        return starts, cols
+
+    def test_sparse_dense_cost_and_structure(self):
+        # The mixed model of test_paintbot_neural_layers ("a model mixing SPARSE_DENSE ..."): the loader counts 4,903.
+        mlp = self.token_mlp(6, [(0, 8, 8), (48, 0, 8)], (0, 0), [10])
+        s1, s2 = self.pattern_csr(28, 24), self.pattern_csr(20, 9)
+        self.assertEqual((len(s1[1]), len(s2[1])), (118, 32))
+        layers = [mlp, (6, [48, 8], [], 0), self.sparse(28, 24, *s1, True, True),
+                  (3, [24, 16, 0, 1], [], 2 * 16 * 24 + 2 * 16), (16, [0, 4], [], 4),
+                  self.sparse(20, 9, *s2, True, False), (9, [0, 2], [], 11)]
+        info = validate_pwnet2(pwnet2(56, [4, 5], layers))
+        self.assertEqual(info["operations"], 4903)
+        self.assertEqual(sparse_dense_ops(24, 118, True, True), 2 * 118 + 3 * 24)
+        self.assertEqual(info["state"], 16 + 5)
+        # SPARSE_DENSE costs DENSE's count with 2*in*out replaced by 2*nnz + out.
+        dense = validate_pwnet2(pwnet2(64, [2, 2, 2], [(1, [64, 6, 1, 1], [], 64 * 6 + 6)]))["operations"]
+        full = self.sparse(64, 6, [64 * o for o in range(7)], list(range(64)) * 6, True, True)
+        self.assertEqual(validate_pwnet2(pwnet2(64, [2, 2, 2], [full]))["operations"], dense + 6)
+        empty = validate_pwnet2(pwnet2(64, [2, 2, 2], [self.sparse(64, 6, [0] * 7, [], False, False)]))
+        self.assertEqual((empty["operations"], empty["parameters"]), (6, 0))
+        good = ([0, 2, 2, 5], [1, 4, 0, 2, 5])
+        validate_pwnet2(pwnet2(6, [3], [self.sparse(6, 3, *good, True, False)]))
+        cases = [
+            (([1, 2, 2, 5], good[1]), {}, "rowStart\\[0\\] must be 0"),
+            (([0, 2, 1, 5], good[1]), {}, "rowStart must not decrease"),
+            (([0, 2, 2, 4], good[1]), {}, "rowStart\\[out\\] 4 != nnz 5"),
+            (([0, 2, 2, 6], good[1]), {}, "rowStart 3 exceeds nnz 5"),
+            ((good[0], [1, 6, 0, 2, 5]), {}, "column 6 outside the input width 6"),
+            ((good[0], [1, 1, 0, 2, 5]), {}, "columns must strictly increase within row 0"),
+            ((good[0], [1, 4, 0, 0, 5]), {}, "columns must strictly increase within row 2"),
+            (good, dict(params=[5, 3, 1, 0, 5]), "SPARSE_DENSE input 5 != width 6"),
+            (good, dict(params=[6, 0, 1, 0, 5]), "SPARSE_DENSE output must be"),
+            (good, dict(params=[6, 3, 2, 0, 5]), "parameter 2 must be 0 or 1"),
+            (good, dict(params=[6, 3, 1, 2, 5]), "parameter 3 must be 0 or 1"),
+            (good, dict(params=[6, 3, 1, 0, 4194305]), "SPARSE_DENSE nnz must be 0..4194304"),
+            (good, dict(params=[6, 3, 1, 0, 5, 1]), "unused parameter 5"),
+        ]
+        for (starts, cols), kw, fragment in cases:
+            with self.assertRaisesRegex(ValueError, fragment):
+                validate_pwnet2(pwnet2(6, [3], [self.sparse(6, 3, starts, cols, True, False, **kw)]))
+        model = pwnet2(6, [3], [self.sparse(6, 3, *good, True, False)])
+        with self.assertRaisesRegex(ValueError, "truncated"):
+            validate_pwnet2(model[:-4])
+        with self.assertRaisesRegex(ValueError, "trailing bytes"):
+            validate_pwnet2(model + bytes(4))
+        nonfinite = bytearray(model)
+        nonfinite[-4:] = struct.pack("<f", float("nan"))
+        with self.assertRaisesRegex(ValueError, "nonfinite"):
+            validate_pwnet2(bytes(nonfinite))
+
     def test_pwnet002_with_user_inputs(self):
         # A PWNET002 actor with obs contract teams.view.1u<K> (512 + K inputs): the header is read through
         # validate_pwnet2 and the op count includes the K extra inputs.
@@ -1065,12 +1130,18 @@ class Pwnet2Tests(unittest.TestCase):
                                              token_segments=consts["MaxTokenSegments"],
                                              token_input=consts["MaxTokenInput"], token_model=consts["MaxTokenModel"],
                                              token_mlp_layers=consts["MaxTokenMlpLayers"],
-                                             pool_heads=consts["MaxAttnPoolHeads"], pool_width=consts["MaxAttnPoolWidth"]))
+                                             pool_heads=consts["MaxAttnPoolHeads"], pool_width=consts["MaxAttnPoolWidth"],
+                                             sparse_nonzeros=consts["MaxSparseNonzeros"]))
         self.assertEqual((consts["TranscendentalOps"], consts["MinGruUnitOps"]), (8, 32))
         # SEGMENT_NEAR's published count: one formula in the loader, staging and neural_actor.md.
         self.assertIn("int64(inputs) + int64(tokens)*int64(tokens)*12 + int64(tokens)*8", source)
         self.assertIn("| SEGMENT_NEAR | `I + 12*T*T + 8*T` |", (ROOT / "examples/paintbot/neural_actor.md").read_text())
         self.assertEqual(segment_near_ops(538, 16), 538 + 12 * 16 * 16 + 8 * 16)
+        # SPARSE_DENSE's published count: the loader, staging and neural_actor.md.
+        self.assertIn("2*int64(nonzeros) + int64(outputs) + (if bias: int64(outputs) else: 0) + "
+                      "(if relu: int64(outputs) else: 0)", source)
+        self.assertIn("| SPARSE_DENSE | `2*nnz + out + out*bias + out*relu` |",
+                      (ROOT / "examples/paintbot/neural_actor.md").read_text())
         host = (ROOT / "examples/paintbot/neural_host.nim").read_text()
         self.assertIn("MaxNeuralOperations* = %s'i64" % format(MAX_NEURAL_OPERATIONS, "_"), host)
 

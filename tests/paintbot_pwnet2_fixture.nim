@@ -304,3 +304,40 @@ proc delay*(offset, length: int, init: seq[float32]): Spec =
   ## previous inference. Weights init [length].
   result = Spec(code: 16, params: [offset.uint32, length.uint32, 0, 0, 0, 0, 0, 0])
   result.tensors = init
+
+proc sparseDenseCsr*(inputs, outputs: int, rowStart, cols: seq[uint32], vals: seq[float32], bias: seq[float32] = @[],
+    relu = false): Spec =
+  ## SPARSE_DENSE (17) from its CSR parts: params in, out, bias, act, nnz; rowStart [out + 1] and col [nnz] (uint32),
+  ## then val [nnz] and b [out] when `bias` is not empty.
+  result = Spec(code: 17, params: [inputs.uint32, outputs.uint32, (bias.len > 0).uint32, relu.uint32,
+    cols.len.uint32, 0, 0, 0])
+  result.extra = rowStart & cols
+  result.tensors = vals & bias
+
+proc sparseDense*(r: var Rand, inputs, outputs: int, density: float, bias = false, relu = false,
+    emptyRows = 0.0): Spec =
+  ## A random SPARSE_DENSE: each weight kept with probability `density` (columns ascending), a fraction `emptyRows`
+  ## of the rows stored with no entries at all.
+  var rowStart = @[0'u32]
+  var cols: seq[uint32]
+  var vals: seq[float32]
+  for o in 0..<outputs:
+    if r.rand(1.0) >= emptyRows:
+      for i in 0..<inputs:
+        if r.rand(1.0) < density:
+          cols.add i.uint32
+          vals.add r.gauss(1.0/sqrt(max(1.0, density*inputs.float)))
+    rowStart.add cols.len.uint32
+  sparseDenseCsr(inputs, outputs, rowStart, cols, vals, (if bias: r.weights(outputs, 0.1) else: @[]), relu)
+
+proc denseOf*(s: Spec): Spec =
+  ## The DENSE (1) with SPARSE_DENSE `s`'s weights at their columns and +0.0 everywhere else, the same bias and act.
+  let inputs = s.params[0].int
+  let outputs = s.params[1].int
+  let nnz = s.params[4].int
+  result = Spec(code: 1, params: [s.params[0], s.params[1], s.params[2], s.params[3], 0, 0, 0, 0])
+  result.tensors = newSeq[float32](inputs*outputs)
+  for o in 0..<outputs:
+    for e in s.extra[o].int ..< s.extra[o+1].int:
+      result.tensors[o*inputs + s.extra[outputs + 1 + e].int] = s.tensors[e]
+  if s.params[2] == 1: result.tensors.add s.tensors[nnz ..< nnz + outputs]
