@@ -1094,6 +1094,69 @@ class Pwnet2Tests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "nonfinite"):
             validate_pwnet2(bytes(nonfinite))
 
+    @staticmethod
+    def recall(source, offset, length, params=None):
+        """RECALL (18): params source, offset, len; init [len]."""
+        return (18, params or [source, offset, length], [], length)
+
+    def test_recall_cost_and_structure(self):
+        # The mixed model of test_paintbot_neural_layers ("a model mixing RECALL ..."): the loader counts 1,712.
+        s1, s2 = self.pattern_csr(20, 16), self.pattern_csr(18, 9)
+        self.assertEqual((len(s1[1]), len(s2[1])), (56, 29))
+        layers = [self.sparse(20, 16, *s1, True, True), self.recall(5, 1, 6),
+                  (3, [22, 12, 0, 1], [], 2 * 12 * 22 + 2 * 12), self.recall(4, 0, 2), (16, [0, 4], [], 4),
+                  self.sparse(18, 9, *s2, True, False)]
+        info = validate_pwnet2(pwnet2(20, [4, 5], layers))
+        self.assertEqual(info["operations"], 1712)
+        self.assertEqual(info["state"], 7 + 12 + 3 + 5)
+        self.assertEqual(info["parameters"], 56 + 16 + 6 + (2 * 12 * 22 + 2 * 12) + 2 + 4 + 29 + 9)
+        # RECALL costs len, and its state (len + 1) and init (len) count like DELAY's.
+        base = validate_pwnet2(pwnet2(6, [2, 3], [(1, [6, 6, 1, 0], [], 42), (1, [6, 5, 0, 0], [], 30)]))
+        good = [(1, [6, 6, 1, 0], [], 42), self.recall(2, 1, 4), (1, [10, 5, 0, 0], [], 50)]
+        info = validate_pwnet2(pwnet2(6, [2, 3], good))
+        self.assertEqual(info["operations"], base["operations"] + 4 + 2 * 4 * 5)
+        self.assertEqual((info["state"], info["parameters"]), (5, 42 + 4 + 50))
+
+        def model(**kw):
+            layers = list(good)
+            layers[1] = self.recall(2, 1, 4, **kw)
+            return pwnet2(6, [2, 3], layers)
+        cases = [
+            ([1, 1, 4], "RECALL source 1 must be a later layer \\(2..2\\)"),
+            ([0, 1, 4], "RECALL source 0 must be a later layer"),
+            ([3, 1, 4], "RECALL source 3 must be a later layer"),
+            ([4000000000, 1, 4], "must be a later layer"),
+            ([2, 2, 4], "RECALL slice outside the source's width 5"),
+            ([2, 6, 4], "RECALL slice outside the source's width 5"),
+            ([2, 0xF0000000, 4], "RECALL slice outside"),
+            ([2, 1, 4, 1], "unused parameter 3"),
+            ([2, 1, 4, 0, 0, 0, 0, 1], "unused parameter 7"),
+        ]
+        for params, fragment in cases:
+            with self.assertRaisesRegex(ValueError, fragment):
+                validate_pwnet2(model(params=params))
+        with self.assertRaisesRegex(ValueError, "RECALL len must be 1..4096"):
+            validate_pwnet2(pwnet2(6, [2, 3], [good[0], (18, [2, 0, 0], [], 0), (1, [6, 5, 0, 0], [], 30)]))
+        with self.assertRaisesRegex(ValueError, "recurrent state exceeds 4096"):
+            validate_pwnet2(pwnet2(6, [2, 2], [self.recall(1, 0, 4096), (1, [4102, 4, 0, 0], [], 4102 * 4)]))
+        with self.assertRaisesRegex(ValueError, "recurrent state exceeds 4096"):
+            validate_pwnet2(pwnet2(101, [2, 2], [(16, [0, 100], [], 100), self.recall(2, 0, 3995),
+                                                 (1, [4196, 4, 0, 0], [], 4196 * 4)]))
+        with self.assertRaisesRegex(ValueError, "RECALL output exceeds 4096"):
+            validate_pwnet2(pwnet2(100, [2, 2], [self.recall(1, 0, 4000), (1, [4100, 4, 0, 0], [], 4100 * 4)]))
+        cond = (13, [0, 1], [], 4)
+        validate_pwnet2(pwnet2(4, [2, 2], [self.recall(1, 0, 2), (1, [6, 4, 0, 0], [], 24), cond]))
+        with self.assertRaisesRegex(ValueError, "RECALL source 2 is a COND_HEAD"):
+            validate_pwnet2(pwnet2(4, [2, 2], [self.recall(2, 0, 2), (1, [6, 4, 0, 0], [], 24), cond]))
+        good_model = pwnet2(6, [2, 3], good)
+        with self.assertRaisesRegex(ValueError, "trailing bytes"):
+            validate_pwnet2(good_model + bytes(4))
+        nonfinite = bytearray(good_model)
+        at = len(good_model) - 4 * 50 - 36 - 4 * 4  # the RECALL's init
+        nonfinite[at:at + 4] = struct.pack("<f", float("inf"))
+        with self.assertRaisesRegex(ValueError, "nonfinite"):
+            validate_pwnet2(bytes(nonfinite))
+
     def test_pwnet002_with_user_inputs(self):
         # A PWNET002 actor with obs contract teams.view.1u<K> (512 + K inputs): the header is read through
         # validate_pwnet2 and the op count includes the K extra inputs.
@@ -1142,6 +1205,12 @@ class Pwnet2Tests(unittest.TestCase):
                       "(if relu: int64(outputs) else: 0)", source)
         self.assertIn("| SPARSE_DENSE | `2*nnz + out + out*bias + out*relu` |",
                       (ROOT / "examples/paintbot/neural_actor.md").read_text())
+        # RECALL's published count: len, DELAY's, in the loader, staging and neural_actor.md.
+        self.assertIn("| RECALL | `len` |", (ROOT / "examples/paintbot/neural_actor.md").read_text())
+        recall_branch = source[source.index("of lkRecall.uint32:"):source.index("of lkCondHead.uint32:")]
+        self.assertIn("layer.operations = int64(layer.length)\n", recall_branch)
+        self.assertEqual(validate_pwnet2(pwnet2(6, [2, 2], [self.recall(1, 1, 3), (1, [9, 4, 0, 0], [], 36)]))
+                         ["operations"], 3 + 2 * 9 * 4)
         host = (ROOT / "examples/paintbot/neural_host.nim").read_text()
         self.assertIn("MaxNeuralOperations* = %s'i64" % format(MAX_NEURAL_OPERATIONS, "_"), host)
 
