@@ -97,7 +97,7 @@ A PWNET002 actor may name any observation contract the host knows, including tea
 and ffa.view.1u<K> (`neural_basic.md`, manifest `user_inputs`): its input count is then 512 + K
 (ffa.view.1u<K>: the layout's size + K, which the input-count layout word `0xFFFEE000` resolves to),
 the K user inputs are ordinary input columns 512.. (ffa.view.1u<K>: the layout's size.., layout
-word section 2 offset + 24) (DENSE, CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP and SEGMENT_NEAR slices may read them), and the operation
+word section 2 offset + 24) (DENSE, SPARSE_DENSE, CONCAT_INPUT, ENTITY_ATTN, TOKEN_MLP and SEGMENT_NEAR slices may read them), and the operation
 count includes them like any other input. Staging reads the input count and contract from the PWNET002
 header. The file length must be exact: no trailing bytes. The package manifest binds the SHA-256
 of the whole file, as for PWNET001. Every weight must be finite; every unused `param` word
@@ -129,8 +129,10 @@ when layer 0 is SEGMENT_NEAR, that layer's output (the input view, below).
 | 14 | TOKEN_PAIR | `source, p, geo_base, geo_stride, x, z, self_pairs` | `A[p, d]`, `B[p, d]`, `C[p, 10]`, `b[p]` |
 | 15 | POINTER_K | `source, offset, k` | `V[k, z]`, `c[k]` (z = the source's token width) |
 | 16 | DELAY | `offset, len` | `init[len]` |
+| 17 | SPARSE_DENSE | `in, out, bias, act, nnz` | `rowStart[out+1]`, `col[nnz]` (uint32), then `val[nnz]`, then `b[out]` if bias (FP32) |
 
-Limits: widths between layers 1..4096; DENSE `out` 1..4096; MINGRU `hidden` 1..1024;
+Limits: widths between layers 1..4096; DENSE and SPARSE_DENSE `out` 1..4096; SPARSE_DENSE `nnz` 0..4,194,304;
+MINGRU `hidden` 1..1024;
 `act` 0 = none, 1 = relu; `eps` finite and > 0; TOKEN_MLP tokens 1..256, segments 1..8, layers
 1..4, at most 1024 gathered floats per token, TOKEN_MLP widths and TOKEN_MIX `z` 1..256;
 ENTITY_ATTN at most 256 tokens over all groups; SEGMENT_NEAR only as layer 0, tokens 1..256;
@@ -177,6 +179,18 @@ sum. `exp` and `sqrt` are the platform's FP32 functions (the same `exp` PWNET001
 sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
 
 - **DENSE**: `y[o] = act(sum_i x[i]*W[o,i] (+ b[o]))`, relu(v) = `v > 0 ? v : 0`.
+- **SPARSE_DENSE** (DENSE over a compressed sparse row matrix; a compiled program of thousands of small affine
+  rows costs its nonzeros, not `in*out`): row o's entries are `e = rowStart[o] ..< rowStart[o+1]`, and
+  `y[o] = act(sum_e x[col[e]]*val[e] (+ b[o]))`, summed in stored order from `+0.0`, one FP32 multiply-add per
+  entry, then the bias, then `act` (0 none, 1 relu) exactly as DENSE. A row with no entries gives `act(b[o])`
+  (`act(0)` without bias). The loader requires `rowStart[0] = 0`, `rowStart` non-decreasing,
+  `rowStart[out] = nnz`, every `col < in`, columns strictly increasing within a row, and every `val` and `b`
+  finite. Because the stored order is ascending column order, SPARSE_DENSE is DENSE's sum with the absent
+  columns' terms left out, and a DENSE whose weights are zero outside those columns gives the same FP32
+  outputs bit for bit: each left-out term is `x[i]*0 = +-0` (x is finite), and adding a zero to a running sum
+  that starts at `+0.0` never changes it (round to nearest never produces `-0` from `+0` plus a nonzero
+  term, and `s + -0 = s`). `val` and `b` are the layer's parameters (they count toward the parameter cap);
+  `rowStart` and `col` are structure, read as plain uint32 (never layout words).
 - **RMSNORM**: `r = 1 / sqrt((sum_i x[i]*x[i]) / dim + eps)`, `y[i] = x[i]*r*g[i]`.
 - **MINGRU**: `combined = W x (+ b)`, split into `c, z` (and `p` with highway), each width
   `hidden`. With `s` this layer's slice of the state:
@@ -363,6 +377,7 @@ unit's gates, interpolation and highway are 32 (PWNET001's `32*H`).
 | layer | operations |
 |---|---|
 | DENSE | `2*in*out + out*bias + out*relu` |
+| SPARSE_DENSE | `2*nnz + out + out*bias + out*relu` |
 | RMSNORM | `4*dim + 16` |
 | MINGRU | `2*in*G*hidden + G*hidden*bias + 32*hidden` |
 | RESIDUAL | `width` |
@@ -395,7 +410,10 @@ pool  = T + 2*T*d + d + 8 + P          valid flags, mean, max, reciprocal, passt
 ```
 
 and for the token layers `pool(d) = T + 2*T*d + d + 8` (T tokens; the counts, like every
-other, do not depend on which tokens are valid). Example (an entity-factored actor over
+other, do not depend on which tokens are valid). SPARSE_DENSE charges DENSE's units per stored entry (a
+multiply-accumulate is 2) plus one per output row for the row's start and store, so a SPARSE_DENSE that stores
+every weight of a DENSE costs that DENSE's count plus `out`, never less; the count depends on `nnz` alone, never
+on the values. Example (an entity-factored actor over
 the retired contract v2u32's column layout; the counts depend only on the widths): TOKEN_MLP over the 16 identities with segments (104, 8, 8), (470, 2, 2),
 (0, 0, 24), (448, 0, 2), (506, 1, 1), (522, 1, 1) (identity j's block, its terrain floats,
 the seat's own features for every token, two user inputs of its own), widths 128, 128; then

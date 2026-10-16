@@ -7,7 +7,7 @@ type
     ## PWNET002 layer type codes (the u32 `type` of a layer record).
     lkDense = 1, lkRmsNorm = 2, lkMinGru = 3, lkResidual = 4, lkEntityAttn = 5, lkConcatInput = 6,
     lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9, lkSegmentNear = 10, lkAttnPool = 11,
-    lkPad = 12, lkCondHead = 13, lkTokenPair = 14, lkPointerK = 15, lkDelay = 16
+    lkPad = 12, lkCondHead = 13, lkTokenPair = 14, lkPointerK = 15, lkDelay = 16, lkSparseDense = 17
   AttnGroup = object
     offset, stride, count, width, valid: int  # valid = -1: every token of the group is valid
     weight: int                               # E_g [d, width] then e_g [d], offsets into weights
@@ -48,6 +48,7 @@ type
     pairWidth: int         # TOKEN_PAIR: p, the pair MLP's width
     geoBase, geoStride, geoX, geoZ: int  # TOKEN_PAIR: token n's (x, z) = input[geoBase + n*geoStride + geoX / geoZ]
     selfPairs: bool        # TOKEN_PAIR: the pair (n, n) is included
+    rowStart, cols: seq[int32]  # SPARSE_DENSE: CSR row starts [out + 1] and column indices [nnz] (weight = values)
     operations: int64
   Net2Object = object
     layers: seq[NetLayer]
@@ -153,7 +154,7 @@ proc interpolate(a, b, weight: float32): float32 =
 # ---------------------------------------------------------------------------------------
 # PWNET002: the architecture is data. A layer stack from a fixed menu (DENSE, RMSNORM,
 # MINGRU, RESIDUAL, ENTITY_ATTN, CONCAT_INPUT, TOKEN_MLP, TOKEN_MIX (both with an optional pre-relu
-# LayerNorm), POINTER, SEGMENT_NEAR, ATTN_POOL, PAD, COND_HEAD, TOKEN_PAIR, POINTER_K, DELAY), FP32
+# LayerNorm), POINTER, SEGMENT_NEAR, ATTN_POOL, PAD, COND_HEAD, TOKEN_PAIR, POINTER_K, DELAY, SPARSE_DENSE), FP32
 # (SEGMENT_NEAR's geometry: float64), fixed summation order, loaded and validated once, run
 # with bounded per-model scratch sized at load (no inference allocation). The format,
 # equations and the published operation-count formula are in neural_actor.md ("PWNET002").
@@ -181,6 +182,7 @@ const
   MaxAttnPoolWidth* = 1024  # ATTN_POOL heads x key width, heads x value width
   TokenPairFeatures* = 10   # TOKEN_PAIR: the pair geometry features per ordered token pair
   MaxTokenPairRow* = 1024   # TOKEN_PAIR: d + 2p, the floats of one output row
+  MaxSparseNonzeros* = 4_194_304  # SPARSE_DENSE: stored entries (nnz) of one layer
   ## Published cost constants: a multiply-accumulate is 2 operations, an elementwise add,
   ## multiply, compare, max, relu or copy is 1, an exp, sqrt or division is 8, and a MINGRU
   ## unit's gates, interpolation and highway are 32 (PWNET001's 32 per hidden unit).
@@ -255,6 +257,12 @@ proc tokenPairOps*(tokens, d, p, width: int): int64 =
   let P = int64(p)
   int64(width) + T*(4*D*P + 2 + D) + T*T*(18 + 2*TokenPairFeatures*P + 4*P + 2*P) + T*(TranscendentalOps + P) +
     tokenPoolOps(tokens, d + 2*p)
+
+proc sparseDenseOps*(outputs, nonzeros: int, bias, relu: bool): int64 =
+  ## SPARSE_DENSE's published cost, in DENSE's units: a multiply-accumulate (2) per stored entry, one per output row
+  ## (its start and store), and DENSE's bias add and relu per output. A SPARSE_DENSE that stores every weight of a
+  ## DENSE therefore costs that DENSE's count plus `out`: never less.
+  2*int64(nonzeros) + int64(outputs) + (if bias: int64(outputs) else: 0) + (if relu: int64(outputs) else: 0)
 
 proc segmentNearOps*(inputs, tokens: int): int64 =
   ## SEGMENT_NEAR's published cost: the copy of the input, per token pair 12, per token 8.
@@ -448,6 +456,47 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
         net.readWeights(data, p, o)
       layer.outWidth = o
       layer.operations = int64(2*width*o) + (if hasBias: o else: 0) + (if layer.relu: o else: 0)
+    of lkSparseDense.uint32:
+      # SPARSE_DENSE (neural_actor.md): DENSE over a CSR matrix. Payload rowStart [out + 1] and col [nnz] (uint32),
+      # then val [nnz] and b [out] if bias (FP32). Columns strictly increase within a row, so a row sums its terms in
+      # DENSE's ascending column order.
+      layer.kind = lkSparseDense
+      let o = int(q[1])
+      let nnz = int64(q[4])
+      if int(q[0]) != width: net2Error(where & "SPARSE_DENSE input " & $q[0] & " != width " & $width)
+      if o notin 1..MaxNet2Width: net2Error(where & "SPARSE_DENSE output must be 1.." & $MaxNet2Width)
+      let hasBias = flag(2)
+      layer.relu = flag(3)
+      if nnz > MaxSparseNonzeros: net2Error(where & "SPARSE_DENSE nnz must be 0.." & $MaxSparseNonzeros)
+      unused(5)
+      let n = int(nnz)
+      if p + 4*(o + 1 + n) > data.len: raise newException(ValueError, "truncated neural actor")
+      layer.rowStart = newSeq[int32](o + 1)
+      for i in 0..o:
+        let s = readU32(data, p)
+        if s > uint32(n): net2Error(where & "SPARSE_DENSE rowStart " & $i & " exceeds nnz " & $n)
+        layer.rowStart[i] = int32(s)
+        if i > 0 and layer.rowStart[i] < layer.rowStart[i-1]:
+          net2Error(where & "SPARSE_DENSE rowStart must not decrease (row " & $(i-1) & ")")
+      if layer.rowStart[0] != 0: net2Error(where & "SPARSE_DENSE rowStart[0] must be 0")
+      if int(layer.rowStart[o]) != n:
+        net2Error(where & "SPARSE_DENSE rowStart[out] " & $layer.rowStart[o] & " != nnz " & $n)
+      layer.cols = newSeq[int32](n)
+      for i in 0..<n:
+        let c = readU32(data, p)
+        if c >= uint32(width): net2Error(where & "SPARSE_DENSE column " & $c & " outside the input width " & $width)
+        layer.cols[i] = int32(c)
+      for row in 0..<o:
+        for e in layer.rowStart[row]+1 ..< layer.rowStart[row+1]:
+          if layer.cols[e] <= layer.cols[e-1]:
+            net2Error(where & "SPARSE_DENSE columns must strictly increase within row " & $row)
+      layer.weight = net.weights.len
+      net.readWeights(data, p, n)
+      if hasBias:
+        layer.bias = net.weights.len
+        net.readWeights(data, p, o)
+      layer.outWidth = o
+      layer.operations = sparseDenseOps(o, n, hasBias, layer.relu)
     of lkRmsNorm.uint32:
       layer.kind = lkRmsNorm
       if int(q[0]) != width: net2Error(where & "RMSNORM dim " & $q[0] & " != width " & $width)
@@ -1363,6 +1412,17 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
     of lkDense:
       let bias = if layer.bias < 0: nil else: w.at(layer.bias)
       dense(x, layer.inWidth, w.at(layer.weight), bias, layer.outWidth, layer.relu, y)
+    of lkSparseDense:
+      # y[o] = act(sum over row o's entries, in stored (ascending column) order, of x[col]*val (+ b[o])): DENSE's
+      # sum restricted to the stored columns.
+      let val = w.at(layer.weight)
+      let bias = if layer.bias < 0: nil else: w.at(layer.bias)
+      for o in 0..<layer.outWidth:
+        var sum = 0'f32
+        for e in layer.rowStart[o] ..< layer.rowStart[o+1]: sum += x[layer.cols[e]]*val[e]
+        if bias != nil: sum = sum + bias[o]
+        if layer.relu and not (sum > 0'f32): sum = 0'f32
+        y[o] = sum
     of lkRmsNorm:
       rmsNorm(x, layer.inWidth, w.at(layer.weight), layer.eps, y)
     of lkMinGru:

@@ -400,3 +400,173 @@ suite "PWNET002 TOKEN_PAIR (layer 14): a learned pairwise token layer":
     check rejects(with(2, proc (s: var Spec) = s.params[6] = 2), "parameter 6 must be 0 or 1")
     check rejects(with(2, proc (s: var Spec) = s.params[7] = 1), "unused parameter 7")
     check rejects(with(2, proc (s: var Spec) = s.tensors.setLen(s.tensors.len - 1)), "")
+
+proc sparse32(x: openArray[float32], s: Spec): seq[float32] =
+  ## neural_actor.md's SPARSE_DENSE straight from the spec's words: per row, a float32 sum from +0 over the stored
+  ## entries in order, then the bias, then the act.
+  let outputs = s.params[1].int
+  let nnz = s.params[4].int
+  for o in 0..<outputs:
+    var sum = 0'f32
+    for e in s.extra[o].int ..< s.extra[o+1].int:
+      sum += x[s.extra[outputs + 1 + e].int]*s.tensors[e]
+    if s.params[2] == 1: sum = sum + s.tensors[nnz + o]
+    if s.params[3] == 1 and not (sum > 0'f32): sum = 0'f32
+    result.add sum
+
+proc patternCsr(inputs, outputs: int): (seq[uint32], seq[uint32]) =
+  ## A fixed sparsity pattern (mirrored in test_neural_package.py): row o stores the columns i with
+  ## (i + 2*o) mod 5 == 0, except that rows with o mod 7 == 6 store nothing.
+  var starts = @[0'u32]
+  var cols: seq[uint32]
+  for o in 0..<outputs:
+    if o mod 7 != 6:
+      for i in 0..<inputs:
+        if (i + 2*o) mod 5 == 0: cols.add i.uint32
+    starts.add cols.len.uint32
+  (starts, cols)
+
+proc patternSparse(r: var Rand, inputs, outputs: int, bias, relu: bool): Spec =
+  let (starts, cols) = patternCsr(inputs, outputs)
+  sparseDenseCsr(inputs, outputs, starts, cols, r.weights(cols.len, 0.5), (if bias: r.weights(outputs, 0.1) else: @[]),
+    relu)
+
+proc wideObservation(r: var Rand, n: int): seq[float32] =
+  ## Mixed signs, exact zeros (so DENSE's absent columns multiply into -0 and +0), and a wide magnitude range.
+  for i in 0..<n:
+    result.add(case r.rand(4)
+      of 0: 0'f32
+      of 1: -0'f32
+      of 2: float32(r.rand(2.0) - 1.0)
+      of 3: float32(r.rand(2000.0) - 1000.0)
+      else: float32(r.rand(2.0e-3) - 1.0e-3))
+
+suite "PWNET002 SPARSE_DENSE (layer 17): DENSE over a CSR matrix":
+  test "the engine equals a float32 reimplementation, term for term (empty rows, nnz 0, bias, relu)":
+    var r = initRand(171)
+    var trials, emptyRowsSeen, zeroNnz = 0
+    for density in [0.0, 0.01, 0.1, 0.5, 1.0]:
+      for bias in [false, true]:
+        for relu in [false, true]:
+          for k in 0..<3:
+            let inputs = 1 + r.rand(299)
+            let outputs = 2 + r.rand(198)
+            let s = r.sparseDense(inputs, outputs, density, bias, relu, emptyRows = [0.0, 0.3, 1.0][k])
+            if s.params[4] == 0: inc zeroNnz
+            for o in 0..<outputs:
+              if s.extra[o] == s.extra[o+1]: inc emptyRowsSeen
+            let actor = loadActor(encode2(inputs, [outputs], [s]))
+            check actor.operationCount == sparseDenseOps(outputs, s.params[4].int, bias, relu)
+            check actor.parameterCount == s.params[4].int + (if bias: outputs else: 0)
+            for t in 0..<4:
+              let obs = r.wideObservation(inputs)
+              check bits(actor.run(obs)) == bits(sparse32(obs, s))
+            inc trials
+    check trials == 60 and zeroNnz >= 12 and emptyRowsSeen > 100
+    # A row with no entries is act(b) (0 without bias); a layer with nnz 0 is act(b) everywhere.
+    let empty = sparseDenseCsr(5, 3, @[0'u32, 0, 0, 0], @[], @[], @[0.5'f32, -0.25, 2], relu = true)
+    check loadActor(encode2(5, [3], [empty])).run(@[1'f32, 2, 3, 4, 5]) == @[0.5'f32, 0, 2]
+    let none = sparseDenseCsr(5, 2, @[0'u32, 0, 0], @[], @[])
+    check bits(loadActor(encode2(5, [2], [none])).run(@[1'f32, -2, 3, 4, 5])) == @[0'u32, 0]
+    # Two in a row, the second reading the first's relu output.
+    let a = r.sparseDense(40, 30, 0.2, bias = true, relu = true, emptyRows = 0.2)
+    let b = r.sparseDense(30, 6, 0.5, bias = true)
+    let chain = loadActor(encode2(40, [3, 3], [a, b]))
+    for t in 0..<10:
+      let obs = r.wideObservation(40)
+      check bits(chain.run(obs)) == bits(sparse32(sparse32(obs, a), b))
+
+  test "SPARSE_DENSE equals the DENSE with the same nonzeros, bit for bit":
+    # SPARSE_DENSE sums its stored entries in ascending column order: DENSE's order with the absent columns left out.
+    # In DENSE those columns add x*0 = +-0 (x finite) to a sum that starts at +0.0, which never changes an FP32 sum:
+    check bits([0'f32 + -0'f32, 0'f32 + 0'f32]) == @[0'u32, 0]
+    for s in [1.5'f32, -1.5, 1e-38, -3e38]:
+      check bits([s + -0'f32, s + 0'f32]) == bits([s, s])
+    var r = initRand(172)
+    var zeroTerms = 0
+    for trial in 0..<40:
+      let inputs = 1 + r.rand(255)
+      let outputs = 2 + r.rand(126)
+      let s = r.sparseDense(inputs, outputs, [0.0, 0.05, 0.3, 0.9, 1.0][trial mod 5], r.rand(1) == 1, r.rand(1) == 1,
+        emptyRows = 0.1)
+      let d = denseOf(s)
+      zeroTerms += inputs*outputs - s.params[4].int
+      let sparseActor = loadActor(encode2(inputs, [outputs], [s]))
+      let denseActor = loadActor(encode2(inputs, [outputs], [d]))
+      # The cost: DENSE's count for the same widths, or (fully stored) DENSE's plus one per row.
+      check sparseActor.operationCount ==
+        denseActor.operationCount - 2*int64(inputs*outputs) + 2*int64(s.params[4]) + int64(outputs)
+      for t in 0..<5:
+        let obs = r.wideObservation(inputs)
+        check bits(sparseActor.run(obs)) == bits(denseActor.run(obs))
+    check zeroTerms > 100_000
+    # Inside a recurrent stack the state agrees too, tick after tick.
+    let s1 = r.sparseDense(64, 32, 0.15, bias = true, relu = true)
+    let s2 = r.sparseDense(32, 9, 0.4, bias = true)
+    let g = r.mingru(32, 32, highway = true)
+    let sparseNet = loadActor(encode2(64, [4, 5], [s1, g, s2]))
+    let denseNet = loadActor(encode2(64, [4, 5], [denseOf(s1), g, denseOf(s2)]))
+    var sa = newSeq[float32](sparseNet.stateSize)
+    var sb = newSeq[float32](denseNet.stateSize)
+    var la, lb = newSeq[float32](9)
+    for t in 0..<50:
+      let obs = r.wideObservation(64)
+      sparseNet.infer(obs, sa, la)
+      denseNet.infer(obs, sb, lb)
+      check bits(la) == bits(lb) and bits(sa) == bits(sb)
+
+  test "a model mixing SPARSE_DENSE with token, recurrent and delay layers: loads, runs, costs the published count":
+    # The same shape as test_neural_package.py's test_sparse_dense_cost_and_structure (staging's count).
+    var r = initRand(173)
+    let specs = @[r.tokenMlp(6, [[0'u32, 8, 8], [48'u32, 0, 8]], 0, 0, [10]),   # 0: 20
+      concat(48, 8),                                                            # 1: 28
+      r.patternSparse(28, 24, bias = true, relu = true),                         # 2: 24
+      r.mingru(24, 16, highway = false, bias = true),                           # 3: 16
+      delay(0, 4, r.weights(4, 0.1)),                                           # 4: 20
+      r.patternSparse(20, 9, bias = true, relu = false),                        # 5: 9
+      r.pointerHead(0, 2, 10)]                                                  # 6: logits 2..7
+    let (_, cols1) = patternCsr(28, 24)
+    let (_, cols2) = patternCsr(20, 9)
+    check (cols1.len, cols2.len) == (118, 32)
+    let actor = loadActor(encode2(56, [4, 5], specs))
+    let published = tokenMlpOps(6, [16, 10]) + 8 + sparseDenseOps(24, 118, true, true) +
+      (2*24*2*16 + 2*16 + 32*16) + 4 + sparseDenseOps(9, 32, true, false) + pointerOps(6, 10, 9)
+    check sparseDenseOps(24, 118, true, true) == 2*118 + 3*24
+    check actor.operationCount == published
+    check actor.operationCount == 4_903   # test_neural_package.py asserts the same count from staging
+    check actor.stateSize == 16 + 5
+    var state = newSeq[float32](actor.stateSize)
+    var logits = newSeq[float32](9)
+    for t in 0..<20:
+      var obs = r.wideObservation(56)
+      for n in 0..<6: obs[8*n] = float32(n != 2)
+      actor.infer(obs, state, logits)
+      for x in logits: check x == x
+
+  test "the loader checks SPARSE_DENSE's params and CSR structure":
+    let good = sparseDenseCsr(6, 3, @[0'u32, 2, 2, 5], @[1'u32, 4, 0, 2, 5], @[1'f32, 2, 3, 4, 5], @[0.1'f32, 0.2, 0.3])
+    discard loadActor(encode2(6, [3], [good]))
+    proc with(change: proc (s: var Spec)): string =
+      var s = good
+      change(s)
+      encode2(6, [3], [s])
+    check rejects(with(proc (s: var Spec) = s.extra[0] = 1), "rowStart[0] must be 0")
+    check rejects(with(proc (s: var Spec) = s.extra[2] = 1), "rowStart must not decrease")
+    check rejects(with(proc (s: var Spec) = s.extra[3] = 4), "rowStart[out] 4 != nnz 5")
+    check rejects(with(proc (s: var Spec) = s.extra[3] = 6), "rowStart 3 exceeds nnz 5")
+    check rejects(with(proc (s: var Spec) = s.extra[4 + 1] = 6), "column 6 outside the input width 6")
+    check rejects(with(proc (s: var Spec) = s.extra[4 + 1] = 1), "columns must strictly increase within row 0")
+    check rejects(with(proc (s: var Spec) = s.extra[4 + 3] = 0), "columns must strictly increase within row 2")
+    check rejects(with(proc (s: var Spec) = s.tensors[1] = Inf.float32), "nonfinite neural weight")
+    check rejects(with(proc (s: var Spec) = s.tensors[6] = NaN.float32), "nonfinite neural weight")
+    check rejects(with(proc (s: var Spec) = s.params[0] = 5), "SPARSE_DENSE input 5 != width 6")
+    check rejects(with(proc (s: var Spec) = s.params[1] = 0), "SPARSE_DENSE output must be")
+    check rejects(with(proc (s: var Spec) = s.params[2] = 2), "parameter 2 must be 0 or 1")
+    check rejects(with(proc (s: var Spec) = s.params[3] = 2), "parameter 3 must be 0 or 1")
+    check rejects(with(proc (s: var Spec) = s.params[4] = 4_194_305), "SPARSE_DENSE nnz must be 0..4194304")
+    check rejects(with(proc (s: var Spec) = s.params[5] = 1), "unused parameter 5")
+    check rejects(with(proc (s: var Spec) = s.params[7] = 1), "unused parameter 7")
+    check rejects(with(proc (s: var Spec) = s.params[4] = 6), "")      # the payload no longer matches nnz
+    check rejects(with(proc (s: var Spec) = s.tensors.setLen(7)), "truncated")
+    check rejects(encode2(6, [3], [good]) & "\0\0\0\0", "trailing bytes")
+    check rejects(with(proc (s: var Spec) = s.extra.setLen(3)), "")
