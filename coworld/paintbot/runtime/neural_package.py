@@ -479,6 +479,8 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
     token_layers = {}  # layer index -> ("mlp" | "mix" | "attn", tokens, floats per token)
     conditionals = []  # COND_HEAD (condition head, re-selected head), in layer order
     exposed = set()    # ENTITY_ATTN layers whose token rows a later layer reads (their copy is costed once)
+    codes = []         # each layer's type code, in layer order
+    recalls = []       # RECALL (layer, source layer, offset, len): the source is checked after every layer is read
 
     def expose(source):
         nonlocal operations
@@ -802,6 +804,20 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
             if out > lim["width"]:
                 bad(where + "DELAY output exceeds %d" % lim["width"])
             operations += length
+        elif code == 18:  # RECALL: y = [x, prev]; prev = a later layer's slice last inference (neural_actor.nim lkRecall)
+            source, offset, length = q[0], q[1], q[2]
+            unused(3)
+            if not 1 <= length <= lim["width"]:
+                bad(where + "RECALL len must be 1..%d" % lim["width"])
+            weights(length)
+            state += length + 1
+            if state > lim["state"]:
+                bad(where + "recurrent state exceeds %d" % lim["state"])
+            out = width + length
+            if out > lim["width"]:
+                bad(where + "RECALL output exceeds %d" % lim["width"])
+            recalls.append((k, source, offset, length))
+            operations += length
         elif code == 13:  # COND_HEAD
             when_head, head = q[0], q[1]
             unused(2)
@@ -831,11 +847,20 @@ def _walk_pwnet2(model, observation_contract, action_contract, seats, header):
         else:
             bad(where + "unknown layer type %d" % code)
         widths.append(out)
+        codes.append(code)
         width = out
     if pos != len(model):
         bad("length: %d trailing bytes" % (len(model) - pos))
     if width != outputs:
         bad("last layer width %d != outputs %d" % (width, outputs))
+    for k, source, offset, length in recalls:
+        where = "layer %d: " % k
+        if not k < source < count:
+            bad(where + "RECALL source %d must be a later layer (%d..%d)" % (source, k + 1, count - 1))
+        if codes[source] == 13:
+            bad(where + "RECALL source %d is a COND_HEAD" % source)
+        if offset > widths[source] or length > widths[source] - offset:
+            bad(where + "RECALL slice outside the source's width %d" % widths[source])
     budget = neural_budget(seats)
     if operations > budget:
         raise ValueError("neural actor exceeds native operation budget: %d > %d" % (operations, budget))

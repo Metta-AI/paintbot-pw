@@ -570,3 +570,188 @@ suite "PWNET002 SPARSE_DENSE (layer 17): DENSE over a CSR matrix":
     check rejects(with(proc (s: var Spec) = s.tensors.setLen(7)), "truncated")
     check rejects(encode2(6, [3], [good]) & "\0\0\0\0", "trailing bytes")
     check rejects(with(proc (s: var Spec) = s.extra.setLen(3)), "")
+
+type RefSlot = object
+  ## The reference's state for one DELAY or RECALL layer: the stored slice and the primed flag.
+  m: seq[float32]
+  primed: bool
+
+proc refRun(specs: openArray[Spec], obs: seq[float32], slots: var seq[RefSlot]): seq[float32] =
+  ## neural_actor.md's SPARSE_DENSE, DELAY and RECALL straight from the spec's words. A DELAY or RECALL layer
+  ## outputs [x, prev], prev = init unless primed, else the stored slice. DELAY stores its own input's slice; a
+  ## RECALL's slice [y_source[offset ..< offset+len], 1] is stored when layer `source` runs. Staged, then committed.
+  if slots.len == 0: slots = newSeq[RefSlot](specs.len)
+  var staged = slots
+  var outs: seq[seq[float32]]
+  var x = obs
+  for k, s in specs:
+    var y: seq[float32]
+    case s.code
+    of 17: y = sparse32(x, s)
+    of 16, 18:
+      let n = (if s.code == 16: s.params[1].int else: s.params[2].int)
+      y = x
+      for i in 0..<n: y.add(if slots[k].primed: slots[k].m[i] else: s.tensors[i])
+      if s.code == 16:
+        staged[k] = RefSlot(m: x[s.params[0].int ..< s.params[0].int + n], primed: true)
+    else: doAssert false, "reference: unsupported layer " & $s.code
+    outs.add y
+    for j, other in specs:
+      if other.code == 18 and other.params[0].int == k:
+        let off = other.params[1].int
+        staged[j] = RefSlot(m: y[off ..< off + other.params[2].int], primed: true)
+    x = y
+  slots = staged
+  x
+
+proc refState(specs: openArray[Spec], slots: seq[RefSlot]): seq[float32] =
+  ## The engine's state layout: each DELAY / RECALL slice in layer order, m then the primed flag.
+  for k, s in specs:
+    if s.code in [16'u32, 18]:
+      let n = (if s.code == 16: s.params[1].int else: s.params[2].int)
+      for i in 0..<n: result.add(if slots[k].primed: slots[k].m[i] else: 0'f32)
+      result.add(if slots[k].primed: 1'f32 else: 0'f32)
+
+suite "PWNET002 RECALL (layer 18): the previous inference's slice of a later layer":
+  test "the engine equals a float32 reimplementation, bit for bit, over ticks with resets":
+    var r = initRand(181)
+    # A: SPARSE_DENSE -> RECALL (1 later) -> SPARSE_DENSE -> RECALL (3 later) -> SPARSE_DENSE -> RECALL (1 later,
+    #    the same source as layer 3) -> SPARSE_DENSE (the source: the logits).
+    let a = @[r.sparseDense(12, 10, 0.5, bias = true, relu = true),       # 0: 10
+      recall(2, 3, 4, r.weights(4, 0.5)),                                 # 1: 14, reads layer 2 [3 ..< 7]
+      r.sparseDense(14, 16, 0.4, bias = true, relu = true),               # 2: 16
+      recall(6, 0, 5, r.weights(5, 0.5)),                                 # 3: 21, reads layer 6 [0 ..< 5]
+      r.sparseDense(21, 18, 0.4, bias = true, relu = true),               # 4: 18
+      recall(6, 2, 7, r.weights(7, 0.5)),                                 # 5: 25, reads layer 6 [2 ..< 9]
+      r.sparseDense(25, 9, 0.5, bias = true)]                             # 6: logits 9
+    # B: RECALL as layer 0 reading the last layer (the compiled-program shape: state read first, written last),
+    #    a DELAY between (its state interleaves in layer order) and a RECALL of the DELAY layer itself.
+    let b = @[recall(5, 1, 6, r.weights(6, 0.5)),                         # 0: 8 + 6 = 14, reads layer 5 [1 ..< 7]
+      r.sparseDense(14, 12, 0.5, bias = true, relu = true),               # 1: 12
+      delay(2, 3, r.weights(3, 0.5)),                                     # 2: 15
+      recall(4, 0, 15, r.weights(15, 0.5)),                               # 3: 30, reads layer 4 (all of it)
+      r.sparseDense(30, 20, 0.3, bias = true, relu = true),               # 4: 20
+      r.sparseDense(20, 9, 0.5, bias = true)]                             # 5: logits 9
+    for (inputs, specs) in [(12, a), (8, b)]:
+      let actor = loadActor(encode2(inputs, [4, 5], specs))
+      var expectState = 0
+      for s in specs:
+        if s.code == 16: expectState += s.params[1].int + 1
+        if s.code == 18: expectState += s.params[2].int + 1
+      check actor.stateSize == expectState
+      var state = newSeq[float32](actor.stateSize)
+      var logits = newSeq[float32](9)
+      var slots: seq[RefSlot]
+      var ticks = 0
+      for t in 0..<120:
+        if t mod 17 == 0:
+          for v in state.mitems: v = 0'f32   # the host's reset: zero the whole state
+          slots = @[]
+        let obs = r.observation(inputs)
+        actor.infer(obs, state, logits)
+        let want = refRun(specs, obs, slots)
+        check bits(logits) == bits(want)
+        check bits(state) == bits(refState(specs, slots))
+        inc ticks
+      check ticks == 120
+
+  test "RECALL carries a late value to an early layer: a counter, and prev = init after a reset":
+    # Layer 1 (SPARSE_DENSE, the source) outputs [x0, x1, prev0 + 1, 2*prev1]; layer 0 RECALLs its [2 ..< 4].
+    # Tick t after a reset (t = 1, 2, ...): prev = (t - 1, 2^(t-1)), so the logits are [x0, x1, t, 2^t].
+    let sd = sparseDenseCsr(4, 4, @[0'u32, 1, 2, 3, 4], @[0'u32, 1, 2, 3], @[1'f32, 1, 1, 2], @[0'f32, 0, 1, 0])
+    let actor = loadActor(encode2(2, [2, 2], [recall(1, 2, 2, @[0'f32, 1]), sd]))
+    check actor.stateSize == 3 and actor.operationCount == 2 + sparseDenseOps(4, 4, true, false)
+    var state = newSeq[float32](3)
+    var logits = newSeq[float32](4)
+    for round in 0..<2:
+      for t in 1..6:
+        actor.infer(@[0.25'f32, -3], state, logits)
+        check logits == @[0.25'f32, -3, float32(t), float32(1 shl t)]
+        check state == @[float32(t), float32(1 shl t), 1]
+      for v in state.mitems: v = 0'f32   # reset: the next tick reads init again
+    # The recalled value feeds the next SPARSE_DENSE, so it changes the logits: same observation, different prev.
+    var r = initRand(182)
+    let specs = @[r.sparseDense(6, 8, 0.6, bias = true, relu = true), recall(3, 0, 4, @[0'f32, 0, 0, 0]),
+      r.sparseDense(12, 10, 0.6, bias = true, relu = true), r.sparseDense(10, 4, 0.8, bias = true)]
+    let net = loadActor(encode2(6, [2, 2], specs))
+    var st = newSeq[float32](net.stateSize)
+    var first, second = newSeq[float32](4)
+    let obs = r.observation(6)
+    net.infer(obs, st, first)
+    check st[4] == 1'f32 and st[0 ..< 4] == first
+    net.infer(obs, st, second)
+    check bits(first) != bits(second)
+    for v in st.mitems: v = 0'f32
+    net.infer(obs, st, second)
+    check bits(first) == bits(second)
+
+  test "a failed inference commits no RECALL state":
+    let sd = sparseDenseCsr(4, 4, @[0'u32, 1, 2, 3, 4], @[0'u32, 1, 2, 3], @[1'f32, 1, 1, 2], @[0'f32, 0, 1, 0])
+    let actor = loadActor(encode2(2, [2, 2], [recall(1, 2, 2, @[0'f32, 1]), sd]))
+    var state = @[5'f32, 3e38, 1]   # 2*prev1 overflows to +Inf in layer 1
+    var logits = @[7'f32, 7, 7, 7]
+    expect ValueError: actor.infer(@[1'f32, 1], state, logits)
+    check state == @[5'f32, 3e38, 1] and logits == @[7'f32, 7, 7, 7]
+
+  test "a model mixing RECALL with sparse, recurrent and delay layers costs the published count":
+    # The same shape as test_neural_package.py's test_recall_cost_and_structure (staging's count).
+    var r = initRand(183)
+    let specs = @[r.patternSparse(20, 16, bias = true, relu = true),   # 0: 16
+      recall(5, 1, 6, r.weights(6, 0.1)),                              # 1: 22
+      r.mingru(22, 12, highway = false, bias = true),                  # 2: 12
+      recall(4, 0, 2, r.weights(2, 0.1)),                              # 3: 14, reads the DELAY layer
+      delay(0, 4, r.weights(4, 0.1)),                                  # 4: 18
+      r.patternSparse(18, 9, bias = true, relu = false)]               # 5: logits 9
+    let (_, cols1) = patternCsr(20, 16)
+    let (_, cols2) = patternCsr(18, 9)
+    let actor = loadActor(encode2(20, [4, 5], specs))
+    let published = sparseDenseOps(16, cols1.len, true, true) + 6 + (2*22*2*12 + 2*12 + 32*12) + 2 + 4 +
+      sparseDenseOps(9, cols2.len, true, false)
+    check (cols1.len, cols2.len) == (56, 29)
+    check actor.operationCount == published
+    check actor.operationCount == 1_712   # test_neural_package.py asserts the same count from staging
+    check actor.stateSize == 7 + 12 + 3 + 5
+    check actor.parameterCount == cols1.len + 16 + 6 + (2*12*22 + 2*12) + 2 + 4 + cols2.len + 9
+    var state = newSeq[float32](actor.stateSize)
+    var logits = newSeq[float32](9)
+    for t in 0..<20:
+      actor.infer(r.observation(20), state, logits)
+      for x in logits: check x == x
+
+  test "the loader checks RECALL's source, slice, len, params, state and width":
+    var r = initRand(184)
+    let d0 = r.dense(6, 6, bias = true)
+    let d2 = r.dense(10, 5)
+    let good = @[d0, recall(2, 1, 4, @[1'f32, 2, 3, 4]), d2]   # 6 -> 6 -> 10 -> 5
+    discard loadActor(encode2(6, [2, 3], good))
+    proc with(change: proc (s: var Spec)): string =
+      var specs = good
+      change(specs[1])
+      encode2(6, [2, 3], specs)
+    check rejects(with(proc (s: var Spec) = s.params[0] = 1), "RECALL source 1 must be a later layer (2..2)")
+    check rejects(with(proc (s: var Spec) = s.params[0] = 0), "RECALL source 0 must be a later layer")
+    check rejects(with(proc (s: var Spec) = s.params[0] = 3), "RECALL source 3 must be a later layer")
+    check rejects(with(proc (s: var Spec) = s.params[0] = 4_000_000_000'u32), "must be a later layer")
+    check rejects(with(proc (s: var Spec) = s.params[1] = 2), "RECALL slice outside the source's width 5")
+    check rejects(with(proc (s: var Spec) = s.params[1] = 6), "RECALL slice outside the source's width 5")
+    check rejects(with(proc (s: var Spec) = s.params[1] = 0xF000_0000'u32), "RECALL slice outside")
+    check rejects(with(proc (s: var Spec) = (s.params[2] = 0; s.tensors = @[])), "RECALL len must be 1..4096")
+    check rejects(with(proc (s: var Spec) = s.params[3] = 1), "unused parameter 3")
+    check rejects(with(proc (s: var Spec) = s.params[7] = 1), "unused parameter 7")
+    check rejects(with(proc (s: var Spec) = s.tensors[2] = NaN.float32), "nonfinite neural weight")
+    check rejects(with(proc (s: var Spec) = s.tensors[0] = Inf.float32), "nonfinite neural weight")
+    check rejects(with(proc (s: var Spec) = s.tensors.setLen(3)), "")   # the payload no longer matches len
+    check rejects(encode2(6, [2, 3], good) & "\0\0\0\0", "trailing bytes")
+    # State: len 4096 needs 4097 floats; with a DELAY's 101, len 3995 needs 4097 too.
+    check rejects(encode2(6, [2, 2], [recall(1, 0, 4096, newSeq[float32](4096)), r.dense(4102, 4)]),
+      "recurrent state exceeds 4096")
+    check rejects(encode2(101, [2, 2], [delay(0, 100, newSeq[float32](100)),
+      recall(2, 0, 3995, newSeq[float32](3995)), r.dense(4196, 4)]), "recurrent state exceeds 4096")
+    # Output: state 4001 is fine, but 100 + 4000 > 4096.
+    check rejects(encode2(100, [2, 2], [recall(1, 0, 4000, newSeq[float32](4000)), r.dense(4100, 4)]),
+      "RECALL output exceeds 4096")
+    discard loadActor(encode2(96, [2, 2], [recall(1, 0, 4, newSeq[float32](4)), r.dense(100, 4)]))
+    # The source must not be a COND_HEAD (it would be the stack's last layer, a pass-through declaration).
+    check rejects(encode2(4, [2, 2], [recall(2, 0, 2, @[0'f32, 0]), r.dense(6, 4), condHead(0, 1, newSeq[float32](4))]),
+      "RECALL source 2 is a COND_HEAD")
+    discard loadActor(encode2(4, [2, 2], [recall(1, 0, 2, @[0'f32, 0]), r.dense(6, 4), condHead(0, 1, newSeq[float32](4))]))

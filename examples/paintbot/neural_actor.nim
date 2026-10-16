@@ -7,7 +7,8 @@ type
     ## PWNET002 layer type codes (the u32 `type` of a layer record).
     lkDense = 1, lkRmsNorm = 2, lkMinGru = 3, lkResidual = 4, lkEntityAttn = 5, lkConcatInput = 6,
     lkTokenMlp = 7, lkTokenMix = 8, lkPointer = 9, lkSegmentNear = 10, lkAttnPool = 11,
-    lkPad = 12, lkCondHead = 13, lkTokenPair = 14, lkPointerK = 15, lkDelay = 16, lkSparseDense = 17
+    lkPad = 12, lkCondHead = 13, lkTokenPair = 14, lkPointerK = 15, lkDelay = 16, lkSparseDense = 17,
+    lkRecall = 18
   AttnGroup = object
     offset, stride, count, width, valid: int  # valid = -1: every token of the group is valid
     weight: int                               # E_g [d, width] then e_g [d], offsets into weights
@@ -49,6 +50,8 @@ type
     geoBase, geoStride, geoX, geoZ: int  # TOKEN_PAIR: token n's (x, z) = input[geoBase + n*geoStride + geoX / geoZ]
     selfPairs: bool        # TOKEN_PAIR: the pair (n, n) is included
     rowStart, cols: seq[int32]  # SPARSE_DENSE: CSR row starts [out + 1] and column indices [nnz] (weight = values)
+    recallOffset: int      # RECALL: the slice's offset in the source layer's output (source = the source layer)
+    recalls: seq[int]      # the RECALL layers whose source is this layer (their state is staged after it runs)
     operations: int64
   Net2Object = object
     layers: seq[NetLayer]
@@ -154,7 +157,7 @@ proc interpolate(a, b, weight: float32): float32 =
 # ---------------------------------------------------------------------------------------
 # PWNET002: the architecture is data. A layer stack from a fixed menu (DENSE, RMSNORM,
 # MINGRU, RESIDUAL, ENTITY_ATTN, CONCAT_INPUT, TOKEN_MLP, TOKEN_MIX (both with an optional pre-relu
-# LayerNorm), POINTER, SEGMENT_NEAR, ATTN_POOL, PAD, COND_HEAD, TOKEN_PAIR, POINTER_K, DELAY, SPARSE_DENSE), FP32
+# LayerNorm), POINTER, SEGMENT_NEAR, ATTN_POOL, PAD, COND_HEAD, TOKEN_PAIR, POINTER_K, DELAY, SPARSE_DENSE, RECALL), FP32
 # (SEGMENT_NEAR's geometry: float64), fixed summation order, loaded and validated once, run
 # with bounded per-model scratch sized at load (no inference allocation). The format,
 # equations and the published operation-count formula are in neural_actor.md ("PWNET002").
@@ -166,7 +169,7 @@ const
   MaxNet2Parameters* = 4_194_304
   MaxNet2Layers* = 64
   MaxNet2Width* = 4096      # any vector between layers
-  MaxNet2State* = 4096      # recurrent floats, all MINGRU and DELAY layers together
+  MaxNet2State* = 4096      # recurrent floats, all MINGRU, DELAY and RECALL layers together
   MaxMinGruHidden* = 1024
   MaxAttnGroups* = 8
   MaxAttnTokens* = 256
@@ -807,6 +810,25 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
       layer.outWidth = width + layer.length
       if layer.outWidth > MaxNet2Width: net2Error(where & "DELAY output exceeds " & $MaxNet2Width)
       layer.operations = int64(layer.length)
+    of lkRecall.uint32:
+      # RECALL (neural_actor.md): y = [x, prev], prev = init until the source layer has run since the last state
+      # reset, then the slice y_source[offset ..< offset + length] of the previous inference, where `source` is a
+      # strictly later layer. Its state is DELAY's: the slice, then a primed flag. The source layer is checked once
+      # every layer is parsed (below).
+      layer.kind = lkRecall
+      layer.source = int(q[0])  # the source layer's index
+      layer.recallOffset = int(q[1])
+      layer.length = int(q[2])
+      unused(3)
+      if layer.length notin 1..MaxNet2Width: net2Error(where & "RECALL len must be 1.." & $MaxNet2Width)
+      layer.weight = net.weights.len
+      net.readWeights(data, p, layer.length)  # init [length]
+      layer.stateOffset = net.stateSize
+      net.stateSize += layer.length + 1
+      if net.stateSize > MaxNet2State: net2Error(where & "recurrent state exceeds " & $MaxNet2State)
+      layer.outWidth = width + layer.length
+      if layer.outWidth > MaxNet2Width: net2Error(where & "RECALL output exceeds " & $MaxNet2Width)
+      layer.operations = int64(layer.length)
     of lkCondHead.uint32:
       layer.kind = lkCondHead
       let whenHead = int(q[0])
@@ -841,6 +863,19 @@ proc loadActor2(data: string, ctx: ActorLayout): Actor =
     net.layers.add layer
   if p != data.len: net2Error("length: " & $(data.len - p) & " trailing bytes")
   if width != outputs: net2Error("last layer width " & $width & " != outputs " & $outputs)
+  # RECALL's source is a strictly later layer, so it is checked once every layer is known.
+  for k in 0..<net.layers.len:
+    if net.layers[k].kind != lkRecall: continue
+    let where = "layer " & $k & ": "
+    let source = net.layers[k].source
+    if source <= k or source >= net.layers.len:
+      net2Error(where & "RECALL source " & $source & " must be a later layer (" & $(k+1) & ".." &
+        $(net.layers.len-1) & ")")
+    if net.layers[source].kind == lkCondHead: net2Error(where & "RECALL source " & $source & " is a COND_HEAD")
+    if net.layers[k].recallOffset > net.layers[source].outWidth or
+        net.layers[k].length > net.layers[source].outWidth - net.layers[k].recallOffset:
+      net2Error(where & "RECALL slice outside the source's width " & $net.layers[source].outWidth)
+    net.layers[source].recalls.add k
   net.parameters = net.weights.len
   net.nextState = scratch
   net.work = scratch + net.stateSize
@@ -1465,6 +1500,14 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
     of lkCondHead:
       # A declaration for the selection (Actor.conditionals); the vector passes through.
       for i in 0..<layer.outWidth: y[i] = x[i]
+    of lkRecall:
+      # y = [x, prev]; the next state is staged when the source layer runs (below).
+      let n = layer.length
+      let old = oldState.at(layer.stateOffset)
+      let init = w.at(layer.weight)
+      for i in 0..<layer.inWidth: y[i] = x[i]
+      let primed = old[n] != 0'f32
+      for i in 0..<n: y[layer.inWidth+i] = if primed: old[i] else: init[i]
     of lkPad:
       # y = x[0 ..< at], `length` zeros, x[at ..< width]: room for match-sized pointer heads.
       let at = layer.source
@@ -1472,6 +1515,12 @@ proc inferNet2(actor: Actor, obs: openArray[float32], state: var seq[float32],
       for i in 0..<layer.length: y[at+i] = 0'f32
       for i in at..<layer.inWidth: y[layer.length+i] = x[i]
     checkFinite(y, layer.outWidth)
+    # RECALL layers reading this layer: stage [y[offset ..< offset + len], 1], committed with every other state.
+    for r in layer.recalls:
+      let recall = addr net.layers[r]
+      let next = scratch.at(net.nextState + recall.stateOffset)
+      for i in 0..<recall.length: next[i] = y[recall.recallOffset+i]
+      next[recall.length] = 1'f32
     x = y
     if layer.kind == lkSegmentNear: input = y  # every later layer that reads "the input" reads the view
   # Every result is validated before state or logits are committed.

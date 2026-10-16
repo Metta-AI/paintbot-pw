@@ -341,3 +341,10 @@ proc denseOf*(s: Spec): Spec =
     for e in s.extra[o].int ..< s.extra[o+1].int:
       result.tensors[o*inputs + s.extra[outputs + 1 + e].int] = s.tensors[e]
   if s.params[2] == 1: result.tensors.add s.tensors[nnz ..< nnz + outputs]
+
+proc recall*(source, offset, length: int, init: seq[float32]): Spec =
+  ## RECALL (18): y = [x, prev]; prev = init on a fresh or zeroed state, else the slice
+  ## y_source[offset ..< offset+length] that the later layer `source` output on the previous inference. Weights
+  ## init [length].
+  result = Spec(code: 18, params: [source.uint32, offset.uint32, length.uint32, 0, 0, 0, 0, 0])
+  result.tensors = init
