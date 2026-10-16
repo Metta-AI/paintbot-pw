@@ -4,7 +4,8 @@ when defined(emscripten) and defined(workerReplayIndex): import flatty
 import windy, opengl, vmath, chroma, jsony, gltf
 import polyworld/[shapes, characters, common, toon, shadows, quadterrain, pathing, actioncam, selectionoutlines]
 import game, sim, analysis, camdirector, scenery, villagegraphics, controls, celebration, projection, kinhue, watershader, sky
-when not defined(emscripten): import devpanel
+# The developer panels (water, sky and camera controls) are opt-in: -d:pwDevPanel.
+when defined(pwDevPanel): import devpanel
 from kinship import activeKinship, rPercent
 import polyworld/[player, tapes]
 when defined(emscripten): {.emit: "#include <emscripten.h>\n#include <emscripten/html5.h>".}
@@ -639,7 +640,7 @@ proc runGraphics*() =
   let window = newWindow("Paintbot · Heartwick", ivec2(1440, 900))
   makeContextCurrent(window)
   loadExtensions()
-  when not defined(emscripten):
+  when defined(pwDevPanel):
     var panel = initDevPanel(window)
   # Keep only a narrow scenic strip around the playable arena.
   const border = 3
@@ -752,8 +753,9 @@ proc runGraphics*() =
     let ocean = QuadLayer(originX: HalfGrid.int-400, originZ: HalfGrid.int-400, width: 800,
       depth: 800, water: true, tiles: newSeq[Tile](800*800))
     for tile in ocean.tiles.mitems:
-      tile = Tile(flags: TileExists, tops: pack([-2.75'f32, -2.75, -2.75, -2.75]),
+      tile = Tile(flags: TileExists, tops: pack([SeaSurface, SeaSurface, SeaSurface, SeaSurface]),
         bottoms: pack([-3'f32, -3, -3, -3]))
+    oceanLayer = layers.len
     layers.add ocean
   if riverTerrain:
     # As in GOTA, water covers submerged ground corners and the bank clips it.
@@ -782,6 +784,7 @@ proc runGraphics*() =
           river.tiles[z*terrainWidth+x] = Tile(flags: TileExists,
             tops: pack(levels),
             bottoms: pack([-2'f32,-2,-2,-2]))
+    lakeLayer = layers.len
     layers.add river
   amplitude = 1.2
   treeHeight = 5.5
@@ -961,7 +964,7 @@ proc runGraphics*() =
 
     var (eye, view, projection) = spectatorCamera(target, distance, viewYaw, tilt,
         window.size.x, window.size.y)
-    when not defined(emscripten): panel.updateCamera(eye, view, target)
+    when defined(pwDevPanel): panel.updateCamera(eye, view, target)
     profMark(1)
     let vp = projection*view
     # Highlights the camera did not show become instant-replay candidates.
@@ -1069,6 +1072,8 @@ proc runGraphics*() =
       uploadTerrainVisibility(visibility)
       visibilityTick = world.tick; visibilityLens = terrainLens
     profMark(2)
+    # The sky's sun (the panel's) casts the shadows and lights the scene.
+    shadowsFollowSun(scene.toon)
     sunDepthPasses(window.size):
       drawTerrainSunDepth()
       scene.sunDepthPass = true; actors(margin = 1.8, maxRank = CrowdDetail); scene.sunDepthPass = false
@@ -1491,24 +1496,42 @@ proc runGraphics*() =
           rgbx(255,244,200,200), halfWidth = 0.04)
     # Every view reflects the same sky phase and world geometry; the in-game UI overlay
     # is drawn afterward so it does not appear in the water.
-    proc renderReflection(v, proj: Mat4, eyeAt: Vec3, exclude = -1): bool =
-      result = islandTerrain and reflecting()
+    proc renderReflection(params: WaterParams, v, proj: Mat4, eyeAt: Vec3,
+        exclude = -1): bool =
+      ## Renders this body of water's reflection, mirrored at its own surface.
+      result = reflecting(params)
       if not result: return
-      # The water mirrors the river's surface; the sea, lower, reflects from the same plane.
-      let mirrored = reflectedCamera(eyeAt, v, proj, waterParams.height)
+      let mirrored = reflectedCamera(eyeAt, v, proj, params.height)
       let mirroredVp = mirrored.projection*mirrored.view
       beginWaterReflection(window.size)
-      drawSky(mirroredVp, mirrored.eye)
+      # Without the sun: the water scatters it from its ripples (sheen and glints).
+      drawSky(mirroredVp, mirrored.eye, sun = false)
       drawTerrain(mirroredVp)
       beginCharacters(scene, window, mirrored.view, mirrored.projection, mirrored.eye)
       actors(exclude = exclude, view = mirroredVp); finishCharacters(scene)
       shapes.draw(mirroredVp)
       endWaterReflection()
       glViewport(0, 0, window.size.x.GLsizei, window.size.y.GLsizei)
-    let reflected = renderReflection(view, projection, eye)
-    if islandTerrain:
-      drawMurkyWater(vp, eye, (world.tick.float32+alpha)/24, window.size,
-        scene.toon.highlightColor, reflected = reflected)
+    proc drawWaters(v, proj: Mat4, eyeAt: Vec3, exclude = -1,
+        viewport = ivec4(0, 0, 0, 0)) =
+      ## Draws the ocean, then the lake and river over it where they meet, each with its
+      ## own parameters and reflection, over this view's opaque scene. An inset passes
+      ## its viewport; its scissor and viewport are restored after each reflection pass.
+      if not islandTerrain: return
+      captureWaterScene(window.size)
+      for (params, surface, layer) in [(oceanParams, SeaSurface, oceanLayer),
+          (waterParams, RiverSurface, lakeLayer)]:
+        if layer < 0: continue
+        let inset = viewport.z > 0
+        if inset: glDisable(GL_SCISSOR_TEST)
+        let reflected = renderReflection(params, v, proj, eyeAt, exclude)
+        if inset:
+          glEnable(GL_SCISSOR_TEST)
+          glViewport(viewport.x, viewport.y, viewport.z, viewport.w)
+        drawPaintbotWater(params, surface, waterLayerRanges[layer], proj*v, eyeAt,
+          (world.tick.float32+alpha)/24, window.size, scene.toon.highlightColor, viewport,
+          reflected = reflected)
+    drawWaters(view, projection, eye)
     profMark(7)
     shapes.draw(vp)
     overlay.draw(vp)
@@ -1521,10 +1544,8 @@ proc runGraphics*() =
         {.emit: "`ratio`=emscripten_get_device_pixel_ratio();".}
       let right = (24*ratio).int
       let top = (100*ratio).int
-      # The reflection target covers its whole framebuffer. Apply the inset's scissor
-      # only after rendering it, then restore the inset viewport after character setup.
-      glDisable(GL_SCISSOR_TEST)
-      let reflected = renderReflection(v, proj, eyeAt, exclude)
+      # The reflection target covers its whole framebuffer: drawWaters renders each
+      # reflection outside the inset's scissor, then restores it and the inset viewport.
       glEnable(GL_SCISSOR_TEST)
       glScissor((window.size.x-wi-right).GLint, (window.size.y-he-top).GLint,
           wi.GLsizei, he.GLsizei)
@@ -1537,11 +1558,8 @@ proc runGraphics*() =
       glViewport((window.size.x-wi-right).GLint, (window.size.y-he-top).GLint,
           wi.GLsizei, he.GLsizei)
       actors(exclude, view = proj*v); finishCharacters(scene)
-      if islandTerrain:
-        drawMurkyWater(proj*v, eyeAt, (world.tick.float32+alpha)/24, window.size,
-          scene.toon.highlightColor,
-          ivec4((window.size.x-wi-right).int32, (window.size.y-he-top).int32, wi.int32, he.int32),
-          reflected = reflected)
+      drawWaters(v, proj, eyeAt, exclude,
+        ivec4((window.size.x-wi-right).int32, (window.size.y-he-top).int32, wi.int32, he.int32))
       shapes.draw(proj*v)
       overlay.draw(proj*v)
       glDisable(GL_SCISSOR_TEST)
@@ -1553,7 +1571,7 @@ proc runGraphics*() =
       drawInset(lookAt(p, p+forward, vec3(0, 1, 0)),
         perspective(78'f32, 1.6'f32, 0.15'f32, 180'f32), p, selected)
     profMark(9)
-    when not defined(emscripten):
+    when defined(pwDevPanel):
       if panel.draw(window, paused): setPlaying(cint(paused))
     window.swapBuffers()
     profMark(10)

@@ -1867,6 +1867,9 @@ var
   autumnTrees* = false    # leafy trees may also wear red and yellow
   seed* = 1988            # seeds the per-tile tree rng in bakeTreeTiles
   layerVertexRanges*: seq[Slice[int]]
+  waterLayerRanges*: seq[Slice[int]]
+    ## Per layer, its vertices in the water mesh (empty for land layers); pass one to
+    ## drawWater to draw that water alone.
     ## Filled by bakeTerrain: which baked vertices belong to which layer, so
     ## callers can draw a subset without re-emitting anything.
 
@@ -3714,17 +3717,21 @@ proc bakeTerrain*(
   mesh.setLen(0)
   waterMesh.setLen(0)
   layerVertexRanges.setLen(0)
+  waterLayerRanges.setLen(0)
   let floorY = -amplitude - 6
   if rebuildWalkability:
     computeWalkable()
   rebuildTerrainData()
   for i in 0 ..< layers.len:
-    let first = mesh.len div TerrainVertexSize
+    let
+      first = mesh.len div TerrainVertexSize
+      firstWater = waterMesh.len div 6
     if layers[i].water:
       emitWaterLayer(layers[i])
     else:
       emitLayer(i, layers[i], floorY, blockers)
     layerVertexRanges.add first ..< (mesh.len div TerrainVertexSize)
+    waterLayerRanges.add firstWater ..< (waterMesh.len div 6)
   rebuildTreeMesh()
   if waterVertexBuffer != 0 and waterMesh.len > 0:
     glBindBuffer(GL_ARRAY_BUFFER, waterVertexBuffer)
@@ -3909,9 +3916,12 @@ proc waterShaderProgram*(): GLuint =
   ## The compiled water program, for setting an override shader's own uniforms.
   waterProgram
 
-proc drawWater*(viewProjection: Mat4, cameraEye: Vec3, seconds = 0'f32) =
-  ## Transparent water pass; call after all opaque drawing.
-  if waterMesh.len == 0:
+proc drawWater*(viewProjection: Mat4, cameraEye: Vec3, seconds = 0'f32,
+    firstVertex = 0, vertexCount = -1) =
+  ## Transparent water pass; call after all opaque drawing. The default range is all
+  ## water; waterLayerRanges gives one layer's.
+  let count = if vertexCount < 0: waterMesh.len div 6 - firstVertex else: vertexCount
+  if count <= 0:
     return
   glDisable(GL_CULL_FACE)
   glUseProgram(waterProgram)
@@ -3935,7 +3945,7 @@ proc drawWater*(viewProjection: Mat4, cameraEye: Vec3, seconds = 0'f32) =
   glBlendFunc(if waterPremultipliedAlpha: GL_ONE else: GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
   glDepthMask(GL_FALSE)
   glBindVertexArray(waterVertexArray)
-  glDrawArrays(GL_TRIANGLES, 0, (waterMesh.len div 6).GLsizei)
+  glDrawArrays(GL_TRIANGLES, firstVertex.GLint, count.GLsizei)
   glBindVertexArray(0)
   glDepthMask(GL_TRUE)
   glDisable(GL_BLEND)
