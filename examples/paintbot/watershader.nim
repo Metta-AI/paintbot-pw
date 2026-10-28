@@ -1,10 +1,12 @@
 ## Paintbot's own water shader, installed in place of the engine's default.
 ##
-## The water is murky: drawMurkyWater copies the scene's depth just before the water is
-## drawn, and the shader fades whatever lies behind each water pixel towards the water's
-## colour the deeper it is below the surface.
+## What is seen through the water is tinted toward its colour by a constant strength.
 ##
-## It is also a planar mirror: each frame the scene is rendered once more from the camera
+## The lake (and river) and the ocean have their own parameters: each is drawn on its
+## own (its range in the engine's water mesh), with its own reflection pass mirrored at
+## its own height.
+##
+## The water is a planar mirror: each frame the scene is rendered once more from the camera
 ## reflected in the water plane, into an offscreen texture, and the water samples that
 ## texture at its own screen position. How much it reflects follows Schlick's Fresnel
 ## approximation, with the reflectiveness as the reflectance looking straight down:
@@ -14,8 +16,11 @@
 ## where cos θ = dot(up, toward the camera), R0 is the reflectiveness, s the Fresnel
 ## strength (0 turns the effect off) and p its power (5 in Schlick's formula).
 ##
-## The sun also lights the whole surface as a broad sheen: the view ray reflected off
-## the water, compared with the direction toward the sun, weighted by that Fresnel:
+## The reflection pass draws the sky without its sun: a mirrored disc, cut up by the
+## ripples' distortion, reads as a fragmented disc rather than light scattered by waves.
+## The sun reaches the water only through the ripple normals. It lights the surface as a
+## broad sheen: the view ray reflected off the water, compared with the direction toward
+## the sun, weighted by that Fresnel:
 ##
 ##   sheen = sunColour · strength · R(θ) · pow(max(dot(reflect(view, up), sun), 0), sharpness)
 ##
@@ -30,13 +35,30 @@
 ## The normal tilts the reflection lookup (distortion), the Fresnel angle, the sheen and
 ## a sharp sun glint, and flattens with distance so far water does not shimmer.
 ##
-## Refraction: drawMurkyWater copies the scene's colour with its depth, and the water
+## Refraction: drawPaintbotWater copies the scene's colour with its depth, and the water
 ## draws that copy itself, read at a spot the ripples push sideways. The push grows with
 ## the water's depth up to refractionDepth, so the shoreline seam stays closed while the
 ## bed just inside it wobbles; a push landing on something in front of the water (a cog,
 ## a tower) falls back to the straight lookup, so foreground objects never smear into it.
+##
+## Shorelines: each pixel marches outward across the water's surface in 8 directions,
+## projecting each probe to the screen and comparing it with the copied depth: where the
+## scene there stands just above the surface (by less than shoreHeight), it is land, or
+## something standing in the water; higher things seen there (a canopy or roof hanging over
+## the water) are not, so they get no foam halo.
+## The nearest hit, refined by bisection, gives the distance to the shore; all the hits
+## give the direction to it. Two effects use them:
+##   foam: a tileable noise texture, in world metres at foamScale, flowing toward the
+##         shore: every direction that reaches land pulls the flow toward it (weighted by
+##         1 / distance^2, so it turns smoothly around bends and islands), and two copies
+##         of the noise slide along it half a cycle apart, crossfading as each restarts
+##         (the flow-map technique). It shows where it exceeds a threshold that falls from 1 at foamDistance
+##         to 0 at the waterline, so foam thickens toward the shore and breaks up away
+##         from it.
+##   fade: the water, foam included, blends into the scene behind it as it nears the shore,
+##         alpha = (distance / fadeDistance)^fadeCurve, smoothing where water meets land.
 
-import std/[math, times]
+import std/[math, random, times]
 import opengl, shady, vmath
 import chroma
 import polyworld/quadterrain
@@ -51,15 +73,20 @@ const
   ReflectionUnit = 6 # drawWater uses units 0 and 1, the toon shadows 3 and 4
   SceneDepthUnit = 7
   SceneColorUnit = 5
+  FoamNoiseUnit = 8
+  ShoreDirections = 8 # directions the shore search marches in
+  ShoreSteps = 6 # steps along each, before bisecting the nearest hit
+  MaxShoreSearch = 12'f32 # metres; the search reaches the larger of foam and fade distance
   RiverSurface* = RiverWaterHeight.float32 / 100 # metres, where the river's mesh is baked
+  SeaSurface* = -2.75'f32 # metres, where the ocean's mesh is baked
   MaxWaves* = 32
 
 type WaterParams* = object
   ## The water shader's live parameters; the developer panel edits them.
-  color*: Vec3
-  murkDensity*: float32 ## per metre below the surface; the river is 0.38 m deep
+  color*: Vec3 ## the water's own colour, tinting what is seen through it
+  colorStrength*: float32 ## 0 clear water, 1 only the colour shows through
   height*: float32 ## the river's drawn surface; the sea moves with it (visual only)
-  reflectiveness*: float32 ## reflectance looking straight down: 0 murky water only, 1 a mirror
+  reflectiveness*: float32 ## reflectance looking straight down: 0 the scene below only, 1 a mirror
   fresnelStrength*: float32 ## 0 reflects the same at every angle, 1 is Schlick's Fresnel
   fresnelPower*: float32 ## how sharply reflection rises towards grazing angles
   sheenStrength*: float32 ## the sun's glare over the water; 0 turns it off
@@ -75,39 +102,62 @@ type WaterParams* = object
   glintSharpness*: float32 ## higher makes glints smaller and tighter
   refraction*: float32 ## how far the ripples bend what is seen through the water, in screen fractions
   refractionDepth*: float32 ## metres of water at which the bending reaches full strength
+  foamColor*: Vec3
+  foamDistance*: float32 ## metres from the shore that foam reaches
+  foamScale*: float32 ## metres across one tile of the foam's noise
+  foamSpeed*: float32 ## metres per second the foam drifts toward the shore
+  foamOpacity*: float32 ## 0 no foam, 1 solid foam colour
+  foamSoftness*: float32 ## how soft the foam's edges are
+  fadeDistance*: float32 ## metres from the shore over which the water fades in
+  fadeCurve*: float32 ## 1 fades evenly; above 1 stays clear longer near the shore
+  shoreHeight*: float32 ## metres above the water that still count as its shore (its banks);
+                        ## higher things (canopies, roofs) seen over the water do not
 
-const DefaultWaterParams* = WaterParams(color: vec3(0.02'f32, 0.12, 0.13), # dark blueish green
-  murkDensity: 4.5, height: RiverSurface, reflectiveness: 0.2, fresnelStrength: 1,
-  fresnelPower: 4, sheenStrength: 0.35, sheenSharpness: 10, waveHeight: 0.035,
-  waveScale: 0.6, waveSpeed: 0.7, waveDrag: 0.35, waveCount: 18, rippleFade: 150,
-  distortion: 0.18, glintStrength: 12, glintSharpness: 1000, refraction: 0.25,
-  refractionDepth: 0.12)
+const DefaultWaterParams* = WaterParams(color: vec3(0.03'f32, 0.16, 0.18), # blueish green
+  colorStrength: 0.5, height: RiverSurface, reflectiveness: 0.2, fresnelStrength: 1,
+  fresnelPower: 4, sheenStrength: 0.9, sheenSharpness: 24, waveHeight: 0.15,
+  waveScale: 1.5, waveSpeed: 0.7, waveDrag: 0.46, waveCount: 12, rippleFade: 150,
+  distortion: 0.5, glintStrength: 40, glintSharpness: 300, refraction: 0.25,
+  refractionDepth: 0.12, foamColor: vec3(1'f32, 1, 1), foamDistance: 0.95,
+  foamScale: 1.5, foamSpeed: 0.4, foamOpacity: 1, foamSoftness: 0.28,
+  fadeDistance: 1.13, fadeCurve: 1, shoreHeight: 1)
 
-var waterParams* = DefaultWaterParams
+const DefaultOceanParams* = WaterParams(color: vec3(0.03'f32, 0.152, 0.178),
+  colorStrength: 0.5, height: SeaSurface, reflectiveness: 0.2, fresnelStrength: 1,
+  fresnelPower: 4, sheenStrength: 0.9, sheenSharpness: 24, waveHeight: 2,
+  waveScale: 2.74, waveSpeed: 0.7, waveDrag: 0.31, waveCount: 15, rippleFade: 150,
+  distortion: 0.9, glintStrength: 40, glintSharpness: 2874, refraction: 0.25,
+  refractionDepth: 0.12, foamColor: vec3(1'f32, 1, 1), foamDistance: 3.61,
+  foamScale: 3.51, foamSpeed: 0.99, foamOpacity: 0.68, foamSoftness: 0.4,
+  fadeDistance: 0.3, fadeCurve: 1.02, shoreHeight: 3.5)
+
+var
+  waterParams* = DefaultWaterParams ## the lake and river
+  oceanParams* = DefaultOceanParams
+  lakeLayer* = -1 ## the terrain layer index of the lake and river's water, if any
+  oceanLayer* = -1 ## the terrain layer index of the ocean, if any
 
 var
   mvp: Uniform[Mat4]
   reflectionTex: Uniform[Sampler2D]
   sceneDepthTex: Uniform[Sampler2D]
   sceneColorTex: Uniform[Sampler2D]
-  refraction, refractionDepth: Uniform[float32]
+  foamNoise: Uniform[Sampler2D]
   inverseViewProjection: Uniform[Mat4]
   depthViewport: Uniform[Vec4] # the view's x, y, width, height as fractions of the window
-  waterColor: Uniform[Vec3]
-  murkDensity: Uniform[float32]
-  reflectiveness: Uniform[float32]
-  fresnelStrength: Uniform[float32]
-  fresnelPower: Uniform[float32]
   cameraPos: Uniform[Vec3] # drawWater sets it
   waterSunToward: Uniform[Vec3]
-  sheenColor: Uniform[Vec3] # sun colour times sheen strength
-  sheenSharpness: Uniform[float32]
-  waterLift: Uniform[float32] # metres added to the baked water mesh
+  sunColor: Uniform[Vec3]
   rippleClock: Uniform[float32] # wall-clock seconds, so ripples move even while the match is paused
+  waterColor: Uniform[Vec3]
+  waterLift: Uniform[float32] # metres added to the baked water mesh
+  colorStrength, reflectiveness, fresnelStrength, fresnelPower: Uniform[float32]
+  sheenStrength, sheenSharpness, glintStrength, glintSharpness: Uniform[float32]
   waveHeight, waveScale, waveSpeed, waveDrag, waveCount: Uniform[float32]
-  rippleFade, distortion: Uniform[float32]
-  glintColor: Uniform[Vec3] # sun colour times glint strength
-  glintSharpness: Uniform[float32]
+  rippleFade, distortion, refraction, refractionDepth: Uniform[float32]
+  foamColor: Uniform[Vec3]
+  foamDistance, foamScale, foamSpeed, foamOpacity, foamSoftness: Uniform[float32]
+  fadeDistance, fadeCurve, shoreHeight: Uniform[float32]
 
 proc paintbotWaterVert(gl_Position: var Vec4, vertPos: Vec3, worldPos: var Vec3,
     screenPos: var Vec4) =
@@ -117,7 +167,7 @@ proc paintbotWaterVert(gl_Position: var Vec4, vertPos: Vec3, worldPos: var Vec3,
   gl_Position = mvp * vec4(worldPos.x, worldPos.y, worldPos.z, 1.0)
   screenPos = gl_Position
 
-proc waveSum(position: Vec2): float32 =
+proc waveSum(position: Vec2, count, speed, drag: float32): float32 =
   ## The ripples' height at `position` (in wave units), from 0 (trough) to 1 (crest).
   var
     p = position
@@ -129,14 +179,14 @@ proc waveSum(position: Vec2): float32 =
     weights = 0.0
   let phaseShift = length(position) * 0.1 # keeps the waves from lining up everywhere
   for i in 0 ..< MaxWaves:
-    if float32(i) >= waveCount:
+    if float32(i) >= count:
       break
     let
       direction = vec2(sin(angle), cos(angle))
-      x = dot(direction, p) * frequency + rippleClock * waveSpeed * timeScale + phaseShift
+      x = dot(direction, p) * frequency + rippleClock * speed * timeScale + phaseShift
       wave = exp(sin(x) - 1.0)
       slope = -wave * cos(x)
-    p = p + direction * (slope * weight * waveDrag)
+    p = p + direction * (slope * weight * drag)
     total = total + wave * weight
     weights = weights + weight
     weight = weight * 0.8
@@ -155,9 +205,26 @@ proc sceneHeight(uv: Vec2): float32 =
       vec4(ndc.x, ndc.y, texture(sceneDepthTex, uv).x * 2.0 - 1.0, 1.0)
   result = point.y / point.w
 
+proc landAt(x, z, surface: float32): float32 =
+  ## Whether the scene seen at world (x, surface, z) is the water's shore: just above the
+  ## surface is 1 (land), anything else 0, and -1 off this view (unknown).
+  let clip = mvp * vec4(x, surface, z, 1.0)
+  if clip.w <= 0.0:
+    return -1.0
+  let uv = vec2(
+    depthViewport.x + (clip.x / clip.w * 0.5 + 0.5) * depthViewport.z,
+    depthViewport.y + (clip.y / clip.w * 0.5 + 0.5) * depthViewport.w)
+  if uv.x < depthViewport.x or uv.y < depthViewport.y or
+      uv.x >= depthViewport.x + depthViewport.z or uv.y >= depthViewport.y + depthViewport.w:
+    return -1.0
+  let height = sceneHeight(uv)
+  if height > surface and height < surface + shoreHeight:
+    return 1.0
+  return 0.0
+
 proc paintbotWaterFrag(fragColor: var Vec4, worldPos: Vec3, screenPos: Vec4) =
-  ## Murky water: shows the scene behind this pixel (bent by the ripples) and covers it
-  ## with the water's colour, more the deeper it lies below the surface.
+  ## Shows the scene behind this pixel, bent by the ripples, with the reflection, the
+  ## sun's sheen and its glints over it.
   let
     ndc = vec2(screenPos.x / screenPos.w, screenPos.y / screenPos.w)
     depthUv = vec2(
@@ -169,9 +236,9 @@ proc paintbotWaterFrag(fragColor: var Vec4, worldPos: Vec3, screenPos: Vec4) =
     # with distance so far water does not shimmer.
     e = 0.02
     xz = vec2(worldPos.x, worldPos.z)
-    h = waveSum(xz / waveScale) * waveHeight
-    hx = waveSum((xz + vec2(e, 0.0)) / waveScale) * waveHeight
-    hz = waveSum((xz + vec2(0.0, e)) / waveScale) * waveHeight
+    h = waveSum(xz / waveScale, waveCount, waveSpeed, waveDrag) * waveHeight
+    hx = waveSum((xz + vec2(e, 0.0)) / waveScale, waveCount, waveSpeed, waveDrag) * waveHeight
+    hz = waveSum((xz + vec2(0.0, e)) / waveScale, waveCount, waveSpeed, waveDrag) * waveHeight
     flatten = clamp(length(cameraPos - worldPos) / rippleFade, 0.0, 1.0) * 0.85
     normal: Vec3 = normalize(mix(normalize(vec3(h - hx, e, h - hz)), vec3(0.0, 1.0, 0.0),
       flatten))
@@ -180,18 +247,14 @@ proc paintbotWaterFrag(fragColor: var Vec4, worldPos: Vec3, screenPos: Vec4) =
       (refraction * clamp(straightDepth / refractionDepth, 0.0, 1.0))
     bentHeight = sceneHeight(bentUv)
   # A push onto something in front of the water keeps the straight view.
-  var
-    seenUv = bentUv
-    depth = max(worldPos.y - bentHeight, 0.0)
+  var seenUv = bentUv
   # A refracted ray outside an inset must not sample the main camera's pixels.
   if bentHeight > worldPos.y or bentUv.x < depthViewport.x or
       bentUv.y < depthViewport.y or bentUv.x >= depthViewport.x + depthViewport.z or
       bentUv.y >= depthViewport.y + depthViewport.w:
     seenUv = depthUv
-    depth = straightDepth
   let
-    murk = 1.0 - exp(-depth * murkDensity)
-    seen = texture(sceneColorTex, seenUv).xyz
+    seen: Vec3 = mix(texture(sceneColorTex, seenUv).xyz, waterColor, colorStrength)
     # The reflection pass is mirrored left to right (see reflectedCamera), so u runs
     # the other way; the ripples shift where it is read.
     reflection = texture(reflectionTex, vec2(0.5 - ndc.x * 0.5, 0.5 + ndc.y * 0.5) +
@@ -205,21 +268,119 @@ proc paintbotWaterFrag(fragColor: var Vec4, worldPos: Vec3, screenPos: Vec4) =
     # sheen and a sharp glint on each ripple facing the sun.
     mirrored: Vec3 = normal * (2.0 * dot(normal, toCamera)) - toCamera
     toSun = max(dot(mirrored, waterSunToward), 0.0)
-    sheen: Vec3 = sheenColor * (r * pow(toSun, sheenSharpness))
-    glint: Vec3 = glintColor * (r * pow(toSun, glintSharpness))
-    # reflection * r + (murky water) * (1 - r), where the murky water is the water's
-    # colour over the refracted scene with opacity murk. The water draws the scene itself,
-    # so it is opaque; reflection, sheen and glint can exceed 1 (the sun).
-    color = (seen * (1.0 - murk) + waterColor * murk) * (1.0 - r) + reflection * r +
-      sheen + glint
-  fragColor = vec4(color.x, color.y, color.z, 1.0)
+    sheen: Vec3 = sunColor * (sheenStrength * r * pow(toSun, sheenSharpness))
+    glint: Vec3 = sunColor * (glintStrength * r * pow(toSun, glintSharpness))
+    # reflection * r + (the tinted, refracted scene) * (1 - r). The water draws the scene itself,
+    # so it is opaque; sheen and glint can exceed 1 (the sun).
+    color = seen * (1.0 - r) + reflection * r + sheen + glint
+    searchRadius = min(max(foamDistance, fadeDistance), MaxShoreSearch)
+  # The shore: march outward across the water's surface in every direction. Each
+  # direction that reaches land pulls the direction to the shore toward it, weighted by
+  # 1 / distance^2 so it turns smoothly; the nearest hit is bisected for the distance.
+  var
+    toShore = vec2(0.0, 0.0)
+    nearestWater = 0.0
+    nearestShore = searchRadius
+    nearestDirection = vec2(0.0, 0.0)
+  for d in 0 ..< ShoreDirections:
+    let
+      angle = float32(d) * (6.2831853 / float32(ShoreDirections))
+      direction = vec2(cos(angle), sin(angle))
+    var previous = 0.0
+    for s in 1 .. ShoreSteps:
+      let
+        reach = searchRadius * float32(s) / float32(ShoreSteps)
+        land = landAt(worldPos.x + direction.x * reach, worldPos.z + direction.y * reach,
+          worldPos.y)
+      if land < 0.0:
+        break
+      if land > 0.5:
+        toShore = toShore + direction / max(reach * reach, 0.01)
+        if reach < nearestShore:
+          nearestShore = reach
+          nearestWater = previous
+          nearestDirection = direction
+        break
+      previous = reach
+  if nearestShore < searchRadius:
+    for b in 0 ..< 4:
+      let middle = (nearestWater + nearestShore) * 0.5
+      if landAt(worldPos.x + nearestDirection.x * middle,
+          worldPos.z + nearestDirection.y * middle, worldPos.y) > 0.5:
+        nearestShore = middle
+      else:
+        nearestWater = middle
+  if length(toShore) > 0.0:
+    toShore = normalize(toShore)
+  let
+    shoreDistance = nearestShore
+    # Foam: two copies of the noise slide toward the shore, half a cycle apart, each
+    # fading out as it restarts (with a fresh offset), so the motion never jumps or
+    # smears; it shows above a threshold that falls to the waterline.
+    nearShore = 1.0 - clamp(shoreDistance / max(foamDistance, 0.001), 0.0, 1.0)
+    scale = max(foamScale, 0.01)
+    cycle = rippleClock * foamSpeed / scale
+    phase0 = fract(cycle)
+    phase1 = fract(cycle + 0.5)
+    uv0: Vec2 = (xz - toShore * (phase0 * scale)) / scale +
+      vec2(0.37, 0.61) * floor(cycle)
+    uv1: Vec2 = (xz - toShore * (phase1 * scale)) / scale +
+      vec2(0.61, 0.37) * floor(cycle + 0.5)
+    foamNoiseValue = mix(texture(foamNoise, uv0).x, texture(foamNoise, uv1).x,
+      abs(phase0 - 0.5) * 2.0)
+    # Away from the shore the threshold is 1, which the noise never passes.
+    foam = smoothstep(1.0 - nearShore, 1.0 - nearShore + foamSoftness, foamNoiseValue) *
+      foamOpacity
+    # Fade: the water gives way to the scene behind it toward the shore.
+    alpha = pow(clamp(shoreDistance / max(fadeDistance, 0.001), 0.0, 1.0), fadeCurve)
+    straight = texture(sceneColorTex, depthUv).xyz
+    # The foam rides on the water, so the fade takes both.
+    shaded: Vec3 = mix(straight, mix(color, foamColor, foam), alpha)
+  fragColor = vec4(shaded.x, shaded.y, shaded.z, 1.0)
 
 let startTime = epochTime()
+
+proc tileableNoise(size = 256): seq[uint8] =
+  ## Fractal value noise that wraps at its edges: five octaves of a random lattice
+  ## (8 to 128 cells across), each smoothly interpolated with wrapping, summed with
+  ## halving weights and stretched to 0..255.
+  var
+    rng = initRand(2026)
+    total = newSeq[float32](size * size)
+    weight = 1'f32
+    cells = 8
+  for octave in 0 ..< 5:
+    var lattice = newSeq[float32](cells * cells)
+    for value in lattice.mitems: value = rng.rand(1.0).float32
+    for y in 0 ..< size:
+      for x in 0 ..< size:
+        let
+          fx = x.float32 * cells.float32 / size.float32
+          fy = y.float32 * cells.float32 / size.float32
+          x0 = fx.int mod cells
+          y0 = fy.int mod cells
+          x1 = (x0 + 1) mod cells
+          y1 = (y0 + 1) mod cells
+          tx = fx - floor(fx)
+          ty = fy - floor(fy)
+          sx = tx * tx * (3 - 2 * tx)
+          sy = ty * ty * (3 - 2 * ty)
+          top = lattice[y0 * cells + x0] * (1 - sx) + lattice[y0 * cells + x1] * sx
+          bottom = lattice[y1 * cells + x0] * (1 - sx) + lattice[y1 * cells + x1] * sx
+        total[y * size + x] += (top * (1 - sy) + bottom * sy) * weight
+    weight *= 0.5
+    cells *= 2
+  let
+    low = min(total)
+    high = max(total)
+  result = newSeq[uint8](size * size)
+  for i, value in total:
+    result[i] = uint8((value - low) / (high - low) * 255)
 
 var
   reflectionFbo, reflectionColor, reflectionDepth, blankTexture: GLuint
   reflectionSize: IVec2
-  depthCopyFbo, depthCopy, colorCopy: GLuint
+  depthCopyFbo, depthCopy, colorCopy, foamNoiseTexture: GLuint
   depthCopySize: IVec2
 
 proc installPaintbotWater*() =
@@ -235,10 +396,24 @@ proc initPaintbotWater*() =
   glUniform1i(glGetUniformLocation(waterShaderProgram(), "reflectionTex"), ReflectionUnit)
   glUniform1i(glGetUniformLocation(waterShaderProgram(), "sceneDepthTex"), SceneDepthUnit)
   glUniform1i(glGetUniformLocation(waterShaderProgram(), "sceneColorTex"), SceneColorUnit)
+  glUniform1i(glGetUniformLocation(waterShaderProgram(), "foamNoise"), FoamNoiseUnit)
   glUseProgram(0)
   glGenFramebuffers(1, depthCopyFbo.addr)
   glGenTextures(1, depthCopy.addr)
   glGenTextures(1, colorCopy.addr)
+  var noise = tileableNoise()
+  glGenTextures(1, foamNoiseTexture.addr)
+  glBindTexture(GL_TEXTURE_2D, foamNoiseTexture)
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_R8.GLint, 256, 256, 0, GL_RED, GL_UNSIGNED_BYTE,
+    noise[0].addr)
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 4)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR.GLint)
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR.GLint)
+  glGenerateMipmap(GL_TEXTURE_2D)
+  glBindTexture(GL_TEXTURE_2D, 0)
   glGenFramebuffers(1, reflectionFbo.addr)
   glGenTextures(1, reflectionColor.addr)
   glGenRenderbuffers(1, reflectionDepth.addr)
@@ -344,17 +519,25 @@ proc captureScene(size: IVec2) =
     GL_COLOR_BUFFER_BIT or GL_DEPTH_BUFFER_BIT, GL_NEAREST.GLenum)
   glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
-proc reflecting*(): bool =
-  ## Whether the water shows reflections, so the frame needs its reflection pass.
-  waterParams.reflectiveness > 0 or waterParams.fresnelStrength > 0
+proc reflecting*(params: WaterParams): bool =
+  ## Whether this water shows reflections, so it needs its reflection pass.
+  params.reflectiveness > 0 or params.fresnelStrength > 0
 
-proc drawMurkyWater*(viewProjection: Mat4, eye: Vec3, seconds: float32, windowSize: IVec2,
-    sunColor: Color, viewport = ivec4(0, 0, 0, 0), reflected = false) =
-  ## Draws the water over everything drawn so far; call after the opaque scene.
-  ## `viewport` is the view's x, y, width, height in window pixels; zero means the window.
-  ## `reflected` says this frame's reflection pass rendered this view.
-  let rect = if viewport.z == 0: ivec4(0, 0, windowSize.x, windowSize.y) else: viewport
+proc captureWaterScene*(windowSize: IVec2) =
+  ## Copies the scene the water draws over (and bends); call once per view, after the
+  ## opaque scene and before drawPaintbotWater.
   captureScene(windowSize)
+
+proc drawPaintbotWater*(params: WaterParams, surface: float32, vertices: Slice[int],
+    viewProjection: Mat4, eye: Vec3, seconds: float32, windowSize: IVec2, sunColor: Color,
+    viewport = ivec4(0, 0, 0, 0), reflected = false) =
+  ## Draws one body of water (`vertices` of the engine's water mesh, baked at `surface`)
+  ## with `params`, over the scene captured by captureWaterScene. `viewport` is the view's
+  ## x, y, width, height in window pixels; zero means the window. `reflected` says the
+  ## reflection texture holds this body's reflection, rendered for this view.
+  if vertices.len == 0:
+    return
+  let rect = if viewport.z == 0: ivec4(0, 0, windowSize.x, windowSize.y) else: viewport
   glUseProgram(waterShaderProgram())
   var inverse = viewProjection.inverse
   glUniformMatrix4fv(glGetUniformLocation(waterShaderProgram(), "inverseViewProjection"),
@@ -362,34 +545,44 @@ proc drawMurkyWater*(viewProjection: Mat4, eye: Vec3, seconds: float32, windowSi
   glUniform4f(glGetUniformLocation(waterShaderProgram(), "depthViewport"),
     rect.x / windowSize.x, rect.y / windowSize.y,
     rect.z / windowSize.x, rect.w / windowSize.y)
-  let program = waterShaderProgram()
-  glUniform3f(glGetUniformLocation(program, "waterColor"),
-    waterParams.color.x, waterParams.color.y, waterParams.color.z)
-  glUniform1f(glGetUniformLocation(program, "murkDensity"), waterParams.murkDensity)
-  glUniform1f(glGetUniformLocation(program, "waterLift"), waterParams.height - RiverSurface)
-  # A view without its reflection pass reflects nothing at any angle.
-  glUniform1f(glGetUniformLocation(program, "reflectiveness"),
-    if reflected: waterParams.reflectiveness else: 0)
-  glUniform1f(glGetUniformLocation(program, "fresnelStrength"),
-    if reflected: waterParams.fresnelStrength else: 0)
-  glUniform1f(glGetUniformLocation(program, "fresnelPower"), waterParams.fresnelPower)
-  let sun = sunToward()
+  let
+    program = waterShaderProgram()
+    sun = sunToward()
+  template uniform(name: string, value: float32) =
+    glUniform1f(glGetUniformLocation(program, name), value)
+  glUniform3f(glGetUniformLocation(program, "waterColor"), params.color.x, params.color.y,
+    params.color.z)
+  glUniform3f(glGetUniformLocation(program, "sunColor"), sunColor.r, sunColor.g, sunColor.b)
   glUniform3f(glGetUniformLocation(program, "waterSunToward"), sun.x, sun.y, sun.z)
-  let sheen = waterParams.sheenStrength
-  glUniform3f(glGetUniformLocation(program, "sheenColor"),
-    sunColor.r * sheen, sunColor.g * sheen, sunColor.b * sheen)
-  glUniform1f(glGetUniformLocation(program, "sheenSharpness"), waterParams.sheenSharpness)
-  let glint = waterParams.glintStrength
-  glUniform3f(glGetUniformLocation(program, "glintColor"),
-    sunColor.r * glint, sunColor.g * glint, sunColor.b * glint)
-  glUniform1f(glGetUniformLocation(program, "glintSharpness"), waterParams.glintSharpness)
-  for (name, value) in [("waveHeight", waterParams.waveHeight),
-      ("waveScale", waterParams.waveScale), ("waveSpeed", waterParams.waveSpeed),
-      ("waveDrag", waterParams.waveDrag), ("waveCount", waterParams.waveCount),
-      ("rippleFade", waterParams.rippleFade), ("distortion", waterParams.distortion),
-      ("refraction", waterParams.refraction),
-      ("refractionDepth", max(waterParams.refractionDepth, 0.001))]:
-    glUniform1f(glGetUniformLocation(program, name.cstring), value)
+  uniform("waterLift", params.height - surface)
+  # A view without its reflection pass reflects nothing at any angle.
+  uniform("reflectiveness", if reflected: params.reflectiveness else: 0)
+  uniform("fresnelStrength", if reflected: params.fresnelStrength else: 0)
+  uniform("colorStrength", params.colorStrength)
+  uniform("fresnelPower", params.fresnelPower)
+  uniform("sheenStrength", params.sheenStrength)
+  uniform("sheenSharpness", params.sheenSharpness)
+  uniform("glintStrength", params.glintStrength)
+  uniform("glintSharpness", params.glintSharpness)
+  uniform("waveHeight", params.waveHeight)
+  uniform("waveScale", params.waveScale)
+  uniform("waveSpeed", params.waveSpeed)
+  uniform("waveDrag", params.waveDrag)
+  uniform("waveCount", params.waveCount)
+  uniform("rippleFade", params.rippleFade)
+  uniform("distortion", params.distortion)
+  uniform("refraction", params.refraction)
+  uniform("refractionDepth", max(params.refractionDepth, 0.001))
+  glUniform3f(glGetUniformLocation(program, "foamColor"), params.foamColor.x,
+    params.foamColor.y, params.foamColor.z)
+  uniform("foamDistance", params.foamDistance)
+  uniform("foamScale", params.foamScale)
+  uniform("foamSpeed", params.foamSpeed)
+  uniform("foamOpacity", params.foamOpacity)
+  uniform("foamSoftness", params.foamSoftness)
+  uniform("fadeDistance", params.fadeDistance)
+  uniform("fadeCurve", params.fadeCurve)
+  uniform("shoreHeight", params.shoreHeight)
   # Wrapped every 10,000 s to keep float32 precision; the jump is rare and brief.
   glUniform1f(glGetUniformLocation(program, "rippleClock"),
     float32((epochTime() - startTime) mod 10_000))
@@ -399,5 +592,7 @@ proc drawMurkyWater*(viewProjection: Mat4, eye: Vec3, seconds: float32, windowSi
   glBindTexture(GL_TEXTURE_2D, depthCopy)
   glActiveTexture(GLenum(GL_TEXTURE0.int + SceneColorUnit))
   glBindTexture(GL_TEXTURE_2D, colorCopy)
+  glActiveTexture(GLenum(GL_TEXTURE0.int + FoamNoiseUnit))
+  glBindTexture(GL_TEXTURE_2D, foamNoiseTexture)
   glActiveTexture(GL_TEXTURE0)
-  drawWater(viewProjection, eye, seconds)
+  drawWater(viewProjection, eye, seconds, vertices.a, vertices.len)
