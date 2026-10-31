@@ -866,6 +866,16 @@ proc teamSees*(w: World, side: int, p: Point): bool =
   if p.x < g.originX or p.z < g.originZ: return false
   let x = (p.x.int-g.originX) div SightCell; let z = (p.z.int-g.originZ) div SightCell
   x < g.nx and z < g.nz and g.seen[side][z*g.nx+x] != 0
+proc product128(a, b: uint64): tuple[hi, lo: uint64] =
+  ## Exact unsigned product using 32-bit limbs, including on wasm32.
+  const mask = 0xffff_ffff'u64
+  let
+    low = (a and mask) * (b and mask)
+    first = (a shr 32) * (b and mask) + (low shr 32)
+    middle = (first and mask) + (a and mask) * (b shr 32)
+  result.hi = (a shr 32) * (b shr 32) + (first shr 32) + (middle shr 32)
+  result.lo = (middle shl 32) or (low and mask)
+
 proc canSeePoint*(w: World, slot: int, p: Point): bool =
   if slot notin 0..<Seats or w.cogs[slot].hp <= 0: return false
   if teamVision and not ffa(): return w.teamSees(team(slot), p)
@@ -881,7 +891,13 @@ proc canSeePoint*(w: World, slot: int, p: Point): bool =
     let dx = int64(p.x)-c.pos.x
     let dz = int64(p.z)-c.pos.z
     let dot = fx*dx+fz*dz
-    if dot <= 0 or 4*dot*dot < (fx*fx+fz*fz)*distance: return false
+    if dot <= 0: return false
+    # Walking may aim at an int32 goal outside the map. Keep the same cone
+    # inequality without overflowing its fourth-degree coordinate products.
+    let square = product128(dot.uint64, dot.uint64)
+    let cone = (hi: (square.hi shl 2) or (square.lo shr 62), lo: square.lo shl 2)
+    let bound = product128(uint64(fx*fx) + uint64(fz*fz), distance.uint64)
+    if cone < bound: return false
   w.lineClear(c.pos, p)
 proc visible*(w: World, slot, other: int): bool =
   if slot notin 0..<Seats or other notin 0..<Seats or w.cogs[other].hp <= 0:
