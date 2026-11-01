@@ -127,7 +127,12 @@ proc decodeReplayFile*[T](
   let header = bytes.replayFileHeader()
   header.validateHeader(game, gameVersion)
   let offset = bytes.payloadOffset(header)
-  bytes[offset .. ^1].fromFlatty(replayType)
+  result = bytes[offset .. ^1].fromFlatty(replayType)
+  when defined(replayDebuggerStrict):
+    # Opt-in for the debugger only: Flatty otherwise accepts trailing payload.
+    # Compare before game-specific loading normalizes historical fields.
+    if result.toFlatty() != bytes[offset .. ^1]:
+      fail("noncanonical or trailing replay payload")
 
 proc saveReplayFile*[T](
     path,
