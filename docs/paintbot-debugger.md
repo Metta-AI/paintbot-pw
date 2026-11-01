@@ -44,6 +44,17 @@ completion before returning verified history at tick 0. Seek exposes start-of-ti
 state after frames [0,t), supports backward/forward seeks and includes terminal.
 Inspection and event queries do not decide policies or move the playhead.
 
+`inspect.data.session.visibility` describes the **requested lens**, not the
+launcher's maximum permission or the presence of a seat selector. An authorized
+`lens: "omniscient"` inspection remains labeled `omniscient` even with a non-null
+seat; `lens: "seat"` remains labeled `seat`. `open.data.visibility` and
+`seek.data.visibility` are always `seat`, including for omniscient-authorized
+sessions and after an omniscient inspection. Navigation returns session metadata,
+not inspected entity values; this label does not revoke the launcher's permission.
+These semantics come from `session(visibility = "seat")` and the open/seek
+`session()` versus inspect `session(lens)` calls in
+`examples/paintbot/replay_debugger.nim`.
+
 Seat inspection uses SeatView `identityRow`, not row ordering. The entity selector
 is cog identity in `0..<Seats`; unknown identities refuse. Invisible position,
 hp and team are null with `not_visible`. Position is integer hundredths of a tile.
