@@ -692,6 +692,20 @@ int pw_observation_layout(void *handle, int32_t *sixteen);
 int pw_observation_rows(void *handle, int32_t seat, int32_t *out, int32_t capacity);
 int pw_action_layout(void *handle, int32_t *eight);
 void *pw_net_load_layout(void *handle, const void *data, int64_t length, char *error, int32_t capacity);
+/* Owned BASIC decision evidence, training library only: paintbot_native_debug_v1.
+ * See docs/paintbot-native-debug.md for schema and supported checkpoint boundaries.
+ * JSON reads are pure and never decide or draw RNG. Return byte length (no NUL);
+ * write only when capacity >= length; capacity 0 with NULL sizes. -1 bad arguments.
+ * Trace read returns -2 if disabled or no completed traced step exists.
+ * set_trace accepts only 0/1, returns 0 (-1 bad args), and drops any previous record.
+ * Trace state is excluded from world saves. Successful load clears the record but
+ * preserves destination tracing; refused loads leave the destination unchanged.
+ * Status supported/reasons is a capability check, NOT a restriction on the legacy
+ * pw_world_save/load API. Callers enforce supported + pre_decision + no override. */
+int pw_debug_set_trace(void *handle, int enabled);
+int pw_debug_status_json(void *handle, char *out, int32_t capacity);
+int pw_debug_trace_json(void *handle, char *out, int32_t capacity);
+int pw_debug_observation_json(void *handle, int seat, char *out, int32_t capacity);
 #ifdef __cplusplus
 }
 #endif

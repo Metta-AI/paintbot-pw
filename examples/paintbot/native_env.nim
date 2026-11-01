@@ -10,6 +10,7 @@ import polyworld/rngs
 import bassy
 import snapshot, basic_states, contract_hash
 import teacher_classes
+import debug_trace
 
 when not defined(pwTraining): {.error: "native_env requires -d:pwTraining".}
 
@@ -196,6 +197,9 @@ type
     vision, nextVision: bool
     # "vision_range" metres (0 = unlimited), current world's and next reset's, like vision.
     visionRange, nextVisionRange: int32
+    # Decision trace (pw_debug_set_trace; default off): a copy of the last completed step's evidence.
+    # Never saved by pw_world_save (a blob is identical with it on or off) and never read by a step.
+    debug: DebugTrace
   FloatBuffer = ptr UncheckedArray[cfloat]
   ActionBuffer = ptr UncheckedArray[int32]
 
@@ -550,6 +554,18 @@ proc installShadow(env: ptr NativeEnv, slot: int) =
 proc sizeHeard(env: ptr NativeEnv) =
   ## Carried speech, one list per seat (a zeroed handle starts with none).
   if env.scriptHeard.len != env.n: env.scriptHeard.setLen(env.n)
+proc controllerSha(env: ptr NativeEnv): string =
+  ## pw_debug_status_json's controller_sha256: every BASIC seat's whole state (debug_trace.controllerDigest).
+  controllerDigest(env.scriptBots, env.scriptStatus, env.scriptErrors, env.scriptHeard)
+proc debugBegin(env: ptr NativeEnv) =
+  ## A traced step's decision half starts at pre_decision(tick): the world and controller digests.
+  env.debug.pending = true
+  env.debug.tick = env.world.tick
+  env.debug.decidedAhead = false
+  env.debug.hashBefore = env.world.stateHash()
+  env.debug.controllerBefore = env.controllerSha()
+  env.debug.evidence = newSeq[SeatDecisionEvidence](env.n)
+  env.debug.intended = newSeq[Command](env.n)
 proc resetScripts(env: ptr NativeEnv) =
   env.scriptCount = 0
   env.decidedValid = false
@@ -566,7 +582,13 @@ proc scriptDecide(env: ptr NativeEnv) =
   ## (hearing what was shouted last tick), shouts are delivered for next tick. Runs once
   ## per world tick, inline from pw_step or ahead of it from pw_script_decide.
   heard = env.scriptHeard
-  let decided = decide(env.scriptBots, env.world)
+  if env.debug.enabled:
+    if not (env.debug.pending and env.debug.tick == env.world.tick): env.debugBegin()
+    env.debug.evidence = newSeq[SeatDecisionEvidence](env.n)
+    decisionTrace = addr env.debug.evidence
+  let decided = try: decide(env.scriptBots, env.world)
+                finally: decisionTrace = nil
+  if env.debug.enabled: env.debug.intended = decided
   deliverSpeech(env.world)
   env.scriptHeard = heard
   for slot in 0..<env.n:
@@ -960,6 +982,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     env.resetDecoders()
     env.resetSampling()
     env.labelMemory.resetLabelMemory()
+    env.debug.drop()
     for slot in 0..<env.n:
       env.commandPending[slot] = false
       env.commandShown[slot] = false
@@ -1094,6 +1117,11 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     var wasDead = newSeq[bool](env.n)
     var decoders = newSeq[Bot](env.n)
     for slot in 0..<env.n: env.lastDecidedSet[slot] = false
+    # Decision trace: a step whose decision was not taken ahead starts its record here, before anything
+    # decides (a decision taken ahead while tracing was off is not traced).
+    if env.debug.enabled and not (env.decidedValid and env.decidedTick == env.world.tick) and
+        not (env.debug.pending and env.debug.tick == env.world.tick):
+      env.debugBegin()
     if env.tcSeats != 0:
       # In-step teacher classes: nothing from an earlier step survives; keep as each decoder holds it before deciding.
       for slot in 0..<env.n:
@@ -1161,6 +1189,11 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
           if (mask and 8) != 0: cmd.chargeGrenade = caller.chargeGrenade
           if (mask and 16) != 0: cmd.sneak = caller.sneak
           commands[slot] = cmd
+    let traced = env.debug.enabled and env.debug.pending and env.debug.tick == env.world.tick
+    var raw: seq[bool]
+    if traced:
+      raw = newSeq[bool](env.n)
+      for slot in 0..<env.n: raw[slot] = env.commandPending[slot]
     for slot in 0..<env.n:
       if env.commandPending[slot]:
         # The raw command replaces whatever the seat would have executed (a scripted
@@ -1174,6 +1207,8 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
         env.commandShown[slot] = false
     if env.tcSeats != 0: env.stepTeacherClasses()
     for slot in 0..<env.n: env.gateFire(slot, commands[slot])
+    # What the world executes: after raw commands and fire gating, immediately before simulation.
+    let applied = if traced: commands else: @[]
     let kinStep = env.mode == gmFfaKin
     var preScore, preGreat: seq[int32]
     var preOwners: array[KinHeartSlots, int32]
@@ -1211,6 +1246,13 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
     # pw_seat_equip_stats: ticks each seat ends disguised (telemetry only).
     for slot in 0..<env.n:
       if env.world.uniforms[slot]: inc env.stats[slot].disguisedTicks
+    if traced:
+      var programs = newSeq[bool](env.n)
+      for slot in 0..<env.n: programs[slot] = env.scripts[slot].len > 0
+      env.debug.last = env.debug.renderStep(env.world.stateHash(), env.controllerSha(), programs, applied, raw)
+      env.debug.pending = false
+      env.debug.evidence = @[]
+      env.debug.intended = @[]
     let done = env.world.winner != -1 or env.world.tick >= env.world.endTick
     if kinStep:
       # FFA-kin: the dense kin-weighted score reward, every seat, dead ones included.
@@ -1574,6 +1616,7 @@ proc pw_set_seat_script*(handle: pointer, seat: cint, source: ptr UncheckedArray
   env.scriptHeard[seat] = @[]
   env.lastDecided[seat] = Command()   # pw_seat_decided_orders: nothing decided by the new program yet
   env.lastDecidedSet[seat] = false
+  env.debug.drop()
   env.installScript(seat)
   if env.scripts[seat].len > 0: inc env.scriptCount
   if env.scriptStatus[seat] == 2: 1 else: 0
@@ -1621,6 +1664,7 @@ proc pw_set_seat_policy_script*(handle: pointer, seat: cint, source: ptr Uncheck
   env.scriptHeard[seat] = @[]
   env.lastDecided[seat] = Command()   # pw_seat_decided_orders: nothing decided by the new program yet
   env.lastDecidedSet[seat] = false
+  env.debug.drop()
   env.installScript(seat)
   if env.scripts[seat].len > 0:
     inc env.scriptCount
@@ -2012,6 +2056,7 @@ proc pw_set_seat_shadow_script*(handle: pointer, seat: cint, source: ptr Uncheck
   ready(handle)
   let env = cast[ptr NativeEnv](handle)
   if env.shadowScripts[seat].len > 0: dec env.shadowCount
+  env.debug.drop()
   env.shadowScripts[seat] = newString(length)
   if length > 0: copyMem(addr env.shadowScripts[seat][0], source, length)
   env.installShadow(seat)
@@ -2104,6 +2149,7 @@ proc pw_script_decide*(handle: pointer): cint {.exportc, cdecl, dynlib.} =
   if env.decidedValid and env.decidedTick == env.world.tick: return 0
   env.shadowDecide()   # before scriptDecide delivers this tick's speech: the shadows hear what their seats hear
   env.scriptDecide()
+  if env.debug.enabled and env.debug.pending: env.debug.decidedAhead = true
   1
 
 proc pw_set_seat_override*(handle: pointer, seat: cint, mask: int32): cint {.exportc, cdecl, dynlib.} =
@@ -2881,14 +2927,8 @@ proc snapChecksum(data: openArray[byte], n: int): string =
   sha256Hex(s)
 
 proc saveBot(w: var SnapWriter, b: Bot) =
-  w.put(not b.isNil)
-  if b.isNil: return
-  w.putBytes(b.runtime.saveState())
-  w.put(not b.strings.isNil)
-  if not b.strings.isNil: w.putBytes(b.strings.saveState())
-  w.put(b.failed); w.put(b.error)
-  w.put(b.neural)
-  w.put(b.rnd)
+  ## The bot record; the same bytes debug_trace's controller digest covers.
+  w.putBot(b)
 
 proc loadBot(r: var SnapReader, b: Bot) =
   ## Restores a saveBot record into a bot freshly built from the same script.
@@ -2918,6 +2958,8 @@ proc pw_world_save*(handle: pointer, output: ptr UncheckedArray[byte], capacity:
     when name == "scriptBots" or name == "decoders" or name == "shadowBots":
       w.putU64(f.len.uint64)
       for b in f: w.saveBot(b)
+    elif name == "debug":
+      discard   # the decision trace is a copy of a past step, never match state
     else:
       w.put(f)
   w.put(snapChecksum(w.data, w.data.len))
@@ -2984,6 +3026,8 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
             var rnd: RndStream
             r.get(neural); r.get(rnd)
             botBlobs[k].add (slot, r.data[start ..< r.at])
+      elif name == "debug":
+        discard   # never in a blob: the handle keeps its own tracing switch
       else:
         r.get(f)
     if r.at != r.data.len: r.fail("trailing bytes")
@@ -3012,6 +3056,7 @@ proc pw_world_load*(handle: pointer, data: ptr UncheckedArray[byte], length: int
       var br = SnapReader(data: blob)
       br.loadBot(tmp.shadowBots[slot])
     env[] = tmp   # teams.view.1h: the seats' motion histories come back with the blob (exact continuation)
+    env.debug.drop()   # a record of the replaced match's last step no longer describes this one
   except SnapError, ValueError:
     snapLastError = getCurrentExceptionMsg()
     ready(handle)
@@ -3028,3 +3073,91 @@ proc pw_world_load_error*(output: ptr UncheckedArray[char], capacity: int32): ci
   for i in 0..<k: output[i] = m[i]
   output[k] = '\0'
   m.len.cint
+
+# Owned-run decision evidence (debug_trace.nim, schema paintbot_native_debug_v1). Every call here is a pure read
+# except pw_debug_set_trace, which only switches the copy pw_step makes of its own decision; none decides, draws a
+# random number or changes what pw_world_save writes.
+proc debugReasons(env: ptr NativeEnv): seq[string] =
+  ## Why the handle's current state is not a supported owned-run checkpoint/branch point ([] = supported): every
+  ## check reads the handle's actual state, never a caller's label.
+  if env.world.winner != -1 or env.world.tick >= env.world.endTick: result.add "terminal"
+  if env.decidedValid and env.decidedTick == env.world.tick: result.add "phase_not_pre_decision"
+  for slot in 0..<env.n:
+    if env.commandPending[slot]:
+      result.add "pending_override"
+      break
+  for slot in 0..<env.n:
+    let b = env.scriptBots[slot]
+    if env.scripts[slot].len == 0: result.add "no_basic_program:" & $slot
+    elif env.scriptStatus[slot] == 2 or b.isNil: result.add "compile_failed:" & $slot
+    else:
+      if env.policy[slot]: result.add "policy_seat:" & $slot
+      if b.callsAny(AdvisorBuiltins): result.add "advisor_reference:" & $slot
+      if b.callsAny(NeuralBuiltins): result.add "neural_reference:" & $slot
+    if not env.decoders[slot].isNil: result.add "decoder_seat:" & $slot
+    if env.shadowScripts[slot].len > 0: result.add "shadow_script:" & $slot
+    if env.damagePermille[slot] != 1000: result.add "damage_scale:" & $slot
+    if env.firePeriod[slot] != 1: result.add "fire_period:" & $slot
+    if env.overrideMask[slot] != 0: result.add "action_override:" & $slot
+  if env.tcSeats != 0 or env.tcExact != 0: result.add "teacher_classes"
+  var neutral = Handicap()
+  for slot in 0..<MaxSeats: neutral.damageTaken[slot] = 1000
+  var knobs = env.handicapKnobs
+  for slot in 0..<MaxSeats: knobs.remOut[slot] = 0; knobs.remIn[slot] = 0   # carried fractions, not knobs
+  if knobs != neutral: result.add "handicap"
+
+proc pw_debug_set_trace*(handle: pointer, enabled: cint): cint {.exportc, cdecl, dynlib.} =
+  ## Opt-in decision trace: 1 records a copy of every following pw_step's decision and executed commands
+  ## (pw_debug_trace_json), 0 stops. Either drops the record held so far. The world, the seats and
+  ## pw_world_save's bytes are identical with tracing on or off. Returns 0, -1 for bad arguments.
+  if handle == nil or enabled notin 0.cint..1.cint: return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  env.debug.drop()
+  env.debug.enabled = enabled == 1
+  0
+
+proc pw_debug_status_json*(handle: pointer, output: ptr UncheckedArray[char], capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The handle's decision boundary and controller identity as one JSON object (debug_trace.statusJson): tick,
+  ## terminal, phase, supported/reasons, pending_override, trace_enabled, program and controller digests and the
+  ## world hash. pw_world_json's convention: returns the length and writes it (no NUL) only when capacity holds it.
+  ## A pure read. -1 for bad arguments.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  try:
+    var programs = newSeq[string](env.n)
+    for slot in 0..<env.n:
+      if env.scripts[slot].len > 0: programs[slot] = sha256Hex(env.scripts[slot])
+    let terminal = env.world.winner != -1 or env.world.tick >= env.world.endTick
+    var pending = false
+    for slot in 0..<env.n: pending = pending or env.commandPending[slot]
+    let doc = statusJson(env.world.tick, terminal, env.decidedValid and env.decidedTick == env.world.tick,
+      env.debugReasons, pending, env.debug.enabled, env.n, env.rulesVersion, SnapBuildId, programs,
+      env.controllerSha, env.world.stateHash)
+    writeJson(doc, output, capacity)
+  except CatchableError: -1
+
+proc pw_debug_trace_json*(handle: pointer, output: ptr UncheckedArray[char], capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The last completed traced pw_step as one JSON object (debug_trace.renderStep), pw_world_json's convention.
+  ## -2 while tracing is off or before a traced step completed (since pw_debug_set_trace, pw_reset, pw_world_load
+  ## or a script change). A pure read. -1 for bad arguments.
+  if handle == nil or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  if not env.debug.enabled or env.debug.last.len == 0: return -2
+  writeJson(env.debug.last, output, capacity)
+
+proc pw_debug_observation_json*(handle: pointer, seat: cint, output: ptr UncheckedArray[char],
+    capacity: int32): cint {.exportc, cdecl, dynlib.} =
+  ## The seat's SeatView observation of the current pre-step world (its BASIC DATA values and `agents` roster),
+  ## pw_world_json's convention. A pure read: nothing decides, no rnd stream draws. -1 for bad arguments.
+  if handle == nil or seat notin 0..<seatsOf(handle) or capacity < 0 or (capacity > 0 and output == nil): return -1
+  ready(handle)
+  let env = cast[ptr NativeEnv](handle)
+  try:
+    beginViews(env.world)
+    let doc = observationDoc(seat, env.world.tick, env.decidedValid and env.decidedTick == env.world.tick,
+      seatObservation(seat, env.world.tick))
+    writeJson(doc, output, capacity)
+  except CatchableError: -1
