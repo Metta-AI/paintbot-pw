@@ -48,6 +48,7 @@ nim r tests/test_paintbot_heart_spawns.nim
 nim r tests/test_paintbot_uniform.nim
 nim r tests/test_paintbot_human.nim
 nim r tests/test_paintbot_replay.nim
+python tests/run_paintbot_debugger.py
 nim r -d:headless tests/test_paintbot_live_rules.nim --bot:examples/paintbot/players/base.bas:16
 nim r tests/test_paintbot_oracle.nim
 nim r tests/test_paintbot_glory.nim
