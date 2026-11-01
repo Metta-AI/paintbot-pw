@@ -2,6 +2,12 @@
 ## Equations match PufferLib 6ffa5b10 src/algo.cu (MIT); see neural_actor.md.
 import std/[math, os]
 
+# The actor contract rounds each product and each sum to FP32 separately (no fused
+# multiply-add; neural_actor.md, Equations). fp_policy compiles the whole build with
+# -ffp-contract=off under gcc and clang, whose defaults fuse on FMA targets; sim.nim imports
+# it too. test_paintbot_neural_layers' "FP32 rounding" suite fails if it is lost.
+import fp_policy
+
 type
   LayerKind* = enum
     ## PWNET002 layer type codes (the u32 `type` of a layer record).

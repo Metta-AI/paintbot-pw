@@ -755,3 +755,27 @@ suite "PWNET002 RECALL (layer 18): the previous inference's slice of a later lay
     check rejects(encode2(4, [2, 2], [recall(2, 0, 2, @[0'f32, 0]), r.dense(6, 4), condHead(0, 1, newSeq[float32](4))]),
       "RECALL source 2 is a COND_HEAD")
     discard loadActor(encode2(4, [2, 2], [recall(1, 0, 2, @[0'f32, 0]), r.dense(6, 4), condHead(0, 1, newSeq[float32](4))]))
+
+proc multiplyAdd(c, a, b: float32): float32 {.noinline.} =
+  ## c + a*b as the float32 mirrors write it: one expression, then two statements.
+  var s = c
+  s += a*b
+  let p = a*b
+  var t = c
+  t = t + p
+  if s != t: return NaN.float32
+  s
+
+suite "FP32 rounding: every product and sum rounds separately (no fused multiply-add)":
+  # neural_actor.md's Equations round each product to FP32 and then each sum; the float32 mirrors above
+  # and test_paintbot_neural_delay's pinned values assume it. On an FMA target GCC fuses a*b + c into one
+  # rounding by default, even across statements, and Ubuntu 26.04's amd64v3 gcc (ubuntu-latest's) targets
+  # x86-64-v3; clang fuses within an expression (`s += a*b`), e.g. on Apple arm64. fp_policy
+  # (imported by neural_actor and sim) passes -ffp-contract=off to the whole build. Without it, TOKEN_PAIR
+  # above and the pinned values fail on such a compiler; this names the cause. a = 1 + 2^-12: a*a = 1 +
+  # 2^-11 + 2^-24 rounds (a tie, to even) to 1 + 2^-11, so c + a*a with c = -(1 + 2^-11) is exactly 0,
+  # where one rounding gives 2^-24. Parsed at run time, so the C compiler cannot fold them.
+  test "this build rounds a product to FP32 before adding it (-ffp-contract=off is in effect)":
+    let a = float32(parseFloat("1.000244140625"))   # 1 + 2^-12
+    let c = float32(parseFloat("-1.00048828125"))   # -(1 + 2^-11)
+    check multiplyAdd(c, a, a) == 0'f32
