@@ -1,3 +1,5 @@
+## fp_policy: -ffp-contract=off for the whole build (exact float64 ties below must not fuse).
+import fp_policy
 import village, topography
 export topography
 ## Integer-only Paintbot simulation; Polyworld RNG and portable state hashes.

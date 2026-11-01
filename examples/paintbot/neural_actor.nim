@@ -3,13 +3,10 @@
 import std/[math, os]
 
 # The actor contract rounds each product and each sum to FP32 separately (no fused
-# multiply-add; neural_actor.md, Equations). On a target with FMA, GCC's default
-# contracts a*b + c into one, even across statements (Ubuntu 26.04's amd64v3 gcc
-# targets x86-64-v3), and clang does within an expression (`sum += a*b`). passC is
-# global: callers' float32 mirrors and pinned values get the same rounding.
-# test_paintbot_neural_layers' "FP32 rounding" suite fails if it is lost.
-when defined(gcc) or defined(clang):
-  {.passC: "-ffp-contract=off".}
+# multiply-add; neural_actor.md, Equations). fp_policy compiles the whole build with
+# -ffp-contract=off under gcc and clang, whose defaults fuse on FMA targets; sim.nim imports
+# it too. test_paintbot_neural_layers' "FP32 rounding" suite fails if it is lost.
+import fp_policy
 
 type
   LayerKind* = enum
