@@ -2,6 +2,15 @@
 ## Equations match PufferLib 6ffa5b10 src/algo.cu (MIT); see neural_actor.md.
 import std/[math, os]
 
+# The actor contract rounds each product and each sum to FP32 separately (no fused
+# multiply-add; neural_actor.md, Equations). On a target with FMA, GCC's default
+# contracts a*b + c into one, even across statements (Ubuntu 26.04's amd64v3 gcc
+# targets x86-64-v3), and clang does within an expression (`sum += a*b`). passC is
+# global: callers' float32 mirrors and pinned values get the same rounding.
+# test_paintbot_neural_layers' "FP32 rounding" suite fails if it is lost.
+when defined(gcc) or defined(clang):
+  {.passC: "-ffp-contract=off".}
+
 type
   LayerKind* = enum
     ## PWNET002 layer type codes (the u32 `type` of a layer record).

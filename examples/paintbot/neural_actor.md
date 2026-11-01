@@ -178,7 +178,11 @@ word and leaves the rest to the host, which checks everything at load.
 
 Sums run over their index in ascending order, starting from `+0.0`, one FP32
 multiply-add per term (`sum += a*b`), with no reassociation; a bias is added after the
-sum. `exp` and `sqrt` are the platform's FP32 functions (the same `exp` PWNET001's
+sum. A multiply-add rounds twice: the product is rounded to FP32, then the sum. It is
+never a fused multiply-add (FMA, one rounding): `neural_actor.nim` compiles the whole
+build with `-ffp-contract=off` under gcc and clang, whose defaults fuse on FMA targets
+(gcc for x86-64-v3, as Ubuntu 26.04's amd64v3 toolchain targets; clang on arm64).
+`exp` and `sqrt` are the platform's FP32 functions (the same `exp` PWNET001's
 sigmoid uses), and `sigmoid` and `interp` are PWNET001's (above).
 
 - **DENSE**: `y[o] = act(sum_i x[i]*W[o,i] (+ b[o]))`, relu(v) = `v > 0 ? v : 0`.

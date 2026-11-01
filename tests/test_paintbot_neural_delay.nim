@@ -209,7 +209,8 @@ suite "models without DELAY are unchanged":
   # One model per pre-DELAY layer kind family (1..15) and PWNET001, fixed seeds. The integers (operations, state,
   # parameters, layers) are pinned on every platform; the logits and states over 40 inferences with a reset at 20
   # are pinned (FNV-1a over the bits) where the reference values were taken, Linux x86-64 (gcc, glibc: no FMA
-  # contraction, the same exp), from paintbot-pw d32eb17's engine before DELAY existed.
+  # contraction, the same exp), from paintbot-pw d32eb17's engine before DELAY existed. neural_actor's
+  # -ffp-contract=off keeps them on an FMA-default gcc (Ubuntu 26.04 amd64v3, -march=x86-64-v3).
   proc models(): seq[(string, string)] =
     var r = initRand(1608)
     result.add ("pwnet001", r.pwnet001(64, 64)[0])
