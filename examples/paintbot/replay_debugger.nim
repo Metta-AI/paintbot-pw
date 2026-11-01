@@ -25,10 +25,10 @@ proc configureReplayDebugger*(path: string, engine: JsonNode) =
   opened = false
   everOpened = false
 
-proc session(): JsonNode =
+proc session(visibility = "seat"): JsonNode =
   %*{"session_id": getEnv("PW_DEBUG_SESSION_ID"), "backend": "replay",
     "engine": binding, "tick": world.tick, "phase": "historical",
-    "capabilities": ["replay_inspect"], "visibility": "seat",
+    "capabilities": ["replay_inspect"], "visibility": visibility,
     "verification": "verified", "terminal": world.winner != -1}
 
 proc keys(n: JsonNode, names: openArray[string]): bool =
@@ -210,7 +210,7 @@ proc handleRequest*(req: JsonNode): JsonNode =
         value = newJNull()
         missing = %"not_visible"
       values.add %*{"field": field, "value": value, "missing_reason": missing}
-    result["data"] = %*{"session": session(), "seat": p["seat"],
+    result["data"] = %*{"session": session(p["lens"].getStr()), "seat": p["seat"],
       "entity_id": p["entity_id"], "values": values}
   else: discard
 

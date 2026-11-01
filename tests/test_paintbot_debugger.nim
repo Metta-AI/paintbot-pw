@@ -240,6 +240,7 @@ suite "public replay debugger first tracer":
     let hidden = successful(request("hidden", "inspect", %*{
       "session_id": SessionId, "seat": 0, "entity_id": 1, "lens": "seat",
       "fields": ["visible", "position", "hp", "team"]}))
+    check hidden["session"]["visibility"] == %"seat"
     check hidden["values"][0]["value"] == %false
     for i in 1..3:
       check hidden["values"][i]["value"].kind == JNull
@@ -259,6 +260,12 @@ suite "public replay debugger first tracer":
     let allSeeing = successful(omni)
     check allSeeing["values"][0]["value"] == %*{"x": world.cogs[1].pos.x, "z": world.cogs[1].pos.z}
     check allSeeing["values"][1]["value"] == %true
+    check allSeeing["session"]["visibility"] == %"omniscient"
+    var sameSelector = omni.copy()
+    sameSelector["params"]["seat"] = %0
+    let selectedOmni = successful(sameSelector)
+    check selectedOmni["session"]["visibility"] == %"omniscient"
+    check selectedOmni["values"] == allSeeing["values"]
     delEnv("PW_DEBUG_ALLOW_OMNISCIENT")
 
     # Slice 9: source-tick events, immutable cursor filters, pure pagination.
