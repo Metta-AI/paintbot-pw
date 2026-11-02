@@ -985,6 +985,7 @@ proc pw_reset*(handle: pointer, seed, maxTicks: int32): cint {.exportc, cdecl, d
     env.debug.drop()
     for slot in 0..<env.n:
       env.commandPending[slot] = false
+      env.commandNext[slot] = Command()   # dropped with its pending flag: no stale bytes in a snapshot
       env.commandShown[slot] = false
       env.tcInfo[slot] = [0'i32, 0, 0, 0]
     return 0
@@ -1201,6 +1202,8 @@ proc stepEnv(env: ptr NativeEnv, actions: ActionBuffer, rewards, terminals: Floa
         commands[slot] = env.commandNext[slot]
         env.scriptOrders[slot] = env.commandNext[slot]
         env.commandPending[slot] = false
+        # Consumed: clear it, so a snapshot after the step holds no stale command (only a pending one is read).
+        env.commandNext[slot] = Command()
         env.commandShown[slot] = env.scripts[slot].len == 0
       elif env.commandShown[slot]:
         env.scriptOrders[slot] = Command()
