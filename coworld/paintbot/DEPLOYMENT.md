@@ -869,3 +869,6 @@ Real hosted verification used ordinary variants and all seats running this exact
 | ----------------------- | --------------- | ------------------------------------------- | --------------------------- |
 | Heartland, 16 seats     | 0.1.58          | `ereq_bc48010e-3c95-4af5-a8be-116573017f27` | 8,640 ticks; 16 clean exits |
 | Heartland Big, 50 seats | 0.1.59          | `ereq_0bd6f0cf-9996-4da7-9c16-a84566aa5be8` | 8,640 ticks; 50 clean exits |
+
+The published 0.1.59 browser viewer loaded the 50-seat hosted replay and displayed verified status.
+[Hosted replay screenshot](https://softmax.nexus/artifacts/59bfd7d6-9bd8-4d9b-a542-ca0c61d2a816) records the rendered Big Twin Mesas map.
