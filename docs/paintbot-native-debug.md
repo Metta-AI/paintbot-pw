@@ -59,6 +59,16 @@ Bassy renews text-storage owners using a process-global counter at restart. Seri
 
 The regression first failed on controller digest and byte equality after each future decision while world hashes still matched. Existing Bassy tests compared string contents after continuation but did not compare subsequent full snapshot bytes; the older native fixture mainly exercised integer memory. The new public string/RNG checkpoint fixture closes that gap. It also checks early corrupt/wrong-build refusal and a checksummed invalid-source late rebuild refusal without changing the destination.
 
+## One-command action branches
+
+A branch is a supported checkpoint loaded into a fresh handle, then one `pw_set_seat_command_ex` before the next `pw_step`: the seat's BASIC program still runs (its memory, RNG and speech advance as usual) and only the executed command for that one step is replaced. No new entry point exists; callers must check `supported` before queuing (a queued command itself makes the handle report `pending_override`). Every later tick is decided by the unchanged BASIC controllers, so opponents react to the changed world. The trace marks the replaced step with `replaced_by_raw_command`. This is local causal evidence about one owned run, not an independent performance estimate or a claim about downloaded league replays.
+
+`tests/test_paintbot_debug_branch.nim` covers: a no-op replacement (the baseline's own normalized command) is identical to the baseline in observations, intentions, applied commands, VM evidence, world hash, controller digest and **full snapshot bytes** for four ticks; a changed legal command diverges first at the replaced step (same pre-step hash, decisions and controller digests; only that seat's `applied` differs) and later changes other seats' BASIC intentions; parent and sibling handles stay isolated, a second setter call before the step replaces the first, and reloading the checkpoint replays the branch byte-for-byte; goals stay verbatim and aims clamp; out-of-range flags, bad seats and null buffers are refused with no pending command and unchanged bytes; and the status gate refuses post-decision, pending-command, override, fire-period, shadow, unscripted and terminal states.
+
+### Consumed-command snapshot correction
+
+A consumed or reset-dropped raw command used to stay in the handle's `commandNext` slot. Nothing reads it without a pending flag, but `pw_world_save` serializes every field, so a no-op branch differed from its baseline only in those stale bytes. Both paths now clear the slot. The regression first failed on byte equality at every future tick while world hashes, controller digests and traces matched; earlier seat-command tests checked world hashes and echoes, never snapshot bytes after a command.
+
 ## Verification commands
 
 With Nim 2.2.10 and `POLYWORLD_DEPS` pointing at dependencies matching `coworld/dependencies.lock`:
@@ -66,6 +76,7 @@ With Nim 2.2.10 and `POLYWORLD_DEPS` pointing at dependencies matching `coworld/
 ```sh
 nim r -d:release --mm:arc --threads:on -d:pwTraining tests/test_paintbot_debug_trace.nim
 nim r -d:release --mm:arc --threads:on -d:pwTraining tests/test_paintbot_debug_checkpoint.nim
+nim r -d:release --mm:arc --threads:on -d:pwTraining tests/test_paintbot_debug_branch.nim
 nim r -d:release --mm:arc --threads:on -d:pwTraining tests/test_paintbot_native_save_load.nim
 nim r -d:release --mm:arc --threads:on -d:pwTraining tests/test_paintbot_bassy_snapshots.nim
 nim r -d:release --mm:arc --threads:on -d:pwTraining -d:bassyNoJit tests/test_paintbot_bassy_snapshots.nim
