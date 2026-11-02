@@ -844,3 +844,31 @@ certification passed on five episodes (`ereq_1f895fde-9f8c-499a-b525-a1ee0509629
   configurations. BASIC gains `rnd(n)`.
 - Training library only (`-d:pwTraining`): the training-only labels `pw_seat_privileged_labels`, the aim-offset
   action contract 13, and the removed decoder setters.
+
+## Heartland visibility and filler refresh — 2026-11-02
+
+Heartland `0.1.59` is certified and canonical as `cow_382ee858-5592-4eab-a518-b2e41578aa6e`. Source
+`f2b4438f6be33b7bee2647beee419699071dfadb` fixes exact field-of-view arithmetic on large maps. Manifest:
+`sha256:128069da497cae9a77ccd835effa85138287c10062160ccc66d05e12dce3022b`. All ten hosted certification checks passed
+under contract `main-d544006489bc`. The shared engine was also published as Paintbot `0.3.128`.
+
+Both Heartland leagues now use the current public `coworld/heartland/players/ffa.bas` as filler:
+
+- Policy: `heartland-filler-ffa-bassy:v1`, version `488c044e-d6c6-452a-a066-3fc40b699dec`.
+- Source SHA-256: `1fe2eab64bdb1b849a5908c0eb99813bac21f88c22710b7cfc9f4381cddfaf80`.
+- Heartland: `league_40996eb3-4a80-457d-86d5-866f72882995`.
+- Heartland Big: `league_c463b65f-99f1-43ae-bb03-2d4f7f094f1b`.
+
+Only filler references changed, using compare-and-swap updates through `/v2/leagues/{league_id}/filler-policies`. Seed
+policies, commissioner settings, and scheduling state were verified unchanged. The previous filler policy version
+remains intact.
+
+Real hosted verification used ordinary variants and all seats running this exact policy:
+
+| Variant                 | Coworld version | Episode request                             | Verified outcome            |
+| ----------------------- | --------------- | ------------------------------------------- | --------------------------- |
+| Heartland, 16 seats     | 0.1.58          | `ereq_bc48010e-3c95-4af5-a8be-116573017f27` | 8,640 ticks; 16 clean exits |
+| Heartland Big, 50 seats | 0.1.59          | `ereq_0bd6f0cf-9996-4da7-9c16-a84566aa5be8` | 8,640 ticks; 50 clean exits |
+
+The published 0.1.59 browser viewer loaded the 50-seat hosted replay and displayed verified status.
+[Hosted replay screenshot](https://softmax.nexus/artifacts/59bfd7d6-9bd8-4d9b-a542-ca0c61d2a816) records the rendered Big Twin Mesas map.
