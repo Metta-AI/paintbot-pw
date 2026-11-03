@@ -21,13 +21,28 @@ type
     strings*: StringPool
     neural*: NeuralSeat
     rnd*: RndStream
+type
+  SeatDecisionEvidence* = object
+    ## What one seat's decision actually saw and spent (debug_trace.nim): a read-only copy taken by
+    ## runSeat while `decisionTrace` points at a list (opt-in; nil = nothing is recorded).
+    captured*: bool  ## runSeat reached this seat
+    ran*: bool       ## its program ran (false: already failed, or dead)
+    skipped*: string ## "program_failed" | "dead" when it did not run
+    values*: array[DataNames.len, int32]       ## the DATA values the program was given
+    agents*: seq[array[6, int32]]              ## the `agents` roster through SeatView, per seat
+    instructions*, workUnits*: int64
+    failed*: bool
+    error*: string
 # One decision's commands. Training builds run many worlds on many threads: there the
 # variable is thread-local, so a handle may migrate between threads. The tick's views, the
-# vision cache and the speech live in seat_view.
+# vision cache and the speech live in seat_view. decisionTrace (opt-in, nil by default) is the
+# list runSeat copies decision evidence into.
 when defined(pwTraining):
   var commands* {.threadvar.}: seq[Command]
+  var decisionTrace* {.threadvar.}: ptr seq[SeatDecisionEvidence]
 else:
   var commands*: seq[Command]
+  var decisionTrace*: ptr seq[SeatDecisionEvidence]
 const RndSalt* = 0x42415352524e4400'u64  # "BASRND" in the high bytes, slot below it
 proc rndRng*(matchSeed: int32, slot: int): Rng =
   ## The seat's rnd stream for a match: the neural sampling stream's seeding (match seed salted
@@ -267,7 +282,13 @@ proc runSeat(b: Bot, slot: int, w: World) =
   ## live, working seat runs its script against its SeatView.
   let view = seatView(slot)
   b.neural.beginTick(view, w.seed)
-  if b.failed or view.selfHp <= 0: return
+  # Decision evidence (opt-in): copies only, taken where the seat's own inputs and costs are known.
+  let tracing = not decisionTrace.isNil and slot < decisionTrace[].len
+  if b.failed or view.selfHp <= 0:
+    if tracing:
+      decisionTrace[][slot] = SeatDecisionEvidence(captured: true,
+        skipped: (if b.failed: "program_failed" else: "dead"), failed: b.failed, error: b.error)
+    return
   if not b.rnd.seeded:
     b.rnd.rng = rndRng(w.seed, slot)
     b.rnd.seeded = true
@@ -282,10 +303,24 @@ proc runSeat(b: Bot, slot: int, w: World) =
     peakInstructions[slot] = max(peakInstructions[slot], stats.instructions)
     peakWork[slot] = max(peakWork[slot], stats.workUnits)
     peakStrings[slot] = max(peakStrings[slot], b.strings.stringCount.int64)
+    if tracing:
+      decisionTrace[][slot] = SeatDecisionEvidence(captured: true, ran: true, values: values,
+        instructions: stats.instructions, workUnits: stats.workUnits)
   except BasicError as e:
     b.failed=true;b.error=e.msg;commands[slot]=Command()
     when defined(coworld):playerError(slot,e.msg)
     elif not defined(pwTraining):echo "seat ",slot," disabled: ",e.msg
+    if tracing:
+      decisionTrace[][slot] = SeatDecisionEvidence(captured: true, ran: true, values: values,
+        instructions: b.runtime.instructionsUsed, workUnits: b.runtime.workUsed, failed: true, error: e.msg)
+  if tracing:
+    # The roster the program could read (the `agents` record's loader), read after it ran so the
+    # copy can never charge or reorder anything the program did.
+    var roster = newSeq[array[6, int32]](Seats)
+    for i in 0..<Seats:
+      roster[i] = [view.visible(i), view.playerX(i), view.playerY(i), view.playerHp(i),
+        view.playerTeam(i), view.playerCarrying(i)]
+    decisionTrace[][slot].agents = roster
 proc decide*(bots:openArray[Bot],w:World):seq[Command] =
   ## Every seat decides on the pre-step world `w`, perceiving it only through its SeatView.
   shouts=newSeq[seq[string]](Seats)

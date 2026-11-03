@@ -44,13 +44,40 @@ proc fingerprint[T: Runtime | StringPool](state: T): seq[byte] =
     when name == "program":
       return programState(field)
 
+proc putCanonical[T](writer: var SnapWriter, value: T, owner: uint32) =
+  ## Storage generation IDs are process-global allocation identities, not controller state.
+  ## Encode live string references under owner 1 and stale references under owner 0.
+  ## Never mutate the live runtime; stale references remain invalid after restoration.
+  when T is Value:
+    if value.kind == StringValue:
+      writer.put(stringValue(if value.stringOwner == owner: 1'u32 else: 0'u32,
+        value.stringHandle))
+    else: writer.put(value)
+  elif T is seq:
+    writer.putU64(value.len.uint64)
+    for item in value: writer.putCanonical(item, owner)
+  elif T is array:
+    for item in value: writer.putCanonical(item, owner)
+  elif T is tuple or T is object:
+    for _, field in fieldPairs(value): writer.putCanonical(field, owner)
+  else: writer.put(value)
+
 proc saveState*(runtime: Runtime): seq[byte] =
   ## Saves mutable Bassy storage while retaining host bindings and JIT code.
   var writer: SnapWriter
   writer.putBytes(runtime.fingerprint())
+  var owner: uint32
   for name, field in fieldPairs(runtime[]):
-    when name in RuntimeFields:
-      writer.put(field)
+    when name == "strings":
+      for key, value in fieldPairs(field):
+        when key == "owner": owner = value
+  for name, field in fieldPairs(runtime[]):
+    when name == "strings":
+      for key, value in fieldPairs(field):
+        when key == "owner": writer.put(if value == 0: 0'u32 else: 1'u32)
+        else: writer.put(value)
+    elif name in RuntimeFields:
+      writer.putCanonical(field, owner)
     elif name notin RuntimeBindings:
       {.error: "Review new Bassy runtime field for snapshots: " & name.}
   writer.data
