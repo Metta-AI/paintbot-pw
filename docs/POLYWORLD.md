@@ -23,7 +23,7 @@ Examples, experiments, and tools load models, textures, fonts, and UI from
 needs as its own data file.
 
 ```
-git clone git@github.com:Metta-AI/polyworld_art.git ../polyworld_art
+git clone git@github.com:softmax-universe/polyworld_art.git ../polyworld_art
 ```
 
 The two folders should sit like this:

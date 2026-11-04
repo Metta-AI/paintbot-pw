@@ -242,7 +242,7 @@ credential, the missing-route breaker, and a 429 failing only its own ask.
 and promoted to canonical. It is the first hosted release with the sidecar route, 24-tick hosted
 spacing and the missing-route breaker, and with the BASIC oracle functions a script such as
 `cogames/paintbot/jev/players/jevbot.bas` needs to compile. Until the platform sidecar serves
-`/v1/systemone` (Metta-AI/metta#24299), the first ask of an episode is answered 404 and logged,
+`/v1/systemone` (softmax-universe/softmax#24299), the first ask of an episode is answered 404 and logged,
 and the oracle asks nothing further: advised scripts play unadvised, and nothing else changes.
 
 ### Hardening after review

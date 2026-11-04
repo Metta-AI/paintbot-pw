@@ -6,7 +6,7 @@ The images were generated for Paintbot. The models are constructed from
 procedural primitives by the included Python source. Embedded grass and
 masonry textures are the project's CC0 terrain tiles.
 
-Imported from Metta-AI/paintbot-pw at 7b2b19f. No Unity Asset Store model,
+Imported from softmax-universe/paintbot-pw at 7b2b19f. No Unity Asset Store model,
 texture, rig, animation, or material is included. Geometry and texture paths
 are generated from the public art checkout alone.
 

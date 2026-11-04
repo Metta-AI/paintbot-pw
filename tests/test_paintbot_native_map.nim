@@ -40,7 +40,7 @@ proc fold(digest: var uint64, hash: uint32) =
 const
   DefaultSeeds = [7'i32, 1001, 424242]
   DefaultTicks = 600
-  # Recorded from the library before pw_set_map existed (Metta-AI/paintbot-pw main 1512438)
+  # Recorded from the library before pw_set_map existed (softmax-universe/paintbot-pw main 1512438)
   # with -d:pwMapGoldenRecord: {seed, FNV-1a of the 600 per-tick state hashes, last hash}.
   DefaultGolden: array[3, (int32, uint64, uint32)] = [
     (7'i32, 11266663677668710009'u64, 352507994'u32),
