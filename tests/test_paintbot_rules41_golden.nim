@@ -1,4 +1,4 @@
-## Rules-41 golden state hashes, recorded on the untouched upstream tree (Metta-AI/paintbot-pw
+## Rules-41 golden state hashes, recorded on the untouched upstream tree (softmax-universe/paintbot-pw
 ## main e60e489, rules 41 generated maps #122) before the FFA-kin mode was merged in. Any engine
 ## change that is meant to leave rules-41 teams play alone must keep every value here byte for
 ## byte; never edit `Golden` to make this pass. Same drivers, seeds and checkpoints as the

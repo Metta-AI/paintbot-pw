@@ -1,6 +1,6 @@
 # Paintbot CC0 art
 
-Paintbot loads its art from the public `Metta-AI/polyworld_art` repository.
+Paintbot loads its art from the public `softmax-universe/polyworld_art` repository.
 `coworld/assets.json` pins the exact art commit. Native builds use the sibling
 `../polyworld_art` directory, or `POLYWORLD_ART` at compile time. Browser builds
 use `POLYWORLD_ART` for their source and mount the selected files at

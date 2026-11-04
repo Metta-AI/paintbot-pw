@@ -1,6 +1,6 @@
 # Deploy the paintbot-pw Coworld: coworld build -> coworld certify -> (optional) coworld upload-coworld.
 #
-# Destination: Metta-AI/paintbot-pw/.github/workflows/deploy.yml
+# Destination: softmax-universe/paintbot-pw/.github/workflows/deploy.yml
 #
 # Required repository secrets:
 #   SOFTMAX_TOKEN              Softmax platform bearer token. Only read when dry_run is false.
@@ -210,14 +210,14 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           assets = json.load(open("coworld/assets.json"))
-          assert assets["repository"].rstrip("/").removesuffix(".git").endswith("Metta-AI/polyworld_art"), assets
+          assert assets["repository"].rstrip("/").removesuffix(".git").endswith("softmax-universe/polyworld_art"), assets
           print(f"revision={assets['revision']}")
           PY
 
       - name: Check out Polyworld art (public, pinned)
         uses: actions/checkout@v5
         with:
-          repository: Metta-AI/polyworld_art
+          repository: softmax-universe/polyworld_art
           ref: ${{ steps.assets.outputs.revision }}
           path: polyworld_art
           lfs: true

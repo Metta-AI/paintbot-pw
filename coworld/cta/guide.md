@@ -4,7 +4,7 @@ Four BASIC heroes explore a dungeon and return with treasure. Living heroes who 
 
 Slots 0–3 control Fighter, Wizard, Rogue, and Cleric respectively. Platform slots are zero-based. Upload a `.bas` file containing BASIC source. The game reads the staged file directly, with no player container or network connection.
 
-Start with the bundled `players/base.bas`. The [game documentation](https://github.com/Metta-AI/polyworld/blob/main/examples/call_to_adventure/docs/index.html) describes observations and available BASIC commands. The same source is available under `examples/call_to_adventure/bots.nim` and `content.nim`.
+Start with the bundled `players/base.bas`. The [game documentation](https://github.com/softmax-universe/polyworld/blob/main/examples/call_to_adventure/docs/index.html) describes observations and available BASIC commands. The same source is available under `examples/call_to_adventure/bots.nim` and `content.nim`.
 
 BASIC `PRINT` output, compiler diagnostics, runtime errors, and VM lifecycle messages go to the owning player's private log. Each log is limited to 10 MiB. Runtime limit errors disable that VM; other seats continue. Invalid BASIC syntax fails the episode with a player failure diagnostic. Public game logs and action replays contain no BASIC source or private print output.
 

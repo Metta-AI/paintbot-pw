@@ -60,7 +60,7 @@ top cog and family. HUD maths live in `coworld/paintbot/kinhud.js`
 
 ## Build
 
-Check out `Metta-AI/polyworld_art` beside this repository as `polyworld_art` at the revision in `coworld/assets.json`, or set `POLYWORLD_ART`. Run `python3 coworld/tools/sync_dependencies.py`, then:
+Check out `softmax-universe/polyworld_art` beside this repository as `polyworld_art` at the revision in `coworld/assets.json`, or set `POLYWORLD_ART`. Run `python3 coworld/tools/sync_dependencies.py`, then:
 
 ```
 coworld/paintbot/tools/build_replay_viewer.sh "$PWD/tmp/viewer"
