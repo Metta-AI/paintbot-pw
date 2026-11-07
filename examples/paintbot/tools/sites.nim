@@ -4,7 +4,7 @@ import
 
 const
   DefaultSite* = Root.parentDir / "polyworld-buff"
-  SiteUrl = "https://metta-ai.github.io/polyworld-buff/"
+  SiteUrl = "https://softmax-universe.github.io/polyworld-buff/"
   Assets* = [
     ("regular", "fonts/Rubik-Regular.ttf"),
     ("bold", "fonts/Rubik-Bold.ttf"),
